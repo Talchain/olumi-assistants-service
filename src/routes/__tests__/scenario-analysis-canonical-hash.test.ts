@@ -1,3 +1,8 @@
+import { stampRunAnalysisProjection } from '../../orchestrator-v5/context/analysis-projection-policy.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js';
+import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
+import { legacyRun } from '../../orchestrator-v5/context/__tests__/legacy-gap-projection.fixture.js';
 /**
  * CS-AN-2: THE RELOAD MUST JUDGE FRESHNESS WITH THE HASH THE RUN STAMPED.
  *
@@ -76,6 +81,7 @@ const readFactsWithTurnFor = vi.fn();
 const readScenarioRunAnalysisFactsFor = vi.fn();
 const readAnalysisInvalidatedAt = vi.fn();
 const routeStore = {
+  readMostRecentPendingActions: async () => [],
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -147,6 +153,7 @@ function makeTopLevelRawOnly(raw = 120000): Dict {
 /** A store double for the run-time seam ONLY — never the route's store. */
 function snapshotStore(graph: unknown): SessionStore {
   return {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => graph,
     loadGraphAndBriefText: async () => ({ graph, briefText: null }),
   } as unknown as SessionStore;
@@ -431,5 +438,230 @@ describe('CS-AN-2 — the reload judges freshness with the hash the run stamped'
     expect(body.analysis_result, 'an unverifiable run must not be served as the current result').toBeNull();
     expect(body.graph, 'the reload still serves the graph').not.toBeNull();
     expect(body.graph_hash).toBe(runHash);
+  });
+});
+
+// The Run compared only B/C. Clearing A's final gap admits A/B/C without changing legacy numeric bytes.
+describe('legacy clearance outside the hot window survives a real durable reader and cold reload', () => {
+  it.each(['complete', 'failed', 'capped', 'run failed'] as const)('withholds the exact B/C Run after A is admitted (%s edit read)', async state => {
+    const graph = makeBase();
+    const excludedId = 'opt_excluded';
+    (graph.nodes as Dict[]).push({ id: excludedId, kind: 'option', label: 'Hybrid',
+      interventions: { fac_annual_cost: { value: 0.3, source: 'user_specified' } } });
+    (graph.edges as Dict[]).push(...(graph.edges as Dict[]).filter(edge => edge.from === 'opt_hybrid' || edge.to === 'opt_hybrid')
+      .map(edge => ({ ...structuredClone(edge), from: edge.from === 'opt_hybrid' ? excludedId : edge.from, to: edge.to === 'opt_hybrid' ? excludedId : edge.to })));
+    const hash = await runStampFor(graph);
+    const before = structuredClone(graph);
+    (before.nodes as Dict[]).find(node => node.id === excludedId)!.unresolved_targets = ['unmapped demand'];
+    expect(computeAnalysisAffectingGraphHash(before as never, 'legacy')).toBe(hash);
+    const fact = runFact(hash);
+    fact.result.run_id = 'legacy-only-b-c';
+    expect(Object.keys(fact.result.win_probabilities!)).toEqual(['opt_hybrid', 'opt_status_quo']);
+    expect(fact.result).not.toHaveProperty('input_snapshot');
+    const edit = { fact_type: 'edit_graph', fact_version: 1, result: {
+      edit_kind: 'option_configuration', status: 'applied', operations_count: 1,
+      affected_entities: [{ kind: 'option', label: 'Hybrid' }], graph_hash_before: hash,
+      graph_hash_after: hash, safe_summary: 'Cleared the excluded option gap', impact: 'moderate', rerun_recommended: true,
+    } };
+    const runRow = { id: RUN_ROW, scenario_id: SCENARIO, v5_conversation_turn_id: RUN_TURN,
+      created_at: RUN_AT, handler_id: 'run_analysis', action_type: 'run_analysis', noop: false,
+      payload: { fact_type: fact.fact_type, fact_version: fact.fact_version, result: fact.result } };
+    const editRow = { ...runRow, id: 'fact-clear-excluded-a', created_at: '2026-09-25T18:00:00.000Z',
+      handler_id: 'edit_graph', action_type: 'edit_graph', payload: edit };
+    const queries: Dict[] = [];
+    const client = { from: () => {
+      const filters: Dict = {}; queries.push(filters);
+      const chain = {
+        select: () => chain,
+        eq: (key: string, value: unknown) => { filters[key] = value; return chain; },
+        gt: (key: string, value: unknown) => { filters['after_' + key] = value; return chain; },
+        order: () => chain,
+        limit: async () => filters.handler_id === 'run_analysis'
+          ? { data: [runRow], count: 1, error: state === 'run failed' ? { message: 'durable Run read failed' } : null }
+          : { data: state === 'complete' ? [editRow] : [], count: state === 'capped' ? 22 : state === 'complete' ? 1 : 0,
+            error: state === 'failed' ? { message: 'durable edit read failed' } : null },
+      }; return chain;
+    } } as unknown as SupabaseClient;
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: null });
+    readRecent.mockResolvedValue(state === 'run failed' ? [{ id: RUN_TURN }] : []); readFactsFor.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue(state === 'run failed' ? [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, turn_id: RUN_TURN }] : []);
+    readScenarioRunAnalysisFactsFor.mockImplementation((id, limit) => store.readScenarioRunAnalysisFactsFor(id, limit));
+    const body = await reload();
+    expect(runStateOf(body)).toMatchObject({ kind: 'complete_stale', computed_at: RUN_AT });
+    expect(queries).toHaveLength(state === 'run failed' ? 1 : 2);
+    if (state !== 'run failed') expect(queries[1]).toMatchObject({ scenario_id: SCENARIO, handler_id: 'edit_graph', after_created_at: RUN_AT });
+    expect(body.analysis_result).toBeNull();
+    expect(body.graph_hash).toBe(hash);
+    // Equal labels cannot substitute the newly admitted A for either of the saved B/C identities.
+    expect((body.graph as Dict).nodes).toEqual(graph.nodes);
+  });
+
+  it('an explicit excluded-option admission snapshot also binds the exclusion by id', async () => {
+    const graph = makeBase();
+    (graph.nodes as Dict[]).push({ id: 'opt_excluded', kind: 'option', label: 'Hybrid', interventions: { fac_annual_cost: { value: 0.3 } } });
+    (graph.edges as Dict[]).push(...(graph.edges as Dict[]).filter(edge => edge.from === 'opt_hybrid' || edge.to === 'opt_hybrid')
+      .map(edge => ({ ...structuredClone(edge), from: edge.from === 'opt_hybrid' ? 'opt_excluded' : edge.from, to: edge.to === 'opt_hybrid' ? 'opt_excluded' : edge.to })));
+    const hash = await runStampFor(graph); const fact = runFact(hash);
+    const input = legacyRun('node').result.input_snapshot!;
+    fact.result.input_snapshot = { ...input, options: [
+      { option_id: 'opt_hybrid', settings: [{ factor_id: 'fac_annual_cost', encoded: 0.8 }] },
+      { option_id: 'opt_status_quo', settings: [{ factor_id: 'fac_annual_cost', encoded: 0.6 }] },
+    ], options_not_sent: [{ option_id: 'opt_excluded', reason: 'not_analysable' }] };
+    seed(graph, hash); readRecent.mockResolvedValue([]); readFactsWithTurnFor.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT }], total_count: 1 });
+    const body = await reload();
+    expect(runStateOf(body)).toMatchObject({ kind: 'complete_stale', computed_at: RUN_AT });
+    expect(body.analysis_result).toBeNull();
+  });
+});
+
+
+it('healthy gap-free Run wire bytes stay identical when the private projection stamp is present', async () => {
+  const graph = makeBase(); const hash = await runStampFor(graph);
+  seed(graph, hash); const legacyBody = await reload(); delete legacyBody.request_id;
+  const fact = runFact(hash); fact.result.enrichment = stampRunAnalysisProjection(fact.result.enrichment!);
+  readFactsWithTurnFor.mockResolvedValue([{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, turn_id: RUN_TURN }]);
+  readScenarioRunAnalysisFactsFor.mockResolvedValue({ total_count: 1,
+    facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT }],
+    legacy_edit_facts: { since: null, facts: [], readOk: false, total_count: null },
+  });
+  const stampedBody = await reload(); delete stampedBody.request_id;
+  expect(JSON.stringify(stampedBody)).toBe(JSON.stringify(legacyBody));
+});
+
+
+describe('C2 recorded Run revision on the real reload route', () => {
+  function seedRevision(graph: Dict, hash: string | null, recorded: unknown, current: number) {
+    const fact = runFact(hash ?? '');
+    fact.result.run_id = 'c2-selected-run';
+    // The projection stamp keeps these rows focused on revision/hash authority.
+    fact.result.enrichment = stampRunAnalysisProjection(fact.result.enrichment!);
+    if (hash === null) delete fact.result.graph_hash_at_run;
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: null, revision: current });
+    readRecent.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ total_count: 1,
+      facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, evaluated_scenario_revision: recorded }],
+    });
+    return fact;
+  }
+  function staleness(body: Dict) {
+    return (body.canonical_analysis_view as Dict).staleness as Dict;
+  }
+  function parity(body: Dict) {
+    const kind = runStateOf(body)?.kind;
+    expect(staleness(body).stale).toBe(kind === 'complete_current' ? false : kind === 'complete_stale' ? true : null);
+  }
+
+  it('DL1: an analysis-affecting n1 → n2 edit stays stale and retains n1 after reload', async () => {
+    const before = makeBrokenF1(120000); const edited = makeBrokenF1(130000);
+    seedRevision(edited, await runStampFor(before), 11, 12);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_stale');
+    expect(staleness(body)).toMatchObject({ revision: 12, run_revision: 11, run_revision_source: 'recorded',
+      basis: 'analysis_graph_hash_interim', limitation: 'Hash equality cannot detect brief, framing or stage changes.' });
+    expect((body.canonical_analysis_view as Dict).run).toMatchObject({ run_id: 'c2-selected-run' });
+    parity(body);
+    const again = await reload();
+    expect((again.canonical_analysis_view as Dict).run).toEqual((body.canonical_analysis_view as Dict).run);
+    expect(staleness(again)).toEqual(staleness(body));
+  });
+
+  it('DL2: a non-analysis revision move with equal hashes stays fresh', async () => {
+    const graph = makeBase(); seedRevision(graph, await runStampFor(graph), 11, 12);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ stale: false, run_revision: 11, run_revision_source: 'recorded', basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it.each([undefined, null])('DL3: legacy revision %s is null, never zero, and equal hashes remain fresh', async recorded => {
+    const graph = makeBase(); seedRevision(graph, await runStampFor(graph), recorded, 0);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown', basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it.each(['11', -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('DL4: malformed stored revision %s remains legacy unknown', async recorded => {
+    seedRevision(makeBase(), null, recorded, 11);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect(staleness(body)).toMatchObject({ stale: null, run_revision: null, run_revision_source: 'legacy_unknown', basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it.each([null, ''])('no usable stored hash %s: recorded match alone supplies the revision basis', async hash => {
+    seedRevision(makeBase(), hash, 11, 11);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ stale: false, run_revision: 11, run_revision_source: 'recorded',
+      basis: 'recorded_run_revision', limitation: 'No analysis hash was available; only the scenario revision was compared.' });
+    parity(body);
+  });
+
+  it('no hash with recorded divergence stays unknown', async () => {
+    seedRevision(makeBase(), null, 11, 12);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect(staleness(body)).toMatchObject({ stale: null, run_revision: 11, basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it('the real durable SELECT and hot-window SELECT carry occurrence revision outside payload', async () => {
+    const graph = makeBase(); const fact = seedRevision(graph, await runStampFor(graph), 11, 12);
+    const row = { id: RUN_ROW, scenario_id: SCENARIO, v5_conversation_turn_id: RUN_TURN,
+      created_at: RUN_AT, handler_id: 'run_analysis', action_type: 'run_analysis', noop: false,
+      evaluated_scenario_revision: 11,
+      payload: { fact_type: fact.fact_type, fact_version: fact.fact_version, result: fact.result } };
+    const selects: string[] = [];
+    const client = { from: () => {
+      const chain = { select: (columns: string) => { selects.push(columns); return chain; },
+        eq: () => chain, in: () => chain, order: () => chain,
+        limit: async () => ({ data: [row], count: 1, error: null }),
+        then: (resolve: (value: { data: typeof row[]; error: null }) => unknown) => resolve({ data: [row], error: null }),
+      }; return chain;
+    } } as never;
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    readRecent.mockResolvedValue([{ id: RUN_TURN }]);
+    readFactsWithTurnFor.mockImplementation(ids => store.readFactsWithTurnFor(ids));
+    readScenarioRunAnalysisFactsFor.mockImplementation((id, limit) => store.readScenarioRunAnalysisFactsFor(id, limit));
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ run_revision: 11, run_revision_source: 'recorded' });
+    expect(selects).toHaveLength(2);
+    expect(selects.every(columns => columns.split(', ').includes('evaluated_scenario_revision'))).toBe(true);
+    const hot = await store.readFactsWithTurnFor([RUN_TURN]);
+    expect(hot[0]).toMatchObject({ fact_row_id: RUN_ROW, evaluated_scenario_revision: 11 });
+    expect(hot[0].fact).not.toHaveProperty('evaluated_scenario_revision');
+    expect(hot[0].fact.result).not.toHaveProperty('evaluated_scenario_revision');
+    parity(body);
+  });
+
+  it('no usable current graph hash: a recorded match uses the same revision fallback', async () => {
+    const graph = makeBase(); const hash = await runStampFor(graph);
+    delete (graph.nodes as Dict[]).find(node => node.id === 'fac_annual_cost')!.label;
+    seedRevision(graph, hash, 11, 11);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ basis: 'recorded_run_revision', run_revision: 11, stale: false });
+    parity(body);
+  });
+
+  it('another row’s matching revision cannot license the selected Run', async () => {
+    const fact = seedRevision(makeBase(), null, undefined, 12);
+    const other = structuredClone(fact); other.result.run_id = 'c2-other-run';
+    other.result.computed_at = '2026-09-23T18:00:00.000Z';
+    // Input is reversed deliberately: wrapper identity survives durable sorting.
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ total_count: 2, facts: [
+      { fact: other, fact_row_id: 'other-row', fact_created_at: other.result.computed_at, evaluated_scenario_revision: 12 },
+      { fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT },
+    ] });
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect((body.canonical_analysis_view as Dict).run).toMatchObject({ run_id: 'c2-selected-run' });
+    expect(staleness(body)).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown' });
+    parity(body);
   });
 });

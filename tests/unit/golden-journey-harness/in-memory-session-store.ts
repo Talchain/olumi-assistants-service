@@ -136,9 +136,6 @@ export class InMemorySessionStore implements SessionStore {
     return {} as unknown as InvalidationResult;
   }
 
-  async storeDraftGraph(_scenarioId: string, graph: unknown): Promise<void> {
-    this.graph = graph;
-  }
 
   async loadGraph(_scenarioId: string): Promise<unknown | null> {
     return this.graph ?? null;

@@ -85,6 +85,7 @@ function world(initial: Graph) {
     getScenarioOwner: vi.fn(async () => null),
     scenarioExists: vi.fn(async () => true),
     readCommittedTurn: vi.fn(async () => null),
+    readMostRecentPendingActions: vi.fn(async () => []),
   };
   storeRef.value = store;
   return { row, appends, store };

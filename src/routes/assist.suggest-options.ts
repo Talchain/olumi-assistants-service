@@ -25,7 +25,7 @@ const CEE_VERSION = "v12.4";
  * Enforces deterministic ordering (by option id alphabetically).
  */
 export default async function route(app: FastifyInstance) {
-  app.post("/assist/suggest-options", async (req, reply) => {
+  app.post("/assist/suggest-options", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const startTime = Date.now();
     const parsed = SuggestOptionsInput.safeParse(req.body);
     const requestId = getRequestId(req as any);

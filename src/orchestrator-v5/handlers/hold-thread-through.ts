@@ -60,6 +60,7 @@
  * commit carry-forward (single decrement site preserved).
  */
 
+import { heldAgentCardStillApplies } from '../agent-lane/proposal-object/still-applies.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
@@ -355,6 +356,15 @@ export function threadHoldsThroughMutatingCommit(
         }
         continue;
       }
+    }
+    // ⭐ An Agent card whose OWN subject this commit left unchanged (`heldCardStillApplies`: the rule its press and its lapse
+    // read; hiring post3009 turn 05, where approving two link strengths dropped the pending deadline card) is carried AS IT
+    // STANDS: its pin is its proposal's base (`agentProposalOf`), so the chip the user sees is the one they press. The
+    // commit's carry-forward reads the same rule before its hash rule, and the press re-checks it (`scoped_precondition_holds`)
+    // and writes on the CURRENT base.
+    if (heldAgentCardStillApplies(pa, input.graphAfterCommit)) {
+      threaded.push(pa);
+      continue;
     }
     // Generic apply proposal, payload-less GM hold (decline posture), or a
     // hash-pinned concept offer: the confirm/resume path is gated on the

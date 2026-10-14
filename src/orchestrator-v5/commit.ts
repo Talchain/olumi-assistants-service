@@ -1,3 +1,6 @@
+import { assertShareByDatePreserved } from './goal-target/share-by-date-carrier.js';
+import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
+import { heldAgentCardStillApplies } from './agent-lane/proposal-object/still-applies.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -46,7 +49,9 @@ import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
+import type { HorizonBasisWrite } from './goal-target/goal-steady-write.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -86,6 +91,7 @@ import {
 import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
+import { awaitRunRecording } from './run-recording.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isProviderAllowed } from '../adapters/llm/provider-policy.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
@@ -99,6 +105,7 @@ export interface CommitMetadata {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
   /**
    * Draft graph to persist atomically with the turn insert via
    * append_turn_atomic(p_graph). Both the graph write and the turn row commit
@@ -156,10 +163,14 @@ export interface CommitMetadata {
    * mode `edit-graph.ts:2750-2755` exists to avoid).
    */
   readonly baseGraphForInvariants?: unknown;
+  /** In-process approval capability issued by applyGoalSteadyEdit, never a wire field. */
+  readonly horizonBasisWrite?: HorizonBasisWrite;
+  /** Explicit server read when the structural baseline can fall back to a client graph. null means absent. */
+  readonly storedGraphForHorizonBasis?: unknown;
   /**
    * ⭐ STABLE ENTITY REFS ONLY (`graph/entity-refs.ts`; DL CR B1 on #2357): the graph this write REPLACES, so the
    * allocator carries each entity's ref forward and never reissues a retired number. `null` = there is none (a first
-   * write). Read ONLY by the allocator — never by the invariant floor or the version policy, which keep
+   * write). Also used for basis preparation; the structural invariant floor and version policy keep
    * `baseGraphForInvariants`. When neither is given on a graph write, the commit reads the stored graph once for it.
    */
   readonly refBaseGraph?: unknown;
@@ -241,6 +252,8 @@ export interface CommitMetadata {
    * absent/unparseable. See graph-cas-conflict.ts.
    */
   readonly expectedGraphIdentityHash?: string | null;
+  /** Verbatim scenario revision captured with the turn-start server graph read. */
+  readonly expectedRevision?: number;
   /**
    * A3 graph CAS observe-mode: expected-base analysis-affecting hash (16-hex)
    * from the same server read as `expectedGraphIdentityHash`. Threaded
@@ -364,6 +377,8 @@ export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
   readonly persisted_row_id: string;
+  /** Scenario revision returned by the versioned atomic append, including replay. */
+  readonly revision?: number;
   readonly modelVersionReceipt: AtomicCommittedModelVersionReceipt | null;
   /**
    * True when CommitMetadata.graph was provided and the append RESOLVED. False
@@ -538,6 +553,8 @@ export function computeSurvivingPriorPendingsDetailed(
   consumedRefs: readonly string[],
   currentGraphHash: string | undefined,
   nowMs: number,
+  /** A held Agent card that still applies to the current graph by its own rule (`heldAgentCardStillApplies`). Absent: none. */
+  heldCardStillAppliesNow?: (pa: PendingAction) => boolean,
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
@@ -622,20 +639,29 @@ export function computeSurvivingPriorPendingsDetailed(
       || (priorPa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
       || (priorPa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
     ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept/offer capture)
+    // The issue survives; only its answer-binding window counts down. It is consumed
+    // after canonical resolution, not by wall time, an unrelated revision or an offer's TTL.
+    if (priorPa.action.kind === 'reconcile_goal_scope') {
+      survivors.push({ ...priorPa, expires_at_turn_count: Math.max(0, priorPa.expires_at_turn_count - 1) });
+      continue;
+    }
     // 2b. SYMMETRIC CLAIM WINDOW — clamp before rules 3-5 read the bounds, so a
     // clamped ask expires on the same turn as the competitor it was outliving.
     // Identity when the set is unmixed or the pending is not a recorded ask.
     const pa = clampAskWindows ? clampRecordedAskWindow(priorPa) : priorPa;
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
-    // 4. graph-hash invalidation — only when both hashes are known.
+    // 4. graph-hash invalidation — only when both hashes are known. A held Agent card whose OWN subject is unchanged is
+    // not invalidated by a model move (hiring post3009: approving two link strengths dropped the pending deadline card); it
+    // keeps its pin, which is its proposal's base, and its press re-checks the same rule.
     const preconditionHash = pa.preconditions.graph_hash;
     if (
       typeof preconditionHash === 'string' &&
       preconditionHash.length > 0 &&
       typeof currentGraphHash === 'string' &&
       currentGraphHash.length > 0 &&
-      preconditionHash !== currentGraphHash
+      preconditionHash !== currentGraphHash &&
+      heldCardStillAppliesNow?.(pa) !== true
     ) {
       hashInvalidatedCount += 1;
       continue;
@@ -1210,7 +1236,7 @@ async function refBaseFor(metadata: CommitMetadata, store: Pick<SessionStore, 'l
     return (await store.loadGraph(metadata.scenario_id)) ?? null;
   } catch (err) {
     log.warn({ event: 'v5.commit.ref_base_read_failed', scenario_id: metadata.scenario_id, err: err instanceof Error ? err.message : String(err) },
-      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6)');
+      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6); a write carrying a share_by_date carrier is refused');
     return undefined;
   }
 }
@@ -1255,12 +1281,25 @@ export async function commitDirectAnswer(
   // then derive every hash-dependent decision from the projected bytes.
   // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
   // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
+  const baseForWrite = await refBaseFor(metadata, store);
+  const storedBasisBase = metadata.storedGraphForHorizonBasis !== undefined ? metadata.storedGraphForHorizonBasis : baseForWrite;
+  if (graphWasProvided(metadata.graph)) {
+    const priorForScope = typeof store.readMostRecentPendingActions === 'function'
+      ? await store.readMostRecentPendingActions(metadata.scenario_id, { validation: 'strict' })
+      : metadata.priorPendingActions ?? [];
+    assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
+  }
+  if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, metadata.graph);
   const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
-  }), await refBaseFor(metadata, store)).graph;
+  }), baseForWrite).graph;
+  if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
+  if (graphWasProvided(metadata.graph)) {
+    prepareHorizonBasisForWrite(projectedGraphForStore, storedBasisBase, metadata.scenario_id, metadata.horizonBasisWrite);
+  }
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,
@@ -1359,12 +1398,20 @@ export async function commitDirectAnswer(
         CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
         !isPendingActionExpired(pa, nowMsForPendings),
     );
+  // The graph `effectiveGraphHash` names, for a held Agent card's own rule: the bytes this commit stores, or (a commit that
+  // writes none) the stored graph, read only when such a card's pin differs from it. Unreadable: no card is kept by it.
+  const heldCardGraph: unknown = writesGraph ? graphForStore
+    : (metadata.priorPendingActions ?? []).some((pa) => pa.action.kind === 'apply_proposed_change'
+      && typeof pa.preconditions.graph_hash === 'string' && pa.preconditions.graph_hash !== effectiveGraphHash)
+      ? await (async () => { try { return await store.loadGraph(metadata.scenario_id); } catch { return undefined; } })() : undefined;
+  const heldCardStillAppliesNow = (pa: PendingAction): boolean => heldCardGraph != null && heldAgentCardStillApplies(pa, heldCardGraph);
   const prelimCarryForward = computeSurvivingPriorPendingsDetailed(
     metadata.priorPendingActions ?? [],
     initialChipDerivedPending,
     metadata.consumedPendingRefs ?? [],
     effectiveGraphHash,
     nowMsForPendings,
+    heldCardStillAppliesNow,
   );
   const holdLiveAfterCommit =
     hasLiveConfirmationExpecting(initialChipDerivedPending) ||
@@ -1412,6 +1459,7 @@ export async function commitDirectAnswer(
     metadata.consumedPendingRefs ?? [],
     effectiveGraphHash,
     nowMsForPendings,
+    heldCardStillAppliesNow,
   );
   const survivingPrior = carryForward.survivors;
   // Adversarial round-3 concern 3 — consent-priority cap fill. The plain
@@ -1427,10 +1475,10 @@ export async function commitDirectAnswer(
   // rendered-chip invariant is one-directional). A consent hold that STILL
   // cannot fit (all-consent overflow) lapses with the honest F-HELD 2b
   // notice below, never silently.
-  const combinedPendings: readonly PendingAction[] = [
+  const combinedPendings: readonly PendingAction[] = scopeIssuesAfterWrite([
     ...chipDerivedPending,
     ...survivingPrior,
-  ];
+  ], graphForStore, metadata.scenario_id);
   let finalPendings: readonly PendingAction[];
   let capEvictedConsentHolds: readonly PendingAction[] = [];
   if (combinedPendings.length <= PENDING_ACTIONS_PER_TURN_CAP) {
@@ -1440,6 +1488,10 @@ export async function commitDirectAnswer(
       CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
       !isPendingActionExpired(pa, nowMsForPendings);
     const keep = new Set<PendingAction>();
+    for (const pa of combinedPendings) {
+      if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
+      if (pa.action.kind === 'reconcile_goal_scope') keep.add(pa);
+    }
     for (const pa of combinedPendings) {
       if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
       if (isLiveConsentHold(pa)) keep.add(pa);
@@ -1611,6 +1663,9 @@ export async function commitDirectAnswer(
     store,
     writesGraph,
     baseGraphForInvariants: metadata.baseGraphForInvariants,
+    // Keep a known-empty server read distinct from the structural ingress fallback at the door.
+    storedGraphForHorizonBasis: storedBasisBase ?? { nodes: [], edges: [] },
+    ...(metadata.horizonBasisWrite !== undefined ? { horizonBasisWrite: metadata.horizonBasisWrite } : {}),
     source: metadata.handler_id ?? undefined,
     write: {
       scenario_id: metadata.scenario_id,
@@ -1622,6 +1677,8 @@ export async function commitDirectAnswer(
       llm_calls_used: metadata.llm_calls_used,
       duration_ms: metadata.duration_ms,
       handler_facts: metadata.handler_facts,
+      ...(metadata.run_evaluated_revisions !== undefined
+        ? { run_evaluated_revisions: metadata.run_evaluated_revisions } : {}),
       graph: graphForStore,
       briefText: metadata.briefText,
       pending_actions: finalPendings,
@@ -1632,6 +1689,7 @@ export async function commitDirectAnswer(
       // expected-base hashes (undefined when the path is not instrumented).
       expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
       expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
+      ...(metadata.expectedRevision !== undefined ? { expectedRevision: metadata.expectedRevision } : {}),
       ...(atomicVersionPlan.kind === 'plan'
         ? { modelVersion: atomicVersionPlan.write }
         : {}),
@@ -2068,72 +2126,26 @@ export async function commitDirectAnswer(
     );
   }
 
-  // ROADMAP 3.1 (CEE half) — decision-record capture hook
-  // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). Fires ONLY after
-  // the durable append succeeded AND this commit carries a successful
-  // (non-noop) run_analysis fact — which covers BOTH producers (the routed
-  // turn-executor path and chip-click run_analysis funnel through this
-  // commit seam). Fire-and-forget under the same non-blocking contract as
-  // the MM hook above: any capture failure logs and NEVER affects the turn
-  // result. No qualifying fact ⇒ byte-identical commit path (no store
-  // construction, no env reads —
-  // pinned by commit-decision-record-hook.test.ts). The record's
-  // graph_hash is the fact's OWN `graph_hash_at_run` (aag_v1-prefixed) —
-  // the hash the handler computed from the exact snapshot the analysis ran
-  // against (PR #411 object-identity discipline; no re-read, no re-hash).
-  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE deleted (was
-  // live `true` on staging); capture now runs whenever the qualifying fact exists.
-  const decisionRecordFact = metadata.handler_facts.find(
+  // Both independent secondary writes remain AFTER the checked durable append.
+  // One bounded concurrent wait closes the reload race on the normal path;
+  // failure/timeout logs a typed outcome and never changes the turn's success.
+  // The shared eligibility predicate and each hook's skips/payloads are unchanged.
+  const recordingFact = metadata.handler_facts.find(
     (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
   );
-  if (decisionRecordFact !== undefined) {
-    void recordDecisionRecordForCommit({
+  if (recordingFact !== undefined) {
+    await awaitRunRecording({
       scenarioId: metadata.scenario_id,
       turnId: metadata.turn_id,
       persistedRowId,
-      fact: decisionRecordFact,
-      // Guest pre-check reads scenarios.user_id via the store's optional
-      // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
-      // the SessionStore import surface at its declared three files).
-      sessionStore: store,
-    });
-  }
-
-  // ROADMAP 2.1229 (CEE half) — brief + analysis-provenance capture hook.
-  //
-  // THE USER OUTCOME: a person who has run an analysis can send their model
-  // to a colleague, and the colleague opens the link and sees it. Today
-  // `create_shared_brief` raises 'No brief to share - generate a brief
-  // first' on every real share, because `scenarios.brief` is NULL on 14,157
-  // of 14,158 rows. The DB-side producers were always correct — they lost
-  // their CALLER when the direct browser→PLoT `/v2/run` path was retired
-  // (ROADMAP 2.1229). CEE already mints all four required values on every
-  // run and writes them only to the telemetry table `v5_handler_facts`;
-  // this hook forwards them to the row the share path actually reads.
-  //
-  // SIBLING of the decision-record hook above and deliberately INDEPENDENT
-  // of it: same predicate, same fire-and-forget contract, its own `find` and
-  // its own failure handling, so neither can silently change the other's
-  // firing condition (two hooks answering two questions — they are not one
-  // concept with two writes). Fires ONLY after the durable append succeeded
-  // AND this commit carries a successful (non-noop) run_analysis fact; the
-  // predicate already excludes 'refused' attempts, which carry no brief.
-  // Any failure logs and NEVER affects the turn result. No qualifying fact
-  // ⇒ byte-identical commit path (no store construction, no env reads —
-  // pinned by commit-brief-provenance-hook.test.ts, which asserts the
-  // store-construction COUNT rather than merely that the RPC went uncalled).
-  // The hook needs no session store: `store_brief_and_provenance` runs with
-  // the SERVICE ROLE and updates `scenarios` by id, so there is no guest
-  // pre-check to do and no SessionStore import to add.
-  const briefProvenanceFact = metadata.handler_facts.find(
-    (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
-  );
-  if (briefProvenanceFact !== undefined) {
-    void recordBriefProvenanceForCommit({
-      scenarioId: metadata.scenario_id,
-      turnId: metadata.turn_id,
-      persistedRowId,
-      fact: briefProvenanceFact,
+      decision: () => recordDecisionRecordForCommit({
+        scenarioId: metadata.scenario_id, turnId: metadata.turn_id, persistedRowId,
+        fact: recordingFact, sessionStore: store,
+      }),
+      brief: () => recordBriefProvenanceForCommit({
+        scenarioId: metadata.scenario_id, turnId: metadata.turn_id, persistedRowId,
+        fact: recordingFact,
+      }),
     });
   }
 
@@ -2141,8 +2153,8 @@ export async function commitDirectAnswer(
   // the durable append, off the turn path, on EVERY commit — UNCONDITIONAL
   // since the O-2 activation (2026-07-20; the CEE_ROLLING_SUMMARY flag is
   // DELETED per the no-dark-launches ruling — rollback = code revert).
-  // Fire-and-forget under the same non-blocking contract as the MM /
-  // decision-record hooks above: every failure — store construction, RPC
+  // Fire-and-forget with the same failure isolation as the bounded Run
+  // recording above: every failure — store construction, RPC
   // error, summariser model timeout — is caught and logged; NOTHING
   // propagates to the turn result (pinned by
   // commit-rolling-summary-hook.test.ts). The summariser reads the FULL
@@ -2180,6 +2192,7 @@ export async function commitDirectAnswer(
   // applied state. Hand back the authoritative reread instead (or null).
   const replayGraph = replayReread === null ? null : replayReread.graph;
   return {
+    ...(appendOutcome.revision !== undefined ? { revision: appendOutcome.revision } : {}),
     persistedAnalysisGraphHash:
       replayReread === null
         ? persistedAnalysisGraphHash

@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * ⛔ THE AGENT LANE'S FAIL-CLOSED LEADER GATE — the classifier, the projection and the permit.
  *
@@ -13,10 +14,225 @@ import {
   agentNoLeaderSentence,
   dropRankingSentences,
   enforceAgentLaneLeaderClaimsAtWire,
+  rankingCodesIn,
   rankingLabelContext,
   sentenceRanksOptions,
 } from '../withheld-leader-fail-closed.js';
 import { PROVISIONAL_FIGURES_CAVEAT } from '../../compose/leading-option-wire-enforcement.js';
+import { unsizedLinkSentence, unsizedLinkStatement } from '../unsized-path-cause.js';
+import { checkProvisionalView } from '../provisional-view.js';
+
+describe('c6: an appointed lead is a staffing role, with option labels still guarded', () => {
+  const labels = rankingLabelContext({ nodes: [
+    { id: 'raise', kind: 'option', label: 'Raise prices' },
+    { id: 'starter', kind: 'option', label: 'Launch starter tier' },
+  ] }, undefined);
+
+  it.each([
+    'Appoint one lead.',
+    'First, appoint one lead for the route merge.',
+    'First, appoint one operations lead to own the waste-contract change and set a launch date.',
+    'Name a lead for the depot work.',
+    'Assign one operations lead to own the waste contract.',
+    'Assign one lead per site.',
+    'Have each depot nominate a lead.',
+    'Nominate a project lead.',
+    'Appoint one lead’s deputy.',
+    'Hire a lead.', 'Need a lead.', 'Designate one lead.',
+    'Choose a lead.', 'Pick a single lead.', 'Pick a single lead to coordinate drivers.',
+    'Appoint one lead who owns the pilot.',
+    'Pick a project lead and two drivers.', // kept by the existing "project lead" idiom, not by this exemption
+  ])('STAFFING: kept byte-identical: %s', text => {
+    expect(rankingCodesIn(text, labels)).toEqual([]);
+    expect(dropRankingSentences(text, labels)).toEqual({ text, droppedSentences: 0 });
+  });
+
+  it.each([
+    'Raise prices leads.', 'One option leads.', 'The lead is not stable.',
+    '‘Raise prices’ is in the lead.',
+    'Make ‘Raise prices’ the lead option.',
+    'Appoint ‘Launch starter tier’ as the lead.',
+    'It takes the lead in 60% of runs.',
+    'Make ‘RAISE PRICES’ the lead.',
+    'Appoint one lead who leads the comparison.',
+    'Appoint one lead; the lead is not stable.',
+    'Appoint staff and the lead is not stable.',
+    'Appoint staff\nThe lead is not stable.',
+    'Appoint staff — the lead is not stable.',
+    // r0 probe (DL review): paraphrases that do NOT quote an option label. A wider exemption (have/get/put/make/find,
+    // "the", words in between) let all ten through; each must stay a ranking sentence on a withheld turn.
+    'Raise would have the lead in this model.',
+    'Raising prices would have a narrow lead.',
+    'This would put the starter tier in the lead.',
+    'That would make the starter tier the lead option.',
+    'The starter tier would get the lead once churn falls.',
+    'You would need a clear lead before committing to the starter tier.',
+    'Raising prices would have a lead of about 10 points.',
+    'Pick the lead option and move on.',
+    'Choose a lead option now.',
+    'Name the lead option.',
+    'Pick one lead of the three.',
+    'Appoint one lead, and the starter tier leads.',
+  ])('RANKING: still fires: %s', text => {
+    expect(rankingCodesIn(text, labels)).toContain('lead');
+    expect(dropRankingSentences(text, labels).droppedSentences).toBeGreaterThan(0);
+  });
+
+  // Fail-closed by choice: outside the tight appointing form the noun is NOT exempt, so these are still dropped on a
+  // withheld turn (a lost staffing sentence is recoverable; a leaked leader claim is not).
+  it.each([
+    'Make Sam the lead on this.', 'Appoint Sam as the lead.',
+    'The lead you appoint should own the pilot.', 'Get a lead.', 'Find a lead.', 'Put the lead on the pilot.',
+  ])('FAIL-CLOSED outside the tight form: still classified as ranking: %s', text => {
+    expect(rankingCodesIn(text, labels)).toContain('lead');
+  });
+
+  // Review r1 (independent reviewer, 7 Oct ~03:00Z), the reviewer's own options and sentences: base drops each one at the
+  // wire and r1 kept it. The exemption now needs a staffing complement, a role from an allowlist, a sentence-initial
+  // pick/choose/select/need, and no other lead-family word in the sentence.
+  const reviewLabels = rankingLabelContext({ nodes: [
+    { id: 'hire', kind: 'option', label: 'Hire a tech lead' },
+    { id: 'keep', kind: 'option', label: 'Keep current team' },
+  ] }, undefined);
+  it.each([
+    'If you had to choose a lead today, it would be the second option.',
+    'If you had to pick a lead, it is keeping the current team.',
+    'If you need a lead, go with keeping the current team.',
+    'Pick one lead: keeping the current team.',
+    'Choose a lead - the hiring route.',
+    'Choose a lead-option now.',
+    'Keeping the current team would need a bigger lead before this is settled.',
+    'Keeping the current team would need a wider lead.',
+    'Hiring would need a 10-point lead first.',
+    'You would need a bigger lead before choosing.',
+    'The runs would pick a consistent lead: hiring.',
+    'Select a lead and it is the hire.',
+    'Name one lead and it is hiring.',
+    'Appoint one lead for the route merge, as keeping the current team leads.',
+    // r2 discriminators: a staffing complement follows, so only the sentence-initial rule for pick/choose/need decides.
+    'If you had to pick a lead for this decision, it would be keeping the current team.',
+    'The model would choose a lead for now: hiring.',
+    'The runs would select a lead for the hiring route.',
+    'Hiring would need a lead for the board to approve it.',
+  ])('REVIEW r1 MUST FIRE and drop at the wire: %s', text => {
+    expect(rankingCodesIn(text, reviewLabels)).toContain('lead');
+    expect(dropRankingSentences(text, reviewLabels).droppedSentences).toBeGreaterThan(0);
+  });
+
+  // Review r1 #3: `checkProvisionalView` reads the classifier with NO labels (the option-label guard is a no-op there).
+  it('PROVISIONAL VIEW (no labels): a leader claim is still refused; an appointed lead is not a recommendation', () => {
+    const view = (v: string) => checkProvisionalView({ view: v, reasoning: 'The comparison rests on Olumi’s own estimates.', confirm_step: 'Check the churn figure.' });
+    expect(view('If you had to choose a lead today, it would be keeping the current team.')).toMatchObject({ ok: false, field: 'view', problem: 'option_recommendation' });
+    expect(view('Keeping the current team would need a bigger lead before this is settled.')).toMatchObject({ ok: false, problem: 'option_recommendation' });
+    expect(view('First, appoint one lead for the route merge.')).toMatchObject({ ok: true });
+  });
+
+  // DL #2711 r2 BLOCKER: two adjacent unbounded whitespace runs in the staffing patterns were quadratic (806 ms at 20,000
+  // spaces vs base 2 ms). Every run is bounded; each shape stays linear (< 50 ms at 20,000).
+  timingIt.each([
+    ['"Appoint one lead" + 20,000 spaces + "x"', `Appoint one lead${' '.repeat(20000)}x`],
+    ['"First" + 20,000 spaces + "x"', `First${' '.repeat(20000)}x`],
+    ['"Pick a lead" + 20,000 spaces + "." + 20,000 spaces + "x"', `Pick a lead${' '.repeat(20000)}.${' '.repeat(20000)}x`],
+    ['"First," + 20,000 spaces + "pick a lead"', `First,${' '.repeat(20000)}pick a lead`],
+  ])('LINEAR TIME (classifier): %s', (_name, text) => {
+    const t0 = performance.now();
+    rankingCodesIn(text, labels);
+    dropRankingSentences(text, labels);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+
+  it('the staffing exemption does not blank another shared ranking claim', () => {
+    expect(rankingCodesIn('Make Sam the lead; this is the best option.', labels)).toContain('shared_leader_vocabulary');
+  });
+});
+
+describe('c6: the closing states a refused unsized link without re-inviting it', () => {
+  const link = { from: 'route', to: 'returns', from_label: 'Route merge', to_label: 'Return rate' };
+  const graph = { nodes: [
+    { id: link.from, kind: 'factor', label: link.from_label },
+    { id: link.to, kind: 'goal', label: link.to_label },
+  ], edges: [{ from: link.from, to: link.to }] };
+  const analysisReady = { analysis_admission: { permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const response = (recordedCause: boolean, links = [link]): OlumiResponse => ({
+    assistant_text: 'One option leads. First, appoint one lead for the route merge.',
+    blocks: [{ type: 'analysis_result', enrichment: {
+      inference_warnings: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', links, node_ids: ['route', 'returns'] }],
+      ...(recordedCause ? { __cee_unsized_path_leader_cause: { ...links[0], links } } : {}),
+    } }], suggested_actions: [],
+    analysis_state: { leader_claim: { permitted: false, withheld_reason: 'goal_path_unsized' } },
+  } as unknown as OlumiResponse);
+  const opts = (userText?: string) => ({ requestId: 'c6', exitPath: 'agent_lane_v1',
+    mayNameLeadingOption: false, leaderClaimWithheldReason: 'goal_path_unsized', graph, analysisReady, userText });
+  const refusal = "We're not checking return rates or adding that to the model. Move on. What do we do first?";
+
+  it.each([false, true])('REFUSAL naming the link, recorded cause=%s: retains staffing and states the unsized link without an invitation', recorded => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(response(recorded), opts(refusal));
+    expect(out.changed).toBe(true);
+    expect(out.response.assistant_text).toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkStatement([link])}`);
+    expect(out.response.assistant_text).not.toMatch(/Set (?:it|them)/);
+    expect(enforceAgentLaneLeaderClaimsAtWire(out.response, opts(refusal)).response.assistant_text).toBe(out.response.assistant_text);
+  });
+
+  it.each([
+    'not checking', 'not adding', "won't add", "don't add", 'leave it out', 'leave that out', 'leave them out',
+    'skip it', 'skip that', 'move on', 'not going to size', "don't want to size", 'no need to size', 'not modelling',
+  ])('REFUSAL phrase: %s', phrase => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts(`Return rates: ${phrase}.`)).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkStatement([link])}`);
+  });
+
+  it.each([undefined, 'What do we do first?', 'Can we check return rates?'])('CONTROL no refusal (%s): invitation stays byte-identical', userText => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts(userText)).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
+  });
+
+  it('CONTROL refusal naming a different link: invitation stays byte-identical', () => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts("We're not checking delivery delays. Move on.")).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
+  });
+
+  it.each([
+    "Let's not move on yet; I want to size return rate.",
+    'Why are we not adding return rate?',
+    'Don’t skip it - return rate matters.',
+    "I won't add anything else; please size return rate.",
+    'Should we move on from return rate or size it?',
+    // r2 discriminators: the decline and the label share one clause, so only the negation decides.
+    "Let's not move on from return rate yet.",
+    'Don’t leave it out, return rate matters.',
+  ])('REVIEW r1 #4 NOT A REFUSAL (negated / question / other clause): invitation stays byte-identical: %s', userText => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts(userText)).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
+  });
+
+  timingIt.each([
+    ['"not" + 20,000 spaces + "move on return rates"', `not${' '.repeat(20000)}move on return rates`],
+    ['"Return rates," + 20,000 spaces + "but move on"', `Return rates,${' '.repeat(20000)}but move on`],
+  ])('LINEAR TIME (refusal): %s', (_name, userText) => {
+    const t0 = performance.now();
+    enforceAgentLaneLeaderClaimsAtWire(response(false), opts(userText));
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+
+  it('CONTROL a label inside another word is not the named link', () => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts('Not checking return ratepayers.')).response.assistant_text)
+      .toContain(unsizedLinkSentence([link]));
+  });
+
+  it('a refusal can name the from label, case-insensitively', () => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts('Do not proceed: skip it for ROUTE MERGES.')).response.assistant_text)
+      .toContain(unsizedLinkStatement([link]));
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts('Do not proceed: skip it for ROUTE MERGES.')).response.assistant_text)
+      .not.toContain('Set it');
+  });
+
+  it('a refusal naming one co-held link also removes the plural invitation', () => {
+    const links = [link, { from: 'delays', to: 'cost', from_label: 'Delivery delays', to_label: 'Cost' }];
+    const out = enforceAgentLaneLeaderClaimsAtWire(response(true, links), opts(refusal));
+    expect(out.response.assistant_text).toContain(unsizedLinkStatement(links));
+    expect(out.response.assistant_text).not.toMatch(/Set (?:it|them)/);
+  });
+});
 
 /** Paraphrases the shared exact-label gate cannot see — none uses an option's label verbatim. */
 const RANKING: readonly string[] = [
@@ -1491,5 +1707,113 @@ describe('a sentence naming ONE option as separated ranks the options', () => {
 
   it('CONTROL: on the permit-with-caveat turn (entitled, separated, quantified_provisional) the served headline is kept', () => {
     expect(gate({ permitted: true }).endsWith(reply)).toBe(true); // after the leading caveat (AIQ 5913751874)
+  });
+});
+
+/**
+ * ⭐ THE LADDER VERB'S PARAPHRASE CLASSES on the SERVED agent lane (Review Desk 6b + DL, #2646). `highest` is bare here,
+ * so the gap was `lowest` (bound to gave/came out only) and "came top": a minimise leader claim with no share passed.
+ */
+// Desk/DL follow-up rows (F1/F2, DL 6 Oct).
+const F1_F2_CLAIMS = [
+  'Raise to £59 has the highest-revenue path.',
+  'Hire a marketing manager gives the lowest-churn route.',
+  ...['revenue', 'MRR', 'ARR', 'margin', 'profit', 'return', 'growth', 'churn', 'retention', 'sales', 'income', 'conversion', 'cost']
+    .map((metric) => `Raise to £59 gives the lowest-${metric} path.`),
+  ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) => [
+    `Hire a marketing manager ends up with the ${word} MRR.`,
+    `Both hires end up with the ${word} MRR.`,
+    `Hire a marketing manager and Raise to £59 end up with the ${word} MRR.`,
+    `The ${word} MRR is what Raise to £59 ends up with.`,
+    `With the ${word} MRR, Raise to £59 comes out ahead.`,
+    `The ${word} MRR came from Raise to £59.`,
+    `The ${word} MRR was produced by Raise to £59.`,
+    `MRR is ${word} with Raise to £59.`,
+    `The ${word} MRR came from Raise to £59 in 62% of runs.`,
+  ]),
+  'Both hires end with the highest MRR.',
+  'Raise to £59 ends with the highest MRR.',
+  'Raise to £59 ended with the highest MRR.',
+  'Raise to £59 is ending with the highest MRR.',
+  'Both hires finish with the highest MRR.',
+  'Raise to £59 finishes with the highest MRR.',
+  'Raise to £59 finished with the highest MRR.',
+  'Raise to £59 is finishing with the highest MRR.',
+];
+const F1_F2_PLANNING = [
+  'That is the best guess we have.',
+  'In the best case, churn stays flat.',
+  'The top priority is pricing.',
+  'This ends with a question for you.',
+  'Start with the lowest-risk path.',
+  'Start with the lowest-effort step.',
+  // ⛔ The withheld path keeps its BLANKET best / highest / strongest / top bans (DL review 6 Oct): "Raise to £59 has the
+  // highest impact on MRR" and "The best way forward is option B" are leader claims a noun exemption would let through.
+  // So planning phrases with those four words are rowed only against the ladder (lead-ladder-egress.test.ts); here only
+  // the NEW ladder superlatives are rowed.
+  ...['greatest', 'largest', 'biggest'].flatMap((word) =>
+    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'next step', 'question']
+      .map((noun) => `We ended up with the ${word} ${noun}.`)),
+];
+describe('F1/F2: the agent ladder recognises claims and keeps planning', () => {
+  it.each(F1_F2_CLAIMS)('CATCH and drop: %s', (text) => {
+    expect(sentenceRanksOptions(text)).toBe(true);
+    expect(dropRankingSentences(text)).toEqual({ text: '', droppedSentences: 1 });
+    // Pin this lane's ladder too: broad inherited words must not mask a missing synonym or modifier carve-out.
+    if (!text.includes('comes out ahead')) expect(rankingCodesIn(text)).toContain('lowest');
+  });
+  it.each(F1_F2_PLANNING)('LEAVE byte-identical: %s', (text) => {
+    expect(sentenceRanksOptions(text)).toBe(false);
+    expect(dropRankingSentences(text)).toEqual({ text, droppedSentences: 0 });
+  });
+});
+
+describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
+  // Bound by IDENTITY: the agent lane's OWN code fires, not merely the shared vocabulary it also consults.
+  it.each([
+    // production verbs
+    ['Raise to £59 produced the lowest churn.', 'lowest'],
+    ['Raise to £59 delivered the lowest monthly cancellations.', 'lowest'],
+    ['The lowest churn was delivered by Raise to £59.', 'lowest'],
+    ['Raise to £59 resulted in the lowest churn.', 'lowest'],
+    ['Hold delivered the lowest-churn outcome.', 'lowest'],
+    ['Raise to £59 ends up with the lowest churn.', 'lowest'],
+    // has / had
+    ['Raise to £59 had the lowest churn.', 'lowest'],
+    ['Raise to £59 has the lowest churn.', 'lowest'],
+    // fronted and predicative
+    ['The lowest churn came from Raise to £59.', 'lowest'],
+    ['Churn was lowest under Raise to £59.', 'lowest'],
+    ['Churn is the lowest for Raise to £59.', 'lowest'],
+    // top
+    ['Raise to £59 came top.', 'top'],
+    ['Raise to £59 was top on churn.', 'top'],
+    ['Top on churn was Raise to £59.', 'top'],
+  ])('CATCH: %s (%s)', (s, code) => {
+    expect(sentenceRanksOptions(s)).toBe(true);
+    expect(rankingCodesIn(s)).toContain(code);
+  });
+  it.each([
+    'You want the lowest churn you can get.',
+    'This gives the lowest priority to cost.',
+    'Risk is lowest under the current assumptions.',
+    // Codex #2660 r1.
+    'This resulted in the lowest-risk path through the onboarding checklist.',
+    'We ended up with the lowest estimate for churn.',
+    'The team topped up the budget.',
+  ])('LEAVE: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(false);
+  });
+});
+
+// ⛔ DL review (6 Oct): the withheld path's blanket bans are deliberate. A noun exemption on `best` / `highest` would let
+// these leader claims through, so they are pinned here.
+describe('withheld path: blanket best / highest bans stay', () => {
+  it.each([
+    ['Raise to £59 has the highest impact on MRR.', 'highest'],
+    ['The best way forward is option B.', 'best'],
+  ] as const)('CATCH: %s', (text, code) => {
+    expect(rankingCodesIn(text)).toContain(code);
+    expect(sentenceRanksOptions(text)).toBe(true);
   });
 });

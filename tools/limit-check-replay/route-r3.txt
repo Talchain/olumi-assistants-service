@@ -1,0 +1,9 @@
+{"level":"info","time":1791352283156,"pid":31899,"hostname":"Mac.net","event":"agent_lane.route_mounted","msg":"POST /agent/v1/turn mounted"}
+{"level":"info","time":1791352283203,"pid":31899,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8a30593f-111f-4c34-8799-6e166b9636e4","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+Explain route evaluated GREEN
+{"level":"info","time":1791352283235,"pid":31899,"hostname":"Mac.net","event":"v5.egress.leading_option_claim_neutralised_at_wire","request_id":"req-1","exit_path":"agent_lane_v1","edited_fields":"blocks","mode":"surgical","original_length":0,"projected_length":0}
+{"level":"info","time":1791352283242,"pid":31899,"hostname":"Mac.net","event":"v5.egress.leading_option_claim_neutralised_at_wire","request_id":"req-1","exit_path":"agent_lane_v1_final","edited_fields":"blocks","mode":"surgical","original_length":0,"projected_length":0}
+{"level":"info","time":1791352283277,"pid":31899,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8a30593f-111f-4c34-8799-6e166b9636e4","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+Explain route declaration-only GREEN
+{"level":"info","time":1791352283278,"pid":31899,"hostname":"Mac.net","event":"v5.egress.leading_option_claim_neutralised_at_wire","request_id":"req-4","exit_path":"agent_lane_v1","edited_fields":"blocks","mode":"surgical","original_length":0,"projected_length":0}
+{"level":"info","time":1791352283283,"pid":31899,"hostname":"Mac.net","event":"v5.egress.leading_option_claim_neutralised_at_wire","request_id":"req-4","exit_path":"agent_lane_v1_final","edited_fields":"blocks","mode":"surgical","original_length":0,"projected_length":0}

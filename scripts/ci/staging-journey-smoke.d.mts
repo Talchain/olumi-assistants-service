@@ -20,6 +20,70 @@
  */
 export declare const TURN_PATH: string;
 
+/** The response header CEE stamps its build on (`src/plugins/boundary-logging.ts`). */
+export declare const BUILD_HEADER: string;
+
+/** Phase 1's probe path: served by no route, so it is answered from memory. Never /healthz. */
+export declare const BUILD_PROBE_PATH: string;
+
+/** The build a response's {@link BUILD_HEADER} names; null when absent or malformed. */
+export declare function servedBuildFromHeaders(headers: { get(name: string): string | null } | null | undefined): string | null;
+
+/**
+ * Which commit a run measures: an explicit sha wins; else the CURRENT branch head
+ * (`stale` = the triggering event named a different commit); else, only when the
+ * head is not required, the event's sha. Required-but-unreadable = `head_unreadable`.
+ */
+export declare function resolveTarget(input: {
+  explicitSha?: string;
+  eventSha?: string;
+  headSha?: string | null;
+  headRequired?: boolean;
+}): { sha: string | null; source: "explicit" | "head" | "event" | "head_unreadable" | "none"; stale: boolean };
+
+/** Consecutive Phase-1 header matches needed before the journey (Render rollover settle). */
+export declare const SETTLE_MATCHES_DEFAULT: number;
+
+/** One Phase-1 probe folded into the consecutive-match count; any non-match restarts it. */
+export declare function settleStep(streak: number, served: string | null, want: string, needed: number): { streak: number; done: boolean };
+
+/** Phase 3 tick spacing (ms), the consecutive decided mismatches that make a revert, and the decided share `held` needs. */
+export declare const WATCH_INTERVAL_MS: number;
+export declare const WATCH_REVERT_TICKS: number;
+export declare const WATCH_MIN_DECIDED_FRACTION: number;
+
+/**
+ * One live-vs-head watch tick: a head that moved off `baselineHead` = `superseded`;
+ * a tick missing either reading (or with no baseline) decides nothing and breaks
+ * the streak; the served build differing from the target on `revertTicks`
+ * consecutive decided ticks = `revert`.
+ */
+export declare function watchStep(
+  state: { mismatches: number },
+  tick: { served: string | null; head: string | null },
+  target: string,
+  baselineHead: string | null,
+  revertTicks?: number,
+): { state: { mismatches: number }; verdict: "continue" | "superseded" | "revert"; decided: boolean; matched: boolean; served?: string; head?: string };
+
+/**
+ * The watch verdict at the end of its window: `held` only with affirmative evidence (enough ticks, at least half
+ * MATCHED the target, the last decided tick matched), else `unmeasured`.
+ */
+export declare function watchOutcome(input: { ticks: number; matched: number; lastDecidedMatched: boolean }): "held" | "unmeasured";
+
+/** The revert red: what went live over the head, and the exact redeploy command. */
+export declare function revertMessage(input: { target: string; served: string; renderServiceId?: string }): string;
+
+/** The Agent construction call's prompt alias (`agent-lane/runtime/prompt-identity.ts`). */
+export declare const AGENT_CONSTRUCT_ALIAS: string;
+
+/**
+ * The allowed `_provider_calls` rows that fully identify their call: an `agent.*`
+ * prompt_alias, a non-empty prompt_sha256, a provider and a known model.
+ */
+export declare function agentLedgerIdentity(body: unknown): Array<Record<string, unknown>>;
+
 /** Minimum node count for a drafted graph to count as usable. */
 export declare const MIN_NODES: number;
 
@@ -97,9 +161,15 @@ export declare function assertHealthyJourney(frameBody: unknown, followUpBody: u
 
 export declare function extractDiagnostics(body: unknown): {
   build_sha: string | null;
+  /** `cee_build` of every allowed Agent-aliased `_provider_calls` row, in order; null where a row carries none. */
+  agent_builds: Array<string | null>;
   exit_path: string | null;
   prompt_identity_count: number;
   prompt_identity: string[];
+  /** `_diagnostic_trace.construction` is set: the Agent ran a construction this turn. */
+  constructed: boolean;
+  /** An identified ledger row carries the construction alias. */
+  construct_identified: boolean;
 };
 
 /**
@@ -111,8 +181,27 @@ export declare function extractDiagnostics(body: unknown): {
  * @returns failure messages; an empty array means healthy.
  */
 export declare function assertPromptProvenance(
-  diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count"> | null>,
+  diagnostics: Array<
+    | (Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count">
+      & Partial<Pick<ReturnType<typeof extractDiagnostics>, "constructed" | "construct_identified">>)
+    | null
+  >,
   bodies?: readonly unknown[],
+): string[];
+
+/**
+ * Every Agent model call's stamped build must be the commit under test
+ * (`expectSha`); a call with no valid stamp fails. A turn with no Agent call
+ * falls back to the trace build and is not failed when that is absent. Blank
+ * `expectSha` checks nothing.
+ */
+export declare function assertServedBuild(
+  diagnostics: Array<
+    | (Pick<ReturnType<typeof extractDiagnostics>, "build_sha">
+      & Partial<Pick<ReturnType<typeof extractDiagnostics>, "agent_builds">>)
+    | null
+  >,
+  expectSha: string,
 ): string[];
 
 /**

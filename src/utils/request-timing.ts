@@ -16,6 +16,160 @@
 import type { FastifyRequest } from "fastify";
 import { emit, TelemetryEvents } from "./telemetry.js";
 import { getRequestId } from "./request-id.js";
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash, randomUUID } from 'node:crypto';
+import type { LlmInvocationCaptureIdentity, LlmPhysicalAttemptCapture } from '../adapters/llm/types.js';
+
+interface InvocationCapture {
+  logical_call_id: string;
+  identity: LlmInvocationCaptureIdentity;
+  attempts: LlmPhysicalAttemptCapture[];
+}
+
+interface CapturedSdkUsage {
+  input_tokens?: unknown;
+  prompt_tokens?: unknown;
+  output_tokens?: unknown;
+  completion_tokens?: unknown;
+  cache_read_input_tokens?: unknown;
+  cache_creation_input_tokens?: unknown;
+  prompt_tokens_details?: { cached_tokens?: unknown };
+  completion_tokens_details?: { reasoning_tokens?: unknown };
+}
+
+// Only lives for the existing SDK invocation; no request-id lookup or stored ledger.
+const invocationCapture = new AsyncLocalStorage<InvocationCapture>();
+const textIdentity = (value: unknown): string | null => typeof value === 'string' && value.length > 0 ? value : null;
+const numericUsage = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+const digest = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+function sentIdentity(provider: 'openai' | 'anthropic', body: unknown): LlmPhysicalAttemptCapture['sent_identity'] {
+  const empty = { provider, model: null, reasoning_effort: null, thinking_mode: null, body_sha256: null, prompt_payload_sha256: null, tools_sha256: null };
+  if (typeof body !== 'string') return empty;
+  try {
+    const sent = JSON.parse(body);
+    if (!sent || typeof sent !== 'object' || Array.isArray(sent)) return empty;
+    const prompt = Object.fromEntries(['system', 'messages', 'instructions', 'input'].filter(k => Object.hasOwn(sent, k)).map(k => [k, sent[k]]));
+    return {
+      provider,
+      model: textIdentity(sent.model),
+      reasoning_effort: textIdentity(sent.reasoning_effort ?? sent.reasoning?.effort),
+      thinking_mode: textIdentity(sent.thinking?.type),
+      body_sha256: digest(body),
+      prompt_payload_sha256: Object.keys(prompt).length > 0 ? digest(JSON.stringify(prompt)) : null,
+      tools_sha256: Object.hasOwn(sent, 'tools') ? digest(JSON.stringify(sent.tools)) : null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/** Observe the actual SDK fetch, including native retries, without reading its response body. */
+export async function captureLlmPhysicalAttempt(
+  provider: 'openai' | 'anthropic',
+  init: { body?: unknown } | undefined,
+  fn: () => Promise<Response>,
+  transportGuard?: { policy_index: number | undefined },
+): Promise<Response> {
+  const scope = invocationCapture.getStore();
+  if (!scope) return fn(); // Unscoped/raw callers are not silently assigned an identity.
+  const began = performance.now();
+  let sent = sentIdentity(provider, undefined);
+  try { sent = sentIdentity(provider, init?.body); }
+  catch { /* Request metadata is optional; the original fetch still runs. */ }
+  const attempt: LlmPhysicalAttemptCapture = {
+    logical_call_id: scope.logical_call_id,
+    physical_attempt_id: randomUUID(),
+    attempt_index: scope.attempts.length + 1,
+    provider_policy_index: transportGuard ? transportGuard.policy_index ?? null : scope.identity.provider_policy_index ?? null,
+    policy_index_source: transportGuard ? 'transport_guard' : scope.identity.provider_policy_index !== undefined ? 'logical_guard' : null,
+    provider_request_id: null,
+    outcome: 'pending', http_status: null, error_name: null, fetch_elapsed_ms: 0,
+    latency_boundary: 'response_headers',
+    sent_identity: sent,
+  };
+  scope.attempts.push(attempt);
+  try {
+    const result = await fn();
+    attempt.outcome = 'response';
+    try {
+      attempt.http_status = result.status;
+      attempt.outcome = result.ok ? 'response' : 'http_error';
+      attempt.provider_request_id = textIdentity(result.headers.get(provider === 'openai' ? 'x-request-id' : 'request-id'));
+    } catch { /* Unavailable metadata must not replace the original response. */ }
+    return result;
+  } catch (error) {
+    attempt.outcome = 'transport_error';
+    attempt.error_name = error instanceof Error ? error.name : null;
+    throw error;
+  } finally {
+    attempt.fetch_elapsed_ms = Math.max(0, performance.now() - began);
+  }
+}
+
+/** One terminal event for an existing SDK/retry group; attempts never increment logical timing counters. */
+export async function withLlmInvocationCapture<T>(identity: LlmInvocationCaptureIdentity, fn: () => Promise<T>): Promise<T> {
+  const scope: InvocationCapture = { logical_call_id: randomUUID(), identity, attempts: [] };
+  const began = performance.now();
+  let result: T | undefined;
+  let failure: unknown;
+  let succeeded = false;
+  return invocationCapture.run(scope, async () => {
+    try {
+      result = await fn();
+      succeeded = true;
+      return result;
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      // Observer failures must neither replace an SDK result/error nor cause retries.
+      try {
+        const value = result as {
+          usage?: CapturedSdkUsage;
+          response?: { usage?: CapturedSdkUsage };
+          message?: { usage?: CapturedSdkUsage };
+          kind?: unknown;
+          error?: unknown;
+        } | undefined;
+        const raw = value?.usage ?? value?.response?.usage ?? value?.message?.usage;
+        // Draft streaming may resolve with a recoverable rejection/early abort.
+        // Preserve that result and its existing outer recovery, but name it honestly.
+        const resultKind = textIdentity(value?.kind);
+        const outcome = !succeeded ? 'failure'
+          : resultKind === 'runaway' || resultKind === 'so_reject' ? resultKind : 'success';
+        const terminalError = failure ?? value?.error;
+        const usage = {
+          input_tokens: numericUsage(raw?.input_tokens ?? raw?.prompt_tokens),
+          output_tokens: numericUsage(raw?.output_tokens ?? raw?.completion_tokens),
+          cached_input_tokens: numericUsage(raw?.cache_read_input_tokens ?? raw?.prompt_tokens_details?.cached_tokens),
+          cache_creation_input_tokens: numericUsage(raw?.cache_creation_input_tokens),
+          reasoning_tokens: numericUsage(raw?.completion_tokens_details?.reasoning_tokens),
+        };
+        const elapsed = Math.max(0, performance.now() - began);
+        emit(TelemetryEvents.LlmCall, {
+          request_id: textIdentity(identity.request_id), step: identity.step, model: identity.model, provider: identity.provider,
+          elapsed_ms: elapsed,
+          ...(usage.input_tokens !== null ? { tokens_prompt: usage.input_tokens } : {}),
+          ...(usage.output_tokens !== null ? { tokens_completion: usage.output_tokens } : {}),
+          provider_trace: {
+            logical_call_id: scope.logical_call_id, request_id: textIdentity(identity.request_id),
+            provider_policy_index: identity.provider_policy_index ?? null,
+            outcome,
+            result_kind: resultKind,
+            terminal_boundary: 'sdk_invocation',
+            error_name: terminalError instanceof Error ? terminalError.name : null,
+            error_status: numericUsage((terminalError as { status?: unknown } | undefined)?.status),
+            prompt_version: identity.prompt_meta?.prompt_version ?? identity.prompt_meta?.version ?? null,
+            prompt_source: identity.prompt_meta?.source ?? null,
+            registered_prompt_hash: identity.prompt_meta?.prompt_hash ?? null,
+            elapsed_ms: elapsed, usage_scope: 'returned_sdk_result', usage, quality: null, cost: null, attempts: scope.attempts,
+          },
+        });
+      } catch { /* Incidental telemetry cannot change provider behaviour. */ }
+    }
+  });
+}
 
 /**
  * LLM call timing record

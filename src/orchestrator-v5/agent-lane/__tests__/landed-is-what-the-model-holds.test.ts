@@ -116,7 +116,7 @@ describe('link strength: landed is what the model holds, never whether two revis
     w.set(anotherWriterMovesSomethingElse);
     const r = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true, proposal_id: id }));
-    expect(r.follow_up).toBe('Recorded "Pro plan price" → "MRR" as strong (0.55 on Olumi\'s 0–1 scale), as your own estimate.');
+    expect(r.follow_up).toBe('Recorded "Pro plan price" → "MRR" as strong, as your own estimate.');
     expect(said(r)).toBe('Saved.');
     expect(store.outstanding(SCENARIO, null)).toEqual([]);
   });

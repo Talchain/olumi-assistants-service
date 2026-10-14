@@ -64,7 +64,7 @@ function world(w: World = {}) {
   };
   return { caps: createAgentCapabilities(d, new ProposalStore()), reads };
 }
-const run = async (w: World = {}): Promise<Json> => await world(w).caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+const run = async (w: World = {}): Promise<Json> => await world(w).caps.runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
 type Certainty = { option: string; option_id: string; probability_of_goal?: 0 | 1; earned: boolean; say?: string };
 const p59 = (r: Json): Certainty => (r.goal_certainty.options as Certainty[]).find((x) => x.option_id === 'raise_price_to_59')!;
 
@@ -92,7 +92,7 @@ describe('the EXECUTED Run\'s own stored decision (#2280), attributed by its run
     const projectedRows = stripped.option_comparison as Json[];
     expect(projectedRows[0]).not.toHaveProperty('probability_of_goal');
     const w = world({ rows: projectedRows });
-    const r = await w.caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const r = await w.caps.runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     expect(p59(r)).toMatchObject({ earned: false, say: STORED.find((d) => d.option_id === 'raise_price_to_59')!.say });
     expect(p59(r)).not.toHaveProperty('probability_of_goal');
     expect(w.reads).toHaveLength(1);
@@ -100,19 +100,19 @@ describe('the EXECUTED Run\'s own stored decision (#2280), attributed by its run
 
   it('CONTROL: no option at exactly 0 or 1 → nothing carried, and no graph read spent on it', async () => {
     const w = world({ rows: FX.paul.option_comparison.map((o) => ({ ...o, probability_of_goal: 0.6 })) });
-    const r = await w.caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const r = await w.caps.runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     expect(r).not.toHaveProperty('goal_certainty');
     expect(w.reads).toHaveLength(0);
   });
 
   it('ONE graph read: a named leader reads once for the rule; a withheld leader\'s read is the one the rule uses', async () => {
     const named = world();
-    const r = await named.caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const r = await named.caps.runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     expect(r.claim_permissions.leader_may_be_named, 'precondition: no withheld-leader read').toBe(true);
     expect(p59(r).earned).toBe(false);
     expect(named.reads).toHaveLength(1);
     const withheld = world({ leaderPermitted: false });
-    const w = await withheld.caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    const w = await withheld.caps.runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Json;
     expect(w.claim_permissions.leader_may_be_named).not.toBe(true);
     expect(p59(w).earned).toBe(false);
     expect(withheld.reads).toHaveLength(1);

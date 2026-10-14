@@ -14,6 +14,44 @@ import type { RecordConstraintCandidate } from "../../cee/draft/records/projecto
 import type { DraftLineageReceipt } from "../../cee/draft/records/lineage.js";
 import type { BuiltDraftAttachment } from "./draft-attachment.js";
 
+/** Observational SDK invocation metadata; never a permission or spend ledger. */
+export interface LlmInvocationCaptureIdentity {
+  provider: 'openai' | 'anthropic';
+  model: string;
+  step: string;
+  request_id?: string | null;
+  provider_policy_index?: number;
+  prompt_meta?: {
+    prompt_version?: string | null;
+    version?: number | string | null;
+    prompt_hash?: string | null;
+    source?: string | null;
+  };
+}
+
+export interface LlmPhysicalAttemptCapture {
+  logical_call_id: string;
+  physical_attempt_id: string;
+  attempt_index: number;
+  provider_policy_index: number | null;
+  policy_index_source: 'transport_guard' | 'logical_guard' | null;
+  provider_request_id: string | null;
+  outcome: 'pending' | 'response' | 'http_error' | 'transport_error';
+  http_status: number | null;
+  error_name: string | null;
+  fetch_elapsed_ms: number;
+  latency_boundary: 'response_headers';
+  sent_identity: {
+    provider: 'openai' | 'anthropic';
+    model: string | null;
+    reasoning_effort: string | null;
+    thinking_mode: string | null;
+    body_sha256: string | null;
+    prompt_payload_sha256: string | null;
+    tools_sha256: string | null;
+  };
+}
+
 /**
  * Usage metrics returned by LLM calls for cost tracking and telemetry.
  */

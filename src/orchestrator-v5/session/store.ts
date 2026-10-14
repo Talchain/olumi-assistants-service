@@ -15,6 +15,7 @@
 import type {
   ConversationTurnClass,
   HandlerFact,
+  RunDeliveryHandlerFact,
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
@@ -26,6 +27,9 @@ import type {
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
 import type { SessionTurnWithContent } from './conversation-content.js';
+import type { AnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
+import type { GuidanceState } from '../agent-lane/guidance/index.js';
+import type { SuggestedAction } from '../compose/types.js';
 // Type-only, and deliberately so: `turn-fence.ts` imports
 // `StateCommitFailedError` from THIS file, and a value import here would close
 // that into a runtime cycle. `import type` is erased entirely.
@@ -51,7 +55,21 @@ export type { HandlerFactWithTurn, IdentifiedHandlerFact };
  */
 export interface PendingActionReadOptions {
   readonly validation?: 'tolerant' | 'strict';
+  /** Identity from this same uncached read; null means the scenario has no row. */
+  readonly onLatestRowId?: (id: string | null) => void;
 }
+
+export interface ConditionalAppendOptions {
+  /** Only final, non-graph Agent answers. null asserts that no prior row exists. */
+  readonly expectedLatestRowId: string | null;
+}
+
+/** The conditional RPC inserted nothing; the floor must reread and reconcile. */
+export interface SessionLatestMovedOutcome {
+  readonly status: 'latest_moved';
+}
+
+export type ConditionalSessionAppendOutcome = SessionAppendOutcome | SessionLatestMovedOutcome;
 
 export type VersionAuthoredBy = 'owner' | 'assistant' | string;
 
@@ -94,6 +112,8 @@ export interface AtomicCommittedModelVersionReceipt {
 export interface SessionAppendOutcome {
   readonly id: string;
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
+  /** Present on revision-checked v6/v4r appends; includes accepted replays. */
+  readonly revision?: number;
   /**
    * TRUE when this append REPLAYED an already-committed turn — i.e. the RPC
    * returned a pre-existing row and wrote nothing.
@@ -138,6 +158,17 @@ export interface SessionAppendOutcome {
 export interface ScenarioRunAnalysisFactPage {
   readonly facts: readonly IdentifiedHandlerFact[];
   readonly total_count: number;
+  readonly legacy_edit_facts?: import('../types/handler-fact.js').LegacyAnalysisEditFacts;
+  /** Anchor-only isolation evidence; total_count still counts all database rows. */
+  readonly isolated_malformed_rows?: {
+    readonly read_count: number;
+    readonly ids: readonly (string | null)[];
+  };
+}
+
+export interface ScenarioRunAnalysisFactReadOptions {
+  /** Never use a filtered page as reasoning authority. Default reads remain strict. */
+  readonly malformedRows?: 'isolate-for-anchor';
 }
 
 export interface SessionTurnWrite {
@@ -150,6 +181,10 @@ export interface SessionTurnWrite {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /** Frozen Run snapshot revisions, carried outside strict fact payloads (B2). */
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
+  /** Scenario revision from the turn-start server read; v6 requires it. */
+  readonly expectedRevision?: number;
   /**
    * When present, the graph JSONB is persisted to scenarios.graph atomically
    * with the turn insert inside append_turn_atomic. Both writes commit or roll
@@ -208,6 +243,16 @@ export interface SessionTurnWrite {
    * signal codes + SHA-prefix hashes are persisted, never raw user content.
    */
   readonly coaching_state?: CoachingState | null;
+  /** Content-free post-egress guidance events, atomically committed with this Agent answer. */
+  readonly agent_guidance?: AnswerGuidance;
+  /** The plain-text controls this final answer actually offered, bound to its selected Run. */
+  readonly suggested_actions?: readonly SuggestedAction[];
+  readonly suggested_actions_run_key?: string | null;
+  /**
+   * The narration this final answer was sent with (`{status, run_key}`), stored WITH its row whatever offers it carried
+   * (`append_agent_answer_narrated`, migration 20261013230000), so a replay after a restart names the same Run.
+   */
+  readonly run_narration?: AnswerRunNarration;
   /**
    * V5 Conversation Context Reliability: the user's verbatim turn message
    * (boundary `payload.message`), persisted to
@@ -260,8 +305,26 @@ export interface SessionTurnWrite {
   readonly modelVersion?: AtomicCommittedModelVersionWrite;
 }
 
+/** What {@link SessionStore.readCommittedTurnLedger} returns. Turn ids are distinct, oldest first. */
+export interface CommittedTurnLedger {
+  /** Turns whose row committed a model write (`model_version_mutation_id` set). */
+  readonly write_turn_ids: readonly string[];
+  /** Turns whose row carries a non-empty user message, whatever its origin. */
+  readonly user_message_turn_ids: readonly string[];
+  /** The first of those messages, trimmed (the brief, on a scenario built from one); `null` when there is none. */
+  readonly first_user_message: string | null;
+  /**
+   * The messages after the first, trimmed, oldest first, by turn (whatever their origin: a chip's words are stored as a
+   * user message too). A revised draft reads them as CONTEXT only, never as verified words of the user (PL #94 07:32Z Q1).
+   */
+  readonly later_user_messages?: readonly { readonly turn_id: string; readonly text: string }[];
+  /** `false` when the scenario holds more rows than the read covered: the ledger is then not a census. */
+  readonly complete: boolean;
+}
+
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
 export interface CommittedTurnRecord {
+  readonly agent_guidance?: AnswerGuidance;
   readonly id: string;
   readonly request_hash: string;
   readonly assistant_message: string | null;
@@ -274,10 +337,48 @@ export interface CommittedTurnRecord {
    * Tolerant: an unparseable entry is dropped; absent/non-array reads as `[]`.
    */
   readonly pending_actions?: readonly PendingAction[];
+  /**
+   * The narration this exact answer was sent with, as persisted WITH it (`SessionTurnWrite.run_narration`). `null` when
+   * the row recorded none (a legacy row, or a store without the migration): the original narration is then unknown.
+   */
+  readonly run_narration?: AnswerRunNarration | null;
+}
+
+/** A final answer's narration: which Run it was about (16-hex key) and where its explanation stood. */
+export interface AnswerRunNarration {
+  readonly status: 'pending' | 'ready' | 'unavailable' | 'stale';
+  readonly run_key: string;
+}
+
+const ANSWER_NARRATION_STATUSES: ReadonlySet<unknown> = new Set(['pending', 'ready', 'unavailable', 'stale']);
+
+/** Exactly `{status, run_key}` with a known status and a 16-hex key (the migration's own check), else `null`. */
+export function answerRunNarrationOf(value: unknown): AnswerRunNarration | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { status, run_key: runKey, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length > 0 || !ANSWER_NARRATION_STATUSES.has(status)
+    || typeof runKey !== 'string' || !/^[0-9a-f]{16}$/.test(runKey)) return null;
+  return { status: status as AnswerRunNarration['status'], run_key: runKey };
+}
+
+export interface AnswerOffersRead {
+  readonly turn_id: string;
+  readonly suggested_actions: readonly SuggestedAction[];
+  readonly run_key: string | null;
 }
 
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
+  /**
+   * S-D.1b: the Agent answer row, appended ONLY if the latest row is still `options.expectedLatestRowId`. A SEPARATE,
+   * optional capability (never an overload of `append`), so no other store, test double or caller changes; a store
+   * without it is appended unconditionally by the floor, exactly as before.
+   */
+  appendIfLatest?(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
+  /** Uncached latest-answer offers only; absent/malformed/unavailable reads are null. */
+  readLatestAnswerOffers?(scenarioId: string): Promise<AnswerOffersRead | null>;
+  /** Uncached, scenario-scoped bounded answer history. Read failure throws; absent capability is unknown. */
+  readGuidanceHistory?(scenarioId: string): Promise<GuidanceState>;
   // V5 Conversation Context Reliability: returns the content-bearing superset
   // (user_message / assistant_message re-attached after the vendored strict
   // parse). SessionTurnWithContent ⊇ SessionTurn, so existing consumers that
@@ -561,16 +662,44 @@ export interface SessionStore {
     limit: number,
   ): Promise<readonly IdentifiedHandlerFact[]>;
   /**
+   * The scenario's newest durable `finding_dissent` facts (the user's own stated disagreement with a finding),
+   * newest-first, NOT constrained to {@link readRecent}'s conversation window and NOT a conversation-history read:
+   * the served Agent turn reads this and nothing else for what the user has objected to, so a dissent recorded more
+   * than the window's turns ago still reaches the model (the same cliff `readScenarioRunAnalysisFactsFor` closes
+   * for analysis). `noop = false` rows only; a failed or malformed read throws so the caller reports "unknown",
+   * never "no objections". Optional so existing test doubles are not forced to implement it; production
+   * (`SupabaseSessionStore`) always does and callers read omission as "not available", never as "none stated".
+   */
+  readStatedObjectionFactsFor?(
+    scenarioId: string,
+    limit: number,
+    /** Stop paging once this many DIFFERENT findings are covered (a rewritten reason must not starve the others). */
+    distinctFindings?: number,
+  ): Promise<readonly HandlerFact[]>;
+  /**
+   * ⭐ B RESTATED GOAL — THE SCENARIO'S COMMITTED TURN LEDGER, oldest first: which turns committed a model write (the
+   * atomic writer's `model_version_mutation_id`, set for guests too, who have no model versions), and which carry a
+   * user message (typed, chip or unknown origin alike). Read ONLY when a revised draft is offered or applied
+   * (`agent-lane/runtime/draft-replacement.ts`), never per turn, and NOT a conversation history: no text but the first
+   * message's reaches the caller. `complete: false` when the scenario holds more rows than the read covers; a failed or
+   * malformed read throws, so the caller refuses ("unknown"), never treats it as "nothing written".
+   */
+  readCommittedTurnLedger?(scenarioId: string): Promise<CommittedTurnLedger>;
+  /**
    * Load the bounded, scenario-wide `run_analysis` fact set used by the
    * existing freshness/analysis selectors.
    *
    * Unlike {@link readFactsFor}, this read is not constrained to the recent
-   * turn window. Production implementations must make one uncached query with
+   * turn window. Production also reads applied, rerun-recommended edit_graph facts
+   * after the selected unstamped Run, with an exact count; failed/incomplete
+   * edit reads carry readOk=false. Run queries are uncached with
    * an exact pre-limit count, stable `created_at DESC, id DESC` ordering and
    * the caller-supplied lookahead limit. They must validate row identity,
    * parent identity, timestamps, handler/action type, noop and strict payload
    * shape before returning. A missing/inexact count or malformed row throws;
-   * it never becomes an authoritative empty set.
+   * it never becomes an authoritative empty set. The explicit anchor-only
+   * isolation option skips malformed rows with raw-count/id evidence; such a
+   * filtered page must never be used as reconciled reasoning authority.
    *
    * Optional only for legacy test doubles. Production always implements it;
    * callers interpret omission as unavailable, never no analysis.
@@ -578,6 +707,7 @@ export interface SessionStore {
   readScenarioRunAnalysisFactsFor?(
     scenarioId: string,
     limit: number,
+    options?: ScenarioRunAnalysisFactReadOptions,
   ): Promise<ScenarioRunAnalysisFactPage>;
   /**
    * Legacy standalone newest-analysis read.
@@ -589,20 +719,18 @@ export interface SessionStore {
    * two independently timed views of one scenario authority.
    */
   readNewestAnalysisFactFor?(scenarioId: string): Promise<HandlerFact | null>;
+  /**
+   * 0.79 (SD-1 Slice R on the agent lane; DL ruling #87, option A): the NEWEST non-noop `run_delivery` fact recorded for
+   * THIS Run (`result.run_id`), or `null` when none is recorded. What the Run's turn delivered, for the scenario read to
+   * serve under its own gates. Throws `SessionReadError` on a failed or unparseable read; the caller omits.
+   * Optional: callers read omission as "not recorded".
+   */
+  readNewestRunDeliveryFor?(scenarioId: string, runId: string): Promise<RunDeliveryHandlerFact | null>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
-   * Persist a draft graph to the scenarios.graph column via the
-   * store_draft_graph RPC. Not on the critical V5 path — graph persistence
-   * now happens atomically inside append_turn_atomic via SessionTurnWrite.graph.
-   * Retained for out-of-band use (admin tooling, migrations). Throws
-   * StateCommitFailedError on RPC failure.
-   */
-  storeDraftGraph(scenarioId: string, graph: unknown): Promise<void>;
-  /**
    * Load the persisted graph from scenarios.graph for a given scenario.
    * Returns null if no graph is stored. Throws SessionReadError on DB/RPC failure.
-   * Uses the same service-role client access pattern as storeDraftGraph (bypasses RLS).
    * Used by follow-up turns when the UI does not send graph_state in the
    * request body.
    *
@@ -627,9 +755,39 @@ export interface SessionStore {
    * chip-click-dispatch) can read the brief from canonical state instead
    * of an out-of-band option field.
    */
+  /** One existing row, without an upsert; null distinguishes absence from a guest owner. */
+  readExistingScenario?(scenarioId: string): Promise<{
+    readonly userId: string | null;
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+    readonly analysisInvalidatedAt: string | null;
+    /** Server scenario creation timestamp, read beside graph and brief. */
+    readonly createdAt?: string | null;
+    /** Same uncached SELECT as graph; not a revision-at-Run claim. */
+    readonly revision?: number;
+  } | null>;
+  /** Scoped durable rows for the selected Run's additive recording disclosure. */
+  readRunRecordingRows?(scenarioId: string, decisionRecordId: string | null): Promise<import('../run-recording.js').RunRecordingRows>;
+  /**
+   * ⛔ A READ GRANT, AND ONLY FOR THE GRAPH-READ ROUTE (`assist.v1.scenario-graph`). Whether `userId` (a VERIFIED token
+   * subject) is a viewer member of this owned scenario: DGAI `share_scenario` / `scenario_members`, resolved by the
+   * service_role-only SQL `is_scenario_member` (ACCOUNTS "Invite a colleague", #85 5947474393). No write route, turn
+   * path or run path may consult it: a member is a non-owner everywhere else.
+   */
+  isScenarioMember?(scenarioId: string, userId: string): Promise<boolean>;
+  /** One uncached query binds the newest Run fact to the current graph and restore marker. */
+  readRunCurrentness?(scenarioId: string): Promise<{
+    readonly userId: string | null;
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+    readonly analysisInvalidatedAt: string | null;
+    readonly fact: HandlerFact;
+  } | null>;
   loadGraphAndBriefText(scenarioId: string): Promise<{
     readonly graph: unknown | null;
     readonly briefText: string | null;
+    /** Omitted until the v6 code cutover; never inferred from the graph. */
+    readonly revision?: number;
   }>;
   /** DB-stamped restore chronology marker; null means no restore invalidation. */
   readAnalysisInvalidatedAt?(scenarioId: string): Promise<string | null>;

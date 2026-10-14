@@ -30,23 +30,38 @@
  * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT, type CandidateModel } from './admit-model.js';
+import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { labelHeadUnit } from './label-head-unit.js';
+import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
-import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
+import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { readCount } from './same-unit.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
+/** The qualifiers immediately beside a figure prevent recording it as an exact answer. */
+export function hasApproximateFigureQualifier(before: string, after: string): boolean {
+  return /\b(?:about|around|roughly|approximately|circa)\s*$/i.test(before)
+    || /^(?:[-\s]*ish\b|\s*or so\b)/i.test(after);
+}
+
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
-export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+export function figureTheUserWroteSpan(value: number, unit: unknown, userText: string | null | undefined): { start: number; end: number } | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family, userText ?? undefined));
+  const a = findStatedAmounts(userText).find(a => amountIs(a, value, unit, family, userText ?? undefined));
+  return a === undefined ? null : { start: a.index, end: a.index + a.matchedText.length };
+}
+export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
+  return figureTheUserWroteSpan(value, unit, userText) !== null;
 }
 
 /**
@@ -57,6 +72,94 @@ export function timesTheUserWrote(value: number, unit: unknown, userText: string
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   const family = unitPhraseFamily(unit);
   return findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText ?? undefined)).length;
+}
+
+/**
+ * ⛔ RT-10 (Codex buddy P1 on #2585, rounds 1-2; Science 5 Oct (1): the comparator must be the USER'S, "never a drafter
+ * default"). Whether `userText` writes `value`, in `unit`, as a CEILING ON A LEVEL of the goal: a ceiling phrase right
+ * before that very figure ("below 2%", "at most £36k", "under the 2% target", "below or equal to 2%") or right after it
+ * ("2% or less", "£36k max"). The drafter must type a comparator (the schema's enum is required), so "Monthly churn
+ * target 2%" carries one the user never wrote.
+ *
+ * Read in the figure's own clause (ends at . ! ? ; , : a dash or a new line, as `figureTheUserWroteFor`), and NOT the
+ * user's ceiling on a level when, before the figure in that clause:
+ *   - "by" is written: a change ("reduce costs by at most 10%", "by a maximum of 2%", "by 2% or less"; R1 S1);
+ *   - a denial is written (not / never / cannot / -n't), or a verb that keeps the quantity above it (avoid / prevent /
+ *     stop / without): often a FLOOR ("must not go below 2%", "cannot fall below £36k");
+ *   - the phrase is "no less / lower / fewer than": a FLOOR.
+ * With `scope`, the clause's left side must not name ANOTHER quantity of the model instead of the goal
+ * (`leftNamesAnotherQuantity`): "Keep the GCP unit-cost saving below 4%" never lends that saving's ceiling to downtime.
+ * And a figure written more than once is a ceiling only when EVERY writing reads as one ("Monthly spend target £36k; tax
+ * below £36k": tax is not in the model, so scope cannot see it, but the target's own writing carries no ceiling).
+ * Every miss under-claims: no comparator is held and the goal reads as base.
+ */
+const CEILING_BEFORE_FIGURE = /(?<!\bno\s+)\b(?:(?:below|under|less\s+than)\s+or\s+equal\s+to|below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:the|about|around|roughly|approximately|just)\s+)?$/i;
+const CEILING_AFTER_FIGURE = /^[^\S\n]*(?:or\s+(?:less|lower|below|under|fewer)|at\s+most|max(?:imum)?)\b/i;
+/**
+ * Before the figure in its clause: a change ("by") or a denial — not / never / cannot / -n't, or a verb that keeps the
+ * quantity ABOVE the figure (avoid, prevent, stop, without: "avoid falling below 2%" is a FLOOR). Never the user's
+ * ceiling on a level.
+ */
+const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|\bcannot\b|n['\u2019]t\b|\bavoid(?:s|ing)?\b|\bprevent(?:s|ing)?\b|\bstop(?:s|ping)?\b|\bwithout\b/i;
+
+/**
+ * RT-10 round 3 (Codex buddy on dee7bbc6): the ceiling's own clause, on the figure's LEFT, names ANOTHER quantity of the
+ * model and not the goal ("keep the GCP unit-cost saving below 4%"). The left side only: a right-hand label is the
+ * clause's next subject, not the ceiling's ("cut it to at most £36k a month without … migration downtime risk"), and an
+ * anaphor ("it") names nothing. Words shared by the goal's and another label name neither (`figureTheUserWroteFor`'s rule).
+ */
+/**
+ * A word of the goal's own label on the ceiling's left, or a PRONOUN pointing back to it ("keep it to at most …").
+ * Only "it" / "them": "this" / "that" / "these" / "those" are as often determiners ("keep THIS year's tax below £36k",
+ * Codex buddy round 6), and a miss here only under-claims.
+ */
+const ANAPHOR = /\b(?:it|them)\b/i;
+function tiedToTheGoal(clauseBefore: string, scope: EntityScope | undefined): boolean {
+  if (ANAPHOR.test(clauseBefore)) return true;
+  if (scope === undefined) return false;
+  const said = wordsOf(clauseBefore);
+  return scope.target.flatMap(wordsOf).some((t) => said.some((w) => sameWord(w, t)));
+}
+
+function leftNamesAnotherQuantity(clauseBefore: string, scope: EntityScope): boolean {
+  const target = [...new Set(scope.target.flatMap(wordsOf))];
+  const others = [...new Set(scope.others.flatMap(wordsOf))];
+  const decisiveTarget = target.filter((t) => !others.some((o) => sameWord(t, o)));
+  const decisiveOther = others.filter((o) => !target.some((t) => sameWord(t, o)));
+  const said = wordsOf(clauseBefore);
+  const names = (pool: readonly string[]): boolean => said.some((w) => pool.some((p) => sameWord(w, p)));
+  return names(decisiveOther) && !names(decisiveTarget);
+}
+
+export function ceilingTheUserWroteFor(
+  value: number,
+  unit: unknown,
+  userText: string | null | undefined,
+  scope?: EntityScope,
+  /** The goal's current level is this same figure (the drafter's `baseline_value`): ONE plain writing of it is today's. */
+  todayIsTheSameFigure = false,
+): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
+  const family = unitPhraseFamily(unit);
+  const writings = findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText));
+  // ⛔ Round 4 (Codex buddy on a351e007): EVERY writing of the figure must be accounted for — as the ceiling, or (once)
+  // as today's level when the goal's current level is that same figure ("Monthly spend is £36k; keep it to at most
+  // £36k"). "Monthly spend target £36k; tax below £36k" writes the target once with no ceiling and once as an
+  // unmodelled quantity's: which writing is the goal's is unknown, so nothing is held.
+  const ceilings = writings.filter((a) => {
+    const before = userText.slice(0, a.index);
+    const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
+    const clauseBefore = before.slice(clauseStart);
+    if (CHANGE_OR_DENIAL_BEFORE.test(clauseBefore)) return false;
+    const end = a.index + a.matchedText.length;
+    const ceiling = CEILING_BEFORE_FIGURE.test(clauseBefore) || CEILING_AFTER_FIGURE.test(userText.slice(end, end + 24));
+    if (!ceiling || (scope !== undefined && leftNamesAnotherQuantity(clauseBefore, scope))) return false;
+    // ⛔ Round 5 (Codex buddy on 101ab77a): with the figure written MORE than once, a ceiling writing counts only when its
+    // clause ties it to the goal — a word of the goal's label, or an anaphor ("keep IT to at most £36k"). "Monthly spend
+    // is at its £36k target; tax below £36k": the tax writing names neither, so it is not the goal's ceiling.
+    return writings.length === 1 || tiedToTheGoal(clauseBefore, scope);
+  });
+  return ceilings.length > 0 && writings.length - ceilings.length <= (todayIsTheSameFigure ? 1 : 0);
 }
 
 /**
@@ -120,7 +223,7 @@ function writtenWithALetter(a: { readonly magnitude: number; readonly matchedTex
 }
 
 /** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
-function moneyUnitScale(unit: unknown): number {
+export function moneyUnitScale(unit: unknown): number {
   if (typeof unit !== 'string') return 1;
   const reading = readCurrencyUnitWithQualifiers(unit);
   return reading.kind === 'currency' && Number.isFinite(reading.multiplier) && reading.multiplier > 0 ? reading.multiplier : 1;
@@ -218,47 +321,6 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
   });
 }
 
-/**
- * ⛔ A LEVEL THE BRIEF STATES FOR A FACTOR IS THE USER'S, WHATEVER THE DRAFTER TAGGED IT (R3 #72 5896630173 (2); DL
- * 5896669522). Served `03b720e0` on `a20cfd6`: "We have 1,500 paying subscribers" was drafted as an ESTIMATE of "Pro plan
- * paying subscribers" (`baseline_known: false`, 1,500), so it was saved as Olumi's (`cee_inference`). The MRR goal's
- * product then had no two user-stated parts, so no card was offered and nothing was withheld, and the Run showed 6 goal
- * chances on a product-shaped goal.
- *
- * The mirror of `withdrawUnstatedBaselineStamps`, applied to the CANDIDATE before admission so every later reader (the
- * product mint, the card, the disclosure) sees one author. A factor's level is credited to the user (`baseline_known:
- * true`, `explicit`) only when the brief writes that figure FOR THAT FACTOR (`figureTheUserWroteFor`, the per-entity door
- * #2284/#2275 and the Olumi option mark trust). A figure the brief gives as a limit, the goal's target or a proposed
- * (non-status-quo) option's level is never today's level of anything, so it is never credited; the status quo's level
- * is today's. Anything unclear stays Olumi's.
- */
-export function creditStatedFactorLevels(candidate: CandidateModel, brief: string): CandidateModel {
-  const labels = [
-    candidate.goal?.metric, ...(candidate.factors ?? []).map((f) => f.label),
-    ...(candidate.outcomes ?? []).map((o) => o.label), ...(candidate.risks ?? []).map((r) => r.label),
-  ].filter((l): l is string => typeof l === 'string' && l.trim() !== '');
-  const notToday = [
-    ...(candidate.constraints ?? []).map((c) => c.value),
-    candidate.goal?.value,
-    // ⛔ PR Review CR on #2311 @ ff5e7480: a STATUS QUO sets today's level by definition ("keep it at £49" beside "from
-    // £49"), so only another option's level is a proposed one, never today's. Recognised as the Olumi mark does.
-    ...(candidate.options ?? [])
-      .filter((o) => o.is_status_quo !== true && !labelMatchesBaseline(o.label ?? ''))
-      .flatMap((o) => (o.interventions ?? []).map((i) => i.value)),
-  ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
-  let credited = false;
-  const factors = (candidate.factors ?? []).map((f) => {
-    if (f.baseline_known === true && f.provenance === 'explicit') return f;
-    const v = f.baseline_value;
-    if (typeof v !== 'number' || !Number.isFinite(v) || notToday.some((w) => same(w, v))) return f;
-    const others = labels.filter((l) => canonicalLabel(l) !== canonicalLabel(f.label));
-    if (!figureTheUserWroteFor(v, f.unit, brief, { target: [f.label], others })) return f;
-    credited = true;
-    return { ...f, baseline_known: true, provenance: 'explicit' };
-  });
-  return credited ? { ...candidate, factors } : candidate;
-}
-
 /** What `holdStatedGoalAttributes` held on the goal node; each `false` is unattested and left absent. */
 export interface HeldGoalAttributes {
   readonly target: boolean;
@@ -277,7 +339,8 @@ export interface HeldGoalAttributes {
  *  · direction → `goal_direction`: the candidate's comparator, held ONLY beside a target held above — it is the
  *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
  *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
- *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k").
+ *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k"). EXCEPT a CEILING on a level
+ *    target (RT-10): held only where the brief writes that figure as a ceiling (`ceilingTheUserWroteFor`).
  *  · horizon → `goal_horizon_months`: the drafter's month count, held only when MG's `attestHorizon` finds the brief
  *    writing that deadline ("within 12 months", "over the next year"; never "12 subscribers"). Its verdict is returned
  *    as `horizon` whatever it is, so an unresolved deadline's own words ("by Q3") reach the caller, not the node.
@@ -285,7 +348,7 @@ export interface HeldGoalAttributes {
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
-  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown } | null | undefined,
+  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
   brief: string,
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
@@ -294,6 +357,9 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const attestation = attestHorizon(brief, goal);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
+  if ((node as { threshold_source?: unknown }).threshold_source === 'definitional') {
+    return { nodes: [...nodes], held: { target: false, direction: true, horizon: false }, horizon: attestation };
+  }
   const raw = node.goal_threshold_raw;
   // R1 S4-core: a CHANGE target is stored as the contract's figure (a fraction r for `change_rel`, a signed c for
   // `change_abs`) and the brief writes it as the user said it: "cut it by 15%" is 15 in "%", "by 2 points" is 2 in the
@@ -313,7 +379,18 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
     && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
-  const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  const typed = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  // ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1)): a held CEILING on a LEVEL target is the run's sense in any
+  // unit (`goal-direction.ts`), so it is held only where the brief WRITES that figure as a ceiling
+  // (`ceilingTheUserWroteFor`): the drafter must type some comparator, and one it chose is not the user's. A change
+  // target keeps its verb's sign as before; a floor is held exactly as before.
+  const ceilingOnALevel = !isChange && (typed === '<' || typed === '<=');
+  const figure = Math.round((written.figure as number) * 1e9) / 1e9;
+  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(figure, written.unit, brief,
+    quantityScope(nodes, (node as { readonly label?: unknown }).label),
+    typeof goal.baseline_value === 'number' && same(goal.baseline_value, figure))
+    ? undefined
+    : typed;
   const direction = operator !== undefined;
   const months = attestation.status === 'attested' ? attestation.months : null;
   const horizon = months !== null;
@@ -353,10 +430,11 @@ export function goalLevelTheUserWrote(
     readonly risks?: readonly { readonly label: string }[];
   },
   brief: string | null | undefined,
-): (value: number, unit: unknown) => boolean {
+): ((value: number, unit: unknown) => boolean) & { span: (value: number, unit: unknown) => { start: number; end: number } | null } {
   const others = [...(model.factors ?? []), ...(model.outcomes ?? []), ...(model.risks ?? [])]
     .map((q) => q.label).filter((l) => l !== model.goal.metric);
-  return (value, unit) => figureTheUserWroteFor(value, unit, brief, { target: [model.goal.metric], others, strict: true });
+  const span = (value: number, unit: unknown) => figureTheUserWroteForSpan(value, unit, brief, { target: [model.goal.metric], others, strict: true });
+  return Object.assign((value: number, unit: unknown) => span(value, unit) !== null, { span });
 }
 
 /**
@@ -365,6 +443,8 @@ export function goalLevelTheUserWrote(
  * factors' nouns ("Hire Two Developers" vs "Developers hired"), so they would make the target's own word ambiguous.
  */
 export interface EntityScope {
+  /** The asked identity figure must be exact, not an approximation such as "300-ish". Other readers keep their rule. */
+  readonly exactFigure?: true;
   readonly target: readonly string[];
   readonly others: readonly string[];
   /**
@@ -398,6 +478,10 @@ export interface EntityScope {
    *    "the user's, for any target". The user is asked.
    */
   readonly strict?: true;
+  /** A short answer may use a live question elsewhere; this door requires the figure's entity in this clause. */
+  readonly requireNamed?: true;
+  /** Typed, located amounts supplied only by the current-level quote validator. Other doors retain their scanner. */
+  readonly writtenAmounts?: readonly (StatedAmount | ReturnType<typeof countsInWords>[number])[];
   /**
    * ⭐ A4 (CODEX CEE BUDDY 5919834707, AIQ 5919953251): read ONLY the written amount that starts at this index — one span,
    * never "the same figure anywhere". Opt-in, passed only by `writtenRangeFor`; every other door reads as before.
@@ -415,6 +499,11 @@ const stemOf = (w: string): string => {
   return x.endsWith('e') && x.length >= 4 ? x.slice(0, -1) : x;
 };
 /** Two words name the same thing: equal stems, or one stem (four letters or more) begins the other ("month"/"monthly"). */
+/** A word naming the SOURCE end and not the target (a distinguishing source word), for binding a stated transition. */
+/** Movement words in a label ("Footfall loss from price RISE") never name it: "revenue rises from 20%" is revenue's (Codex r2). */
+const MOVEMENT_WORD = /^(?:ris(?:e|es|ing)|rose|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|chang(?:e|es|ed|ing)|jump(?:s|ed|ing)?|cut(?:s|ting)?|growth|gain(?:s|ed|ing)?)$/i;
+export const namesSourceOf = (ends: { readonly source: string; readonly target: string }) => (word: string): boolean =>
+  !MOVEMENT_WORD.test(word) && wordsOf(ends.source).some(s => sameWord(s, word.toLowerCase())) && !wordsOf(ends.target).some(t => sameWord(t, word.toLowerCase()));
 export const sameWord = (a: string, b: string): boolean => {
   const x = stemOf(a);
   const y = stemOf(b);
@@ -499,8 +588,44 @@ export function writtenRangeFor(
 /** Words that widen a label to the same whole rather than narrowing it (R3 #75 5924889786). */
 const GENERALISERS = ['total', 'overall', 'combined', 'all'];
 
-export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
-  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
+/** The existing size-written door's word matcher, shared with the C2 other-label refusal. */
+function quantityMentionOf(w: string, unitWords: readonly string[], decisiveTarget: readonly string[], decisiveOther: readonly string[]): 'target' | 'other' | null {
+  if (w.length < 3) return null;
+  if (unitWords.some((u) => sameWord(u, w))) return null;
+  const t = decisiveTarget.some((x) => sameWord(x, w));
+  const o = decisiveOther.some((x) => sameWord(x, w));
+  return t && !o ? 'target' : o && !t ? 'other' : null;
+}
+
+/** Fi R2: refuse a sentence naming another quantity; no target-label requirement. */
+/** Fi only: every content word of an OTHER label, or either parenthetical name. */
+export function sentenceNamesOtherQuantity(sentence: string, _unit: unknown, scope: EntityScope): boolean {
+  const said = wordsOf(sentence);
+  return scope.others.some(label => {
+    const parenthetical = /^(.+?)\s*\(([^()]+)\)\s*$/u.exec(label);
+    const alternatives = parenthetical === null ? [label] : [parenthetical[1]!, parenthetical[2]!];
+    return alternatives.some(name => {
+      const content = wordsOf(name).filter(w => !NOT_A_NAME.has(w));
+      return content.length > 0 && content.every(w => said.some(s => sameWord(s, w)));
+    });
+  });
+}
+
+/** Locate a complete declared unit frame through the shared reader, never through entity-label words. */
+function boundUnitEnd(text: string, amount: { index: number; matchedText: string; kind: string }, unit: unknown): number | null {
+  const declared = readUnitParts(unit);
+  if (declared === null || JSON.stringify(statedTailParts(text, amount)) !== JSON.stringify(declared)) return null;
+  const start = amount.index + amount.matchedText.length;
+  if (JSON.stringify(statedTailParts(text.slice(0, start), amount)) === JSON.stringify(declared)) return start;
+  for (const word of text.slice(start).matchAll(/[\p{L}\p{N}]+/gu)) {
+    const end = start + word.index! + word[0].length;
+    if (JSON.stringify(statedTailParts(text.slice(0, end), amount)) === JSON.stringify(declared)) return end;
+  }
+  return null;
+}
+
+export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const family = unitPhraseFamily(unit);
   const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
@@ -513,32 +638,33 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
   // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
   const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
-  const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null => {
-    if (w.length < 3) return null;
-    if (unitWords.some((u) => sameWord(u, w))) return null;
-    const t = decisiveTarget.some((x) => sameWord(x, w));
-    const o = decisiveOther.some((x) => sameWord(x, w));
-    return t && !o ? 'target' : o && !t ? 'other' : null;
-  };
+  const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null =>
+    quantityMentionOf(w, unitWords, decisiveTarget, decisiveOther);
   const strict = scope.strict === true;
-  const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
+  const written = scope.writtenAmounts ?? [...findStatedAmounts(userText), ...countsInWords(userText)];
   const severalFigures = written.length >= 2;
-  return written.some((a) => {
+  const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;
     if (!amountIs(a, value, unit, family, userText)) return false;
     const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
+    if (scope.exactFigure === true && hasApproximateFigureQualifier(before, after)) return false;
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const endAt = after.search(/[.!?;,:\n\u2013\u2014]/);
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
     const left: string[] = [];
     const right: string[] = [];
+    const frameEnd = strict ? boundUnitEnd(userText, a, unit) : null;
+    let frameWords = 0;
     for (const m of userText.slice(clauseStart, clauseEnd).matchAll(/[\p{L}\p{N}]+/gu)) {
       const at = clauseStart + (m.index ?? 0);
       if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
-      else if (at >= amountEnd) right.push(m[0].toLowerCase());
+      else if (at >= amountEnd) {
+        right.push(m[0].toLowerCase());
+        if (frameEnd !== null && at + m[0].length <= frameEnd) frameWords += 1;
+      }
     }
     /**
      * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
@@ -550,7 +676,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
      * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
      * "secured £0" is the goal's, never "Angel funding secured"'s). Anything else stays nobody's: under-claim.
      */
-    const clauseWords = [...left, ...right];
+    const clauseWords = [...left, ...right.slice(frameWords)];
     const inClause = (ws: readonly string[]): boolean => ws.some((w) => w.length >= 3 && clauseWords.some((c) => sameWord(c, w)));
     const labelWords = (labels: readonly string[]): string[][] => labels.map((l) => [...new Set(wordsOf(l))]);
     const targetLabelWords = labelWords(scope.target);
@@ -590,7 +716,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     const skipped = rate ?? purpose;
     const skippedWords = skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length;
     // STRICT: a rate names its OWNER — only the rate's own word is passed over ("per senior engineer" is about seniors).
-    const afterRate = right.slice(strict && rate !== null ? skippedWords - 1 : skippedWords);
+    const afterRate = right.slice(frameWords > 0 ? frameWords : strict && rate !== null ? skippedWords - 1 : skippedWords);
     // ⛔ STRICT: a figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT
     // item, never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k and juniors £65k" read
     // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the
@@ -610,9 +736,14 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       ?? (scope.nearOnly === true && comparatorOpens ? null : firstMention(afterRate.slice(rightAfter.length)));
     // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
     // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
-    if (about === null) return !(strict && severalFigures);
+    if (about === null) return scope.requireNamed !== true && !(strict && severalFigures);
     return about === 'target';
   });
+  return matched === undefined ? null : { start: matched.index, end: matched.index + matched.matchedText.length };
+}
+
+export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
+  return figureTheUserWroteForSpan(value, unit, userText, scope) !== null;
 }
 
 /** How many figures a message writes: digits (`findStatedAmounts`) and counts in words (`countsInWords`). */
@@ -662,7 +793,7 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
  * fractions), for `figureTheUserWroteFor` ONLY: it then binds clause by clause exactly as its digits would. Served
  * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
-function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
+export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
     const v = parseCardinalAmount(m[0]);
     return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
@@ -708,12 +839,56 @@ const BAND_WORDS: Record<string, RegExp> = {
   // makes the Agent ask which band; a false hit would stamp a band the user never named as theirs.
   weak: /\b(?:weak(?:ly)?|barely|slight(?=\s*(?:$|[.,;:!?)])|\s+(?:effect|link|influence|impact|relationship|connection)\b))\b/gi,
 };
+// A negator inside a HYPHENATED COMPOUND is part of a word, not a denial: "no-shows", "No-show charge",
+// "not-for-profit", "never-ending" (red-team F2, #87 6007779166). So a hyphen joining a letter on either side ends
+// no match. "no-one" stays a negator: it IS one ("No-one thinks price matters").
 const NEGATOR = new RegExp(
-  "(?:^|[^\\w'\\u2019])(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
+  "(?:^|[^\\w'\\u2019-]|(?<![\\w'\\u2019])-)(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
   // A contraction typed without its apostrophe ("isnt", "doesnt") — listed, never \\w+nt ("important", "significant").
-  + "|isnt|arent|wasnt|werent|doesnt|dont|didnt|cant|couldnt|wont|wouldnt|shouldnt|hasnt|havent|hadnt|aint)(?![\\w'\\u2019])",
+  + "|isnt|arent|wasnt|werent|doesnt|dont|didnt|cant|couldnt|wont|wouldnt|shouldnt|hasnt|havent|hadnt|aint)(?![\\w'\\u2019]|-(?!one\\b)[a-z])",
   'i',
 );
+/**
+ * NEGATOR outside the link's own end labels: a negator word inside an end's NAME ("Not paid invoices", "No deposit
+ * option") is that quantity's name, not a denial (red-team F2). Only a whole label is masked, word by word across spaces
+ * or hyphens only, so a separate "no" elsewhere in the sentence still denies. A label made only of negator words is
+ * never masked: it cannot be told apart from a denial.
+ */
+function negatedOutsideEnds(text: string, ends: { readonly source: string; readonly target: string }): boolean {
+  const masked = [ends.source, ends.target]
+    .filter(label => !labelWords(label).every(w => /^(?:not|never|no|nor|neither|hardly|cannot|without)$/.test(w)))
+    .sort((a, b) => b.length - a.length)
+    .reduce((t, label) => maskLabel(t, label, JOINED_BY_SPACE_OR_HYPHEN), text);
+  return NEGATOR.test(masked);
+}
+const labelWords = (label: string): string[] => [...label.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map(t => t[0]);
+/** Two forms of one word: the same word, or its plural ("charge"/"charges", "box"/"boxes"). Never a stem ("not"/"Notes"). */
+const sameForm = (a: string, b: string): boolean => {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return long === short || long === `${short}s` || (long === `${short}es` && /(?:s|x|z|ch|sh)$/.test(short));
+};
+const JOINED_BY_SPACE_OR_HYPHEN = /^[\s-]+$/;
+const JOINED_BY_ANY_PUNCTUATION = /^[^\p{L}\p{N}]+$/u;
+/**
+ * `text` with every WHOLE mention of `label` blanked: its words in order, case-insensitive, each in the same form or its
+ * plural ("no-show charges" for "No-show charge"; Integrator twin (a)), joined only as `joined` allows.
+ */
+function maskLabel(text: string, label: string, joined: RegExp): string {
+  const want = labelWords(label);
+  if (want.length === 0) return text;
+  const words = [...text.matchAll(/[\p{L}\p{N}]+/gu)];
+  const end = (w: RegExpMatchArray): number => (w.index ?? 0) + w[0].length;
+  let out = text;
+  for (let i = 0; i + want.length <= words.length; i++) {
+    const run = words.slice(i, i + want.length);
+    if (!run.every((w, k) => sameForm(w[0].toLowerCase(), want[k]!)
+      && (k === 0 || joined.test(text.slice(end(run[k - 1]!), w.index))))) continue;
+    const from = run[0]!.index ?? 0;
+    out = out.slice(0, from) + ' '.repeat(end(run[run.length - 1]!) - from) + out.slice(end(run[run.length - 1]!));
+    i += want.length - 1;
+  }
+  return out;
+}
 /** A sentence opened by an auxiliary ("is it strong", "does price strongly affect churn") asks, even without a "?". */
 const AUXILIARY_FIRST = /^\s*(?:is|are|was|were|am|do|does|did|can|could|would|should|will|shall|has|have|had|might|must)\b/i;
 /**
@@ -729,15 +904,21 @@ const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:plea
  * The one reading both `bandTheUserWrote` and `comparatorTheUserWrote` apply, so the two cannot drift.
  */
 type Reading = { readonly said: 'asked' } | { readonly said: 'denied' } | { readonly said: 'affirmed'; readonly clauseBefore: string };
+const sentenceBeforeAt = (turnText: string, index: number): string => {
+  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
+  return turnText.slice(start, index);
+};
+/** The same clause boundary for affirmation and for a comparator's own written figure. */
+const clauseBeforeAt = (turnText: string, index: number): string =>
+  sentenceBeforeAt(turnText, index).replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
 function readingAt(turnText: string, index: number): Reading {
   // The sentence the words sit in, and the part of their clause before them (a clause restarts after , ; : a dash, or "but").
-  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
   const endAt = turnText.slice(index).search(/[.!?\n]/);
   const sentenceEnd = endAt < 0 ? '' : turnText.charAt(index + endAt);
-  const sentenceBefore = turnText.slice(start, index);
+  const sentenceBefore = sentenceBeforeAt(turnText, index);
   if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) return { said: 'asked' };
   // "anything but strong" denies it: read as a negator, never as a clause break.
-  const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+  const clauseBefore = clauseBeforeAt(turnText, index);
   if (NEGATOR.test(clauseBefore)) return { said: 'denied' };
   return { said: 'affirmed', clauseBefore };
 }
@@ -813,31 +994,105 @@ export function holdsABandWord(words: unknown): boolean {
 }
 
 /**
- * The same rule for a goal's success target: WHICH WAY it binds \u2014 at least, or at most \u2014 is recorded as the user's
+ * The same rule for a goal's success target: its comparator, including strictness, is recorded as the user's
  * only when the user SAID it, in THIS turn's own typed words (`user_turn_text`). The goal-target writer stamps the
  * target as the user's (`threshold_source: 'user'`), so a direction the Agent picked and the user only approved would
  * read as the user's own.
  *
- * - The phrases, whole words only: "at least", "minimum", "no less than", "more than", "over", "above" \u2192 at least;
- *   "at most", "no more than", "under", "below", "less than", "maximum", "cap" \u2192 at most. "no less than" and
+ * - The phrases, whole words only: "at least", "minimum", "no less than" \u2192 at least; "more than", "over", "above"
+ *   \u2192 above; "at most", "no more than", "maximum", "cap" \u2192 at most; "under", "below", "less than" \u2192 below. "no less than" and
  *   "no more than" are read whole, never as a negated "less than" / "more than".
+ * - A strict phrase completed with "or equal to", or a figure followed by "or less / more" (and their direction
+ *   synonyms), is inclusive. Read the whole completion before its strict fragment; a suffix needs a stated figure.
+ *   Beside a prefix comparator, the suffix must belong to that comparator's own figure and clause, never a repeat of
+ *   the same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
  * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
  *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
- * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" reads once as
- *   at least; "under" beside "over" reads as both, and the Agent asks.
+ * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" holds two
+ *   different comparators; "under" beside "over" reads as both, and the Agent asks.
  */
-const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
-const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
+const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|(?:less|fewer|lower|below|under|more|higher|above|over)(?:\s+than)?\s+or\s+equal\s+to|or\s+(?:less|fewer|lower|below|under|more|higher|above|over)|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
+const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'maximum', 'cap']);
+const INCLUSIVE_CEILING_WORDS: ReadonlySet<string> = new Set(['less', 'fewer', 'lower', 'below', 'under']);
+const BELOW_WORDS: ReadonlySet<string> = new Set(['less than', 'under', 'below']);
+const ABOVE_WORDS: ReadonlySet<string> = new Set(['more than', 'over', 'above']);
+type StatedComparator = 'at_least' | 'at_most' | 'above' | 'below';
 
-/** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
-export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
+/** The comparator as the user said it, including strictness; null when not said, asked, denied, or contradictory. */
+export function comparatorTheUserWrote(turnText: string | null | undefined): StatedComparator | null {
   if (typeof turnText !== 'string') return null;
-  const said = new Set<'at_least' | 'at_most'>();
-  for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
-    const reading = readingAt(turnText, m.index);
+  const said = new Set<StatedComparator>();
+  const figures = findStatedAmounts(turnText);
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const prefixes = comparators.filter(({ match, words }) => !words.startsWith('or ')
+    && readingAt(turnText, match.index).said === 'affirmed');
+  const prefixFigureIds = new Set(prefixes.flatMap(({ match }) => {
+    const figure = figures.find((amount) => amount.index >= match.index + match[0].length
+      && amount.index - clauseBeforeAt(turnText, amount.index).length <= match.index);
+    return figure === undefined ? [] : [figure.index];
+  }));
+  for (const { match: m, words } of comparators) {
+    const suffix = words.startsWith('or ');
+    const figure = suffix ? figures.find((amount) => {
+      const end = amount.index + amount.matchedText.length;
+      return end <= m.index && /^\s*$/.test(turnText.slice(end, m.index));
+    }) : undefined;
+    if (suffix && (figure === undefined || (prefixes.length > 0 && !prefixFigureIds.has(figure.index)))) continue;
+    const reading = readingAt(turnText, figure?.index ?? m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;
-    said.add(AT_MOST_WORDS.has(m[1]!.toLowerCase().replace(/\s+/g, ' ')) ? 'at_most' : 'at_least');
+    const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+    said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+      : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+      : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
+  }
+  return said.size === 1 ? [...said][0]! : null;
+}
+
+/**
+ * ⭐ THE COMPARATOR THE USER WROTE FOR ONE FIGURE (Batch B, DL 12 Oct; Paul's marketing L20: "a conversion rate of over
+ * 15% and secure 20 new customers within the first 3 months"). `comparatorTheUserWrote` reads the whole turn, so a turn
+ * stating two targets gave its one comparator ("over") to BOTH figures: 20 new customers read as "above 20", a strict
+ * bound the user never said. Here a comparator counts for `value` only when it is bound to a figure of that value: a
+ * prefix in the figure's own clause with NO other stated figure between them ("over 15%"; "at least £60k"; "a minimum
+ * of 20"), or a suffix straight after it ("20 or more"). Asked words say nothing; denied words, or two directions for the
+ * same figure, give null. No binding gives null: the caller asks, never guesses.
+ */
+export function comparatorTheUserWroteFor(turnText: string | null | undefined, value: number): StatedComparator | null {
+  if (typeof turnText !== 'string' || !Number.isFinite(value)) return null;
+  const figures = findStatedAmounts(turnText);
+  const own = figures.filter((amount) => amount.magnitude === value);
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const boundTo = (figure: StatedAmount, m: RegExpExecArray, suffix: boolean): boolean => {
+    const figureEnd = figure.index + figure.matchedText.length;
+    const comparatorEnd = m.index + m[0].length;
+    return suffix
+      ? m.index >= figureEnd && /^\s*$/.test(turnText.slice(figureEnd, m.index))
+      : comparatorEnd <= figure.index && figure.index - clauseBeforeAt(turnText, figure.index).length <= m.index
+        && !figures.some((other) => other !== figure && other.index >= comparatorEnd && other.index < figure.index);
+  };
+  // As the whole-turn reader: beside a prefix, a suffix counts only on that prefix's own figure, never on a repeat of the
+  // same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
+  const prefixed = own.filter((figure) => comparators.some(({ match, words }) => !words.startsWith('or ')
+    && boundTo(figure, match, false) && readingAt(turnText, match.index).said === 'affirmed'));
+  const said = new Set<StatedComparator>();
+  for (const figure of own) {
+    for (const { match: m, words } of comparators) {
+      const suffix = words.startsWith('or ');
+      if (!boundTo(figure, m, suffix)) continue;
+      if (suffix && prefixed.length > 0 && !prefixed.includes(figure)) continue;
+      const reading = readingAt(turnText, suffix ? figure.index : m.index);
+      if (reading.said === 'asked') continue;
+      if (reading.said === 'denied') return null;
+      const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+      said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+        : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+        : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
+    }
   }
   return said.size === 1 ? [...said][0]! : null;
 }
@@ -878,167 +1133,617 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
 }
 
 /**
- * ⛔ A LINK'S SIZE IS THE USER'S ONLY WHEN ONE STATEMENT OF THEIRS SAYS IT (PR Review CHANGES_REQUIRED on #2275 @
- * `ac0023c7`): a verbatim quote plus the two numerals somewhere in the turn is not authorship. "Our budget is £1 per
- * month and we currently have 50 subscribers. Does a Pro price rise affect subscribers?" writes 1 and 50, and says no
- * effect at all. The quote itself must, read with the model's OWN labels:
- *   1. STATE, not ask: no "?", and not opened by an auxiliary (the same reading as `bandTheUserWrote`);
- *   2. not DENY it (the shared negator);
- *   3. write BOTH figures (`figureTheUserWrote`, on the quote only — never the rest of the turn);
- *   4. NAME BOTH ENDS: each end by a word of its label the OTHER end lacks ("the Pro price" / "paying subscribers" for
- *      Pro plan price → Pro plan paying subscribers), unless the quote also writes a word of another quantity that
- *      carries that word and the end lacks ("price sensitivity" claims "price" for Price sensitivity risk) — the same
- *      label words and stems as `factorTheUserNamed`; the two ends named in one statement disambiguate each other;
- *   5. SAY WHICH WAY the target moves, the same way as the amount's sign, with ONE closed class of verbs: lose / cost /
- *      fewer / drop … against gain / win / adds / rise … A move word right after the SOURCE's figure ("£1 increase",
- *      "£10 rise", "£1 we add to the price") or beside a word naming the source ("the price falls", "raise the price")
- *      is the SOURCE's move, and must match the sign of `per_source_change`; with none, the source is read as rising.
- * All of it from ONE sentence of the quote, and each figure SIZES its change: the amount joined to the target's movement
- * ("loses us about 50", "50 fewer"), the source's figure joined to a word of the source ("£1 on the Pro price", "the
- * Pro price falls by £1") — through linking words only, never "and" or another clause: a figure written for anything
- * else (a budget, today's level) is never a size.
- * Every miss under-claims (the Agent asks the user to say it as one statement): an unlisted verb ("sheds"), a source
- * named only by implication ("a £10 rise adds…"), both movements for one end, a figure far from its movement, or the
- * elements spread over several sentences.
+ * RT-6 B1–B2: a conservative pre-filter, never authority for the Agent's direction reading.
+ * Both numbers must occur in ONE affirmed sentence about the named or request-selected link.
+ * The typed approval card is the consent to the reading; no movement vocabulary is required here.
  */
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
-  | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement' | 'source_figure_not_a_change';
-const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
-const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
-const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
-const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
+  | 'not_one_statement' | 'unclear_figure' | 'source_figure_a_level' | 'target_figure_a_level' | 'no_change_stated'
+  | 'figure_counts_another_unit' | 'figure_of_another_quantity';
 /**
- * A figure SIZES a change only when words of that change join it, and only such words stand between (PR Review's third
- * CR, #2275 @ 157b42ae: "Our budget is £1 and Pro price rises, losing 50 paying subscribers" sits £1 beside "price"
- * without describing a price change). The source's figure joins a word of the source through these, its label words
- * or its move ("£1 on the Pro price", "£10 rise in the Pro price", "the Pro price falls by £1"); the amount joins the
- * target's movement through these ("loses us about 50", "50 fewer").
+ * `target_units`: the link target's OWN units, read from its stored node (`ownUnitsOf`). Only these make a figure's
+ * "of <denominator>" the target's own unit; the Agent's proposed unit alone never does (Integrator, #2632).
  */
-const SOURCE_LINK = /^(?:on|in|of|to|the|a|an|our|its|their|we|you|by|extra|more|each|every|per)$/;
-const AMOUNT_LINK = /^(?:us|about|roughly|around|approximately|some|nearly|almost|over|up|to|the|our|of|by|an|a|extra|another)$/;
-const SOURCE_REACH = 6;
+type LinkEffectScope = { readonly quantities: readonly string[]; readonly link_selected?: boolean; readonly target_units?: readonly string[];
+  readonly target_unitless?: boolean; readonly source_unitless?: boolean };
 /**
- * The source's figure is a CHANGE only when it is distributive ("every / each / per £1") or joined to the source's move
- * ("£10 rise", "£1 increase", "falls by £1") — PR Review's fourth CR (#2275 @ ce3cd9d0): "With Pro price £1 today,
- * raising it loses 50 paying subscribers" writes £1 as today's LEVEL, beside "price", and sizes no rise.
+ * A stored node's own units, the USER's stated reading FIRST (Science #87 6008791322 (2)), then its data unit, its
+ * level's unit and its goal threshold unit. An Olumi-written reading is never one of them.
  */
-const DELTA_BEFORE = /^(?:every|each|per)$/;
+export function ownUnitsOf(node: unknown): string[] {
+  const n = (typeof node === 'object' && node !== null ? node : {}) as Record<string, unknown>;
+  const field = (o: unknown, key: string): unknown => (typeof o === 'object' && o !== null ? (o as Record<string, unknown>)[key] : undefined);
+  const reading = n.unit_reading;
+  return [field(reading, 'source') === 'user_stated' ? field(reading, 'unit') : undefined,
+    field(n.data, 'unit'), field(n.observed_state, 'unit'), n.goal_threshold_unit]
+    .filter((u): u is string => typeof u === 'string' && u.trim() !== '');
+}
+/** The ONE denominator of a list of units in priority order: the words after "of" in the first unit that has them. */
+export function denominatorOfUnits(units: readonly string[]): string[] {
+  return units.map(unitDenominatorWords).find(words => words.length > 0) ?? [];
+}
 /**
- * A change NAMED by a noun the figure sizes ("a £10 rise", "a £1 price increase") — never a verb whose object is
- * the source ("£1 raising it": today's £1, then a rise of no stated size; PR Review on #2275 @ fe509477).
+ * ⭐ THE ONE "OF WHAT" OF A QUANTITY'S LEVEL (Science #87 6008791322 (2)): from the user's stated reading first ("% of
+ * appointments", written by the level card from "About 8% of appointments…"), else from the stored unit's denominator.
+ * [] when neither has one. The link-effect binder and the points-or-share rule (U3) both read D here, never apart.
  */
-const CHANGE_NOUN = /^(?:rise|increase|drop|fall|cut|decrease|reduction|hike|boost|lift|uplift|jump)$/;
-/** Words that may stand between a move and "by £1" ("raise the Pro price by £1", "raising it by £1"). */
-const BY_LINK = /^(?:the|a|an|our|its|it|their|them|we|you|prices?)$/;
-const AMOUNT_REACH = 4;
-/** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
-const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
+export function levelDenominatorOf(node: unknown): string[] {
+  return denominatorOfUnits(ownUnitsOf(node));
+}
+/** Keep the exact sentence, including its terminal punctuation, for the approval and provenance quote. */
+const sentencesOf = (q: string): string[] => (q.match(/(?:[^.!?;:\n]|(?<=\d)\.(?=\d))+[.!?;:]?/g) ?? [])
+  .map(x => x.trim()).filter(x => x !== '');
+/**
+ * Where `quote` occurs in the user's text as whole words and whole numbers (Codex buddy r1 HIGH): never starting or ending
+ * inside a word or a number, so "1 percentage points…" is not the user's words when they wrote "11 percentage points…",
+ * and "5 points" is not cut from "0.5 points" or "1,5 points".
+ */
+export function quoteSpansIn(userText: string, quote: string): number[] {
+  if (quote === '') return [];
+  const isWordChar = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+  const spans: number[] = [];
+  for (let at = userText.indexOf(quote); at >= 0; at = userText.indexOf(quote, at + 1)) {
+    const before = userText[at - 1]; const first = quote[0]; const last = quote[quote.length - 1];
+    const after = userText[at + quote.length];
+    // A separator inside a number is never an edge either: ",500 …" from "1,500" (Codex r2 HIGH), "… 1," from "1,500".
+    const cutBefore = (isWordChar(before) && isWordChar(first)) || (/[.,]/.test(before ?? '') && /\d/.test(userText[at - 2] ?? '') && /\d/.test(first ?? ''))
+      || (/\d/.test(before ?? '') && /[.,]/.test(first ?? '') && /\d/.test(quote[1] ?? ''));
+    const cutAfter = (isWordChar(after) && isWordChar(last)) || (/\d/.test(last ?? '') && /[.,]/.test(after ?? '') && /\d/.test(userText[at + quote.length + 1] ?? ''))
+      || (/[.,]/.test(last ?? '') && /\d/.test(after ?? '') && /\d/.test(quote[quote.length - 2] ?? ''));
+    if (!cutBefore && !cutAfter) spans.push(at);
+  }
+  return spans;
+}
+/** The whole sentence (".", "!", "?" or a line break; never a decimal point) around each place the quote occurs. */
+function enclosingSentences(userText: string, quote: string): string[] {
+  const ends = [...userText.matchAll(/[!?\n]|(?<!\d)\.|\.(?!\d)/g)].map(m => m.index!);
+  return quoteSpansIn(userText, quote).map(at => {
+    const start = ends.filter(e => e < at).pop();
+    const end = ends.find(e => e >= at + quote.length - 1);
+    return userText.slice(start === undefined ? 0 : start + 1, end === undefined ? userText.length : end + 1).trim();
+  });
+}
+/**
+ * ⭐ A CORRECTION "X, not Y" STATES X (DL ruling, 7 Oct: a figure the user types for that link this turn is the user's
+ * statement). Served on staging CEE 13149d8 (Canvas D1 witness, draw 3): "Each 1% price rise adds £600 a month to monthly
+ * recurring revenue, not £1,200." was read as a DENIAL because of its trailing "not", so the user could not correct their
+ * own figure from the link they had just opened.
+ *
+ * ONE trailing clause, after a comma, that negates exactly ONE figure ("not £1,200", "not £1,200 a month", "rather than
+ * 20") names the figure being replaced. It is set aside before the negation and figure readings: the rest is what the user
+ * states, and the figure in the tail is never a stated figure. Nothing else is set aside: a tail with no figure ("not a
+ * guess") or two, a tail with another negator, and a sentence whose remaining words still negate ("We don't think it's
+ * £600, not £1,200.", "Not £600 a month, not £1,200 either.") all read exactly as before.
+ */
+// No two unbounded whitespace runs may sit side by side: this runs on EVERY turn (no-direct-link guard), and the old
+// `\s*%?(…){0,3}\s*[.!]?\s*$` took 9.5 s on ", not 1" + 3,200 spaces (DL review, 7 Oct). One optional space before % and
+// before the end mark; a single trailing whitespace run.
+const CORRECTED_FIGURE_TAIL = /,\s*(?:not|rather\s+than|instead\s+of)\s+(?:about\s+|around\s+|roughly\s+)?[£$€]?\d[\d,]*(?:\.\d+)?(?:\s?%)?(?:\s+[\p{L}/]+){0,3}(?:\s?[.!])?\s*$/u;
+const CORRECTION_HEAD = /^,\s*(?:not|rather\s+than|instead\s+of)/i;
+export function withoutCorrectedFigureTail(sentence: string): string {
+  const m = CORRECTED_FIGURE_TAIL.exec(sentence);
+  if (m === null) return sentence;
+  const kept = sentence.slice(0, m.index);
+  const tail = m[0];
+  if (findLinkEffectAmounts(tail).length !== 1) return sentence;
+  if (NEGATOR.test(tail.replace(CORRECTION_HEAD, ' ')) || NEGATOR.test(kept)) return sentence;
+  return `${kept}${/[.!]\s*$/.test(tail) ? tail.trim().slice(-1) : ''}`;
+}
+/**
+ * A quoted fragment cannot omit the question or denial surrounding it in the user's actual sentence. The WHOLE sentence
+ * counts: "I do not believe this claim: Each 1 point …" denies what follows its colon (Codex buddy r1 HIGH). A trailing
+ * corrected figure is not that denial (`withoutCorrectedFigureTail`).
+ */
+export function linkEffectQuoteContextMiss(quote: string, userText: string): 'question' | 'denied' | null {
+  const enclosing = enclosingSentences(userText, quote);
+  const misses = enclosing.map(sentence => sentence.includes('?') || (AUXILIARY_FIRST.test(sentence) && !REQUEST_FORM.test(sentence))
+    ? 'question' as const : NEGATOR.test(withoutCorrectedFigureTail(sentence)) ? 'denied' as const : null);
+  return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
+}
+/**
+ * A sentence that ENDS by denying any change at all: "It doesn't change.", "No, it doesn't really move.", "It has no effect
+ * at all.", "It makes no difference.", "It stays the same.", "No change." Anchored at the end, so a clause after it that
+ * asserts something ("It doesn't fall; it rises.") or sizes it ("It doesn't change much.") is no such sentence.
+ */
+const NO_CHANGE_SENTENCE = new RegExp(
+  "(?:^|[\\s,:;])(?:(?:does|do|did|will|would)\\s+not|(?:does|do|did|wo|would)n['\\u2019]?t)\\s+(?:really\\s+|actually\\s+)?(?:change|move|shift|budge|matter)"
+  + "|(?:^|[\\s,:;])(?:has|have|had|makes?|made)\\s+no\\s+(?:real\\s+)?(?:effect|difference|impact)"
+  + "|(?:^|[\\s,:;])(?:stays?|remains?|is)\\s+(?:the\\s+same|unchanged|flat)"
+  + "|(?:^|[\\s,:;])(?:no\\s+change|nothing\\s+changes)",
+  'i',
+);
+const endsDenyingAnyChange = (sentence: string): boolean => {
+  const body = sentence.trim().replace(/[\s.!\u201D\u2019"')]+$/u, '').replace(/\s+at\s+all$/iu, '');
+  const m = [...body.matchAll(new RegExp(NO_CHANGE_SENTENCE.source, 'gi'))].pop();
+  return m !== undefined && m.index! + m[0].length === body.length;
+};
+/**
+ * ⭐ FU-1 (Codex r1 + r2 on #2664 P1): the user's words say the link does not change at all, which closes the ask. Every
+ * sentence the quote sits in, and the quote itself, ends by denying any change (`NO_CHANGE_SENTENCE`) and writes no figure.
+ * Any other denial still gets its ask: a correction of size ("… loses us 50 paying subscribers, not 20") or of direction
+ * ("It doesn't fall; it rises."), or a denied figure ("… does not lose us 50").
+ */
+export function saysNoChange(quote: string, userText: string): boolean {
+  const around = enclosingSentences(userText, quote);
+  return [quote, ...around].every((words) => figuresWrittenIn(words) === 0 && endsDenyingAnyChange(words));
+}
+/**
+ * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
+ * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
+ * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's
+ * own change words ("each 10 point RISE", "BY about 1 point", "A £1 RISE"). A level ("coverage is 60%"), a span ("over 12
+ * months", "a 12 month study") or a sum ("£500 to investigate", "a £500 budget") is no change (Codex r1 + r2 on the guard). Negative evidence only: it can stop that
+ * guard, never make a card.
+ */
+export function clauseStatesTwoChanges(message: string, labelA: string, labelB: string,
+  names: (text: string, label: string) => boolean): boolean {
+  return sentencesOf(message.trim()).some((c) => linkEffectQuoteContextMiss(c, message) === null && names(c, labelA) && names(c, labelB)
+    && findLinkEffectAmounts(c).filter((f) => figureWrittenAsAChange(c, f)).length >= 2);
+}
+/** The clauses the binders read (`clauseStatesTwoChanges`): split at . ! ? ; : and line breaks, never inside a decimal. */
+export const clausesOf = (message: string): string[] => sentencesOf(message.trim());
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
-  scope: { readonly quantities: readonly string[] },
+  scope: LinkEffectScope,
 ): LinkEffectStatementMiss | null {
   const q = quote.trim();
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
-  if (NEGATOR.test(q)) return 'denied';
-  // ⛔ PR Review's second CR (#2275 @ f5aaec34): every element must come from ONE sentence — "Pro price rises. Paying
-  // subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers." states no £1 → 50.
-  const sentences = sentencesOf(q);
-  const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope));
-  if (misses.some((m) => m === null)) return null;
+  // The figure a correction replaces is neither a denial nor a stated figure (`withoutCorrectedFigureTail`).
+  const sentences = sentencesOf(q).map(withoutCorrectedFigureTail);
+  if (negatedOutsideEnds(sentences.join(' '), ends)) return 'denied';
+  const misses = sentences.map(sentence => linkEffectInOneSentence(sentence, effect, ends, scope));
+  if (misses.some(m => m === null)) return null;
   return sentences.length === 1 ? misses[0]! : 'not_one_statement';
 }
 
-/**
- * The ONE sentence of the quote that states the effect (`linkEffectTheUserStated` passes on it), verbatim, or null.
- * AIQ 5884881500 ("proposer, not stamper"): that sentence is what the proposal stores as the user's words and what the
- * approval card shows beside the reading — the user approves the READING, so a wrong parse costs a "no", never a false
- * `user_stated`.
- */
+/** The verbatim sentence whose own figures license the proposed reading. */
 export function statingSentenceOf(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
-  scope: { readonly quantities: readonly string[] },
+  scope: LinkEffectScope,
 ): string | null {
   if (linkEffectTheUserStated(quote, effect, ends, scope) !== null) return null;
-  return sentencesOf(quote.trim()).find((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
+  // The user's own sentence, verbatim (a correction's tail included), read as `linkEffectTheUserStated` reads it.
+  return sentencesOf(quote.trim()).find(sentence => linkEffectInOneSentence(withoutCorrectedFigureTail(sentence), effect, ends, scope) === null) ?? null;
+}
+
+/** Words that may stand between a distributive word and the source it counts ("each EXTRA conversation", "one MORE hire"). */
+const ONE_FILLER = /^(?:extra|more|additional|single|new|another)$/;
+/**
+ * The token index of the word a distributive phrase counts one of ("each extra conversation" → conversation), or -1.
+ * ⛔ AIQ 5925663053: it must be what the source COUNTS — the change unit's head noun ("conversations"); a unit with no
+ * noun counts nothing (CODEX 5925831728) — never any other label word: "Each investment firm brings in £1m" on "Warm conversations with investment firms"
+ * is per FIRM, not per conversation. The walk crosses only fillers and the source's label words, never punctuation.
+ */
+function distributiveOneAt(q: string, ends: { readonly source: string; readonly target: string }, unit: string): number {
+  const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
+  const label = wordsOf(ends.source);
+  // CODEX 5925755067: the unit's HEAD noun — its last word before any "per" / "/" ("qualified investment-firm
+  // conversations" → conversations; "conversations per week" → conversations). Its qualifiers are crossed, never bound.
+  const unitWords = wordsOf(unit);
+  const head = wordsOf(unit.split(/\s+per\s+|\//iu)[0] ?? '').slice(-1);
+  // CODEX 5925831728: a symbol or scalar unit ("£/month") has no head noun, so there is nothing the phrase counts one
+  // of: "Each Pro price rise" sizes no rise. No label fallback — under-claim, never invent a 1.
+  if (head.length === 0) return -1;
+  const own = head;
+  const isLabel = (w: string): boolean => [...label, ...unitWords].some((x) => sameWord(x, w));
+  for (let i = 0; i < tokens.length; i += 1) {
+    const w = tokens[i]!.w; const next = tokens[i + 1]?.w;
+    const from = /^(?:each|every|per)$/.test(w) ? i + 1 : w === 'one' && next === 'more' ? i + 2
+      : (w === 'a' || w === 'an') && next !== undefined && /^(?:extra|single|additional)$/.test(next) ? i + 2 : -1;
+    if (from < 0) continue;
+    // AIQ 5925612672: the distributive word must GOVERN the source noun — at most ONE modifier between ("each extra
+    // conversation"), plus the source's own label words; "per quarter from … conversations" and "one more round of
+    // conversations" count something else.
+    let fillers = 0;
+    for (let j = from; j < tokens.length && (ONE_FILLER.test(tokens[j]!.w) || isLabel(tokens[j]!.w)); j += 1) {
+      if (/[,;:()\u2013\u2014]/.test(q.slice(tokens[i]!.at, tokens[j]!.at))) break;
+      if (own.some((x) => sameWord(x, tokens[j]!.w))) return j;
+      if (!isLabel(tokens[j]!.w) && (fillers += 1) > 1) break;
+    }
+  }
+  return -1;
+}
+
+/**
+ * ⛔ PR REVIEW'S FIVE CRs, RESTORED AS ONE QUESTION (DL e8, 5 Oct ~18:5xZ, #2605). Option B retired the direction and verb
+ * vocabulary, but a figure the user wrote as a LEVEL, or for another quantity, still sizes no change: "With Pro price £1,
+ * raising it loses 50", "At a Pro price of £1", "Our budget is £1 … we currently have 50 paying subscribers", "One more
+ * ROUND of conversations". Offering "+£1 → −50" there manufactures a reading; Olumi asks instead. Negative evidence only:
+ * these words can stop a card, never make one.
+ */
+const HEDGE = /^(?:about|around|roughly|approximately|nearly|almost|only|just|some|maybe|perhaps|probably)$/i;
+/** The word right before a figure (hedges skipped) that makes it a change: "every £1", "by £1", "a £10 rise". */
+const CHANGE_BEFORE = /^(?:every|each|per|by|a|an|another|extra|additional|one)$/i;
+/** Right after a figure: it is a change ("£1 rise", "50 fewer", "4 points off"). */
+const CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
+/** Whether ONE word is a change word the binder itself reads ("adds", "costs", "raises", "means", …): where a statement's
+ * predicate begins, after the counted phrase (RT-6 row 1b). */
+export function isChangeWord(token: string): boolean {
+  return CHANGE_STATED.test(token);
+}
+
+/** The text after a figure with its ONE change word dropped ("10 more café subscribers" → " café subscribers"), read by
+ * the binder's own `CHANGE_AFTER`: the counted phrase an end's label is checked against (RT-6 row 1b). */
+export function afterChangeWord(tail: string): string {
+  const m = CHANGE_AFTER.exec(tail);
+  return m === null ? tail : tail.slice(m[0].length);
+}
+/** Right before a figure, within its clause: it is a level ("At £1", "Pro price is £1", "we have 50", "With Pro price £1"). */
+const LEVEL_WORD = /^(?:at|is|was|are|were|equals?|equalled|totals?|remains|currently|have|has|had|budget)$/i;
+/** "is/equals" after a CHANGE noun states the change's size ("The Pro price rise is £1"), never a level (Codex r2 P2),
+ * unless that noun is part of the end's own name. */
+const COPULA = /^(?:is|was|are|were|equals?|equalled|totals?|remains)$/i;
+const CHANGE_NOUN_OF = /^(?:rise|increase|cut|drop|fall|jump|change|reduction|decrease|gain|growth|loss|hike|swing)s?$/i;
+/** Anywhere in the sentence: SOMETHING changes (presence only; the Agent's args carry the direction, B2). */
+const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|gain(?:s|ed|ing)?|wins?|winning|won|add(?:s|ed|ing)?|cost(?:s|ing)?|bring(?:s|ing)?|brought|knocks?|knocked|push(?:es|ed|ing)?|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|grow(?:s|ing|n)?|grew|shrink(?:s|ing)?|halv(?:e|es|ed|ing)|doubl(?:e|es|ed|ing)|clos(?:e|es|ed|ing)|shut(?:s|ting)?|spend(?:s|ing)?|spent|trim(?:s|med|ming)?|sav(?:e|es|ed|ing)|worth|up|down|off|more|less|fewer|extra|additional|every|each|per|by|jumps?|chang(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|means?|shed(?:s|ding)?|put(?:s|ting)?)\b/i;
+
+/** Before a figure, ALONE enough to make it a change for the RT-19 guard: a distributive word or "by" ("each 10", "by about 1").
+ * The binder's own `CHANGE_BEFORE` also takes "a"/"an"/"one"/"extra", where a link is already named; here "a £500 budget for
+ * a 12 month study" would read as two changes (Codex r2 on the guard), so those need a change word AFTER the figure. */
+const CHANGE_BEFORE_ALONE = /^(?:every|each|per|by)$/i;
+/** A figure written AS a change: a change word straight after it (the binder's `CHANGE_AFTER`), or `CHANGE_BEFORE_ALONE`
+ * before it (hedges skipped). */
+function figureWrittenAsAChange(q: string, figure: StatedAmount): boolean {
+  if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return true;
+  const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+  const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}]+/gu)].map(m => m[0]);
+  while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
+  const last = words[words.length - 1];
+  return last !== undefined && CHANGE_BEFORE_ALONE.test(last);
+}
+
+function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): boolean {
+  const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+  if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return false;
+  const clause = q.slice(0, start).split(/[,;:.!?]/).pop() ?? '';
+  const words = [...clause.matchAll(/[\p{L}]+/gu)].map(m => m[0]);
+  while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
+  const last = words[words.length - 1];
+  if (last === undefined || CHANGE_BEFORE.test(last)) return false;
+  // "The Pro price rise is £1" sizes the rise; "Footfall lost from price rise is 5%" is the end's own name, so a level.
+  if (LEVEL_WORD.test(last)) {
+    const before = words[words.length - 2];
+    return !(COPULA.test(last) && before !== undefined && CHANGE_NOUN_OF.test(before)
+      && !wordsOf(endLabel).some(x => sameWord(x, before.toLowerCase())));
+  }
+  // "a price OF £1", never "an increase of £1".
+  if (/^of$/i.test(last)) return words.length >= 2 && !CHANGE_NOUN_OF.test(words[words.length - 2]!);
+  // "With Pro price £1": the end's own name, opened by "with", straight before its figure.
+  const withAt = words.map(w => w.toLowerCase()).lastIndexOf('with');
+  return withAt >= 0 && words.slice(withAt + 1).length > 0
+    && words.slice(withAt + 1).every(w => /^(?:the|our|its|a)$/i.test(w) || wordsOf(endLabel).some(x => sameWord(x, w.toLowerCase())));
+}
+
+/** A number WORD that counts something else: "One more ROUND of conversations" is one round, not one conversation. */
+function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { readonly source: string }, unit: string): boolean {
+  if (/\d/.test(figure.matchedText)) return false;
+  // The counted noun is the HEAD before "of", across any modifiers ("One additional small GROUP of cafés"; Codex r2 HIGH).
+  const m = /^((?:\s+[\p{L}-]+){1,4}?)\s+of\b/iu.exec(q.slice(figure.index + figure.matchedText.length));
+  if (m === null) return false;
+  const head = m[1]!.trim().split(/\s+/).pop()!.toLowerCase();
+  const own = [...wordsOf(ends.source), ...wordsOf(unit)];
+  return !own.some(w => sameWord(w, head));
+}
+
+/** The words after a unit's "of" ("% of appointments" → appointments), determiners dropped; [] when it has none. */
+/**
+ * The words dropped before a denominator is compared, on BOTH sides (the stored unit's and the user's "of …"): U3 (Science
+ * d5 #87 6008156781 (1)) adds "all" ("0.05% of all appointments" is the level's own denominator).
+ */
+export const DENOMINATOR_DETERMINER = /^(?:all|our|the|their|its|your|my|a|an)$/;
+/**
+ * The ONE tokeniser for a denominator's words: letters only, lower-cased, a determiner dropped only when it stands
+ * alone (Codex r1 on #2651: "all-hands meetings" keeps "all", so it never reads as "hands meetings").
+ */
+export function denominatorWords(text: string): string[] {
+  return [...text.matchAll(/[\p{L}]+/gu)].filter((w) => {
+    const joined = text[w.index! - 1] === '-' || text[w.index! + w[0].length] === '-';
+    return joined || !DENOMINATOR_DETERMINER.test(w[0].toLowerCase());
+  }).map((w) => w[0].toLowerCase());
+}
+export function unitDenominatorWords(unit: string): string[] {
+  const tail = /\bof\s+(.+)$/iu.exec(unit)?.[1];
+  return tail === undefined ? [] : denominatorWords(tail);
+}
+
+/**
+ * The phrase a target figure is OF ("2 percentage points of net margin"), when its words are not all the target's own:
+ * that figure sizes another quantity (PR Review's figure_not_bound, restored without direction words).
+ */
+function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: string, amountUnit: string, targetUnits: readonly string[]): string | undefined {
+  const after = q.slice(figure.index + figure.matchedText.length);
+  const m = /^(?:\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent))?\s+(?:of|in)\s+((?:(?!(?:while|and|but|which|that|when|if|as|so|for|than|to|this|next|last|each|every|per|a|an|years?|months?|weeks?|quarters?|today|now)\b)[\p{L}-]+\s*){1,5})/iu.exec(after);
+  if (m === null) {
+    // Before the figure: "cuts NET margin by 0.5" names another margin when the word before the target's head is neither
+    // the target's own, a determiner, nor a change word (Codex r2 HIGH). "cuts our gross margin by 0.5" stays the target's.
+    const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+    const clause = q.slice(0, start).split(/[,;:.!?]/).pop() ?? '';
+    // "increase revenue'S TAX by £100": the end's name owns the quantity the figure sizes (Codex step-4 buddy r2 HIGH).
+    const ownedBefore = /([\p{L}-]+)(['’])(s?)\s+((?:[\p{L}-]+\s+){0,3}?[\p{L}-]+)\s+(?:by\s+)?(?:(?:about|around|roughly|approximately|nearly|almost|only|just)\s+)?$/iu.exec(clause);
+    if (ownedBefore !== null && wordsOf(target).some(t => sameWord(t, ownedBefore[1]!.toLowerCase()))
+      && !ownedBefore[4]!.split(/\s+/).every(w => wordsOf(target).some(t => sameWord(t, w.toLowerCase())))) {
+      return `${ownedBefore[1]}${ownedBefore[2]}${ownedBefore[3]} ${ownedBefore[4]}`;
+    }
+    const words = [...clause.matchAll(/[\p{L}-]+/gu)].map(w => w[0]);
+    while (words.length > 0 && (HEDGE.test(words[words.length - 1]!) || /^by$/i.test(words[words.length - 1]!))) words.pop();
+    const label = wordsOf(target);
+    const head = wordsOf(target.split(/\s+(?:from|of|in|for|to|on|per|with|after|by)\s+/i)[0] ?? target).at(-1);
+    const last = words[words.length - 1]; const modifier = words[words.length - 2];
+    if (head === undefined || last === undefined || modifier === undefined || !sameWord(head, last.toLowerCase())) return undefined;
+    // Is a change word before the target's head THE VERB, or a word of another quantity's name (Codex step-4 buddy r1/r2)?
+    //  · a particle or comparative qualifies the change ("push UP revenue", "add MORE revenue"): the verb's;
+    //  · an inflected form is a finite verb ("a price increase RAISES revenue"): the verb;
+    //  · after a determiner it is inside the noun phrase ("increase our LIFT revenue"): another quantity;
+    //  · after another change word it is a modifier ("increase LIFT revenue"), unless that word is a relative clause's own
+    //    verb ("customers we ADD increase revenue"): another quantity, else the verb.
+    const beforeModifier = words[words.length - 3]; const beforeThat = words[words.length - 4];
+    const modifierIsTheChange = CHANGE_STATED.test(modifier) && (/^(?:up|down|off|more|less|fewer|extra|additional)$/i.test(modifier)
+      || /(?:s|ed|ing)$/i.test(modifier) || beforeModifier === undefined
+      || (!/^(?:our|the|their|its|your|my|a|an|this|that|these|those)$/i.test(beforeModifier)
+        && (!CHANGE_STATED.test(beforeModifier) || (beforeThat !== undefined && /^(?:i|we|you|they|he|she|it)$/i.test(beforeThat)))));
+    if (label.some(t => sameWord(t, modifier.toLowerCase())) || /^(?:our|the|their|its|your|my|a|an)$/i.test(modifier) || modifierIsTheChange) return undefined;
+    return `${modifier} ${last}`;
+  }
+  const run = m[1]!.trim();
+  // "1 point of onboarding drag'S SHARE of total delivery risk" / "…delay risks' SHARE…": a possessive (singular or plural)
+  // makes the end's name the OWNER of another quantity, never that quantity (Codex step-4 buddy r1/r2 HIGH).
+  const owned = /^(['’])(s?)((?:\s+(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+){1,6})/iu.exec(after.slice(m[0].length));
+  if (owned !== null) return `${run}${owned[1]}${owned[2]}${owned[3]}`;
+  const content = denominatorWords(run);
+  if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
+  // The TARGET's own unit's denominator ("0.05% of appointments" on a target kept in "% of appointments"; red-team F2,
+  // #87 6007779166): that run is the target's unit, not another quantity, but ONLY when its words ARE the denominator of
+  // one of the target's stored units, word for word; the Agent's proposed unit, if it has a denominator, says the same;
+  // and the phrase ENDS there (its clause closes, or "that way"). Never a subset (the head noun alone), a superset
+  // ("appointments booked online"), a phrase the scan cut short ("appointments for new patients"), a fuzzy match, or a
+  // denominator only the Agent's unit carries ("percentage points of net margin" on "gross margin"; Integrator, #2632).
+  const sameWords = (a: readonly string[]): boolean => a.length === content.length && a.every((w, i) => w === content[i]);
+  const proposed = unitDenominatorWords(amountUnit);
+  if (sameWords(denominatorOfUnits(targetUnits)) && (proposed.length === 0 || sameWords(proposed))
+    && /^\s*(?:$|[.,;:!)\u2013\u2014]|-\s|(?:that|this)\s+way\b)/iu.test(after.slice(m[0].length))) return undefined;
+  return run;
+}
+
+/**
+ * Which written figure states no change of its end, if one does, with the typed question to ask about it. Used by the
+ * binder (as its miss) and by the proposer (for the question's words).
+ */
+export function linkEffectFigureNotAChange(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  targetUnits: readonly string[] = [],
+): { readonly miss: 'source_figure_a_level' | 'target_figure_a_level' | 'figure_counts_another_unit' | 'figure_of_another_quantity'; readonly question: string } | undefined {
+  for (const q of sentencesOf(quote.trim())) {
+    const amounts = findLinkEffectAmounts(q);
+    const literal = (value: number, unit: string) => amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), q)
+      && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+    // A written "from 8% to 4%" never reads as a level here ("from"/"to" are not level words), and these checks only stop a card.
+    const per = literal(effect.per_source_change, effect.per_source_change_unit);
+    const amount = literal(effect.amount, effect.amount_unit);
+    if (per.length > 0 && per.every(f => wordFigureCountsAnotherUnit(q, f, ends, effect.per_source_change_unit))) {
+      return { miss: 'figure_counts_another_unit', question: `What change in “${ends.source}” does “${per[0]!.matchedText.trim()}” stand for?` };
+    }
+    if (per.length > 0 && per.every(f => figureIsALevel(q, f, ends.source))) {
+      return { miss: 'source_figure_a_level', question: `Is ${per[0]!.matchedText.trim()} a change in “${ends.source}”, or its level today?` };
+    }
+    const otherOwner = amount.length > 0 ? targetFigureOfAnotherQuantity(q, amount[0]!, ends.target, effect.amount_unit, targetUnits) : undefined;
+    if (otherOwner !== undefined && amount.every(f => targetFigureOfAnotherQuantity(q, f, ends.target, effect.amount_unit, targetUnits) !== undefined)) {
+      const said = q.slice(amount[0]!.index, amount[0]!.index + amount[0]!.matchedText.length).trim();
+      const unit = /^\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent)/i.exec(q.slice(amount[0]!.index + amount[0]!.matchedText.length))?.[0] ?? '';
+      // ⛔ Never a yes/no: a "Yes" restates the same figure of another quantity, which is refused again (DL 0df0e1, RT-18:
+      // never ASK a confirmation whose "Yes" cannot be recorded). The user is asked for the change in the target itself.
+      return { miss: 'figure_of_another_quantity',
+        // The honest "it doesn't change" has a stated outcome too (Review Desk 6b on #2642): nothing is written, never a 0.
+        question: `What is that as a change in \u201c${ends.target}\u201d? ${said}${unit} of ${otherOwner} reads as a figure for ${otherOwner}. `
+          + `If \u201c${ends.target}\u201d does not change, the link stays as it is.` };
+    }
+    if (amount.length > 0 && amount.every(f => figureIsALevel(q, f, ends.target))) {
+      return { miss: 'target_figure_a_level', question: `Is ${amount[0]!.matchedText.trim()} a change in “${ends.target}”, or its level today?` };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * ⭐ THE RANGE THE USER WROTE AROUND THEIR FIGURE (Science d5 #87 6009282279; a8's shape ruling). "Each 1% price rise
+ * loses about 2 customers, between 1 and 4" and "the starter tier would win about 150 new subscribers, between 80 and
+ * 250" write the size as a point INSIDE a range: `{ low, high, text, end: 'centre' }`, the amount kept as the stated point.
+ * Read only from the sentence that bound the link, at the bound amount:
+ *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
+ *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
+ *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
+ *    written after the range ("between 1 and 4 months" is a time);
+ * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
+ */
+export function centreRangeAt(sentence: string, amountSpan: { readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
+  if ((sentence.match(/\bbetween\b/giu) ?? []).length !== 1) return undefined;
+  const tail = sentence.slice(amountSpan.end);
+  const range = extractStatedLikelyRange(tail);
+  if (range === undefined) return undefined;
+  const at = tail.indexOf(range.text);
+  if (at < 0 || /\d/u.test(tail.slice(0, at))) return undefined;
+  // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
+  // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
+  // Up to three words after it, to the next punctuation ("between 1 and 4 calendar months"; Codex buddy r2 F3).
+  const afterWords = tail.slice(at + range.text.length).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
+  if (afterWords.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== unitPhraseFamily(amountUnit); })) return undefined;
+  const pounds = range.text.includes('£');
+  if (pounds && unitPhraseFamily(amountUnit) !== 'currency') return undefined;
+  const scale = pounds ? moneyUnitScale(amountUnit) : 1;
+  const low = range.low / scale;
+  const high = range.high / scale;
+  const point = Math.abs(amount);
+  if (!(low < point && point < high)) return undefined;
+  return { low, high, text: range.text, end: 'centre' };
+}
+
+/** The user's own count forecast, not another quantity's range or a prior. Shared by construction and registration. */
+export function statedCountInterventionRange(
+  value: number, unit: string, countLabel: string, optionLabel: string, brief: string,
+  quantities: readonly { label: string; unit?: unknown }[],
+): { low: number; high: number; text: string } | undefined {
+  const noun = readCount(unit);
+  if (noun === null || value <= 0 || !Number.isFinite(value)) return undefined;
+  const others = quantities.filter(q => canonicalLabel(q.label) !== canonicalLabel(countLabel));
+  // A money rate cannot own a count's point, even when it shares the count's qualifier ("starter tier").
+  const scope: EntityScope = { target: [countLabel, optionLabel], others: others.map(q => q.label),
+    rivals: others.filter(q => readCount(q.unit) !== null).map(q => q.label), strict: true, requireNamed: true };
+  const qualifiers = wordsOf(countLabel).filter(w => !wordsOf(unit).some(u => sameWord(u, w)));
+  const ownClause = (sentence: string, span: { start: number; end: number }): string => {
+    const before = sentence.slice(0, span.start).match(/[^.!?;,:\n\u2013\u2014]*$/u)?.[0] ?? '';
+    const after = sentence.slice(span.end).match(/^[^.!?;,:\n\u2013\u2014]*/u)?.[0] ?? '';
+    return before + sentence.slice(span.start, span.end) + after;
+  };
+  const namesCount = (clause: string): boolean => {
+    const said = wordsOf(clause);
+    return said.some(w => sameWord(w, noun[noun.length - 1]!))
+      && qualifiers.every(q => said.some(w => sameWord(w, q)));
+  };
+  // No new subject, verb, conjunction or different unit may move the range to a second quantity.
+  const countPhrase = (text: string): boolean => {
+    const phrase = text.replace(/^[\s,]+|[\s,.!]+$/gu, '');
+    if (phrase === '') return true;
+    const read = readCount(phrase);
+    const own = wordsOf(`${countLabel} ${unit}`);
+    return read !== null && read[read.length - 1] === noun[noun.length - 1]
+      && wordsOf(phrase).every(w => w === 'new' || w === 'paying' || own.some(o => sameWord(o, w)));
+  };
+  const receipts: { low: number; high: number; text: string }[] = [];
+  for (const sentence of brief.split(/(?<=[.!?])\s+|\n+/u).map(s => s.trim()).filter(Boolean)) {
+    if (sentence.includes('?') || /\b(?:min(?:imum)?|max(?:imum)?|confidence|credible|guaranteed|worst|best)\b/iu.test(sentence)) continue;
+    const amounts = findStatedAmounts(sentence);
+    // An exact statement about this count vetoes a receipt, even if it contradicts the drafted point.
+    if (amounts.some(a => {
+      const span = figureTheUserWroteForSpan(a.magnitude, unit, sentence, { ...scope, at: a.index });
+      return span !== null && namesCount(ownClause(sentence, span)) && /\bexact(?:ly)?\b/iu.test(ownClause(sentence, span));
+    })) return undefined;
+    const span = figureTheUserWroteForSpan(value, unit, sentence, scope);
+    if (span === null || !namesCount(ownClause(sentence, span)) || amounts.filter(a => a.magnitude === value).length !== 1) continue;
+    const range = centreRangeAt(sentence, span, value, unit);
+    if (range === undefined) continue;
+    const at = sentence.indexOf(range.text, span.end);
+    if (!countPhrase(sentence.slice(span.end, at)) || !countPhrase(sentence.slice(at + range.text.length))) continue;
+    receipts.push({ low: range.low, high: range.high, text: sentence });
+  }
+  return receipts.length === 1 ? receipts[0] : undefined;
+}
+
+type LinkEffectFigures = { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+
+/** The written amounts of ONE sentence that are the stated `value` in `unit`: literal raw amounts, never a fraction fallback. */
+function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], value: number, unit: string): StatedAmount[] {
+  return amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), sentence)
+    && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+}
+
+/**
+ * ⭐ THE USER'S FIGURE INSIDE THE RANGE THEY WROTE, AS AN ANSWER (G1b answer door; construction's own reading,
+ * `centreRangeAt`: Science d5 #87 6009282279, a8's shape ruling). "The starter tier would win about 150 new subscribers,
+ * between 80 and 250" states ONE figure, 150, and the range around it. From a brief, construction binds it with the range
+ * (`natural_effect.stated_range`, `end: 'centre'`); as an ANSWER the door refused it as "a range" and asked "What single
+ * change … rather than a range?", the figure the user had just given (served g1-2633t d1 @c787820). Read only where
+ * construction reads it: the ONE written figure that IS the stated amount, the sentence's ONE "between a and b" written
+ * after it (`centreRangeAt`), and no other range shape left once that range is set aside ("about 150 or 200, between 80
+ * and 250" still asks). Its `at` is where the range text starts in the sentence. Pure.
+ */
+function centreRangeInSentence(sentence: string, effect: LinkEffectFigures): { readonly range: StatedRangeEnd; readonly at: number } | undefined {
+  const own = literalLinkAmounts(sentence, findLinkEffectAmounts(sentence), effect.amount, effect.amount_unit);
+  if (own.length !== 1) return undefined;
+  const after = own[0]!.index + own[0]!.matchedText.length;
+  const range = centreRangeAt(sentence, { end: after }, effect.amount, effect.amount_unit);
+  const at = range === undefined ? -1 : sentence.indexOf(range.text, after);
+  if (range === undefined || at < 0) return undefined;
+  const setAside = sentence.slice(0, at) + ' '.repeat(range.text.length) + sentence.slice(at + range.text.length);
+  return hasLinkEffectRange(setAside) ? undefined : { range, at };
+}
+
+/**
+ * The range the user wrote around their figure in the statement a link-effect card quotes (`centreRangeInSentence`, the
+ * door's own reading), for the writer to carry exactly as construction carries it; undefined when no sentence, or more
+ * than one, writes one.
+ */
+export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): StatedRangeEnd | undefined {
+  const found = sentencesOf(quote.trim()).flatMap(s => { const c = centreRangeInSentence(s, effect); return c === undefined ? [] : [c.range]; });
+  return found.length === 1 ? found[0] : undefined;
 }
 
 function linkEffectInOneSentence(
   q: string,
-  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  effect: LinkEffectFigures,
   ends: { readonly source: string; readonly target: string },
-  scope: { readonly quantities: readonly string[] },
+  scope: LinkEffectScope,
 ): LinkEffectStatementMiss | null {
-  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
-  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
-    unitPhraseFamily(effect.per_source_change_unit), q));
-  if (amountFigure === undefined || perFigure === undefined) return 'figures_not_in_statement';
-  const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
-  const quoteWords = wordsOf(q);
-  const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
-  const named = (end: string, other: string): boolean => wordsOf(end).some((w) => has(w)
-    && !wordsOf(other).some((o) => sameWord(w, o))
-    && !othersOf(end).filter((l) => l !== other).some((l) => wordsOf(l).some((x) => sameWord(x, w))
-      && wordsOf(l).some((x) => !wordsOf(end).some((e) => sameWord(e, x)) && has(x))));
-  if (!named(ends.source, ends.target) || !named(ends.target, ends.source)) return 'end_not_named';
-  const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
-  const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
-  const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
-  const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
-  const perAt = tokenAt(perFigure.index);
-  const amountAt = tokenAt(amountFigure.index);
-  // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
-  const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => tokens[i]!.at >= (f.index ?? 0)
-    && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
-  // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
-  const unbroken = (a: number, b: number): boolean => {
-    const [x, y] = a < b ? [a, b] : [b, a];
-    return !/[,;:()\u2013\u2014]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
-  };
-  const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
-    && Math.abs(a - b) <= reach && unbroken(a, b)
-    && tokens.slice(Math.min(a, b) + 1, Math.max(a, b)).every((t, k) => inFigure(Math.min(a, b) + 1 + k) || link(t.w));
-  const sourceLabel = wordsOf(ends.source);
-  // "£1 increase", "£10 rise", "£1 we add": right after the source's figure. "the price falls", "raise the price": beside
-  // a word naming the source. "add … to the Pro price": up to four words before it.
-  const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
-    || sourceAt.some((s) => (w === 'add' ? s > i && s - i <= 4 : Math.abs(s - i) <= 2));
-  let target = 0; let targetBoth = false; let source = 0; let sourceBoth = false;
-  const targetMoves: number[] = []; const sourceMoves: number[] = [];
-  const say = (end: 'target' | 'source', dir: 1 | -1, i: number): void => {
-    if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; targetMoves.push(i); } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; sourceMoves.push(i); }
-  };
-  tokens.forEach((t, i) => {
-    if (TARGET_DOWN.test(t.w)) say('target', -1, i);
-    else if (TARGET_UP.test(t.w)) say('target', 1, i);
-    else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
-    else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
-  });
-  if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
-  // Each figure SIZES its change: the amount joined to the target's movement, the source's figure to a source word.
-  const sourceLinkWord = (w: string): boolean => SOURCE_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
-    || sourceLabel.some((x) => sameWord(x, w));
-  if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
-    || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
-  // The source's figure is itself IN a change phrase (PR Review's fifth CR: "With Pro price £1, raising it" is today's
-  // price, then a rise of no stated size): distributive ("every £1"), its own move straight after ("£10 rise", "£1 price
-  // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
-  const isMove = (w: string): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w);
-  const isLabel = (w: string): boolean => sourceLabel.some((x) => sameWord(x, w));
-  const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt);
-  const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && CHANGE_NOUN.test(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
-    && tokens.slice(perAt + 1, perAt + d).every((t, k) => inFigure(perAt + 1 + k) || isLabel(t.w)));
-  const byAfterMove = perAt > 1 && tokens[perAt - 1]!.w === 'by' && tokens.slice(Math.max(0, perAt - 7), perAt - 1).some((t, k, xs) => {
-    const m = Math.max(0, perAt - 7) + k;
-    return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
-  });
-  if (!distributive && !moveAfter && !byAfterMove) return 'source_figure_not_a_change';
-  if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
-  if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
-    return source === 0 ? 'direction_not_stated' : 'direction_contradicts';
+  if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
+  if (negatedOutsideEnds(q, ends)) return 'denied';
+  const centre = hasLinkEffectRange(q) ? centreRangeInSentence(q, effect) : undefined;
+  if (hasLinkEffectRange(q) && centre === undefined) return 'unclear_figure';
+  const amounts = findLinkEffectAmounts(q);
+  // Link magnitudes are literal raw amounts, never the fraction fallback used for other node readers.
+  const literalAmount = (value: number, unit: string) => literalLinkAmounts(q, amounts, value, unit);
+  const amountFigures = literalAmount(effect.amount, effect.amount_unit);
+  const perFigures = literalAmount(effect.per_source_change, effect.per_source_change_unit);
+  const levels = linkEffectSourceLevels(q, namesSourceOf(ends));
+  const writtenChange = levels !== undefined && /^(?:percentage points?|pp|points?)$/i.test(effect.per_source_change_unit)
+    && Math.abs(levels.change) === Math.abs(effect.per_source_change);
+  const ownSource = scope.source_unitless === true && effect.per_source_change_unit !== 'switch'
+    ? labelHeadUnit(q, effect.per_source_change, ends.source, ends.target, true) : undefined;
+  // The dental target writes 1 too: it is not the source's numeral, and cannot suppress "each appointment".
+  const oneAt = ownSource?.implicit === true ? ownSource.amount.start
+    : perFigures.length === 0 && Math.abs(effect.per_source_change) === 1
+      ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
+  /**
+   * ⭐ A SWITCH'S EFFECT IS ITS TARGET FIGURE ALONE (Science 6008844683; construction's own reading of the same sentence,
+   * `statedSwitchEffectQuoteMatches`). Turning something on is never written per a source figure: "The starter tier would
+   * win about 150 new subscribers" sizes ‘Starter tier launched’ → ‘Starter subscribers’ at +150 per switch, and the door
+   * answered it "How much does … move …, in figures?". Only:
+   *  · the 'switch' unit at ±1, which the writer admits only for a source the SIZER types binary (`linkEffectEndUnits`:
+   *    `sourceUnitWords` says "switch" only at frame 1 with every level 0 or 1) — never the Agent's word on a continuous
+   *    source, and the door dry-runs that writer before any card;
+   *  · ONE figure written outside the user's own range, and it is the amount: "lift our win rate from 20% to about 30%"
+   *    writes two, and its change (10 points) is a level change's to read, never a 30-point switch effect;
+   *  · a figure written as money or a percentage only in a target unit of that kind: "costs about £6 a month" is never
+   *    6 subscribers, even on a link the user selected (a unit nobody classifies takes any kind elsewhere, `amountIs`).
+   */
+  const outsideRange = amounts.filter(a => centre === undefined || a.index < centre.at || a.index >= centre.at + centre.range.text.length);
+  const kindFits = (a: StatedAmount): boolean => (a.kind !== 'currency' || unitPhraseFamily(effect.amount_unit) === 'currency')
+    && (a.kind !== 'percent' || unitPhraseFamily(effect.amount_unit) === 'percent');
+  const switchOne = perFigures.length === 0 && effect.per_source_change_unit === 'switch' && Math.abs(effect.per_source_change) === 1
+    && amountFigures.length === 1 && outsideRange.length === 1 && outsideRange[0] === amountFigures[0] && kindFits(amountFigures[0]!);
+  const bothWritten = amountFigures.some(amount => writtenChange
+    ? amount.index < levels!.from_index || amount.index >= levels!.end_index
+    : oneAt >= 0 || switchOne || perFigures.some(per => per.index !== amount.index));
+  if (!bothWritten) return 'figures_not_in_statement';
+  // The target is checked even when the source change is distributive or written as levels (Codex r2 HIGH).
+  const notAChange = linkEffectFigureNotAChange(q, effect, ends, scope.target_units ?? []);
+  if (notAChange !== undefined) return notAChange.miss;
+  // A unitless target's proposed count unit must be this end's OWN noun beside the figure, never the other end or
+  // another quantity. This shares construction's located reader; established units still use their existing door.
+  if (scope.target_unitless === true && readUnitParts(effect.amount_unit)?.kind === 'count') {
+    const reading = labelHeadUnit(q, effect.amount, ends.target, ends.source);
+    if (reading === undefined || !sameUnit(reading.unit, effect.amount_unit)) return 'figure_of_another_quantity';
   }
-  return null;
+  if (scope.source_unitless === true && effect.per_source_change_unit !== 'switch'
+    && readUnitParts(effect.per_source_change_unit)?.kind === 'count') {
+    const reading = ownSource;
+    if (reading === undefined || !sameUnit(reading.unit, effect.per_source_change_unit)) return 'figure_counts_another_unit';
+  }
+  if (!CHANGE_STATED.test(q)) return 'no_change_stated';
+  if (scope.link_selected === true) return null;
+  const quoteWords = wordsOf(q);
+  const named = (end: string, other: string): boolean => {
+    const own = wordsOf(end).filter(w => !wordsOf(other).some(o => sameWord(w, o)));
+    if (own.length > 0) return own.some(w => quoteWords.some(t => sameWord(w, t)));
+    // Every word of this end is also the other end's ("no-shows" inside "No-show charge"; red-team F2, #87 6007779166):
+    // it is named only by its own WHOLE label outside every mention of the other end's label. The other's mentions are
+    // matched across any punctuation ("Revenue (tax)" is still "Revenue tax"); word forms are exact or plural, never a
+    // stem prefix ("shown" never names "Shows").
+    const outside = maskLabel(q, other, JOINED_BY_ANY_PUNCTUATION);
+    return wordsOf(end).length > 0 && maskLabel(outside, end, JOINED_BY_SPACE_OR_HYPHEN) !== outside;
+  };
+  return named(ends.source, ends.target) && named(ends.target, ends.source) ? null : 'end_not_named';
 }

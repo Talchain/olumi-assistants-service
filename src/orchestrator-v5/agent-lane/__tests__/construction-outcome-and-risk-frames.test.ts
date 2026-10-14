@@ -195,12 +195,25 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     expect(sent.length).toBeGreaterThanOrEqual(1);
     const items = (s: Record<string, unknown>, k: string) => ((s.properties as Record<string, { items: { required: string[] } }>)[k]!.items);
     for (const s of sent) for (const k of ['risks', 'outcomes']) expect(items(s, k).required).toEqual(['label', 'provenance', 'unit', 'plausible_max']);
-    // The link's `definitional` (DL 5916504679) is the other key optional in the contract and required when sent.
-    for (const s of sent) expect(items(s, 'links').required.at(-1)).toBe('definitional');
+    // The link's `definitional` (DL 5916504679) and `basis` (#2848, Science §(p)(1)) are the other keys optional in the
+    // contract and required when sent.
+    for (const s of sent) expect(items(s, 'links').required.slice(-2)).toEqual(['definitional', 'basis']);
     const contract = buildCandidateSchema();
     const back = structuredClone(sent[0]!);
     for (const k of ['risks', 'outcomes']) items(back, k).required = ['label', 'provenance'];
-    items(back, 'links').required = items(back, 'links').required.filter((k) => k !== 'definitional');
+    items(back, 'links').required = items(back, 'links').required.filter((k) => k !== 'definitional' && k !== 'basis');
+    // S-E GOALS S2b: the event-by-date keys are optional in the contract (recorded candidates predate them) and required
+    // when sent (strict output), exactly as `definitional` is.
+    const goal = (back.properties as Record<string, { required: string[] }>).goal!;
+    goal.required = goal.required.filter((k) => k !== 'kind' && k !== 'deliverable');
+    // Batch C: ruling 11 — the goal's `quantity_frame` and `basis` and each constraint's `role` are optional in the contract
+    // (recorded candidates predate them) and required when sent (strict output), exactly as `kind` / `deliverable` are.
+    goal.required = goal.required.filter((k) => k !== 'quantity_frame' && k !== 'basis');
+    items(back, 'constraints').required = items(back, 'constraints').required.filter((k) => k !== 'role');
+    items(back, 'options').required = items(back, 'options').required.filter((k) => k !== 'added_capacity');
+    // S4 time cut (Science §(ai) Q2): the accumulation `reading` (net|gross) is optional in the contract and required when
+    // sent (strict output), exactly as `added_capacity` is.
+    items(back, 'identities').required = items(back, 'identities').required.filter((k) => k !== 'reading');
     expect(JSON.stringify(back)).toBe(JSON.stringify(contract));
   });
 
@@ -214,7 +227,16 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     const b = await registered(nulls);
     expect((a.out as { ok?: boolean }).ok, JSON.stringify(a.out)).toBe(true);
     expect(a.graph).toEqual(b.graph);
-    expect(a.out).toEqual(b.out);
+    // A fresh durable question has its own row id and answer window on each build; its meaning is identical.
+    const stable = (out: unknown) => {
+      if (out === null || typeof out !== 'object' || Array.isArray(out)) return out;
+      const record = out as Record<string, unknown>;
+      const p = record.pending_action as Record<string, unknown> | undefined;
+      if (!p) return out;
+      const { id: _id, emitted_at_iso: _asked, expires_at_iso: _expiry, ...pending } = p;
+      return { ...record, pending_action: pending };
+    };
+    expect(stable(a.out)).toEqual(stable(b.out));
     const nodes = (a.graph as { nodes: Record<string, unknown>[] }).nodes.filter((n) => n.kind === 'risk' || n.kind === 'outcome');
     expect(nodes.length).toBeGreaterThanOrEqual(1);
     for (const n of nodes) expect(n.scale_frame, String(n.id)).toBeUndefined();

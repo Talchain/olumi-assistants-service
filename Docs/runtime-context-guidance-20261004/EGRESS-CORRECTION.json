@@ -1,0 +1,32 @@
+{
+  "at": "2026-10-04T16:02:16.615417+00:00",
+  "change": "test mock now supplies readable empty guidance history",
+  "production_changes": 0,
+  "fixture_changes": 0,
+  "red": {
+    "passed": 64,
+    "failed": 1
+  },
+  "green": {
+    "numPassedTests": 100,
+    "numFailedTests": 0,
+    "numPassedTestSuites": 10,
+    "files": 4
+  },
+  "checks": "single local test worker; production/fixtures untouched; unreadable-history control retained",
+  "automation": {
+    "id": "olumi-b3-delta-overnight-delivery",
+    "status": "ACTIVE",
+    "cadence_minutes": 5,
+    "reason": "Paul explicitly requested regular lead briefings and action after idle gap"
+  },
+  "accepted_instructions": {
+    "DL": 5981712798,
+    "PL": 5981741263
+  },
+  "pending": "current changed-risk review + CI; VERIFY-GUIDANCE result/cold reader evidence unclaimed; compatibility before other environment",
+  "pinned_pre_push": "typecheck/lint/11smoke files/other invoked checks PASS; state-write baseline RED unchanged",
+  "remaining_guards": "all four PASS",
+  "typecheck_ratchet": "PASS",
+  "production_fixture_guard_diff_vs_reviewed_head": "empty"
+}

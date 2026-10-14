@@ -1,0 +1,348 @@
+/**
+ * `_method_result` v:1 (accel P24 / SCI-10). The corpus is OUTSIDE this author's head:
+ *   - SCI-DEEP: the byte-for-byte witnessed T1b Run (`served-w3-f440be4a-t1b-7ab6c1af.json`), through the real comparer,
+ *     dispatch adapter and presentation licence (the construction `structural-challenge-goal-chance.test.ts` uses);
+ *   - SCI-CHANGE: R3's served D3 response and ISL #220's real D3 block (as `what-changes-turn.test.ts`).
+ * Rows are bound by IDENTITY (row ids, item refs, run stamps); every "absent" row has a present control.
+ */
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { StructuralChallengeResultV1Schema, type StructuralChallengeResultV1 } from '@talchain/schemas';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { compareStructuralChallenge, NOT_COMPARED } from '../../../coaching/structural-challenge-compare.js';
+import { claimPermissionsFrom } from '../../first-analysis.js';
+import type { StructuralChallengeFinalRead } from '../../../handlers/structural-challenge-dispatch.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/tools/analysis-ready-helper.js';
+import type { DecisionFlipDispatchResult, FlipLinkRef } from '../../../handlers/decision-flip-dispatch.js';
+import type { MethodReadback } from '../../method-turn/method-turn.js';
+import { composeStructuralChallengeReply, STRUCTURAL_CHALLENGE_LINES, structuralChallengePressId, structuralChallengeTurnFor, type StructuralChallengeTurn } from '../../method-turn/structural-challenge-turn.js';
+import { linkTippingPointRows, WHAT_CHANGES_PRESS_ID, whatChangesTurnFor } from '../../method-turn/what-changes-turn.js';
+import { changeRowsAgreeWithHero, methodResultForEgress, testLinkMethodResult, whatChangesMethodResult } from '../method-result.js';
+
+type Json = Record<string, any>;
+const CTX = { scenarioId: 'scn-p24', turnId: 'turn-p24' };
+const LEADS = /\blead(s|ing|er)?\b|\bwinner\b|\bbest\b|\brecommend|\bahead\b/i;
+
+// ── SCI-DEEP corpus: the served T1b Run ───────────────────────────────────────────────────────────────────────────────
+const WIRE = JSON.parse(readFileSync(new URL('../../__tests__/fixtures/served-w3-f440be4a-t1b-7ab6c1af.json', import.meta.url), 'utf8')) as Json;
+const BLOCK = WIRE.blocks.find((b: Json) => b.type === 'analysis_result') as Json;
+const KEEP = 'keep_pricing_as_it_is';
+const RAISE = 'raise_prices_by_10';
+const STARTER = 'launch_starter_tier';
+const GOAL = 'monthly_recurring_revenue';
+const L1 = { from_id: 'customers_lost_from_price_rise', to_id: GOAL };
+const LABELS = new Map<string, string>(BLOCK.enrichment.option_comparison.map((r: Json) => [r.option_id, r.option_label]));
+const IDENTITY = { scenario_id: 'y1-control', run_id: 'baseline-control', graph_hash_at_run: 'a'.repeat(16), computed_at: '2026-10-06T19:20:31.396Z' };
+const BASELINE = { scenario_id: IDENTITY.scenario_id, run_id: IDENTITY.run_id, graph_hash_at_run: IDENTITY.graph_hash_at_run, seed_used: '1', n_samples: 10_000, sent_digest: 'd'.repeat(64) };
+
+function fact(block: Json, candidate = false): HandlerFact {
+  return { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+    ...IDENTITY, ...(candidate ? { run_id: 'candidate-control', graph_hash_at_run: 'b'.repeat(16) } : {}),
+    summary: block.summary, leading_option_id: null,
+    enrichment: { ...block.enrichment, meta: { seed_used: '1', n_samples: 10_000 }, _meta: { builds: { plot: 'p1', isl: 'i1' } } },
+    ...(block.inference_warnings !== undefined ? { inference_warnings: block.inference_warnings } : {}),
+    goal_certainty: WIRE.goal_certainty,
+    input_snapshot: { snapshot_version: 1, sent_digest: BASELINE.sent_digest,
+      goal: { node_id: GOAL, target_raw: 126000, frame: 'level', unit: '£/month' },
+      options: block.enrichment.option_comparison.map((r: Json) => ({ option_id: r.option_id, settings: [] })),
+      options_not_sent: [], factors: [], links: [], constraints: [] },
+  } } as unknown as HandlerFact;
+}
+
+async function testLinkTurn(link = L1, status: StructuralChallengeResultV1['status'] = 'completed'): Promise<StructuralChallengeTurn> {
+  const baselineFact = fact(BLOCK);
+  const out = compareStructuralChallenge({ baselineFact, candidateFact: fact(BLOCK, true),
+    turnMayNameLeader: false, reachable: new Set([GOAL]), goalNodeId: GOAL, goalLevelTarget: null });
+  if (!out.ok) throw new Error(out.reason);
+  const completed = status === 'completed';
+  const result = StructuralChallengeResultV1Schema.parse({
+    method: 'full_recompute_unpaired_v1', perturbation_class: 'topology', attribution_case: 'C2_unpaired', retention: 'not_retained',
+    recompute_key: '0'.repeat(64), baseline: BASELINE,
+    alternative: { op: 'remove_link', ...link, origin: 'user_selected', sizing: 'unmarked' },
+    status, reason: completed ? null : 'run_not_current', pair_provenance: completed ? out.pair_provenance : null,
+    claims: completed ? out.claims : [], not_compared: completed ? [...NOT_COMPARED] : [],
+  });
+  const state = { run_state: { kind: 'complete_current' }, requires_rerun: false, leader_claim: { permitted: false, separation: 'near_tie' } };
+  const finalRead = { read: { analysis_state: state, analysis_result: { type: 'analysis_result' }, current_read: {
+    run_state: state.run_state, result: { type: 'analysis_result' }, figures: [],
+    computed_against_hash: IDENTITY.graph_hash_at_run, current_analysis_hash: IDENTITY.graph_hash_at_run,
+  } } as unknown as StructuralChallengeFinalRead['read'], currentness: {
+    readOk: true, fact: baselineFact,
+    permissions: claimPermissionsFrom(state, { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } }, { requested: true }),
+  } } satisfies StructuralChallengeFinalRead;
+  const turn = await structuralChallengeTurnFor(structuralChallengePressId(result.alternative), async () => ({
+    kind: 'result', result, labels: LABELS, certainty: out.certainty, finalRead, baselineRunIdentity: IDENTITY, candidateLeaderLicence: 'withheld',
+  }));
+  if (turn === null) throw new Error('missing turn');
+  return turn;
+}
+
+// ── SCI-CHANGE corpus: R3's served D3 + ISL's real D3 block ───────────────────────────────────────────────────────────
+const SERVED = JSON.parse(readFileSync(new URL('../../turn-context/__tests__/fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: { id: string; body: Json }[] };
+const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SILENT')!;
+const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
+const rbD3 = (): MethodReadback => ({ graph: D3.body.draft_graph, analysisState: D3.body.analysis_state, analysisResult: D3.body.analysis_result,
+  optionParticipation: D3.body.option_participation, analysisReady: buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) });
+const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_hash as string, computed_at: D3.body.analysis_state.run_state.computed_at as string };
+const measured = (links: FlipLinkRef[]): DecisionFlipDispatchResult => ({ status: 'measured', block: ISL_D3_BLOCK as never, links, run: D3_RUN });
+const whatChanges = () => whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbD3(), async (links) => measured(links.slice(0, 2)));
+
+// Producer control: real RC row composer + T1b's stored display licence, with matching scored-option identities.
+async function licensedTurn() {
+  const turn = (await whatChanges())!;
+  const rows = linkTippingPointRows([{ ...ISL_D3_BLOCK.links[0]!, ...L1, to_option_id: RAISE },
+    { ...ISL_D3_BLOCK.links[1]!, from_id: 'starter_tier_subscribers', to_id: GOAL }], {
+    node: { [L1.from_id]: 'Customers lost from price rise', [GOAL]: 'Monthly recurring revenue', starter_tier_subscribers: 'Starter tier subscribers' },
+    option: Object.fromEntries(LABELS), leaderId: STARTER,
+  });
+  return { ...turn, reply: rows.map((r) => r.text).join(' '),
+    measured: { ...turn.measured!, run: { graph_hash_at_run: IDENTITY.graph_hash_at_run, computed_at: IDENTITY.computed_at },
+      optionIds: [RAISE, STARTER, KEEP], leaderId: STARTER, rows } };
+}
+const S3 = JSON.parse(readFileSync(new URL('../../../context/__tests__/fixtures/served-target-fit-S3-E-20260929.json', import.meta.url), 'utf8')).S3 as Json;
+
+describe('"Test without this link": rows are the reply\'s allowlisted lines, bound to the tested link', () => {
+  it('completed on the served T1b Run: what was tested, each option\'s goal chance with its figures, not saved — in reply order', async () => {
+    const turn = await testLinkTurn();
+    const m = testLinkMethodResult(turn, CTX)!;
+    expect(m).toMatchObject({ v: 1, action_id: 'test_link', outcome: 'completed', scenario_id: 'scn-p24', turn_id: 'turn-p24',
+      run: { graph_hash_at_run: IDENTITY.graph_hash_at_run, run_id: IDENTITY.run_id } });
+    const ids = m.rows.map((r) => r.row_id);
+    expect(ids).toEqual(expect.arrayContaining(['tested', `goal:${RAISE}`, `goal:${STARTER}`, `goal:${KEEP}`, 'not_saved']));
+    // Every row is a line of the reply, in the reply's order; the goal rows carry the screen's display strings.
+    const at = m.rows.map((r) => turn.reply.indexOf(r.text));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(m.rows.find((r) => r.row_id === 'tested')!.text).toBe(STRUCTURAL_CHALLENGE_LINES.tested);
+    expect(m.rows.find((r) => r.row_id === `goal:${STARTER}`)!.figures).toEqual(['about 52%', 'about 52%']);
+    expect(m.rows.find((r) => r.row_id === `goal:${KEEP}`)!.figures).toEqual(['less than 1%', 'less than 1%']);
+    // Bound to L1 by id: the tested row names only the link; a goal row names its option and the link.
+    expect(m.rows.find((r) => r.row_id === 'tested')!.item_refs).toEqual([{ kind: 'link', ...L1 }]);
+    expect(m.rows.find((r) => r.row_id === `goal:${RAISE}`)!.item_refs).toEqual([{ kind: 'option', id: RAISE }, { kind: 'link', ...L1 }]);
+    // Never the headline, a lead line or the next step (ruling 2): the card is a subset of the chat, not the chat.
+    const headline = turn.reply.split('\n')[0]!;
+    for (const row of m.rows) {
+      expect(row.text).not.toBe(headline);
+      expect(row.text).not.toMatch(LEADS);
+      expect(row.text).not.toMatch(/^Next step/);
+      expect(row.provenance).toBe('server_built');
+    }
+    expect(methodResultForEgress(m, turn.reply)).toBe(m);
+  });
+
+  it('identity pair: the same test on L2 binds every link ref to L2 and none to L1 (and vice versa)', async () => {
+    const L2 = { from_id: 'price_rise', to_id: 'customers_lost_from_price_rise' };
+    const refsOf = (m: ReturnType<typeof testLinkMethodResult>) => m!.rows.flatMap((r) => r.item_refs.filter((ref) => ref.kind === 'link'));
+    const r1 = refsOf(testLinkMethodResult(await testLinkTurn(L1), CTX));
+    const r2 = refsOf(testLinkMethodResult(await testLinkTurn(L2), CTX));
+    expect(r1.length).toBeGreaterThan(0);
+    expect(r1.every((ref) => ref.kind === 'link' && ref.from_id === L1.from_id && ref.to_id === L1.to_id)).toBe(true);
+    expect(r2.every((ref) => ref.kind === 'link' && ref.from_id === L2.from_id && ref.to_id === L2.to_id)).toBe(true);
+  });
+
+  it('Codex r1: a row is a WHOLE reply line — its text inside another line is not that line (control: the whole line is)', async () => {
+    const turn = await testLinkTurn();
+    const starter = testLinkMethodResult(turn, CTX)!.rows.find((r) => r.row_id === `goal:${STARTER}`)!;
+    expect(turn.reply.split('\n')).toContain(`- ${starter.text}`);
+    const embedded = { ...turn, reply: turn.reply.replace(`- ${starter.text}`, `- Headline: ${starter.text} (aggregated)`) };
+    expect(embedded.reply).toContain(starter.text); // the substring is still there …
+    expect(testLinkMethodResult(embedded, CTX)!.rows.map((r) => r.row_id)).not.toContain(`goal:${STARTER}`); // … the row is not
+  });
+
+  it('Codex r1: two limits on one option are two rows with distinct ids, each bound to its option', async () => {
+    const turn = await testLinkTurn();
+    const result = turn.result!;
+    const limit = (constraint_id: string, baseline: number, alternative: number) => ({ kind: 'constraint_probability' as const,
+      option_id: STARTER, constraint_id, baseline, alternative, target: null, constraint_boundary: null,
+      noise_verdict: 'signal' as const, verdict: 'delta_only' as const, basis: 'no_licensed_boundary' as const, invariant_by_construction: false });
+    const two = StructuralChallengeResultV1Schema.parse({ ...result, claims: [...result.claims, limit(GOAL, 0.3, 0.6), limit(KEEP, 0.2, 0.7)] });
+    const reply = composeStructuralChallengeReply({ result: two, labels: turn.labels, certainty: turn.certainty });
+    const ids = testLinkMethodResult({ ...turn, result: two, reply }, CTX)!.rows.map((r) => r.row_id);
+    expect(ids).toEqual(expect.arrayContaining([`limit:${STARTER}:${GOAL}`, `limit:${STARTER}:${KEEP}`]));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('Codex r2: a separator inside an id cannot merge two limit rows (option "a:b" + limit "c" vs option "a" + limit "b:c")', async () => {
+    const turn = await testLinkTurn();
+    const result = turn.result!;
+    const limit = (option_id: string, constraint_id: string) => ({ kind: 'constraint_probability' as const,
+      option_id, constraint_id, baseline: 0.3, alternative: 0.6, target: null, constraint_boundary: null,
+      noise_verdict: 'signal' as const, verdict: 'delta_only' as const, basis: 'no_licensed_boundary' as const, invariant_by_construction: false });
+    const two = StructuralChallengeResultV1Schema.parse({ ...result, claims: [...result.claims, limit('a:b', 'c'), limit('a', 'b:c')] });
+    const reply = composeStructuralChallengeReply({ result: two, labels: turn.labels, certainty: turn.certainty });
+    const limits = testLinkMethodResult({ ...turn, result: two, reply }, CTX)!.rows.filter((r) => r.row_id.startsWith('limit:'));
+    expect(limits.map((r) => r.item_refs[0])).toEqual(expect.arrayContaining([{ kind: 'option', id: 'a:b' }, { kind: 'option', id: 'a' }]));
+    expect(new Set(limits.map((r) => r.row_id)).size).toBe(limits.length);
+    expect(limits.length).toBe(2);
+  });
+
+  it('long goal and limit identities are bounded and distinct; full option and link refs survive', async () => {
+    const turn = await testLinkTurn({ from_id: 'f'.repeat(100), to_id: 't'.repeat(100) });
+    const option = 'o'.repeat(150);
+    const result = StructuralChallengeResultV1Schema.parse({ ...turn.result!, claims: [
+      { ...turn.result!.claims.find((c) => c.kind === 'goal_probability')!, option_id: option },
+      ...['a', 'b'].map((letter) => ({ kind: 'constraint_probability', option_id: option, constraint_id: letter.repeat(100),
+        baseline: 0.3, alternative: 0.6, target: null, constraint_boundary: null,
+        noise_verdict: 'signal', verdict: 'delta_only', basis: 'no_licensed_boundary', invariant_by_construction: false })),
+    ] });
+    const reply = composeStructuralChallengeReply({ result, labels: turn.labels, certainty: turn.certainty });
+    const rows = testLinkMethodResult({ ...turn, result, reply }, CTX)!.rows.filter((r) => /^(goal|limit):/.test(r.row_id));
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((r) => r.row_id)).size).toBe(3);
+    for (const row of rows) {
+      expect(row.row_id.length).toBeLessThanOrEqual(200);
+      expect(row.row_id).toMatch(/^(goal|limit):[a-f0-9]{32}$/);
+      expect(row.item_refs).toEqual([{ kind: 'option', id: option }, { kind: 'link', from_id: 'f'.repeat(100), to_id: 't'.repeat(100) }]);
+    }
+  });
+
+  it('control pair: a stale test is a sidecar with no rows (completed has rows)', async () => {
+    const stale = testLinkMethodResult(await testLinkTurn(L1, 'stale'), CTX)!;
+    expect(stale).toMatchObject({ outcome: 'stale', rows: [] });
+    expect(testLinkMethodResult(await testLinkTurn(L1), CTX)!.rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('"What would change this?": RC\'s measured lines only, and only beside a hero that agrees (ruling 4)', () => {
+  it('Codex review P1 @9d7bd1ea: the licence must name exactly the scored options — an extra displayed option (higher or tied) withholds', () => {
+    const extra = (pct: number) => { const b = structuredClone(BLOCK); const lic = b.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+      lic.option_ids = [...lic.option_ids, 'extra_option']; lic.pct_by_option = { ...lic.pct_by_option, extra_option: pct };
+      if (lic.display_rounding_by_option) lic.display_rounding_by_option = { ...lic.display_rounding_by_option, extra_option: 'whole' }; return b; };
+    const options = [RAISE, STARTER, KEEP];
+    expect(changeRowsAgreeWithHero(extra(90), options, STARTER)).toBe(false); // higher: the hero's top is the extra option
+    expect(changeRowsAgreeWithHero(extra(52), options, STARTER)).toBe(false); // tied
+    expect(changeRowsAgreeWithHero(extra(10), options, STARTER)).toBe(false); // lower: still not the scored set, fail closed
+    expect(changeRowsAgreeWithHero(BLOCK, options, STARTER)).toBe(true); // control: exactly the scored options
+  });
+
+  it('Codex review P1 @a8117113: a superlative licence must NAME the run-share top as its leader; a similar hero names none', () => {
+    const options = [RAISE, STARTER, KEEP];
+    const withForm = (form: string, extra: Json = {}) => { const b = structuredClone(BLOCK); const lic = b.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'); delete lic.summary_withheld; Object.assign(lic, { form, ...extra }); return b; };
+    expect(changeRowsAgreeWithHero(withForm('highest', { leader_option_id: STARTER, next_option_id: RAISE }), options, STARTER)).toBe(true);
+    expect(changeRowsAgreeWithHero(withForm('highest', { leader_option_id: RAISE, next_option_id: STARTER }), options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(withForm('highest_all_likely_to_miss', { leader_option_id: RAISE, next_option_id: STARTER }), options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(withForm('similar'), options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(BLOCK, options, STARTER)).toBe(true); // control: the served 'each' record
+  });
+
+  it('valid T1b licence: producer ships the quoted row when its top equals the run-share top; the same licence with another top withholds', async () => {
+    const turn = await licensedTurn();
+    expect(turn.outcome).toBe('measured');
+    const m = whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: BLOCK })!;
+    expect(m).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'measured', run: { graph_hash_at_run: IDENTITY.graph_hash_at_run, computed_at: IDENTITY.computed_at } });
+    expect(m.rows.map((r) => r.row_id)).toEqual([`flip:${L1.from_id}->${L1.to_id}`]);
+    expect(m.rows[0]!.item_refs).toEqual([{ kind: 'link', ...L1 }, { kind: 'option', id: RAISE }]);
+    expect(turn.reply).toContain(m.rows[0]!.text);
+    expect(m.rows.some((r) => /would still be supported/.test(r.text))).toBe(false);
+    expect(turn.reply).toMatch(/would still be supported/);
+    expect(whatChangesMethodResult({ ...turn, measured: { ...turn.measured!, leaderId: RAISE } }, { ...CTX, run: null, analysisResult: BLOCK })).toMatchObject({ outcome: 'withheld', rows: [] });
+    expect(methodResultForEgress(m, turn.reply)).toBe(m);
+  });
+
+  it('ruling 4 on the served T1b Run (displayed points 46 / 52 / <1): the top is the run-share top → rows; another → none', () => {
+    const options = [RAISE, STARTER, KEEP];
+    expect(changeRowsAgreeWithHero(BLOCK, options, STARTER)).toBe(true);
+    expect(changeRowsAgreeWithHero(BLOCK, options, RAISE)).toBe(false);
+    // Withheld for one option or no licence: no rows.
+    const withheld = structuredClone(BLOCK);
+    const lic = withheld.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+    lic.withheld_option_ids = [KEEP];
+    delete lic.pct_by_option[KEEP];
+    expect(changeRowsAgreeWithHero(withheld, options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero({}, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
+    // A tie at the top and an option list without the top: none.
+    const tied = structuredClone(BLOCK);
+    tied.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').pct_by_option[RAISE] = 52;
+    expect(changeRowsAgreeWithHero(tied, options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(BLOCK, [RAISE, KEEP], STARTER)).toBe(false);
+  });
+
+  it('Codex r1: ruling 4 reads the options the Run scored — the excluded graph option (phased_gcp_migration) is not one', async () => {
+    const turn = (await whatChanges())!;
+    expect([...turn.measured!.optionIds].sort()).toEqual(['stay_on_aws', 'switch_to_gcp']);
+    expect(D3.body.draft_graph.nodes.some((n: Json) => n.id === 'phased_gcp_migration')).toBe(true); // control: it is in the graph
+    // Why it matters: on T1b, one unscored option would read withheld and drop every row.
+    expect(changeRowsAgreeWithHero(BLOCK, [RAISE, STARTER, KEEP, 'phased_gcp_migration'], STARTER)).toBe(false);
+  });
+
+  it('no licence always withholds: served D3 and a result with no goal figures', async () => {
+    const turn = (await whatChanges())!;
+    for (const analysisResult of [D3.body.analysis_result, {}]) {
+      expect(changeRowsAgreeWithHero(analysisResult, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
+      expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult })).toMatchObject({ outcome: 'withheld', rows: [] });
+    }
+  });
+
+  it('S3 limits-only goal_fit with no licence withholds under DL A', async () => {
+    expect(S3.decision_brief.analysis_summary.goal_fit).toBe(0.981);
+    const analysisResult = { enrichment: S3 };
+    expect(changeRowsAgreeWithHero(analysisResult, S3.option_comparison.map((r: Json) => r.option_id), 'switch_to_gcp')).toBe(false);
+    expect(whatChangesMethodResult((await whatChanges())!, { ...CTX, run: null, analysisResult })).toMatchObject({ outcome: 'withheld', rows: [] });
+  });
+
+  const invalidLicences: [string, (lic: Json) => void][] = [
+    ['missing message', (lic) => { delete lic.message; }],
+    ['invalid severity', (lic) => { lic.severity = 'warning'; }],
+    ['without target', (lic) => { delete lic.target; }],
+    ['invalid target comparator', (lic) => { lic.target.comparator = 'towards'; }],
+    ['nonfinite target', (lic) => { lic.target.value = NaN; }],
+    ['invalid form', (lic) => { lic.form = 'unknown'; }],
+    ['missing scored identity', (lic) => { lic.option_ids = [RAISE, STARTER]; }],
+    ['missing point', (lic) => { delete lic.pct_by_option[KEEP]; }],
+    ['nonfinite point', (lic) => { lic.pct_by_option[KEEP] = Infinity; }],
+    ['fractional point', (lic) => { lic.pct_by_option[KEEP] = 0.4; }],
+    ['out of range point', (lic) => { lic.pct_by_option[KEEP] = 101; }],
+    ['unknown point identity', (lic) => { lic.pct_by_option.unknown = 20; }],
+    ['duplicate option identity', (lic) => { lic.option_ids.push(KEEP); }],
+    ['withheld carrying a point', (lic) => { lic.withheld_option_ids = [KEEP]; }],
+  ];
+  it.each(invalidLicences)('malformed licence %s withholds (control: valid T1b ships)', async (_name, mutate) => {
+    const analysisResult = structuredClone(BLOCK);
+    mutate(analysisResult.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'));
+    const turn = await licensedTurn();
+    expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult })).toMatchObject({ outcome: 'withheld', rows: [] });
+    expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: BLOCK })!.rows).toHaveLength(1);
+  });
+
+  it('duplicate licences and mixed range/point records withhold', () => {
+    const duplicate = structuredClone(BLOCK);
+    duplicate.enrichment.inference_warnings.push(duplicate.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'));
+    expect(changeRowsAgreeWithHero(duplicate, [RAISE, STARTER, KEEP], STARTER)).toBe(false);
+    const mixed = structuredClone(BLOCK);
+    mixed.enrichment.inference_warnings.push({ code: 'GOAL_CHANCE_RANGE', range_by_option: { [KEEP]: { low_pct: 0, high_pct: 10 } } });
+    expect(changeRowsAgreeWithHero(mixed, [RAISE, STARTER, KEEP], STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero({ inference_warnings: [mixed.enrichment.inference_warnings.at(-1)] }, [RAISE, STARTER, KEEP], STARTER)).toBe(false);
+  });
+
+  it('100-char endpoint ids produce bounded, deterministic flip ids distinct for distinct links, preserving full refs', async () => {
+    const turn = await licensedTurn();
+    const links = [{ from_id: 'a'.repeat(100), to_id: 'b'.repeat(100) }, { from_id: 'a'.repeat(100), to_id: 'c'.repeat(100) }];
+    const input = { ...turn, measured: { ...turn.measured!, rows: links.map((link) => ({ ...turn.measured!.rows[0]!, link })) } };
+    const m = whatChangesMethodResult(input, { ...CTX, run: null, analysisResult: BLOCK })!;
+    expect(m.rows).toHaveLength(2);
+    expect(new Set(m.rows.map((r) => r.row_id)).size).toBe(2);
+    m.rows.forEach((r, i) => {
+      expect(r.row_id.length).toBeLessThanOrEqual(200);
+      expect(r.row_id).toMatch(/^flip:[a-f0-9]{32}$/);
+      expect(r.item_refs[0]).toEqual({ kind: 'link', ...links[i] });
+    });
+    expect(whatChangesMethodResult(input, { ...CTX, run: null, analysisResult: BLOCK })!.rows).toEqual(m.rows);
+  });
+
+  it('a hero that disagrees withholds every row (the chat reply is untouched)', async () => {
+    const turn = (await whatChanges())!;
+    const disagree = whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: BLOCK })!;
+    expect(disagree).toMatchObject({ outcome: 'withheld', rows: [] });
+  });
+});
+
+describe('egress: a sidecar is sent only with the words it carries', () => {
+  it('a row or figure the final reply does not contain sends nothing (control: the reply that contains them sends it)', async () => {
+    const turn = await testLinkTurn();
+    const m = testLinkMethodResult(turn, CTX)!;
+    expect(methodResultForEgress(m, turn.reply.replace('about 52%', 'about 53%'))).toBeNull();
+    expect(methodResultForEgress(m, turn.reply.replace(STRUCTURAL_CHALLENGE_LINES.not_saved, ''))).toBeNull();
+    expect(methodResultForEgress(m, turn.reply)).toBe(m);
+    expect(methodResultForEgress(null, turn.reply)).toBeNull();
+  });
+});

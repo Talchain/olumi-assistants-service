@@ -19,6 +19,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import {
   computeAnalysisAffectingGraphHash,
 } from '../../src/orchestrator-v5/context/graph-hash.js';
+import { stampRunAnalysisProjection } from '../../src/orchestrator-v5/context/analysis-projection-policy.js';
 import { deriveAnalysisFreshness } from '../../src/orchestrator-v5/context/freshness.js';
 import {
   attachComputedAt,
@@ -43,9 +44,9 @@ interface FactOpts {
 }
 
 function mkRunAnalysisFact(opts: FactOpts = {}): RunAnalysisHandlerFact {
-  const enrichment: Record<string, unknown> = {
+  const enrichment: Record<string, unknown> = stampRunAnalysisProjection({
     analysis_status: opts.status ?? 'computed',
-  };
+  });
   const result: RunAnalysisHandlerFact['result'] = {
     scenario_id: SCENARIO_ID,
     leading_option_id: 'opt_a',

@@ -1,0 +1,404 @@
+{
+ "source": "prod run fact run_analysis 7f45653b-5e94-45b0-b314-4473ac4f1762, scenario 6582edbc, 7 Oct 2026 08:43:37Z, CEE 7e3f8fb2 (forensics D-01/D-06; facts.json[0])",
+ "goal": {
+  "unit": "% likelihood of on-time launch",
+  "frame": "level",
+  "label": "meet our next feature-launch deadline",
+  "node_id": "meet_our_next_feature_launch_deadline"
+ },
+ "factors": [
+  {
+   "label": "meet our next feature-launch deadline",
+   "factor_id": "meet_our_next_feature_launch_deadline",
+   "authorship_digest": "c0dfd4adffca1e54f26099509ae3c1597f3cf076995372386570ece3eb9f474f"
+  },
+  {
+   "raw": 0,
+   "unit": "hires",
+   "label": "Tech Lead Hires",
+   "source": "cee_inference",
+   "encoded": 0,
+   "factor_id": "tech_lead_hires",
+   "authorship_digest": "14834320a8813e525d23f798c9d1d3ee26574ee9b0198e2754db76f7abcc96b3"
+  },
+  {
+   "raw": 0,
+   "unit": "hires",
+   "label": "Developer Hires",
+   "source": "cee_inference",
+   "encoded": 0,
+   "factor_id": "developer_hires",
+   "authorship_digest": "14834320a8813e525d23f798c9d1d3ee26574ee9b0198e2754db76f7abcc96b3"
+  },
+  {
+   "raw": 5,
+   "unit": "engineers",
+   "label": "Existing Engineering Team Size",
+   "source": "cee_inference",
+   "encoded": 0.16666666666666666,
+   "factor_id": "existing_engineering_team_size",
+   "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+  },
+  {
+   "raw": 4,
+   "unit": "weeks",
+   "label": "New-hire Onboarding Time",
+   "source": "cee_inference",
+   "encoded": 0.16666666666666666,
+   "factor_id": "new_hire_onboarding_time",
+   "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+  }
+ ],
+ "options": [
+  {
+   "label": "Hire a Tech Lead",
+   "settings": [
+    {
+     "raw": 0,
+     "unit": "hires",
+     "label": "Developer Hires",
+     "encoded": 0,
+     "factor_id": "developer_hires"
+    },
+    {
+     "raw": 1,
+     "unit": "hires",
+     "label": "Tech Lead Hires",
+     "encoded": 1,
+     "factor_id": "tech_lead_hires"
+    }
+   ],
+   "option_id": "hire_a_tech_lead"
+  },
+  {
+   "label": "Hire Two Developers",
+   "settings": [
+    {
+     "raw": 2,
+     "unit": "hires",
+     "label": "Developer Hires",
+     "encoded": 2,
+     "factor_id": "developer_hires"
+    },
+    {
+     "raw": 0,
+     "unit": "hires",
+     "label": "Tech Lead Hires",
+     "encoded": 0,
+     "factor_id": "tech_lead_hires"
+    }
+   ],
+   "option_id": "hire_two_developers"
+  },
+  {
+   "label": "Carry On as Now",
+   "settings": [
+    {
+     "raw": 0,
+     "held": true,
+     "label": "Developer Hires",
+     "encoded": 0,
+     "factor_id": "developer_hires"
+    },
+    {
+     "raw": 0,
+     "held": true,
+     "label": "Tech Lead Hires",
+     "encoded": 0,
+     "factor_id": "tech_lead_hires"
+    }
+   ],
+   "option_id": "carry_on_as_now",
+   "is_baseline": true
+  }
+ ],
+ "links": [
+  {
+   "to": "hire_a_tech_lead",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "decision_meet_our_next_feature_launch_deadline",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "hire_two_developers",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "decision_meet_our_next_feature_launch_deadline",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "carry_on_as_now",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "decision_meet_our_next_feature_launch_deadline",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_lead_hires",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "hire_a_tech_lead",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_hires",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "hire_a_tech_lead",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_lead_hires",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "hire_two_developers",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_hires",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "hire_two_developers",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_lead_hires",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "carry_on_as_now",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_hires",
+   "std": 0.01,
+   "band": "very_strong",
+   "from": "carry_on_as_now",
+   "mean": 1,
+   "sizing": "unmarked",
+   "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5",
+   "exists_probability": 1
+  },
+  {
+   "to": "feature_delivery_capacity",
+   "std": 0.15,
+   "band": "moderate",
+   "from": "tech_lead_hires",
+   "mean": 0.3,
+   "sizing": "olumi_estimate",
+   "authorship_digest": "55b1f5514739749f07000225e0bce714303536a203de0c994528aee4910fa563",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_delivery_capacity",
+   "std": 0.19999999999999998,
+   "band": "moderate",
+   "from": "developer_hires",
+   "mean": 0.39999999999999997,
+   "sizing": "olumi_estimate",
+   "authorship_digest": "3c3a2dbbf13bdf1626bfc5a01939862902cf7bf05b03da581c2588760998f7ae",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_delivery_capacity",
+   "std": 0.45,
+   "band": "very_strong",
+   "from": "existing_engineering_team_size",
+   "mean": 0.9,
+   "sizing": "olumi_estimate",
+   "authorship_digest": "83710d68c10921cf8b31a4fa2e328cffe23163a155319b5b15ed903fbfe83b74",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "new_hire_onboarding_disruption",
+   "std": 0.125,
+   "band": "strong",
+   "from": "tech_lead_hires",
+   "mean": 0.5,
+   "sizing": "unmarked",
+   "authorship_digest": "f0e4513c0cd96eb6e8214e90e7d6b25c1b0158842046edc555d7b451c735fc6a",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "new_hire_onboarding_disruption",
+   "std": 0.125,
+   "band": "strong",
+   "from": "developer_hires",
+   "mean": 0.5,
+   "sizing": "unmarked",
+   "authorship_digest": "f0e4513c0cd96eb6e8214e90e7d6b25c1b0158842046edc555d7b451c735fc6a",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "new_hire_onboarding_disruption",
+   "std": 0.125,
+   "band": "strong",
+   "from": "new_hire_onboarding_time",
+   "mean": 0.5,
+   "sizing": "unmarked",
+   "authorship_digest": "f0e4513c0cd96eb6e8214e90e7d6b25c1b0158842046edc555d7b451c735fc6a",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_delivery_capacity",
+   "std": 0.125,
+   "band": "strong",
+   "from": "new_hire_onboarding_disruption",
+   "mean": -0.5,
+   "sizing": "unmarked",
+   "authorship_digest": "f0e4513c0cd96eb6e8214e90e7d6b25c1b0158842046edc555d7b451c735fc6a",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "meet_our_next_feature_launch_deadline",
+   "std": 0.125,
+   "band": "strong",
+   "from": "feature_delivery_capacity",
+   "mean": 0.5,
+   "sizing": "unmarked",
+   "authorship_digest": "f0e4513c0cd96eb6e8214e90e7d6b25c1b0158842046edc555d7b451c735fc6a",
+   "exists_probability": 0.8
+  }
+ ],
+ "served_placeholder_warning": {
+  "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+  "links": [
+   {
+    "to": "meet_our_next_feature_launch_deadline",
+    "from": "feature_delivery_capacity"
+   },
+   {
+    "to": "feature_delivery_capacity",
+    "from": "new_hire_onboarding_disruption"
+   },
+   {
+    "to": "new_hire_onboarding_disruption",
+    "from": "tech_lead_hires"
+   },
+   {
+    "to": "new_hire_onboarding_disruption",
+    "from": "developer_hires"
+   }
+  ],
+  "message": "This comparison turns on the links from ‘Feature Delivery Capaci…’ to ‘meet our next feature-l…’, from ‘New-hire Onboarding Dis…’ to ‘Feature Delivery Capaci…’ and from ‘Tech Lead Hires’ to ‘New-hire Onboarding Dis…’ and 1 more, whose strengths nobody has set yet. To size them, I first need today’s level of ‘meet our next feature-l…’. What is it, in % likelihood of on-time launch?",
+  "node_ids": [
+   "tech_lead_hires",
+   "new_hire_onboarding_disruption",
+   "feature_delivery_capacity",
+   "meet_our_next_feature_launch_deadline",
+   "developer_hires"
+  ],
+  "severity": "warning",
+  "first_ask": {
+   "kind": "goal_level",
+   "node_id": "meet_our_next_feature_launch_deadline",
+   "question": "To size them, I first need today’s level of ‘meet our next feature-l…’. What is it, in % likelihood of on-time launch?"
+  },
+  "option_ids": [
+   "hire_a_tech_lead",
+   "hire_two_developers"
+  ],
+  "acceptable_links": [
+   {
+    "to": "new_hire_onboarding_disruption",
+    "from": "tech_lead_hires"
+   },
+   {
+    "to": "new_hire_onboarding_disruption",
+    "from": "developer_hires"
+   }
+  ],
+  "win_shares_withheld": true
+ },
+ "served_run3_option_comparison": {
+  "source": "prod run fact run_analysis 09:32:39Z (facts.json[4]) enrichment.option_comparison, verbatim",
+  "option_comparison": [
+   {
+    "id": "hire_a_tech_lead",
+    "label": "Hire a Tech Lead",
+    "status": "computed",
+    "outcome": {
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "option_id": "hire_a_tech_lead",
+    "option_label": "Hire a Tech Lead"
+   },
+   {
+    "id": "hire_two_developers",
+    "label": "Hire Two Developers",
+    "status": "computed",
+    "outcome": {
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "option_id": "hire_two_developers",
+    "option_label": "Hire Two Developers"
+   },
+   {
+    "id": "carry_on_as_now",
+    "label": "Carry On as Now",
+    "status": "computed",
+    "outcome": {
+     "p10": -0.01610598799835847,
+     "p50": 0.0126094022868537,
+     "p90": 0.12468596975841506,
+     "std": 0.06376041170873024,
+     "mean": 0.03811838839660155,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": -0.02965594437791569,
+     "cvar_10": -0.0345826918732144,
+     "expected_regret": 0.16474266222328682
+    },
+    "option_id": "carry_on_as_now",
+    "option_label": "Carry On as Now"
+   },
+   {
+    "id": "c3d38027",
+    "label": "Bring in a freelance resource if, within 2 months, we don't have our candidates identified",
+    "status": "computed",
+    "outcome": {
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "option_id": "c3d38027",
+    "option_label": "Bring in a freelance resource if, within 2 months, we don't have our candidates identified"
+   }
+  ]
+ }
+}

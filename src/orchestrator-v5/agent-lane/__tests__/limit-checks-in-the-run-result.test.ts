@@ -39,7 +39,7 @@ function world(verdicts: unknown | null = FX.limit_verdicts) {
 }
 
 /** R-c per option (AI Quality #72 5900908629): the C10 options whose own churn check is withheld, as the sentence names them. */
-const CHURN_WITHHELD = ' For ‘Features and Pro price’ and ‘Additional advertising’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).';
+const CHURN_WITHHELD = ' For ‘Features and Pro price’ and ‘Additional advertising’ it couldn’t be checked: those options move it through a link Olumi hasn’t sized in this limit’s units.';
 /** B6 (ii) as served: the two options that leave churn where it is carry Olumi's 3% as their P's whole basis. */
 const CHURN_B6 = ' For ‘Carry on as now’ and ‘Split £30,000 between feature development and advertising’ it isn’t shown: it starts from Olumi’s estimate of today’s ‘Monthly churn’.';
 /** C10 with churn's level owned as the row under test says it is, so the graph and the row agree. */
@@ -57,7 +57,7 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
   });
 
   it('⭐ B6 SUPERSEDES "CHECKED against Olumi’s estimates" (AIQ 5916187873): served C10 names each option resting on Olumi’s figure, never "cannot be checked"', async () => {
-    const r = await world().runAnalysis(ctx, { reason: 'Run it.' });
+    const r = await world().runAnalysis(ctx, { reason: 'Run it.', effects_timing: null });
     const checks = r.limit_checks as { limits: { limit: string; state: string; say: string }[]; note: string } | undefined;
     expect(checks, JSON.stringify(Object.keys(r))).toBeDefined();
     // Each row also carries MG's ask for that limit, verbatim (`limit-checks-carry-the-ask.test.ts` binds the join).
@@ -99,7 +99,7 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
   });
 
   it('CONTROL: no per-limit rows on the read → no limit_checks (nothing invented); a row whose limit has no label is left out', async () => {
-    const r = await world(null).runAnalysis(ctx, { reason: 'Run it.' });
+    const r = await world(null).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null });
     expect(r).not.toHaveProperty('limit_checks');
     expect(limitChecksForAgent(FX.graph, { per_limit: [{ constraint_id: 'unknown:limit', state: 'unscored' }], joint: { state: 'withheld' } })).toBeUndefined();
   });

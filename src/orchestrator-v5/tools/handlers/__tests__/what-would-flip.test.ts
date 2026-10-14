@@ -330,7 +330,7 @@ describe('what_would_flip — answer-carrying contract', () => {
     // runner-up's own share by its full sentence.
     expect(outcome.assistant_text).toContain('Hire Two Mid-Level');
     expect(outcome.assistant_text).toContain(
-      "'Hire Two Mid-Level' is the most likely contender to overtake it, with a probability of 27%",
+      "'Hire Two Mid-Level' was supported by the next most runs (27%)",
     );
     expect(outcome.assistant_text).not.toMatch(/percentage points?/i);
   });

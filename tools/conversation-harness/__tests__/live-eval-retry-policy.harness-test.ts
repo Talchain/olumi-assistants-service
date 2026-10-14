@@ -43,7 +43,8 @@ describe('live evaluator single-attempt retry policy', () => {
 
   it('pins one provider call site and both retry controls on Anthropic tool routing', () => {
     const text = source('../../../src/adapters/llm/anthropic.ts');
-    const clientFactory = between(text, 'function getClient(): Anthropic', 'const TIMEOUT_MS');
+    // #2541 changed the return type to { client: Anthropic; policyCallHandle }.
+    const clientFactory = between(text, 'function getClient(): { client: Anthropic', 'const TIMEOUT_MS');
     const toolRoute = between(
       text,
       'export async function chatWithToolsAnthropic',

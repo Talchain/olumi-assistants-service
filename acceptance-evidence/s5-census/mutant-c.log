@@ -1,0 +1,137 @@
+Load gate exit: 0
+{"load":18.68017578125,"threshold":25}
+node_modules/.bin/vitest run tests/contract/goal-record-census.guard.test.ts --config vitest.required.config.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ tests/contract/goal-record-census.guard.test.ts (3 tests | 2 failed) 12ms
+     × allows no new references and requires paid-down entries to shrink in the same PR 6ms
+     × contrast control: present token has at least five files; absent token has zero 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/contract/goal-record-census.guard.test.ts > S5 goal-record census ratchet > allows no new references and requires paid-down entries to shrink in the same PR
+AssertionError: expected 'new goal reference: goal_constraints …' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ new goal reference: goal_constraints in src/cee/unified-pipeline/index.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_constraints in src/cee/unified-pipeline/types.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_direction in src/orchestrator-v5/context/freshness.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_direction in src/orchestrator-v5/response-finaliser.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/admission/target-testability.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/accumulation-identity.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/admit-model.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/coach-route-v0_2.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/decision-input-ask.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/horizon-attestation.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/runtime/build-model.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/agent-lane/stated-by-user.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/goal-target/goal-chance-licence.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/goal-target/goal-chance-range-agent.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/graph-management/field-safety.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/orchestrator-v5/tools/handlers/run-analysis.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_horizon in src/schemas/value-warrant-guard.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/agent-lane/runtime/agent-tools.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/commit.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/compose/goal-scope-claim-input.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/persist-graph-write.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/routing/clarification-resume.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/session/pending-action.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/orchestrator-v5/system-events/identity-confirm-edit.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/routes/agent-v1-turn.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/routes/assist.v1.scenario-graph.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_scope in src/schemas/goal-scope.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/adapters/llm/draft-budget.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/adapters/llm/openai.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/context-integrity/not-modelled-manifest.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/context-integrity/structure-origin-answer.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/factor-extraction/goal-baseline-admissibility.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/graph-readiness/identity-frames.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/magnitude/frame-defaulted-links.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/magnitude/link-effect.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/cee/unified-pipeline/stages/repair/compound-goals.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/admission/analysis-admission.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/admit-constraint.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/break-even.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/current-level-answer.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/current-level-ask-carry.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/goal-certainty.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/goal-sense-reading.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/identity-proposal.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/label-head-unit.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/normalising-goal-frame.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/runtime/build-model.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/stated-by-user.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/stated-size-binding.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/unnamed-currency.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/agent-lane/unread-goal-product.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/coaching/coaching-lifecycle.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/coaching/coaching-state.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/coaching/constraint-gap-disclosure.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/coaching/decision-context.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/coaching/identity-not-evaluated-ask.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/coaching/structural-challenge-compare.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/compose/ui-directive.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/context/context-pack-schema.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/context/freshness.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/goal-target/goal-chance-range.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/goal-target/goal-kind.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/goal-target/goal-level-reading.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/goal-target/stated-goal-target.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/goal-target/team-share-write.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/handlers/structural-challenge-dispatch.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/routing/readiness-summary.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/system-events/link-effect-edit.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/system-events/link-effect-unit-reading.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/tools/handlers/adjust-edge-strength.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/tools/handlers/d1-shared/constraint-target-alternative.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/tools/handlers/level-limit-baseline.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/tools/handlers/run-analysis.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/tools/handlers/run-input-residual.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator-v5/tools/handlers/run-input-snapshot.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/orchestrator/context/placeholder-parts.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/routes/selected-run-figures.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold in src/utils/reduction-framing.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: goal_threshold_cap in src/orchestrator-v5/admission/target-testability.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: threshold_source in src/cee/decision-review/invoke.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: threshold_source in src/orchestrator-v5/coaching/decision-review-enricher.ts — read the goal through the one record (S5), or justify and regenerate
++ new goal reference: unit_reading in src/orchestrator-v5/system-events/dispatch.ts — read the goal through the one record (S5), or justify and regenerate
+
+ ❯ tests/contract/goal-record-census.guard.test.ts:14:62
+     12|
+     13|   it('allows no new references and requires paid-down entries to shrin…
+     14|     expect(baselineDifferences(census, baseline).join('\n')).toBe('');
+       |                                                              ^
+     15|   });
+     16|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/contract/goal-record-census.guard.test.ts > S5 goal-record census ratchet > contrast control: present token has at least five files; absent token has zero
+AssertionError: contrast control: goal_threshold_raw suffix is not the identifier: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ tests/contract/goal-record-census.guard.test.ts:35:126
+     33|     for (const token of ['goal_threshold_raw', ABSENT_CONTROL]) {
+     34|       expect(tokenPattern(token).test(`node.${token};`)).toBe(true);
+     35|       expect(tokenPattern(token).test(`node.${token}_extended;`), `con…
+       |                                                                                                                              ^
+     36|       expect(tokenPattern(token).test(`node.prefix_${token};`), `contr…
+     37|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  01:02:46
+   Duration  846ms (transform 109ms, setup 129ms, import 572ms, tests 12ms, environment 0ms)
+

@@ -35,6 +35,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { composeToolCallResponse } from '../compose.js';
+import { goalCoherenceAsk } from '../agent-lane/goal-coherence.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -46,6 +47,8 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { preserveSiblingQuantities } from '../agent-lane/level-batch-frame.js';
+import { recordFactorReview, SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../tools/handlers/set-factor-value.js';
 import { canonicaliseUnitForDisplay } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { checkPairCoherence, resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
 import {
@@ -101,6 +104,44 @@ const SCALE_CONSISTENCY_TOLERANCE = 1e-6;
 function sameStoredNumber(actual: unknown, expected: number): boolean {
   if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) return false;
   return Math.abs(actual - expected) <= 1e-12 * Math.max(1, Math.abs(actual), Math.abs(expected));
+}
+
+/**
+ * ⭐ SD-1 — THE ONE RULE FOR "this confirm ratifies the persisted figure" (DL 0df0e1 6 Oct, condition 1).
+ *
+ * The client states the figure it was SHOWN; each stated figure is compared with the persisted one IN ITS OWN SCALE by
+ * the one tolerance, `sameStoredNumber` (relative 1e-12, floored at 1: float noise only — £1 on £1,234,565,000 is a
+ * move, pinned below). Nothing is re-normalised: re-normalising resolved an equal-pair 3.2 % to 0.032 and refused it.
+ * Two forms, exactly the two DGAI's set builder emits (`buildFactorValueEditEvent` on the shown number):
+ *   · MODEL form (no `raw_value`): `value` IS the persisted `value`. No alias to the persisted raw — a bare value equal
+ *     to the stored RAW can be a different, moved model value (Codex #2617 r1: `{value:.1}` vs stored `{.2, raw .1}`).
+ *   · USER-UNIT form (`raw_value` stated): `raw_value` is the persisted raw (or `value` where none is stored), the
+ *     `unit` is the persisted unit (required when one is stored), and `value` is the persisted value or that same raw
+ *     figure (a capless factor's value carries the typed number through).
+ * A factor with no persisted finite `value` has nothing to ratify.
+ */
+function confirmMatchesPersisted(
+  event: { readonly value: number; readonly raw_value?: number; readonly unit?: string },
+  persisted: { value?: unknown; raw_value?: unknown; unit?: unknown } | undefined,
+): boolean {
+  if (typeof persisted?.value !== 'number' || !Number.isFinite(persisted.value)) return false;
+  const storedValue = persisted.value;
+  const storedRaw = typeof persisted.raw_value === 'number' ? persisted.raw_value : undefined;
+  // A BLANK unit is no unit, on either side: the schema admits `unit: ''` and DGAI's builder omits it (Codex #2617 r2).
+  const unitOf = (u: unknown): string | undefined => (typeof u === 'string' && u.trim() !== '' ? u : undefined);
+  const storedUnit = unitOf(persisted.unit);
+  const eventUnit = unitOf(event.unit);
+  const sameUnit = (a: string, b: string): boolean => canonicaliseUnitForDisplay(a) === canonicaliseUnitForDisplay(b);
+  if (event.raw_value === undefined) {
+    return sameStoredNumber(event.value, storedValue)
+      && (eventUnit === undefined || (storedUnit !== undefined && sameUnit(eventUnit, storedUnit)));
+  }
+  const rawAgrees = sameStoredNumber(event.raw_value, storedRaw ?? storedValue);
+  const valueAgrees = sameStoredNumber(event.value, storedValue) || sameStoredNumber(event.value, event.raw_value);
+  const unitAgrees = storedUnit === undefined
+    ? eventUnit === undefined
+    : eventUnit !== undefined && sameUnit(eventUnit, storedUnit);
+  return rawAgrees && valueAgrees && unitAgrees;
 }
 
 function scaleValuesAgree(actual: unknown, expected: number): boolean {
@@ -342,6 +383,58 @@ export async function applyFactorValueEdit(
     | undefined;
   const factorCap = typeof observed?.cap === 'number' ? observed.cap : undefined;
   const factorUnit = typeof observed?.unit === 'string' ? observed.unit : undefined;
+
+  // ⭐⭐ SD-1 (domain 2; DL 0df0e1 6 Oct; Codex buddy on DGAI #2543): A CONFIRM IS A REVIEW OF THE PERSISTED FIGURE,
+  // NEVER A SET. It used to be resolved exactly as a set and judged after the handler, whose review path needs STRICT
+  // equality — so a value-only factor, a capped float drift and an equal-pair percent became the user's own override or were
+  // refused. Now it is matched against the persisted figure by ONE rule (`confirmMatchesPersisted`) before anything is
+  // resolved, and the single writer records only the review (`recordFactorReview`). A panel apply cannot ride a
+  // confirm (its server-substituted number is a set by construction).
+  if ((event as { readonly intent?: unknown }).intent === 'confirm_current') {
+    // A review is of a FACTOR's figure (the single writer's own target rule, `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`):
+    // a goal or option node carrying an `observed_state` is never stamped by a confirm (Codex #2617 r1).
+    if (!SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS.includes(targetNode.kind)) {
+      return refuse(
+        payload,
+        'confirm_not_a_factor',
+        `I can only confirm a factor's value, so I haven't changed anything.`,
+      );
+    }
+    if (event.applied_from !== undefined || !confirmMatchesPersisted(event, observed)) {
+      return refuse(
+        payload,
+        'confirm_value_moved',
+        `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
+          `To change the figure, type the new value instead.`,
+      );
+    }
+    const review = recordFactorReview(persistedGraph, event.target_id, new Date().toISOString());
+    const reviewedGraph = mergeMutatedGraphForPersistence({
+      mutatedGraph: review.mutated_graph as Record<string, unknown>,
+      persistedBase: persistedGraph,
+      requestId,
+      scenarioId: payload.scenario_id,
+    });
+    const reviewedParse = GraphV3.safeParse(reviewedGraph);
+    if (!reviewedParse.success) {
+      return refuse(payload, 'merged_graph_invalid', `I couldn't save that change. I haven't changed anything.`);
+    }
+    return {
+      kind: 'mutated',
+      response: composeToolCallResponse({
+        answerKind: 'functional',
+        orientation: '',
+        confirmation: review.assistant_text,
+        coaching: null,
+        stage: payload.stage,
+        handlerFacts: review.handler_facts,
+      }),
+      mutatedGraph: reviewedGraph,
+      handlerFacts: review.handler_facts,
+      graph: reviewedParse.data,
+      baseGraph: persistedGraph,
+    };
+  }
 
   // ── the PANEL APPLY claim, verified before anything else is decided ──────
   //
@@ -771,12 +864,25 @@ export async function applyFactorValueEdit(
   // chokepoint does. The handler mutates the graph it was handed; this restores
   // any canonical top-level state (goal_node_id, options[]) that a projection
   // could have dropped. Skipping it is how a mutation silently strips the model.
-  const mergedGraph = mergeMutatedGraphForPersistence({
+  const mergedCandidate = mergeMutatedGraphForPersistence({
     mutatedGraph: outcome.mutated_graph as Record<string, unknown>,
     persistedBase: persistedGraph,
     requestId,
     scenarioId: payload.scenario_id,
   });
+
+  // Preserve on the full final candidate: GraphV3 drops options[] before the
+  // handler, and the D1 merge restores those cells from the trusted base.
+  // The shared owner must see them after that merge, before commit projection.
+  const preserved = preserveSiblingQuantities(persistedGraph, mergedCandidate, []);
+  if (preserved.kind === 'refused') {
+    const composed = composeRecoverableHandlerResponse(new HandlerInvocationFailedError(preserved.reason, {
+      cause_kind: 'graph_invariant_violated', retryable: false,
+      details: { handler_id: 'set_factor_value', reason: preserved.reason },
+    }), { ...(lookup !== undefined ? { graph: lookup } : {}), handlerRegistry: HANDLER_VALIDATION_REGISTRY }, payload.stage);
+    return { kind: 'refused', reason: preserved.reason, response: composed.response, pendingActions: [] };
+  }
+  const mergedGraph = preserved.graph;
 
   const mergedParse = GraphV3.safeParse(mergedGraph);
   if (!mergedParse.success) {
@@ -829,31 +935,11 @@ export async function applyFactorValueEdit(
     );
   }
 
-  // ⭐ A CONFIRM NEVER BECOMES A SET (Shared Data row 1 — Canonical #72 5881225605; AIQ 5881277231 / 5881405845). The
-  // value was resolved above EXACTLY as a set would resolve it, so capped, capless and percent confirms read one rule,
-  // against the PERSISTED node (`targetNode`, never a client copy — DL 5881485082). "The same" is near-exact (float noise
-  // only), never the scale-consistency tolerance: £1 on £1,234,565,000 is a move. A kept value was already written as
-  // review by the single writer (`unchangedValueIsReview`, above).
-  if ((event as { readonly intent?: unknown }).intent === 'confirm_current') {
-    const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown } | undefined;
-    const after = mergedParse.data.nodes.find((n) => n.id === event.target_id)?.observed_state as
-      | { value?: unknown; raw_value?: unknown }
-      | undefined;
-    const sameValue = typeof before?.value === 'number' && sameStoredNumber(after?.value, before.value)
-      && (typeof before.raw_value !== 'number' || sameStoredNumber(after?.raw_value, before.raw_value));
-    if (appliedProvenance !== undefined || !sameValue) {
-      return refuse(
-        payload,
-        'confirm_value_moved',
-        `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
-          `To change the figure, type the new value instead.`,
-      );
-    }
-  }
+  // A `confirm_current` never reaches here: it returned above as a review of the persisted figure (SD-1).
 
   // The SAME composer the NL lane uses — this is what maps the
   // `set_factor_value` fact to the boundary `graph_patch` block.
-  const response = composeToolCallResponse({
+  const composedResponse = composeToolCallResponse({
     answerKind: 'functional',
     orientation: '',
     confirmation: outcome.assistant_text,
@@ -861,6 +947,16 @@ export async function applyFactorValueEdit(
     stage: payload.stage,
     handlerFacts: outcome.handler_facts,
   });
+  // Asked only when the figure changed: the persisted figure before this edit (RC5, Science §(f): not re-asked for the same value).
+  const before = (persistedGraph as { nodes?: Array<{ id?: unknown; observed_state?: { raw_value?: unknown } }> } | null)?.nodes
+    ?.find((n) => n?.id === event.target_id)?.observed_state?.raw_value;
+  // The RAW merged graph: GraphV3's strict identity schema drops an identity carrying `addends` (buddy r1 P1).
+  const coherenceAsk = goalCoherenceAsk(mergedGraph, { nodeId: event.target_id, ...(typeof before === 'number' ? { previousRaw: before } : {}) });
+  const response: OlumiResponse = coherenceAsk === null ? composedResponse : {
+    ...composedResponse,
+    assistant_text: `${composedResponse.assistant_text}\n\n${coherenceAsk.text}`,
+    suggested_actions: [...composedResponse.suggested_actions, ...coherenceAsk.controls],
+  };
 
   return {
     kind: 'mutated',

@@ -35,7 +35,9 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 
 // Mock CEE V3 schema — CIL Phase 1: safeParse returns { success: true, data: input }
 // to simulate Zod strip behaviour (boundary now uses parseResult.data).
-vi.mock("../../src/schemas/cee-v3.js", () => ({
+vi.mock("../../src/schemas/cee-v3.js", async (importOriginal) => ({
+  // Partial mock: keep the real exports (e.g. EdgeV3) that other imported modules read at load time.
+  ...(await importOriginal<Record<string, unknown>>()),
   CEEGraphResponseV3: {
     safeParse: vi.fn((input: unknown) => ({ success: true, data: input })),
   },

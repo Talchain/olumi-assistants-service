@@ -75,7 +75,7 @@ export default async function route(app: FastifyInstance) {
   const ELICIT_BELIEF_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_ELICIT_BELIEF_RATE_LIMIT_RPM") ?? 60;
   const FEATURE_VERSION = "elicit-belief-1.0.0";
 
-  app.post("/assist/v1/elicit-belief", async (req, reply) => {
+  app.post("/assist/v1/elicit-belief", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

@@ -61,6 +61,7 @@ const SCENARIO_GUEST = "e0000000-0000-4000-8000-0000000000a2";
 const rows = new Map<string, string | null>();
 
 /** Records what the ownership oracle was actually asked, per request. */
+const ownerCalls: string[] = [];
 const ensureCalls: Array<{ scenarioId: string; userId: string | null }> = [];
 
 vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => {
@@ -71,6 +72,11 @@ vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => 
     ...original,
     getSessionStore: () =>
       createMockSessionStore({
+        readExistingScenario: async scenarioId => {
+          ownerCalls.push(scenarioId);
+          const owner = rows.get(scenarioId);
+          return owner === undefined ? null : { userId: owner, graph: null, briefText: null, analysisInvalidatedAt: null };
+        },
         append: async () => ({ id: "mock-row-id" }),
         ensureScenarioExists: async (
           scenarioId: string,
@@ -179,6 +185,7 @@ let app: FastifyInstance;
 
 beforeAll(async () => {
   app = await build();
+  app.addHook('onSend', async (req, reply, payload) => { reply.header('x-ownership-caller', req.scenarioAccess?.callerUserId ?? ''); return payload; });
   await app.ready();
 });
 
@@ -188,6 +195,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   ensureCalls.length = 0;
+  ownerCalls.length = 0;
   rows.clear();
   rows.set(SCENARIO_OWNED, OWNER);
   rows.set(SCENARIO_GUEST, null);
@@ -214,8 +222,10 @@ describe("/orchestrate/v2/turn — caller-asserted identity is inadmissible on a
     expect(refusalReason(res.payload)).toBe("scenario_requires_authenticated_owner");
 
     // The claim never reached the ownership decision.
-    expect(ensureCalls).toHaveLength(1);
-    expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_OWNED, userId: null });
+    expect(ownerCalls).toHaveLength(1);
+    expect(ensureCalls).toHaveLength(0);
+    expect(ownerCalls[0]).toBe(SCENARIO_OWNED);
+    expect(res.headers["x-ownership-caller"]).toBe('');
   });
 
   // ── CASE 2 — THE CONTROL MUST NOT BE FORGEABLE BY ONE HEADER ──────────────
@@ -244,7 +254,8 @@ describe("/orchestrate/v2/turn — caller-asserted identity is inadmissible on a
 
     expect(res.statusCode).toBe(422);
     expect(refusalReason(res.payload)).toBe("scenario_requires_authenticated_owner");
-    expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_OWNED, userId: null });
+    expect(ownerCalls[0]).toBe(SCENARIO_OWNED);
+    expect(res.headers["x-ownership-caller"]).toBe('');
   });
 
   // ── CASE 2b — A PRESENT-BUT-INVALID SIGNATURE MUST NOT ADMIT EITHER ───────
@@ -278,7 +289,8 @@ describe("/orchestrate/v2/turn — caller-asserted identity is inadmissible on a
 
     expect(res.statusCode).toBe(422);
     expect(refusalReason(res.payload)).toBe("scenario_requires_authenticated_owner");
-    expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_OWNED, userId: null });
+    expect(ownerCalls[0]).toBe(SCENARIO_OWNED);
+    expect(res.headers["x-ownership-caller"]).toBe('');
   });
 
   // ── CASE 3 — OVER-CORRECTION CONTROL: the documented carve-out SURVIVES ───
@@ -301,7 +313,8 @@ describe("/orchestrate/v2/turn — caller-asserted identity is inadmissible on a
     expect(refusalReason(res.payload)).toBeNull();
     expect(res.statusCode).not.toBe(422);
     // The claim WAS honoured — the oracle was asked about the owner.
-    expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_OWNED, userId: OWNER });
+    expect(ownerCalls[0]).toBe(SCENARIO_OWNED);
+    expect(res.headers["x-ownership-caller"]).toBe(OWNER);
   });
 
   // ── CASE 4 — OVER-CORRECTION CONTROL: guest scenarios are untouched ───────
@@ -317,7 +330,8 @@ describe("/orchestrate/v2/turn — caller-asserted identity is inadmissible on a
     });
 
     expect(refusalReason(res.payload)).toBeNull();
-    expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_GUEST, userId: null });
+    expect(ownerCalls[0]).toBe(SCENARIO_GUEST);
+    expect(res.headers["x-ownership-caller"]).toBe('');
   });
 
   // ── CASE 5 — the cross-tenant refusal is NOT the one doing the work ───────

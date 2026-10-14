@@ -116,8 +116,8 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
   };
   const os = (id: string) => (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === id)!.observed_state ?? {};
   const SALARIES = { assumptions: [
-    { factor_label: 'Senior engineer annual salary', value: 120000, unit: 'GBP/year per engineer', basis: 'as the user said', revise: true },
-    { factor_label: 'Junior engineer annual salary', value: 65000, unit: 'GBP/year per engineer', basis: 'as the user said', revise: true },
+    { user_stated: true, factor_label: 'Senior engineer annual salary', value: 120000, unit: 'GBP/year per engineer', basis: 'as the user said', revise: true },
+    { user_stated: true, factor_label: 'Junior engineer annual salary', value: 65000, unit: 'GBP/year per engineer', basis: 'as the user said', revise: true },
   ] };
 
   it('RED (served E1): ONE approval stores both salaries as the user\'s, and a later unrelated commit keeps that on re-read', async () => {
@@ -134,7 +134,7 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     expect(os('senior_engineer_annual_salary').raw_value ?? os('senior_engineer_annual_salary').value).toBe(120000);
     // A later, unrelated commit (Olumi's figure on another factor), then a fresh read: the user's source survives.
     const b = agent('What would you assume for annual salary spend?');
-    const q = await b.caps.proposeAssumptions(b.ctx, { assumptions: [{ factor_label: 'Annual salary spend', value: 250000, unit: 'GBP/year', basis: 'two seniors', revise: true }] } as never);
+    const q = await b.caps.proposeAssumptions(b.ctx, { assumptions: [{ user_stated: false, factor_label: 'Annual salary spend', value: 250000, unit: 'GBP/year', basis: 'two seniors', revise: true }] } as never);
     expect(q.ok, JSON.stringify(q)).toBe(true);
     const out2 = await b.caps.authoriseChange(b.ctx, { proposal_id: String(q.proposal_id) });
     expect(out2.ok, JSON.stringify(out2)).toBe(true);

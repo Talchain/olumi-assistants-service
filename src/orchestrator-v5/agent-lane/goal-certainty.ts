@@ -1,3 +1,7 @@
+import { draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
+import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
+import { NOT_SIZED } from './reply/words.js';
+import { compactWordLabel } from './reply/labels.js';
 /**
  * ⭐ IS A GOAL CERTAINTY EARNED? — ONE typed decision the reply and every goal-probability display read (AI Quality
  * 5882366427 + R3 5882389030, ACKed 5882498938; the DL assigns the producer to MG, 5882387398).
@@ -21,9 +25,21 @@
  * into the goal hides every unsized path into it, so a certainty through it is unearned and has no figure (fail closed).
  * No engine run and no new carrier: everything is on CEE's own graph and the run's per-option P(goal). Pure.
  */
-import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
+export { reachedGoalPaths } from '../admission/target-testability.js';
+import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { sayFigure } from './say-figure.js';
+import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
+import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
+import { readUnitParts, sameUnit } from './same-unit.js';
+import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
+import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
+import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
+import { sayDate } from '../goal-target/deadline-date.js';
+import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
 
@@ -72,8 +88,8 @@ export type NoBreakEven =
   | 'not_an_identity' | 'identity_not_evaluated' | 'level_from_inputs' | 'addends' | 'extra_goal_parent'
   | 'operand_not_parent' | 'no_exact_figure';
 
-const userOwns = (source: unknown): boolean =>
-  typeof source === 'string' && (source === 'brief_extraction' || source.startsWith('user'));
+/** The user's own level, by the ONE provenance authority (`isUsersLevelOrApproved`): theirs, or Olumi's they approved. */
+const userOwns = (observed: unknown): boolean => isUsersLevelOrApproved(observed);
 
 /** +1 / −1 when the goal is held above / below its target; 0 when the comparator is not stated. */
 function goodSign(direction: unknown): number {
@@ -87,9 +103,9 @@ function linkSign(e: Rec): number {
   return mean === undefined || mean === 0 ? 0 : Math.sign(mean);
 }
 
-const levelOf = (n: Rec | undefined): { value?: number; raw?: number; source?: unknown; unit?: string } => {
+const levelOf = (n: Rec | undefined): { value?: number; raw?: number; observed?: unknown; unit?: string } => {
   const os = isRec(n?.observed_state) ? n!.observed_state : {};
-  return { value: num(os.value), raw: num(os.raw_value), source: os.source, unit: text(os.unit) };
+  return { value: num(os.value), raw: num(os.raw_value), observed: os, unit: text(os.unit) };
 };
 
 const interventionLevel = (v: unknown): { value?: number; raw?: number } =>
@@ -119,7 +135,8 @@ export function goalCertaintyDecisions(
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
   const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string')
+    // Retain metadata only from an attestation of THIS declaration, including accumulation's month/input order.
+    .filter((e) => typeof e.node_id === 'string' && evaluatedIdentityCarriers(nodes, [e]).has(e.node_id))
     .map((e) => [e.node_id as string, e] as const));
   const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
   const declared = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -141,11 +158,15 @@ export function goalCertaintyDecisions(
           : unlinkedOperand !== undefined ? 'operand_not_parent'
             : extraParent !== undefined ? 'extra_goal_parent'
               : undefined;
-  const sized = sizedLinkTest(nodes);
+  // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), edges);
+  // ⭐ T1b (Science d5, 6 Oct; Codex r1 on #2648): the user's sizes on both sides of a level-less mediator size that path
+  // here too, by the ONE reader P5 uses, so a certainty through it is never called "isn't sized".
+  const userChain = userSizedLevelLessLinks(graph);
   const exact = (e: Rec): boolean => {
     const to = byId.get(e.to);
     const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
-    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e);
+    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e) || userChain.has(`${String(e.from)}→${String(e.to)}`);
   };
   const good = goodSign(goal.goal_direction);
   const out: GoalCertaintyDecision[] = [];
@@ -158,6 +179,11 @@ export function goalCertaintyDecisions(
     // is an interior result and gets no decision.
     const certainty: 0 | 1 | undefined = p === 1 ? 1 : p === 0 ? 0 : undefined;
     if (certainty === undefined) continue;
+    // ⛔ ZERO SPREAD IS NOT A CHANCE (Science §(ab)(2); DL hold on #2858): every draw gave the same result, so the 0 or 1
+    // says only what happens if today's figures hold. B1's Keep £49 read exactly 100% at month 12 with the user's rates
+    // held fixed, and was "earned" here because Keep moves nothing. No decision ⇒ unearned everywhere (the licence
+    // withholds its %, the transport strips the exact figure, the Agent says it cannot be confirmed).
+    if (zeroSpread(r)) continue;
     const option = byId.get(optionId);
     const iv = option !== undefined ? mergeInterventionSourceObjects(option) : {};
     // The goal would move AWAY from its target (P = 1) or TOWARDS it (P = 0) to reverse the certainty.
@@ -240,6 +266,8 @@ function breakEvenOf(
   through: string,
 ): GoalCertaintyDecision['break_even'] {
   const op = identity?.operation;
+  // Accumulation is excluded from break-even: neither a product ratio nor a sum delta models its horizon.
+  if (op === 'accumulation') return undefined;
   if ((op !== 'product' && op !== 'sum') || !operands.has(through) || through in iv) return undefined;
   const today = levelOf(goal).raw;
   const threshold = num(goal.goal_threshold_raw);
@@ -256,7 +284,7 @@ function breakEvenOf(
   if (projected === 0) return undefined;
   const fraction = Math.abs(threshold / projected - 1);
   const operand = levelOf(byId.get(through));
-  const count = operand.raw !== undefined && userOwns(operand.source) ? Math.round(fraction * operand.raw) : undefined;
+  const count = operand.raw !== undefined && userOwns(operand.observed) ? Math.round(fraction * operand.raw) : undefined;
   return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
 }
 
@@ -277,6 +305,24 @@ function sayMismatch(
       + `‘${label(goal.id)}’, so it can’t follow what ‘${label(found.from)}’ does through it.`
     : `${head}the model links ‘${label(found.through)}’ into ‘${label(goal.id)}’ beside the parts it is worked out from, so it `
       + `can’t check what ‘${label(found.from)}’ does to it.`;
+}
+
+/**
+ * Every valid draw gave this option the same goal value. Served Runs since 6 Oct carry the zero as floating-point noise
+ * (std 1.1e-16 … 3.3e-10 with p10 === p90; census over 17,927 stored Runs, 8 Oct), so identical deciles decide first and
+ * a std counts as zero within a relative tolerance far below any real spread (the smallest real one in that census:
+ * B1 £59, std 0.0045 on a 0–1 frame).
+ */
+const ZERO_SPREAD_RELATIVE = 1e-9;
+export function zeroSpread(r: Rec): boolean {
+  const o = isRec(r.outcome) ? r.outcome : undefined;
+  if (o === undefined) return false;
+  const p10 = num(o.p10);
+  const p90 = num(o.p90);
+  if (p10 !== undefined && p90 !== undefined && p10 === p90) return true;
+  const std = num(o.std);
+  const scale = Math.max(Math.abs(num(o.p50) ?? num(o.mean) ?? 0), 1);
+  return std !== undefined && std >= 0 && std <= ZERO_SPREAD_RELATIVE * scale;
 }
 
 /**
@@ -329,14 +375,73 @@ function sayUnearned(
   return `${holds} ${outcome} ${change} ${verb} more than about ${pct}% of ${part}${count}. ${unsized}`;
 }
 
-/** The sizer's mark for a link it could not size (the magnitude contract). */
-const PLACEHOLDER_MAGNITUDE = 'olumi_placeholder';
 
 /** One option whose goal figures move with a link nobody sized, and every such link on its paths into the goal. */
 export interface PlaceholderGoalPath {
   readonly option_id: string;
   /** The unsized links (`from` → `to`), in walk order, deduplicated. Never empty. */
   readonly links: ReadonlyArray<{ readonly from: string; readonly to: string }>;
+}
+
+/**
+ * R4 leader licence: nobody sized a causal link on a compared option's goal path. Independent of the target and
+ * stricter than the legacy placeholder-only coaching reader below. A user size wins over stale stamps; definition
+ * and confirmed identity operands are exact. Examples and Olumi's actual estimates keep their existing disclosures.
+ */
+/** Actual moved factors, using the legacy placeholder reader's held/raw scale rule. Unknown moves fail closed. */
+function actualMoveSeeds(graph: unknown, optionIds: readonly string[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): Map<string, string[]> {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  return new Map(optionIds.map(optionId => {
+    const option = byId.get(optionId);
+    const iv = scoredInterventions?.get(optionId) ?? (option === undefined ? undefined : mergeInterventionSourceObjects(option));
+    const moved = Object.entries(iv ?? {}).flatMap(([factorId, set]) => {
+      if (!byId.has(factorId)) return [];
+      const held = levelOf(byId.get(factorId));
+      const to = interventionLevel(set);
+      const same = (a: number | undefined, b: number | undefined): boolean => a !== undefined && b !== undefined && a === b;
+      return same(to.value, held.value) || same(to.raw, held.raw) || same(to.value, held.raw) ? [] : [factorId];
+    });
+    return [optionId, moved];
+  }));
+}
+
+/**
+ * Delegates the leader licence's "nobody sized it" reading to the ONE predicate, `isPlaceholderLink` in link-sizing.ts.
+ * The no-dead-end reader asks this wrapper, never the provenance field.
+ */
+export function licenceUnsizedLink(edge: unknown): boolean {
+  return isPlaceholderLink(edge);
+}
+
+export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): PlaceholderGoalPath[] {
+  const seeds = actualMoveSeeds(graph, optionIds, scoredInterventions);
+  const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations);
+  return paths.flatMap(path => {
+    const links = path.links.filter(e => !exactLinks.has(e) && isPlaceholderLink(e))
+      .flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
+    return links.length > 0 ? [{ option_id: path.option_id, links }] : [];
+  });
+}
+
+/** R8 legacy disclosure uses the same actual-move licence walk; defaulted alone never withholds. */
+export function legacyLeaderGoalLinks(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): Array<{ from: string; to: string }> {
+  const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, actualMoveSeeds(graph, optionIds, scoredInterventions), identityEvaluations);
+  return goalOrderedLinks(graph, paths.flatMap(path => path.links.filter(e => {
+    const p = isRec(e.provenance) ? e.provenance : undefined;
+    return !exactLinks.has(e) && linkSizing(e) === 'unmarked'
+      && p?.magnitude === undefined && e.defaulted === true;
+  }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : [])));
+}
+
+export function legacyGoalWarning(graph: unknown, links: Array<{ from: string; to: string }>): {
+  code: 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK'; message: string; severity: 'info'; node_ids: string[]; links: Array<{ from: string; to: string }>;
+} {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const label = (id: string): string => text(nodes.find(n => n.id === id)?.label) ?? id;
+  return { code: 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK', severity: 'info',
+    message: legacyLinkSentence(links.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) }))),
+    node_ids: links[0] === undefined ? [] : [links[0].from, links[0].to], links };
 }
 
 /**
@@ -369,8 +474,7 @@ export function placeholderGoalPaths(
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
-  const evaluated = new Set((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string').map((e) => e.node_id as string));
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
   // ⛔ THE CARD IS THE ONE ROUTE (AIQ 5902606752): a goal that declares an INFERRED product this run did not evaluate is
   // Olumi's unconfirmed reading of how the goal is made. PLoT never forwards it (variant (d), `translator-v3.ts`) and
   // withholds every goal figure itself (#416, which (S) defers to), and C46 names the leader's cause. (S) stands down, so
@@ -378,8 +482,8 @@ export function placeholderGoalPaths(
   const goalIdentity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   if (goalIdentity !== undefined && goalIdentity.stated_in_brief === false && goalIdentity.operation === 'product' && !evaluated.has(goal.id)) return [];
   const placeholder = (e: Rec): boolean => {
-    const p = isRec(e.provenance) ? e.provenance : undefined;
-    if (p?.magnitude !== PLACEHOLDER_MAGNITUDE || p.source === 'user_specified') return false;
+    // ONE predicate (L4, `link-sizing.ts`): an accepted Olumi estimate sizes a link for goal figures (DL 5929790081 (i)).
+    if (!isPlaceholderLink(e)) return false;
     const to = byId.get(e.to);
     const id = isRec(to?.nonlinear_identity) && evaluated.has(String(to!.id)) ? to!.nonlinear_identity : undefined;
     return !(Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from));
@@ -399,19 +503,7 @@ export function placeholderGoalPaths(
   }
   const out: PlaceholderGoalPath[] = [];
   for (const optionId of optionIds) {
-    const option = byId.get(optionId);
-    const iv = scoredInterventions?.get(optionId) ?? (option !== undefined ? mergeInterventionSourceObjects(option) : undefined);
-    if (iv === undefined) continue;
-    // A factor set at the level it holds moves nothing; an unknown move is read as a move (fail closed). The wire carries
-    // a level in the node's model scale or in the user's units (the egress denormalises capped factors: the scaffolded
-    // status quo "Keep £49" arrives as 49 beside a held 0.245), so it is the held level in EITHER scale.
-    const moved = Object.entries(iv).flatMap(([factorId, set]) => {
-      if (!byId.has(factorId) || !reachesGoal.has(factorId)) return [];
-      const held = levelOf(byId.get(factorId));
-      const to = interventionLevel(set);
-      const same = (a: number | undefined, b: number | undefined): boolean => a !== undefined && b !== undefined && a === b;
-      return same(to.value, held.value) || same(to.raw, held.raw) || same(to.value, held.raw) ? [] : [factorId];
-    });
+    const moved = (actualMoveSeeds(graph, [optionId], scoredInterventions).get(optionId) ?? []).filter(id => reachesGoal.has(id));
     const links: { from: string; to: string }[] = [];
     const seen = new Set<unknown>(moved);
     const queue: unknown[] = [...moved];
@@ -428,9 +520,16 @@ export function placeholderGoalPaths(
   return out;
 }
 
+/** What a placeholder withhold asks FIRST (D3, 6 Oct): the goal's level, one gauge question, or one link. */
+export type PlaceholderFirstAsk =
+  | { readonly kind: 'goal_level'; readonly node_id: string; readonly question?: string }
+  | { readonly kind: 'gauge'; readonly from: string; readonly through: string; readonly to: string }
+  | { readonly kind: 'link'; readonly from: string; readonly to: string };
+
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
- * UI's "Not shown." register (≤ 400 characters). The ask names the links to size: the writer is `propose_link_effect`
+ * UI's "Not shown." register (400-character explanation budget; complete question labels take precedence).
+ * The ask names the links to size: the writer is `propose_link_effect`
  * (AIQ 5902548598). A placeholder INTO an identity the goal declares but this run did not evaluate is sized by the
  * user's Yes on the confirm card, so it gets no link-size ask of its own: one route, not two (AIQ 5902606752).
  */
@@ -438,11 +537,12 @@ export function placeholderGoalWarning(
   graph: unknown,
   paths: readonly PlaceholderGoalPath[],
   code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[] } {
+  productBlocks = false,
+  /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
+  opts: { readonly gaugeAsk?: true } = {},
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }>; first_ask?: PlaceholderFirstAsk } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const label = (id: unknown): string => `‘${text(byId.get(id)?.label) ?? String(id)}’`;
-  const list = (xs: readonly string[]): string => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
   const cardSized = (l: { from: string; to: string }): boolean => {
     const id = byId.get(l.to)?.nonlinear_identity;
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
@@ -461,34 +561,237 @@ export function placeholderGoalWarning(
   // Only a link INTO the goal (AIQ 5903874730; P0 PARTNER 5903857287): a placeholder out of limit-watched churn into
   // subscribers is a real mechanism whose size is unknown, so it is asked for as before; downtime → spend is the guess.
   const guessedLink = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
-  const guessed = named.filter(guessedLink);
-  const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined);
-  const byTarget = new Map<string, string[]>();
-  for (const l of named) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
-  const phrases = [...byTarget].slice(0, 2).map(([to, froms]) =>
-    `${list(froms.slice(0, 3).map(label))}${froms.length > 3 ? ' and others' : ''} ${froms.length === 1 ? 'moves' : 'move'} ${label(to)}`);
-  const options = paths.map((p) => label(p.option_id));
-  const opts = options.length > 3 ? `${list(options.slice(0, 2))} and ${options.length - 2} more options` : list(options);
-  const verb = options.length === 1 ? 'is' : 'are';
-  const sized = phrases.length === 0 ? '' : `Olumi hasn’t sized how ${phrases.join(', or how ')}${byTarget.size > 2 ? ', and more' : ''}, so t`;
-  const ask = asked.length === 0 ? ''
-    : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
-  const guess = guessed.length === 0 ? ''
-    : ` Olumi only guessed that ${list(guessed.slice(0, 2).map((l) => `${label(l.from)} changes ${label(l.to)}`))}, so you aren’t asked `
-      + `to size ${guessed.length === 1 ? 'that link' : 'those links'}.`;
-  const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}${guess}`;
-  const compactLabel = (id: string): string => {
-    const value = text(byId.get(id)?.label) ?? id;
-    return `‘${value.length <= 48 ? value : `${value.slice(0, 47).trimEnd()}…`}’`;
-  };
-  const fallbackAsk = asked.length === 0 ? ''
-    : ` Give a figure for how ${compactLabel(asked[0]!.from)} moves ${compactLabel(asked[0]!.to)} and Olumi will use it.`;
-  const fallbackGuess = guessed.length === 0 ? '' : ' Olumi only guessed another link; you aren’t asked to size it.';
+  const ordered = goalOrderedLinks(graph, links);
+  const labelOf = (id: string): string => text(byId.get(id)?.label) ?? id;
+  // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
+  // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
+  // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
+  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
+  // S-E GOALS §2: no link into a chance goal is offered or asked (its sentence above asks nothing).
+  const chanceGoal = nodes.some((n) => n.kind === 'goal' && goalKindOf(n) === 'chance_of_event');
+  const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
+    && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
+  // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
+  const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
+  const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
+  const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
+    : noDeadEnd?.first ?? (firstLink !== undefined ? { kind: 'link', from: firstLink.from, to: firstLink.to } : undefined);
   return {
-    code, message: message.length <= 400 ? message
-      : `Not shown. This run can’t say how likely these options are to reach the goal: a link on the way is not sized.${fallbackAsk}${fallbackGuess}`,
+    code, message,
+    links: ordered,
     severity: 'warning',
     node_ids: [...new Set(links.flatMap((l) => [l.from, l.to]))],
     option_ids: paths.map((p) => p.option_id),
+    // ⭐ DL [R2] (5930827933): the links the row may offer as ONE click, "Accept starting strength", through the
+    // approval that sizes a placeholder (#2446 `approvalSizes`). Only the ones whose size can make the figure right — the
+    // SAME set the sentence asks about (a levelled source, not a guessed mechanism): the offer gate (V4).
+    ...(asked.length > 0 && !productBlocks ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
+    // ⭐ D3 (DL 0df0e1, 6 Oct; Integrator 37): what `message` asks FIRST, typed, so every surface names the SAME next step
+    // (the panel reads it by identity; it never picks a link of its own): the goal's level (A), the gauge's one end-to-end
+    // question (B), a link in its parent's unit (C), else the first link the sentence names that the user CAN size, nearest
+    // the goal: one of `acceptable_links` (AIQ: a guessed or level-less link is named, never asked — the words' "Set them"
+    // is MC's ruled sentence, pinned by mc-p0-round6/round8). Nothing while a product blocks, or when the offer is empty.
+    ...(firstAsk !== undefined ? { first_ask: firstAsk } : {}),
   };
+}
+
+/**
+ * The ONE source of a withhold's no-dead-end words, for the warning AND the Agent's withheld reply (R8: one grammar for the
+ * warning, summary, reply and P5; Codex/R8-6: the reply re-said the generic sentence). The AIQ guessed-link rule applies.
+ */
+export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>, opts: { readonly gaugeAsk?: true } = {}): { message?: string; gaugeLinks: Set<string>; first?: PlaceholderFirstAsk } | undefined {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const limitIds = new Set((isRec(graph) && Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
+    .filter(isRec).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'));
+  const guessed = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
+  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed, opts);
+}
+
+/**
+ * ⭐ THE NO-DEAD-END ASKS (MC 21; Science d5): the words a withheld path's links are asked in, when a level-less mediator or
+ * a frameless goal would otherwise leave the user nothing they can answer. `undefined` when none applies, so every other
+ * withhold keeps its words byte for byte.
+ *   (A) a goal with no frame: its level first, with Science's bridge ("To size it, I first need today’s level of …"); the existing card
+ *       records it, and the next Run asks the links.
+ *   (B) a gauge mediator: ONE end-to-end question (6006425419), never its two links apart; both leave the one-click offer.
+ *   (C) a mediator measured in its sized parent's unit: asked in that unit, the estimate named (6006548763).
+ * Explanations fit the 400-character carrier; if a question alone exceeds it, full labels take precedence.
+ */
+export function noDeadEndAsks(
+  graph: unknown,
+  links: ReadonlyArray<{ from: string; to: string }>,
+  labelOf: (id: string) => string,
+  /** AIQ 5903604206 / 5903627210: a guessed link out of a node the user's limit watches is said, never asked. */
+  guessed: (l: { from: string; to: string }) => boolean = () => false,
+  opts: { readonly gaugeAsk?: true } = {},
+  // `first` is absent on RT-18's gated early return (`{ gaugeLinks }`): the words ask nothing, so nothing is asked first.
+): { message?: string; gaugeLinks: Set<string>; first?: PlaceholderFirstAsk } | undefined {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = graph.edges.filter(isRec);
+  // S-A label rule (`reply/labels.ts`): question labels stay complete and explanations yield first when the carrier is
+  // tight. Only when even the question alone cannot fit the 400-character carrier do labels shorten, at word boundaries.
+  let budget: number | null = null;
+  const q = (id: string): string => `\u2018${budget === null ? labelOf(id) : compactWordLabel(labelOf(id), budget)}\u2019`;
+  /** A label inside a QUESTION: complete (D-04) unless the carrier cannot hold every sentence otherwise. */
+  let questionBudget: number | null = null;
+  const qq = (id: string): string => `\u2018${questionBudget === null ? labelOf(id) : compactWordLabel(labelOf(id), questionBudget)}\u2019`;
+  const fit = (sentences: readonly string[]): string => {
+    let out = '';
+    for (const s of sentences) { const next = out === '' ? s : `${out} ${s}`; if (next.length > 400) break; out = next; }
+    return out;
+  };
+  const fitted = (build: () => string, standalone?: () => string): string => {
+    budget = null;
+    const full = build();
+    if (full.length <= 400) return full;
+    // Every sentence is kept where it can be (the product reading "Olumi measures X in …; correct that if it's wrong" is
+    // provenance the user must see), and labels shorten at word boundaries, never mid-word (S-A label rule, D-04):
+    // first the explanation's labels only, so the question stays complete; then, if that cannot fit, the question's too.
+    for (const shortenQuestion of [false, true]) {
+      for (budget = 120; budget > 12; budget -= 12) {
+        questionBudget = shortenQuestion ? budget : null;
+        const out = build();
+        if (out.length <= 400) { budget = null; questionBudget = null; return out; }
+      }
+    }
+    budget = null;
+    questionBudget = null;
+    // Only then does the explanation yield to the complete question.
+    if (standalone !== undefined) return standalone();
+    const questionAt = full.indexOf(' Roughly how much');
+    return questionAt < 0 ? full : full.slice(questionAt + 1);
+  };
+  const goal = nodes.find((n) => n.kind === 'goal');
+  // ⛔ S-E GOALS (Science ruling 7 Oct §2, P0; D-06): a goal measured as the CHANCE of an event is never asked its level
+  // ("today's level of … in % likelihood of on-time launch") and no link into it is asked to be sized: Olumi computes that
+  // chance. The one sentence says so; nothing is asked first (the host's one question is the deadline).
+  if (goal !== undefined && goalKindOf(goal) === 'chance_of_event') {
+    const deadline = goalDeadlineFromRecord(graph, goal.id);
+    return { message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)), gaugeLinks: new Set() };
+  }
+  // The host owns the date -> team-time question; a forecast has no level today.
+  if (draftedTeamPartOf(graph) !== null) return { gaugeLinks: new Set() };
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
+  if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
+    const unit = unitOf(goalView);
+    // Science d5 #87 6007354826: the bridge says WHY the level comes first (the link question needs the goal's unit).
+    const askOf = (): string => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
+      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
+    // ⛔ THE ASK ALWAYS SURVIVES (Codex r1 #2635 P1): `first` names it, so the statement compacts WITH it and is dropped
+    // only when even compacted it leaves no room. Long labels used to keep the statement and drop the question.
+    const ask = askOf();
+    const statement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), 400 - ask.length - 1);
+    let message = statement === '' ? ask : `${statement} ${ask}`;
+    let question = ask;
+    // The complete question is kept whenever the cause still fits beside it in the 400 carrier (D-04). Otherwise the
+    // labels shorten, at word boundaries, in the statement AND the question together, so the reason is never lost
+    // (R10 Science: every link accounted for; Codex r2 P1 on #2748: a 308-character question left no room for the
+    // cause). `first.question` is the question actually said, so the current-level ask still binds (Codex r1 P1).
+    if (statement === '' || ask.length > 400) {
+      for (budget = 120; budget > 12; budget -= 12) {
+        const shortAsk = askOf();
+        const b = budget;
+        const shortStatement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: compactWordLabel(labelOf(l.from), b), to_label: compactWordLabel(labelOf(l.to), b) })), 400 - shortAsk.length - 1);
+        message = shortStatement === '' ? shortAsk : `${shortStatement} ${shortAsk}`;
+        question = shortAsk;
+        if (shortStatement !== '' && message.length <= 400) break;
+      }
+      budget = null;
+    }
+    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question } };
+  }
+  const readings = mediatorReadings(graph);
+  const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
+  const sentences: string[] = [];
+  const covered = new Set<string>();
+  const gaugeLinks = new Set<string>();
+  const key = (from: unknown, to: unknown): string => `${String(from)}->${String(to)}`;
+  // ⭐ D3 (DL 0df0e1, 6 Oct; Integrator 37): the FIRST thing the words ask, typed, so the panel names the same step.
+  let first: PlaceholderFirstAsk | undefined;
+  for (const [m, r] of readings) {
+    if (r.via !== 'gauge' || r.stored === true || !links.some((l) => l.from === m || l.to === m)) continue;
+    const lever = gaugeLever(edges, m, r, unitOfNode);
+    if (lever === undefined || guessed({ from: lever, to: m }) || guessed({ from: m, to: r.child })) continue;
+    // The gauge path's links are never offered one at a time (a lever → M size alone cannot lift the withhold): kept
+    // whether or not the question below is asked (Codex r1 on #2641, P2).
+    for (const k of [key(lever, m), key(m, r.child)]) gaugeLinks.add(k);
+    // ⛔ RT-18 GATE (DL 0df0e1, 6 Oct, cut 5): the (B) end-to-end QUESTION stays OFF until its answer has a working path. On
+    // a served dental draft every answer was refused (the Agent sizes lever → goal, which the model does not hold; the
+    // through-M answer reads "% of appointments" as another quantity). A dead end with a cause beats a false instruction:
+    // the path is said in the unsized-link sentence. Cut 6 lifts this with the end-to-end retarget.
+    if (opts.gaugeAsk !== true) continue;
+    const leverUnit = unitOfNode(lever)!;
+    // ⛔ NEVER DOUBLE-COUNTED, AND NEVER ANOTHER QUANTITY (Science 6006425419; Codex r1 P2): only the lever's OTHER
+    // user-sized links that lie on a goal path are "already given". One stated in the asked unit is quoted; otherwise the
+    // link is named, never an unrelated figure ("2 hours per £10").
+    const onGoalPath = goalPathNodes(nodes, edges);
+    const given = edges.filter((e) => e.from === lever && e.to !== m && onGoalPath.has(e.to) && linkSizing(e) === 'user');
+    const sameQuantity = given.map((e) => (isRec(e.provenance) && isRec(e.provenance.natural_effect) ? e.provenance.natural_effect : undefined) as Rec | undefined)
+      .find((n) => n !== undefined && typeof n.amount === 'number' && typeof n.amount_unit === 'string' && typeof n.per_source_change === 'number'
+        && typeof n.per_source_change_unit === 'string' && sameUnit(n.amount_unit as string, r.unit));
+    const onTop = (): string => sameQuantity !== undefined
+      ? `, on top of the ${sayFigure(sameQuantity.amount as number, sameQuantity.amount_unit as string)} per ${sayFigure(sameQuantity.per_source_change as number, sameQuantity.per_source_change_unit as string)} you already gave`
+      : given.length > 0 ? `, on top of its effect through ${qq(String(given[0]!.to))} that you already gave` : '';
+    first ??= { kind: 'gauge', from: lever, through: String(m), to: String(r.child) };
+    sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which ${NOT_SIZED}.`
+      + ` Roughly how much would ${sourceChangeWords(qq(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${qq(r.child)} that way${onTop()}, in ${r.unit}?`
+      + ' A best guess and a range is fine.',
+    () => `Roughly how much would ${sourceChangeWords(qq(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${qq(r.child)} through ${qq(m)}${onTop()}, in ${r.unit}? A best guess and a range is fine.`));
+    for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
+  }
+  for (const l of links) {
+    const r = readings.get(l.from);
+    // FA1-3 (DL, 6 Oct): a product source is measured in its operands' composed unit, the same reading the writer takes.
+    if ((r?.via !== 'sized_parents' && r?.via !== 'product') || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
+    // FA1 (Science d5): a child with no unit of its own that is a definitional part of its total is asked in that unit,
+    // the same reading the writer takes the answer in.
+    const partOf = readings.get(l.to);
+    const childUnit = unitOfNode(l.to) ?? (partOf?.via === 'definitional_part' ? partOf.unit : undefined);
+    if (childUnit === undefined) continue;
+    first ??= { kind: 'link', from: l.from, to: l.to };
+    // X2 (served re-draw 2, N1): a percent borrowed from Olumi's incoming estimate is not this unitless
+    // source's own measure. Use the link's existing qualitative writer instead of inventing a per-1% ask.
+    if (r.via === 'sized_parents' && unitOfNode(l.from) === undefined && readUnitParts(r.unit)?.kind === 'percent') {
+      sentences.push(fitted(() => `This comparison turns on how strongly ${q(l.from)} affects ${q(l.to)}, which ${NOT_SIZED}.`
+        + ` On the canvas, click the link from ${q(l.from)} to ${q(l.to)}; under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong.`
+        + ' That records your judgement of the link\u2019s strength.'));
+      covered.add(key(l.from, l.to));
+      continue;
+    }
+    const why = r.via === 'product' ? `as ${q(r.operands[0])} \u00d7 ${q(r.operands[1])}` : `from its own estimate of the link from ${q(r.parents[0]!)}`;
+    sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which ${NOT_SIZED}.`
+      + ` Olumi measures ${q(l.from)} in ${r.unit}, ${why}; correct that if it\u2019s wrong.`
+      + ` Roughly how much does ${sourceChangeWords(qq(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${qq(l.to)}, in ${childUnit}?`));
+    covered.add(key(l.from, l.to));
+  }
+  if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;
+  const rest = links.filter((l) => !covered.has(key(l.from, l.to)));
+  if (rest.length > 0) sentences.push(unsizedLinkSentence(rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
+  return { message: fit(sentences) || sentences[0]!, gaugeLinks, first: first! };
+}
+
+
+/** Every node with a directed path to the goal (options and the decision aside), the goal included. */
+function goalPathNodes(nodes: readonly Rec[], edges: readonly Rec[]): Set<unknown> {
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const goal = nodes.find((n) => n.kind === 'goal');
+  const out = new Set<unknown>(goal === undefined ? [] : [goal.id]);
+  const walkable = (id: unknown): boolean => { const k = byId.get(id)?.kind; return k !== undefined && k !== 'option' && k !== 'decision'; };
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (e.edge_type !== 'bidirected' && out.has(e.to) && !out.has(e.from) && walkable(e.from)) { out.add(e.from); grew = true; }
+  }
+  return out;
+}
+
+/** The lever a gauge mediator is asked through: the link the answer replaces (brief3), else its one parent with a unit. */
+function gaugeLever(edges: readonly Rec[], m: string, r: Extract<MediatorReading, { via: 'gauge' }>, unitOfNode: (id: unknown) => string | undefined): string | undefined {
+  if (r.replaces !== undefined) return r.replaces;
+  const levers = [...new Set(edges.filter((e) => e.to === m && typeof e.from === 'string' && unitOfNode(e.from) !== undefined)
+    .map((e) => e.from as string))];
+  return levers.length === 1 ? levers[0] : undefined;
 }

@@ -38,7 +38,31 @@ const TEST_FILE = /\.(test|spec)\./;
 const ALLOWED_CROSS_BOUNDARY = new Set(
   [
     '../../config/index.js', // config.cee.modelVersionsEnabled (flag read)
+    '../persist-graph-write.js', // SYS10: authorised save/restore operations in the existing controlled door
+    '../persisted-graph-invariants.js', // refusal class retained at the HTTP boundary
+    '../ownership/door-ownership.js', // existing ownership refusal class
+    // S5 2b (#2899): pure zero-import outbound proof strip; DL review in this PR
+    '../goal-target/outbound-graph.js',
     '../context/graph-identity.js', // Group A: computeGraphIdentityHash + analysis-affecting hash
+    // VERSION RESULT-DIFF's pure binder reads the existing Run identity,
+    // currentness and claim authorities; it introduces no writer or science
+    // projection. These exact seams require owning HARNESS/DL review in this PR.
+    '../context/analysis-interpretation-identity.js',
+    '../context/freshness.js',
+    // Saved-result permission reuses the canonical per-Run claim/licence composition.
+    '../context/canonical-analysis-state.js',
+    '../compose/analysis-state-v1.js',
+    // Shared Data: the pure common licence consumes both bound saved-Run
+    // claim/admission verdicts. No independent permission policy in Compare.
+    '../compose/leader-licence.js',
+    '../agent-lane/first-analysis.js',
+    '../compose/unrequested-analysis-confinement.js',
+    '../coaching/pick-raw-robustness.js',
+    '../agent-lane/admit-model.js',
+    '../../orchestrator/tools/analysis-ready-helper.js',
+    '../../orchestrator/context/constraint-feasibility.js',
+    '../context/reconcile-scenario-analysis-facts.js', // fact-set type only
+    '../coaching/build-run-delta.js', // selected-pair types only
     '../boundary/request-extensions.js', // GraphStateIngress (type-only)
     '../../orchestrator/context/stable-stringify.js', // Group A canonicaliser
     // C8-A (Codex review defect 2 / H1, 2026-08-25): the SANCTIONED sigma
@@ -66,6 +90,7 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
 const EXTERNAL_ALLOWED = new Set([
   '@supabase/supabase-js',
   '@talchain/schemas/boundary', // local overlay extends the currently-published response
+  '@talchain/schemas/orchestrator', // canonical Run snapshot parser + fact types
   'zod',
 ]);
 
@@ -160,6 +185,19 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
     expect(moduleFiles.length).toBeGreaterThan(1);
   });
 
+  it('the outbound graph proof-strip seam has zero imports or module dependencies', () => {
+    const file = resolve(moduleDir, '../goal-target/outbound-graph.ts');
+    const tree = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+    const imports: ts.Node[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node) || ts.isImportTypeNode(node)) imports.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+    expect(imports, 'outbound-graph.ts must remain a zero-import leaf').toEqual([]);
+    expect(scanImports(file)).toEqual({ specifiers: [], hasDynamic: false });
+  });
+
   it('every production import resolves within the module, a sanctioned seam, or an allowlisted external', () => {
     for (const file of moduleFiles) {
       const fileDir = dirname(file);
@@ -176,7 +214,7 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
     for (const file of moduleFiles) {
       for (const spec of scanImports(file).specifiers) {
         expect(
-          FORBIDDEN_LIVE_SURFACE.test(spec),
+          FORBIDDEN_LIVE_SURFACE.test(spec) && !['../persist-graph-write.js', '../persisted-graph-invariants.js'].includes(spec),
           `${file} imports forbidden live surface '${spec}'`,
         ).toBe(false);
       }
@@ -220,6 +258,7 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
 const SANCTIONED_INBOUND_CALL_SITES = new Set(
   [
     '../commit.ts',
+    '../persist-graph-write.ts', // SYS10 controlled door dispatches the existing version adapter
     '../handlers/draft-graph-dispatch.ts',
     '../build-turn-context.ts', // bounded read-only receipt -> immutable version adoption
     '../context/canonical-label-transition.ts', // pure pair validation, no writes
@@ -241,6 +280,15 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
     // hand would be the twin-of-the-contract defect this module's allowlists
     // exist to prevent. One parser, one more read-only call site, is the shape.
     '../agent-lane/runtime/agent-capabilities.ts',
+    // Selected Run model input reads saved graph evidence and reuses the existing complete per-Run licence.
+    // No version write, new flag, permission rule or wire schema.
+    '../agent-lane/selected-run-delta-for-model.ts',
+    // "Test without this link" re-licenses its reply on the final canonical read with the SAME complete per-Run
+    // licence (boundRunLeaderLicence), rather than a second boolean rule. Read-only: no version write, flag or schema.
+    '../handlers/structural-challenge-dispatch.ts',
+    // A2 L1 (Science 0df0e1): the Run-time leader-licence SHADOW reads the SAME complete per-Run licence
+    // (boundRunLeaderClaim) to log where the live predicates disagree. Pure, log-only: no version write, flag or schema.
+    '../compose/leader-licence-shadow.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 
@@ -286,6 +334,18 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, './service.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../config/index.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/graph-identity.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/analysis-interpretation-identity.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/freshness.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/canonical-analysis-state.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../compose/analysis-state-v1.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../agent-lane/first-analysis.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../compose/unrequested-analysis-confinement.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../coaching/pick-raw-robustness.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../agent-lane/admit-model.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../../orchestrator/tools/analysis-ready-helper.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../../orchestrator/context/constraint-feasibility.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/reconcile-scenario-analysis-facts.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../coaching/build-run-delta.js')).toBe(true);
     expect(importAllowed(moduleDir, '../boundary/request-extensions.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../orchestrator/context/stable-stringify.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../utils/telemetry.js')).toBe(true);
@@ -293,6 +353,7 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, '../../schemas/cee-v3.js')).toBe(true);
     expect(importAllowed(moduleDir, '@supabase/supabase-js')).toBe(true);
     expect(importAllowed(moduleDir, '@talchain/schemas/boundary')).toBe(true);
+    expect(importAllowed(moduleDir, '@talchain/schemas/orchestrator')).toBe(true);
     // zod is now allowlisted (added with the strict boundary-contract module):
     expect(importAllowed(moduleDir, 'zod')).toBe(true);
     // Off-list / forbidden:

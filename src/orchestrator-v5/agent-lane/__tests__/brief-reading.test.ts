@@ -64,7 +64,9 @@ describe('readBrief — one call, never throws', () => {
     const call = vi.fn(async () => j({ goal: 'reach £100k MRR within 6 months', options: [] }));
     await expect(readBrief(PAUL_C, call)).resolves.toEqual({ goal: 'reach £100k MRR within 6 months', options: [], limits: [] });
     expect(call).toHaveBeenCalledWith(expect.objectContaining({ model: BRIEF_READING_MODEL, input: PAUL_C, schema: BRIEF_READING_SCHEMA }));
-    expect(Object.keys((BRIEF_READING_SCHEMA['properties'] as Record<string, unknown>)).sort()).toEqual(['goal', 'limits', 'options']);
+    expect(Object.keys((BRIEF_READING_SCHEMA['properties'] as Record<string, unknown>)).sort()).toEqual(['build', 'goal', 'limits', 'options']);
+    // T1 (a): the one non-span field is a boolean — it can carry no words, so no leader or ranking can ride on it.
+    expect((BRIEF_READING_SCHEMA['properties'] as Record<string, unknown>)['build']).toEqual({ type: 'boolean' });
   });
 
   it('a failing call is no reading, never an error; an empty message makes no call', async () => {
@@ -111,5 +113,12 @@ describe('v2 limits — shown only with their own comparator cue, and never a go
     expect(Object.keys(briefs), 'control: the whole corpus is here').toHaveLength(20);
     expect(shown, 'control: limits ARE shown across the corpus (a filter that drops everything would pass the next line)').toBeGreaterThanOrEqual(20);
     expect(slips, 'any slip turns limits off (AIQ)').toEqual([]);
+  });
+
+  it('T1 (a): `build` is kept ONLY as true; false, missing or malformed leave it absent (never routes)', () => {
+    const msg = 'We want to reach £100k MRR within 6 months.';
+    const g = (build: unknown) => gateBriefReading(msg, JSON.stringify({ goal: 'reach £100k MRR within 6 months', options: [], limits: [], build }));
+    expect(g(true)).toEqual({ goal: 'reach £100k MRR within 6 months', options: [], limits: [], build: true });
+    for (const b of [false, 'true', 1, null, undefined]) expect(g(b)?.build, String(b)).toBeUndefined();
   });
 });

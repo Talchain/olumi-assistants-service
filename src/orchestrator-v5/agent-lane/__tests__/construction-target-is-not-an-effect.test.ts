@@ -1,11 +1,7 @@
 /**
- * ⛔ THE TARGET IS NOT AN EFFECT (R3 #72 5899493499 / 5899535464; served cut-costs on CEE `0a89a01`, 2 of 3 drafts).
- *
- * Served: the drafter sized "GCP workload share → Monthly spend" as £9,000 a month at a full switch — 20% of the user's
- * £45,000, i.e. the user's own target — run 0 as "−£9,000 per 100%", run 2 as "−£90 per 1%". The full switch then sat
- * exactly on the threshold and its chance was a coin toss. Olumi's estimate on a link into the goal whose largest option
- * move shifts the goal by the gap to its target (±1%) is set aside for the frame-aware placeholder, and asked.
- * Real path: strict candidate → `buildModelFromBrief` → the `/graph/register` body.
+ * Target-gap equality does not invalidate a convertible Olumi estimate. Keep its
+ * source and natural units, and ask exactly for evidence supporting that size.
+ * Real path: strict candidate → buildModelFromBrief → /graph/register.
  */
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
@@ -62,7 +58,7 @@ const goalEdge = (g: { nodes: Rec[]; edges: Rec[] }): Rec => {
 const magnitudeOf = (e: Rec): unknown => (e.provenance as Rec | undefined)?.magnitude;
 const asked = (out: Rec): string[] => ((out.open_questions ?? []) as string[]).filter((q) => q.includes('at the largest change an option makes'));
 
-describe('an Olumi estimate sized FROM the user\'s target is set aside and asked', () => {
+describe('a target-sized Olumi estimate stays labelled and is challenged', () => {
   it('PREMISE: the goal holds £45,000 today and a 20% cut (the gap is £9,000)', async () => {
     const { graph } = await build(cut({ amount: -4500, per: 100 }));
     const goal = graph.nodes.find((n) => n.kind === 'goal')!;
@@ -70,20 +66,15 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
     expect((goal.observed_state as Rec).raw_value).toBe(45000);
   });
 
-  it('ROW 1 (served run 0): "−£9,000 per 100%" → the placeholder stands in, and the user is asked', async () => {
-    const { graph, out } = await build(cut({ amount: -9000, per: 100 }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
-    expect(asked(out)).toHaveLength(1);
-    expect(asked(out)).toEqual(['Olumi estimated that raising "GCP workload share" by 100 points lowers "Monthly spend" by £9,000 per month; at the '
-      + 'largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is what you want, not evidence of '
-      + 'what an option does, so it was not used: a placeholder sized to keep "Monthly spend" within its range stands in for it. How much does '
-      + '"GCP workload share" change "Monthly spend"?']);
-  });
-
-  it('ROW 2 (served run 2): "−£90 per 1%" → the same', async () => {
-    const { graph, out } = await build(cut({ amount: -90, per: 1 }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
-    expect(asked(out)).toHaveLength(1);
+  it.each([
+    ['ROW 1', -9000, 100, '£9,000'],
+    ['ROW 2', -90, 1, '£90'],
+  ] as const)('%s: the target-sized Olumi estimate remains labelled and asks exactly for supporting evidence', async (_row, amount, per, money) => {
+    const { graph, out } = await build(cut({ amount, per }));
+    const edge = goalEdge(graph);
+    expect(magnitudeOf(edge)).toBe('olumi_estimate');
+    expect((edge.provenance as Rec).natural_effect).toEqual({ amount, amount_unit: 'GBP per month', per_source_change: per, per_source_change_unit: '%', strength_mean: -0.16, strength_mean_frame: 'edge_strength' });
+    expect(asked(out)).toEqual([`Olumi estimated that raising "GCP workload share" by ${per} ${per === 1 ? 'point' : 'points'} lowers "Monthly spend" by ${money} per month; at the largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is not evidence for an effect size. What evidence supports this provisional estimate?`]);
   });
 
   it('CONTROL (an estimate that is not the gap): "−£4,500 per 100%" is kept as Olumi\'s estimate, nothing asked', async () => {
@@ -93,13 +84,13 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
   });
 
   // ⛔ SUPERSEDED "the user's own size is kept as theirs" (AIQ #2383 5916497454): this brief never writes £9,000, so a size
-  // the drafter tagged `explicit` is Olumi's, sized FROM the target, and is set aside and asked exactly as ROW 1. (A brief
+  // the drafter tagged `explicit` remains Olumi's and is challenged exactly as ROW 1. (A brief
   // that did write it would hold a second £ amount, and the goal's today level is then not read: `briefGoalLevel`'s
   // one-amount rule. The user's own written size is kept as theirs in `construction-magnitude-contract` R4 and
   // `construction-set-aside-estimate-is-not-an-input`'s CONTROL.)
-  it('RED (AIQ #2383): "−£9,000 per 100%" tagged explicit but written nowhere is Olumi\'s: the placeholder stands in, and it is asked', async () => {
+  it('RED (AIQ #2383): "−£9,000 per 100%" tagged explicit but written nowhere is Olumi\'s: the estimate stays Olumi’s, and it is asked', async () => {
     const { graph, out } = await build(cut({ amount: -9000, per: 100, provenance: 'explicit' }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
+    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_estimate');
     expect(asked(out)).toHaveLength(1);
   });
 });

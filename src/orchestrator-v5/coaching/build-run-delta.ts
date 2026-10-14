@@ -52,18 +52,26 @@ import {
   type RunDelta,
   type RunDeltaAttributionCaseLiteral,
   type RunDeltaBuildsEqualityLiteral,
+  type RunDeltaGoalChanceDelta,
   type RunDeltaNoiseVerdictLiteral,
+  type RunDeltaWinProbabilitiesUnavailableLiteral,
   type RunDeltaWinProbabilityDelta,
 } from '@talchain/schemas/boundary';
 
 import {
-  isUsableWinProbability,
-  winnerOptionResultSource,
+  identityBoundWinProbabilities,
+  readOptionResultSources,
+  runWithheldWinShares,
 } from '../../orchestrator/context/option-result-source.js';
+import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+import { unsizedPathLeaderWithheld } from '../agent-lane/unsized-path-cause.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
+import { goalChanceSideOf } from '../goal-target/goal-chance-sides.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
-import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
+import { projectRunFact, selectTwoNewestRunAnalysisFacts, type RunPair } from './compare-runs.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { validateAnalysisRunFactIdentity, type AnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 // ⭐ THE BAND LIVES IN ITS OWN MODULE NOW, AND IT HAS TWO READERS. The
 // constants and `noiseVerdictForProportions` moved out of this file VERBATIM
 // when the deterministic rerun PROSE acquired the same question. Two
@@ -71,7 +79,8 @@ import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.
 // noise?" would be free to drift, and the prose one would drift silently
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
-import { diffRunInputs } from './run-input-changes.js';
+import { diffRunInputs, linksMovedWithinBand, type WithinBandLinkMove } from './run-input-changes.js';
+import { islDrawStructureKeyOfFact } from './draw-structure.js';
 
 /**
  * Why no delta was produced. A DISCRIMINATED reason rather than a bare `null`,
@@ -122,7 +131,23 @@ export type BuildRunDeltaResult =
 /** The four PLoT `_meta.builds` members, in a fixed order. */
 const BUILD_KEYS = ['ui', 'cee', 'plot', 'isl'] as const;
 
-interface RunEchoes {
+/**
+ * ⭐ M2 cause (52f8cd, DL 5934109147): the two COMPUTE builds from PLoT's ALWAYS-ON `_meta.evidence` when `_meta.builds`
+ * is absent. PLoT sends `_meta.builds` only under `UI_CANONICAL_META` (off on staging), but `evidence.plot_build` /
+ * `evidence.isl_build` are "deliberately NOT gated" (PLoT `run.ts` ~5174), so without this `builds_equal` was permanently
+ * 'unknown' on staging and C0/C1 unreachable. Still PLoT's own echo, never CEE's record. PLoT's literal `'unknown'` (no
+ * build stamped) is not a build: it reads as absent, so it can never make two Runs look equal.
+ */
+function evidenceBuilds(underscoreMeta: Record<string, unknown>): Readonly<Record<string, unknown>> | null {
+  const evidence = asRecord(underscoreMeta.evidence);
+  if (evidence === null) return null;
+  const build = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' && v.trim() !== 'unknown' ? v.trim() : null);
+  const plot = build(evidence.plot_build);
+  const isl = build(evidence.isl_build);
+  return plot === null && isl === null ? null : { plot, isl };
+}
+
+export interface RunEchoes {
   /** PLoT `meta.seed_used`, normalised. PLoT echoes it as a STRING. */
   readonly seedUsed: string;
   /** PLoT `meta.n_samples`. */
@@ -136,7 +161,8 @@ interface RunEchoes {
    */
   readonly builds: Readonly<Record<string, unknown>> | null;
   /**
-   * The byte-for-byte PLoT envelope itself. Carried on this value rather than
+   * PLoT's envelope as stored (its own `meta`, CEE's claim withholds applied —
+   * see `readRunEchoes`). Carried on this value rather than
    * re-read at the call site so a caller cannot pair one run's echoes with
    * another run's option records — the same construction as `RunProjection`
    * in `compare-runs.ts`: make the coupling a property of one value, not an
@@ -181,7 +207,16 @@ function finiteNumber(value: unknown): number | null {
  * `builds` is the exception and is allowed to be null: the contract models its
  * absence explicitly as the tri-state 'unknown'.
  */
-function readRunEchoes(fact: HandlerFact): RunEchoes | null {
+/**
+ * PLoT's `meta.seed_used` echo for ONE Run, read by the SAME reader `seed_equal` compares — so the seed C1 seed reuse
+ * lends (`seed-reuse.ts`) is byte-identical to what the next pair's `seed_equal` will read. Null when the Run could
+ * not be paired at all (no graph hash, no echo, no sample count).
+ */
+export function runSeedEcho(fact: HandlerFact): string | null {
+  return readRunEchoes(fact)?.seedUsed ?? null;
+}
+
+export function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   const result = asRecord((fact as { result?: unknown }).result);
   if (result === null) return null;
 
@@ -191,9 +226,12 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
       : null;
   if (graphHashAtRun === null) return null;
 
-  // `enrichment` is the byte-for-byte PLoT envelope (`run-analysis.ts` writes
-  // it with no projection and no stripping), so `meta` and `_meta` below are
-  // PLoT's own, not a CEE reconstruction.
+  // `enrichment` is PLoT's envelope AS `run-analysis.ts` STORED IT: `meta` and
+  // `_meta` below are PLoT's own, never a CEE reconstruction — but the option
+  // figures are AFTER CEE's claim withholds (`withholdOptionGoalFigures` /
+  // `withholdOptionLimitScores` strip withheld figures and append a typed
+  // warning: `GOAL_FIGURES_WITHHELD_CODES`, `win_shares_withheld`). So a share
+  // missing here may have been withheld, not absent from PLoT.
   const enrichment = asRecord(result.enrichment);
   if (enrichment === null) return null;
 
@@ -213,7 +251,7 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   if (nSamples === null || nSamples <= 0) return null;
 
   const underscoreMeta = asRecord(enrichment._meta);
-  const builds = underscoreMeta === null ? null : asRecord(underscoreMeta.builds);
+  const builds = underscoreMeta === null ? null : asRecord(underscoreMeta.builds) ?? evidenceBuilds(underscoreMeta);
 
   return { seedUsed, nSamples, graphHashAtRun, builds, enrichment };
 }
@@ -228,7 +266,7 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
  * "equal" would assert pipeline equality on ground we never checked, which is
  * the same fabrication as defaulting absence to 'equal', wearing a comparison.
  */
-function deriveBuildsEquality(
+export function deriveBuildsEquality(
   prior: RunEchoes,
   current: RunEchoes,
 ): RunDeltaBuildsEqualityLiteral {
@@ -369,22 +407,38 @@ function deriveBuildsEquality(
  * fixture). So build DRIFT is observable today, flag-off; build EQUALITY —
  * which is what C1 needs — is not.
  */
-function classifyAttribution(provenance: {
-  readonly seed_equal: boolean;
-  readonly hash_equal: boolean;
-  readonly builds_equal: RunDeltaBuildsEqualityLiteral;
-  readonly n_equal: boolean;
-}): RunDeltaAttributionCaseLiteral | null {
+function classifyAttribution(
+  provenance: {
+    readonly seed_equal: boolean;
+    readonly hash_equal: boolean;
+    readonly builds_equal: RunDeltaBuildsEqualityLiteral;
+    readonly n_equal: boolean;
+  },
+  /**
+   * Both Runs' PLoT-recorded ISL draw-structure keys compared (`draw-structure.ts` `islDrawStructureKeyOfFact`; PLoT computes them):
+   * `equal` / `unequal` when both were recorded, `unrecorded` when either was not.
+   * C1 needs `equal`: the same seed on a different draw structure misaligns the draws, so the movement is not
+   * attributable (R3 #75 5920859011). Fails CLOSED: an `unrecorded` pair cannot show its draws line up (AI EXPERIENCE
+   * BUILD CR 5921519604).
+   * ⛔ A KNOWN MISMATCH IS AN OBSERVED DIVERGENCE (AI EXPERIENCE BUILD CR 5922160590): it outranks C0 as well as C1. An
+   * equal analysis hash does NOT imply an identical request: `computeAnalysisAffectingGraphHash` sorts nodes and edges,
+   * while ISL draws in list order, so a reordered stochastic node list keeps the hash and moves every draw. C0 on an
+   * `unrecorded` pair (the legacy control) is unchanged.
+   */
+  drawStructure: 'equal' | 'unequal' | 'unrecorded',
+): RunDeltaAttributionCaseLiteral | null {
   // Observed divergences first, most fundamental first. Each of these is a
   // fact we measured off two echoes.
   if (!provenance.seed_equal) return 'C2_unpaired';
+  if (drawStructure === 'unequal') return 'C2_unpaired';
   if (!provenance.n_equal) return 'C4_budget_drift';
   if (provenance.builds_equal === 'unequal') return 'C3_engine_drift';
 
   // Past every observed divergence. Only the two VERIFIED cases remain, and
   // both require a positively-confirmed builds equality.
   if (provenance.builds_equal === 'equal') {
-    return provenance.hash_equal ? 'C0_identical' : 'C1_attributable';
+    if (provenance.hash_equal) return 'C0_identical';
+    return drawStructure === 'equal' ? 'C1_attributable' : 'C2_unpaired';
   }
 
   // seed, n and hash all agree but builds is unverifiable. Nothing in the table
@@ -394,57 +448,12 @@ function classifyAttribution(provenance: {
 }
 
 /**
- * Every option whose identity is STRUCTURALLY SAFE, mapped to its win
- * probability.
- *
- * ⚠ WHY NOT `result.win_probabilities`, WHICH IS RIGHT THERE AND ALREADY
- * PERSISTED. Because it is LABEL-KEYED. `run-analysis.ts:2286-2302`
- * (`extractWinProbabilities`) keys that record by `option_label` FIRST and only
- * falls back to `option_id`, so on any ordinary run its keys are DISPLAY
- * STRINGS. `RunDeltaWinProbabilityDeltaSchema.option_id` is identity-bound —
- * *"Option id — identity-bound (trap 19), never a label"* — and feeding labels
- * into it would reintroduce exactly the defect `compare-runs.ts` documents at
- * length: a rename is invisible to the analysis-affecting hash, so two runs
- * that differ only in a label would be reported as different options.
- *
- * ⚠ AND NOT `compactAnalysis(...).summary.options[]` either: that projection
- * carries the SAME `option_id <- option_label` fallback, which is precisely why
- * `readLeaderOptionId` exists to confirm the winner's id against the raw
- * records. Only the raw source plus an explicit id check is safe.
- *
- * A DUPLICATE ID DROPS BOTH ENTRIES. If two records claim one id we cannot tell
- * which is which, and picking either would attach a number to an option by
- * guess. Fail-closed.
- */
-function identityBoundWinProbabilities(
-  enrichment: Record<string, unknown>,
-): ReadonlyMap<string, number> {
-  const found = new Map<string, number>();
-  const ambiguous = new Set<string>();
-
-  for (const entry of winnerOptionResultSource(enrichment)) {
-    const id = entry.option_id;
-    if (typeof id !== 'string' || id.length === 0) continue;
-    // The SHARED predicate, imported rather than re-implemented: a usable
-    // win probability is a finite number in [0, 1]. Re-stating that inequality
-    // here would be a second definition free to drift from the first.
-    if (!isUsableWinProbability(entry.win_probability)) continue;
-    if (found.has(id)) {
-      ambiguous.add(id);
-      continue;
-    }
-    found.set(id, entry.win_probability);
-  }
-
-  for (const id of ambiguous) found.delete(id);
-  return found;
-}
-
-/**
  * SC-24 (schemas 0.68.0) — the pair's endpoints and its exact input changes, read off the two facts' own
  * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
- *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` — or
- *     `'partial'` when a sent input changed that no authored row can state (`run-input-changes.ts` RULES).
+ *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` ONLY when
+ *     every sent input is VERIFIED the same outside the rows (equal 0.71 residuals on both ends + the link rules,
+ *     `run-input-changes.ts`) — else `'partial'`, which means "can't verify", NEVER "an input changed": an end with no
+ *     recorded residual (a Run before 0.71) is `partial` on a no-edit rerun (DL 5939864517; F1b 5943379851).
  *   - `not_recorded`: an end predates snapshots → the coverage says so and NO list travels (never an empty diff).
  *   - `same_run`: both ends are one Run re-delivered → no delta at all.
  */
@@ -482,6 +491,228 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
 }
 
 /**
+ * ⭐ SD-1 INTERIM (DL 0df0e1 ruling, 6 Oct, cut 5): the links whose size moved inside one band between the two Runs a
+ * `run_delta` names, read from THOSE Runs' own persisted facts, found by the delta's `endpoints` run ids. Internal: S7 names
+ * them; nothing here reaches the wire, and the delta's coverage stays `partial`. Fail closed (`[]`) when the delta is not a
+ * `partial` pair with both run ids, when either Run's fact or snapshot is missing, or when facts that share a run id
+ * disagree on its snapshot.
+ */
+export function withinBandLinkMovesForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  /**
+   * The user-write receipts (`adjust_edge_strength`, both user link-edit paths), each with its row's DB-stamped
+   * `created_at`. A receipt counts only when it was written BETWEEN the two Runs (after the prior Run's `computed_at`,
+   * before the current's): an earlier identical move of the same link never credits this pair (buddy r2 (c)).
+   */
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
+): WithinBandLinkMove[] {
+  if (asRecord(runDelta)?.input_coverage !== 'partial') return [];
+  const pair = recordedRunPair(facts, runDelta, timedReceipts);
+  if (pair === null) return [];
+  return linksMovedWithinBand(pair.prior, pair.current, pair.userWrote, pair.refitOnly);
+}
+
+/**
+ * ⭐ S5t-W (e7 #87 6011176086; Science Q2 6009456901: a frame change is never narrated as a change): the links whose WHOLE
+ * move between the two Runs a delta names is a frame refit's rescale — the refit receipts (`frame_refit` on the writing
+ * `adjust_edge_strength` fact, link-effect-edit.ts) written between the Runs, chaining the link from the prior Run's mean to
+ * the current's. Such a link's natural size never moved, so S7 neither names nor counts its band row. Fail closed (`[]`).
+ */
+export function frameRefitLinksForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
+): string[] {
+  const pair = recordedRunPair(facts, runDelta, timedReceipts);
+  if (pair === null) return [];
+  const prior = new Map(pair.prior.links.map((l) => [`${l.from}->${l.to}`, l] as const));
+  return pair.current.links.flatMap((cl) => {
+    const pl = prior.get(`${cl.from}->${cl.to}`);
+    return pl !== undefined && pl.mean !== cl.mean && pair.refitOnly(cl.from, cl.to, pl.mean, cl.mean) ? [`${cl.from}->${cl.to}`] : [];
+  });
+}
+
+/**
+ * ⭐ S7 TRUTH FLOOR (cut 6; DL 0df0e1 + Science d5 on #2631, 6 Oct): the links of a delta's `strength` rows that the USER
+ * wrote between its two Runs — the user's recorded link-write receipts for that link, written between the Runs, chaining it
+ * from exactly the prior Run's mean to the current's (`recordedRunPair.userWrote`). A band also moves when Olumi refits a frame
+ * (#2631) or a goal's level re-frames it (`normalising-goal-frame.ts`), and the snapshot carries no frames, so a band row
+ * is the user's change ONLY with such a receipt. Fail closed (`[]`) when the pair or its snapshots cannot be read.
+ */
+export function userWrittenLinksForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
+): string[] {
+  const d = asRecord(runDelta);
+  const strengthLinks = (Array.isArray(d?.input_changes) ? d.input_changes : []).map(asRecord)
+    .filter((r): r is Record<string, unknown> => r !== null && r.entity_kind === 'link' && r.field === 'strength')
+    .map((r) => asRecord(r.link)).filter((l): l is Record<string, unknown> => l !== null && typeof l.from === 'string' && typeof l.to === 'string');
+  if (strengthLinks.length === 0) return [];
+  const pair = recordedRunPair(facts, runDelta, timedReceipts);
+  if (pair === null) return [];
+  const linkIn = (s: ReturnType<typeof RunInputSnapshotSchema.parse>, from: string, to: string) => s.links.find((l) => l.from === from && l.to === to);
+  const out: string[] = [];
+  for (const l of strengthLinks) {
+    const from = l.from as string; const to = l.to as string;
+    const pl = linkIn(pair.prior, from, to); const cl = linkIn(pair.current, from, to);
+    if (pl !== undefined && cl !== undefined && pair.userWrote(from, to, pl.mean, cl.mean)) out.push(`${from}->${to}`);
+  }
+  return out;
+}
+
+/**
+ * The two Runs a delta's `endpoints` name, read from THEIR OWN persisted facts (snapshots must agree across facts that
+ * share a run id), and the receipt test bound to them: a user link write recorded strictly between the two Runs, for the
+ * pair's own two means. `null` when either Run, its snapshot or its timing cannot be read.
+ */
+function recordedRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[],
+): {
+  prior: ReturnType<typeof RunInputSnapshotSchema.parse>;
+  current: ReturnType<typeof RunInputSnapshotSchema.parse>;
+  userWrote: (from: string, to: string, priorMean: number, currentMean: number) => boolean;
+  refitOnly: (from: string, to: string, priorMean: number, currentMean: number) => boolean;
+} | null {
+  const d = asRecord(runDelta);
+  const endpoints = asRecord(d?.endpoints);
+  const priorId = asRecord(endpoints?.prior)?.run_id;
+  const currentId = asRecord(endpoints?.current)?.run_id;
+  if (typeof priorId !== 'string' || typeof currentId !== 'string' || priorId === currentId) return null;
+  const runOf = (runId: string): { snapshot: ReturnType<typeof RunInputSnapshotSchema.parse>; at: number | null } | null => {
+    const found = facts.map(readRunInputs).filter((r) => r.runId === runId);
+    if (found.length === 0 || found.some((r) => r.snapshot === null)) return null;
+    const first = JSON.stringify(found[0]!.snapshot);
+    if (!found.every((r) => JSON.stringify(r.snapshot) === first)) return null;
+    const at = found[0]!.computedAt === null ? Number.NaN : Date.parse(found[0]!.computedAt);
+    return { snapshot: found[0]!.snapshot!, at: Number.isNaN(at) ? null : at };
+  };
+  const prior = runOf(priorId);
+  const current = runOf(currentId);
+  if (prior === null || current === null) return null;
+  const between = (createdAt: string): boolean => {
+    const t = Date.parse(createdAt);
+    return prior.at !== null && current.at !== null && !Number.isNaN(t) && t > prior.at && t < current.at;
+  };
+  return {
+    prior: prior.snapshot,
+    current: current.snapshot,
+    // The user's writes to this link between the Runs, in time order, must CHAIN from the prior Run's mean to the current's
+    // (buddy r1 P2-1 on #2647: two edits, 0.30 → 0.55 → 0.85, are the user's move as much as one). A gap (something else
+    // moved the link between two of them, or before or after) breaks the chain: no author is claimed.
+    userWrote: (from, to, priorMean, currentMean) => {
+      const chain = timedReceipts.filter((r) => between(r.created_at))
+        .map((r) => ({ at: Date.parse(r.created_at), move: userLinkWriteMove(r.fact, from, to) }))
+        .filter((r): r is { at: number; move: { before: number; after: number } } => r.move !== null)
+        .sort((a, b) => a.at - b.at);
+      if (chain.length === 0) return false;
+      // Two receipts at the same instant (or the same millisecond) have no provable order, and an order is what a chain
+      // claims (buddy r2 P2 on #2647): no author is claimed.
+      if (chain.some((r, i) => i > 0 && r.at === chain[i - 1]!.at)) return false;
+      // Receipts record the PERSISTED strength (clamped to ±1); a Run restores the full β from `clamped_from` before it
+      // sends (run-analysis.ts). So the chain is walked in persisted terms (buddy r1 P2-2 on #2647).
+      let mean = persistedMean(priorMean);
+      for (const { move } of chain) {
+        if (!sameMean(move.before, mean)) return false;
+        mean = move.after;
+      }
+      return sameMean(mean, persistedMean(currentMean));
+    },
+    // S5t-W: the same chain, of the refit's rescales alone (any other move of the link between the Runs breaks it).
+    refitOnly: (from, to, priorMean, currentMean) => {
+      const moves = timedReceipts.filter((r) => between(r.created_at))
+        .map((r) => ({ at: Date.parse(r.created_at), user: userLinkWriteMove(r.fact, from, to), refit: frameRefitMove(r.fact, from, to) }))
+        .filter((r) => r.user !== null || r.refit !== null)
+        .sort((a, b) => a.at - b.at);
+      if (moves.length === 0 || moves.some((r) => r.user !== null)) return false;
+      if (moves.some((r, i) => i > 0 && r.at === moves[i - 1]!.at)) return false;
+      let mean = persistedMean(priorMean);
+      for (const { refit } of moves) {
+        if (!sameMean(refit!.before, mean)) return false;
+        mean = refit!.after;
+      }
+      // ⛔ The chain ends at the current Run's OWN mean, never its clamp (Codex buddy r1 on #2661): a refit never writes a
+      // clamped link (`refitKeepsOtherLinks` refuses one), so a current β beyond ±1 restored from `clamped_from` is a later
+      // re-estimate that only collides with the refit's endpoint at the clamp. It is a change, and it is said.
+      return Math.abs(currentMean) <= 1 && sameMean(mean, currentMean);
+    },
+  };
+}
+
+/**
+ * The rescale a refit receipt records for `from → to` (`result.after.frame_refit`, link-effect-edit.ts: the persisted mean
+ * before and after), or `null` when `fact` records none for that link.
+ */
+function frameRefitMove(fact: HandlerFact, from: string, to: string): { before: number; after: number } | null {
+  const f = fact as { fact_type?: unknown; noop?: unknown; result?: unknown };
+  if (f.fact_type !== 'adjust_edge_strength' || f.noop === true) return null;
+  const result = asRecord(f.result);
+  if (result === null || result.status !== 'applied') return null;
+  const moves = asRecord(result.after)?.frame_refit;
+  const move = (Array.isArray(moves) ? moves : []).map(asRecord).find((m) => m !== null && m.from === from && m.to === to);
+  const before = move?.before_mean;
+  const after = move?.after_mean;
+  return typeof before === 'number' && Number.isFinite(before) && typeof after === 'number' && Number.isFinite(after) ? { before, after } : null;
+}
+
+/**
+ * The move a persisted user link-write receipt records for `from → to` (its strength mean before and after), or `null` when
+ * `fact` is not one. Both user paths record it as an applied, non-noop `adjust_edge_strength` (`link-effect-edit.ts` — the
+ * stated figure, `set_link_effect` — and `adjust-edge-strength.ts`, the band/strength edit), keyed `from→to`. The caller
+ * binds the moves to the pair's own two means, so a receipt for another move of the same link never counts.
+ */
+function userLinkWriteMove(fact: HandlerFact, from: string, to: string): { before: number; after: number } | null {
+  const f = fact as { fact_type?: unknown; noop?: unknown; result?: unknown };
+  if (f.fact_type !== 'adjust_edge_strength' || f.noop === true) return null;
+  const result = asRecord(f.result);
+  if (result === null || result.status !== 'applied' || result.target_id !== `${from}→${to}`) return null;
+  const meanOf = (side: unknown) => asRecord(asRecord(side)?.strength)?.mean;
+  const before = meanOf(result.before);
+  const after = meanOf(result.after);
+  return typeof before === 'number' && Number.isFinite(before) && typeof after === 'number' && Number.isFinite(after) ? { before, after } : null;
+}
+
+const sameMean = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b));
+/** The strength a Run's restored mean was persisted as: a β beyond ±1 is stored clamped (with `clamped_from`). */
+const persistedMean = (runMean: number): number => Math.max(-1, Math.min(1, runMean));
+
+/** Exact historical execution identity resolved by the selected-version binding. */
+export type SelectedRunIdentity = AnalysisRunFactIdentity & { readonly run_id: string };
+export interface SelectedRunPair {
+  readonly prior: SelectedRunIdentity;
+  readonly current: SelectedRunIdentity;
+}
+
+function selectRecordedPair(facts: readonly HandlerFact[], selected: SelectedRunPair): RunPair | null {
+  if (selected.prior.scenario_id !== selected.current.scenario_id) return null;
+  const find = (identity: SelectedRunIdentity): HandlerFact | null => {
+    if (validateAnalysisRunFactIdentity(identity).status !== 'confirmed'
+      || typeof identity.run_id !== 'string' || identity.run_id.trim() === '' || identity.run_id.trim() !== identity.run_id || identity.run_id.length > 200) return null;
+    const matches = facts.filter((fact) => {
+      if (!isSuccessfulRunAnalysisFact(fact)) return false;
+      const result = asRecord((fact as { result?: unknown }).result);
+      const checked = validateAnalysisRunFactIdentity(result);
+      return result?.run_id === identity.run_id && checked.status === 'confirmed'
+        && checked.identity.scenario_id === identity.scenario_id
+        && checked.identity.graph_hash_at_run === identity.graph_hash_at_run
+        && checked.identity.computed_at === identity.computed_at;
+    });
+    // Ambiguous records cannot be repaired by taking the first or newest fact.
+    return matches.length === 1 ? matches[0]! : null;
+  };
+  const prior = find(selected.prior);
+  const current = find(selected.current);
+  return prior === null || current === null ? null : {
+    prior, current,
+    prior_graph_hash_at_run: selected.prior.graph_hash_at_run,
+    current_graph_hash_at_run: selected.current.graph_hash_at_run,
+  };
+}
+
+/**
  * The wire block, or a discriminated refusal.
  *
  * `mayNameLeadingOption` is the TURN's permission and is the OUTER CONJUNCT
@@ -495,8 +726,12 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
 export function buildRunDelta(input: {
   readonly priorFacts: readonly HandlerFact[];
   readonly mayNameLeadingOption: boolean;
+  /** Compare route only: FROM → TO, retaining the recorded dates. No fallback. */
+  readonly selectedPair?: SelectedRunPair;
 }): BuildRunDeltaResult {
-  const pair = selectTwoNewestRunAnalysisFacts(input.priorFacts);
+  const pair = input.selectedPair === undefined
+    ? selectTwoNewestRunAnalysisFacts(input.priorFacts)
+    : selectRecordedPair(input.priorFacts, input.selectedPair);
   if (pair === null) return { kind: 'none', reason: 'insufficient_runs' };
   // ⛔ A pair with a run nobody asked for has no honest delta: its scores and trust verdict are
   // confined (review of #1857, B5), and withholding only its leader id still lets
@@ -531,7 +766,11 @@ export function buildRunDelta(input: {
   // so a true £59 → £60 input change showed nothing. When both Runs recorded their inputs, the pair is emitted as
   // `C5_unattributed` — no causal reading, no magnitude — so the input rows can travel. Without recorded inputs there
   // is still nothing honest to show, and the old refusal stands.
-  const classified = classifyAttribution(pairProvenance);
+  const priorDrawStructure = islDrawStructureKeyOfFact(pair.prior);
+  const currentDrawStructure = islDrawStructureKeyOfFact(pair.current);
+  const drawStructure = priorDrawStructure === null || currentDrawStructure === null ? 'unrecorded'
+    : priorDrawStructure === currentDrawStructure ? 'equal' : 'unequal';
+  const classified = classifyAttribution(pairProvenance, drawStructure);
   if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }
@@ -605,11 +844,60 @@ export function buildRunDelta(input: {
   // Deterministic order so a captured wire body is byte-stable across replays.
   winProbabilities.sort((a, b) => a.option_id.localeCompare(b.option_id));
 
+  // Compare chances have their OWN per-Run display licences, independent of leader permission.
+  // Read identities even when the option's win share was withheld; retain current-first record order.
+  const optionIds = (enrichment: Record<string, unknown>): Set<string> => new Set(
+    readOptionResultSources(enrichment).flatMap((rows) => rows.flatMap((row) =>
+      typeof row.option_id === 'string' && row.option_id.length > 0 ? [row.option_id] : [])),
+  );
+  const priorOptionIds = optionIds(priorEchoes.enrichment);
+  const goalChances: RunDeltaGoalChanceDelta[] = [...optionIds(currentEchoes.enrichment)]
+    .filter((id) => priorOptionIds.has(id)).map((option_id) => ({
+      option_id,
+      prior: goalChanceSideOf((pair.prior as { result?: unknown }).result, option_id),
+      current: goalChanceSideOf((pair.current as { result?: unknown }).result, option_id),
+    }));
+  // ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY there are no shares, typed — only when the cause is known:
+  //   - `prior_withheld`: THIS Run may show its shares, the earlier Run's were withheld → "compared for the first time";
+  //   - `no_matched_option`: both Runs show shares, and no option has one on both sides.
+  // Any other empty list (this Run's own shares withheld, a Run with no shares recorded) carries no reason: the
+  // consumer keeps its cause-neutral words, never a reason it cannot back.
+  // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN RECORDED withhold — never the absence of a
+  // stamp (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence). Two records qualify:
+  //   (a) its typed `constraint_verdict` says it may not name a leader (the Run is then not entitled here);
+  //   (b) it has NO shares and its own envelope records that the goal-figure withholder REMOVED shares it had
+  //       (`runWithheldWinShares`: a `GOAL_FIGURES_WITHHELD_CODES` warning carrying `win_shares_withheld: true`, set by
+  //       the withholder only when the envelope held ≥1 identity-bound usable share). A code alone is not enough: PLoT
+  //       may have sent no shares at all (CODEX pre-review on 864e915c, P1). The Run stays entitled, but the withholder
+  //       took every share with the figures (R3 journey-8 5942780839: an unsized Olumi link on the way; after the
+  //       Accept, "No option has figures from both runs" was shown where the options can now be compared).
+  // A historical Run with neither record is "not entitled" (fail closed) or share-less, but its cause is unknown,
+  // so no reason travels.
+  const priorVerdictWithheld = (() => {
+    const verdict = pair.prior.fact_type === 'run_analysis' ? (pair.prior.result as { constraint_verdict?: unknown }).constraint_verdict : undefined;
+    return verdict !== null && typeof verdict === 'object' && !Array.isArray(verdict)
+      && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
+  })();
+  const priorFiguresWithheld = priorWins.size === 0 && runWithheldWinShares(priorEchoes.enrichment);
+  // A path withhold removes leader permission, but an older marked envelope can still hold its shares.
+  // Their disjoint identities explain an empty comparison without lending either run a leader licence.
+  const priorMarkedSharesRetained = pair.prior.fact_type === 'run_analysis'
+    && readMayNameLeadingOptionFromResult(pair.prior.result) && unsizedPathLeaderWithheld(pair.prior.result)
+    && runWithheldWinShares(priorEchoes.enrichment);
+  const retainedSharesDoNotMatch = priorMarkedSharesRetained && priorWins.size > 0 && currentWins.size > 0
+    && ![...priorWins.keys()].some((id) => currentWins.has(id));
+  const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
+    : currentEntitled && currentWins.size > 0 && ((!priorEntitled && priorVerdictWithheld) || priorFiguresWithheld) ? 'prior_withheld'
+      : currentEntitled && ((priorEntitled && priorWins.size > 0 && currentWins.size > 0) || retainedSharesDoNotMatch) ? 'no_matched_option'
+        : undefined;
+
   const candidate = {
     attribution_case: attributionCase,
     pair_provenance: pairProvenance,
     leader,
     win_probabilities: winProbabilities,
+    goal_chances: goalChances,
+    ...(winProbabilitiesUnavailable !== undefined ? { win_probabilities_unavailable: winProbabilitiesUnavailable } : {}),
     // ⭐ THE WITHHELD FLIP-THRESHOLD SLOT, TAKEN FROM THE CAGE — NEVER WRITTEN
     // HERE. `flip_thresholds` is a ratified Tier-3 deny key and
     // `claim-safety-cage.ts` is its sole owner, so this producer carries no

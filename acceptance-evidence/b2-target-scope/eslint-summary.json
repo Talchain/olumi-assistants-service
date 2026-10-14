@@ -1,0 +1,18 @@
+{
+  "exit": 0,
+  "files": [
+    "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "src/orchestrator-v5/agent-lane/goal-level-in-goal-units.ts",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts",
+    "src/orchestrator/context/option-result-source.ts"
+  ]
+}

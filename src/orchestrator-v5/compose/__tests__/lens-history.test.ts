@@ -569,3 +569,70 @@ describe('2.211 A2 — a fact that CANNOT have emitted a lens is excluded, both 
     expect(derivePreviousAnalysisLens([noGraphHashFact('2026-07-31T10:00:00.000Z')])).toBeNull();
   });
 });
+
+// ============================================================================
+// 4. ⭐ A5 — the lens replay reads the scenario's authoritative Run history
+//    (lease output/rc-00351a/A5-LEASE.md, reader 3; Codex #2572 r1/r2)
+// ============================================================================
+
+/** Triggers the flip-risk lens ONLY: decisive odds, so the moderate-odds pre-mortem rule cannot fire. */
+function flipOnlyFact(computedAt: string | undefined): HandlerFact {
+  const f = bothTriggerFact(computedAt ?? '2026-07-31T10:00:00.000Z') as unknown as { result: Record<string, unknown> & { enrichment: Record<string, unknown> } };
+  f.result.enrichment.option_comparison = [{ win_probability: 0.85 }, { win_probability: 0.15 }];
+  if (computedAt === undefined) delete f.result.computed_at;
+  return f as unknown as HandlerFact;
+}
+function bothAt(computedAt: string | undefined): HandlerFact {
+  const f = bothTriggerFact(computedAt ?? '2026-07-31T10:00:00.000Z') as unknown as { result: Record<string, unknown> };
+  if (computedAt === undefined) delete f.result.computed_at;
+  return f as unknown as HandlerFact;
+}
+
+describe('A5 — lensReplayRuns is the lens replay\'s history', () => {
+  const QUIET_WINDOW = [mutationFact(), mutationFact(), mutationFact()];
+  const compose = (opts: { window?: readonly HandlerFact[]; history?: readonly HandlerFact[] }) => lensBodyOfResponse(composeToolCallResponse({
+    ...BASE_INPUT,
+    handlerFacts: [bothTriggerFact('2026-07-31T11:00:00.000Z')],
+    persistedGraph: GRAPH,
+    persistedGraphHash: GRAPH_HASH,
+    ...(opts.window !== undefined ? { priorTurnFactsForLensHistory: opts.window } : {}),
+    ...(opts.history !== undefined ? { lensReplayRuns: opts.history } : {}),
+  }));
+
+  it('PRECONDITION: flipOnlyFact can only select the flip-risk lens', () => {
+    const f = flipOnlyFact('2026-07-31T09:00:00.000Z') as RunAnalysisHandlerFact;
+    expect(selectLens(f)!.lens).toBe('sensitivity_flip_risk');
+    expect(selectLens(f, { previousAnalysisLens: 'sensitivity_flip_risk' })!.lens).toBe('sensitivity_flip_risk');
+  });
+
+  it('RED: the previous Run has left the window → its lens still counts (turn 2 ships PRE-MORTEM)', () => {
+    expect(compose({ window: QUIET_WINDOW, history: [bothTriggerFact('2026-07-31T10:00:00.000Z')] })).toBe(BODY_BY_RATIONALE.WIN_PROB_MODERATE);
+  });
+
+  it.each([
+    ['tied', '2026-07-31T10:00:00.000Z'],
+    ['absent', undefined],
+  ])('RED (Codex #2572 r2): %s computed_at — the persisted order decides (newest flip-only last → PRE-MORTEM, no repeat)', (_n, at) => {
+    // Persisted newest-first: B (flip only) after A (both). Replayed A → flip, then B → flip: the previous lens is flip.
+    const A = bothAt(at); const B = flipOnlyFact(at);
+    expect(compose({ window: [A], history: [B, A] })).toBe(BODY_BY_RATIONALE.WIN_PROB_MODERATE);
+  });
+
+  it('CONTROL: an authoritative history with no Runs → no previous lens (turn 1\'s lens)', () => {
+    expect(compose({ window: QUIET_WINDOW, history: [] })).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+  });
+
+  it('CONTROL: without priorTurnFactsForLensHistory the history is ignored (unthreaded stays fail-safe)', () => {
+    expect(compose({ history: [bothTriggerFact('2026-07-31T10:00:00.000Z')] })).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+  });
+});
+
+function lensBodyOfResponse(response: { blocks: readonly unknown[] }): string | null {
+  for (const raw of response.blocks) {
+    const b = raw as Record<string, unknown>;
+    if (b.type === 'coaching' && b.source === 'deterministic_signal' && b.coaching_kind === 'strengthen') {
+      return typeof b.body === 'string' ? b.body : null;
+    }
+  }
+  return null;
+}

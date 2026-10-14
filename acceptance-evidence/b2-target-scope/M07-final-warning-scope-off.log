@@ -1,0 +1,53 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts (10 tests | 1 failed | 9 skipped) 67ms
+     × R2 s4b unseen-1: clean loyalty_app and carry_on_as_now have no target withhold beside the fourth-shop range 65ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts > S-E GOALS S6: each option owns its target-testability reason > R2 s4b unseen-1: clean loyalty_app and carry_on_as_now have no target withhold beside the fourth-shop range
+AssertionError: expected [ { …(7) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
++     "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £24,000 / month), because it needs a size for the links from Loyalty-app gross-profit uplift to monthly profit and from Loyalty-app operating cost to monthly profit and 9 more. Roughly how much monthly profit in GBP/month does a change in Loyalty-app gross-profit uplift bring?",
++     "node_ids": [
++       "monthly_profit",
++     ],
++     "option_ids": [
++       "loyalty_app",
++       "carry_on_as_now",
++     ],
++     "say": "",
++     "severity": "warning",
++     "withheld_claims": [
++       "goal_probability",
++       "joint_probability",
++       "outcome",
++       "downside",
++     ],
++   },
++ ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts:108:74
+    106|     expect(failing).toEqual([{ from: 'fourth_shop_fit_out_spend', to: …
+    107|     const out = scopeTargetNotTestableWithRanges(envelope, graph);
+    108|     expect(out.inference_warnings.filter((w: Rec) => w.code === TARGET…
+       |                                                                          ^
+    109|     expect(JSON.stringify(out)).not.toContain('needs nothing more of i…
+    110|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  16:45:45
+   Duration  5.74s (transform 4.05s, setup 178ms, import 5.35s, tests 67ms, environment 0ms)
+

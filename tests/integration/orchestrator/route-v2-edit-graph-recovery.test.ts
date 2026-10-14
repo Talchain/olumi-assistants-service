@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../../src/orchestrator-v5/append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 /**
  * V5 Phase 2.5 Defect A — Part 1 regression suite.
  *
@@ -50,7 +56,6 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
     loadGraph: loadGraphMock,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
   }),

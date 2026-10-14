@@ -939,6 +939,41 @@ function canonicalise(text: string): string {
 }
 
 /**
+ * The spans the existing occurrence reader claims as a target or a level.
+ * Fi reuses its located occurrences and role verdicts; it never reparses a figure
+ * or excludes another occurrence merely because the two have equal values.
+ */
+export function nonEffectQuantitySpans(brief: string, labels: readonly string[], targets: readonly { label: string; value: number; unit: string }[] = []): { start: number; end: number }[] {
+  const pair = resolveStatedGoalPairSpan(brief);
+  return scanQuantities(brief).filter(occ => labels.some(label => {
+    const role = judgeOccurrence(brief, occ, label, 'absent', pair);
+    return (role.ok && targets.some(t => t.label === label
+      && sameQuantity(occ, { ...occ, value: classifyUnitScaleClass(t.unit) === 'percent' ? t.value / 100 : t.value, unit: t.unit })))
+      || role.refusal === 'stated_as_current_level'
+      || (role.refusal === 'limit_direction_not_representable' && targets.some(t => t.label === label
+        && sameQuantity(occ, { ...occ, value: classifyUnitScaleClass(t.unit) === 'percent' ? t.value / 100 : t.value, unit: t.unit })));
+  })).map(occ => ({ start: occ.index, end: occ.end }));
+}
+
+/**
+ * Recovery Batch B, S4 V2 (AIE 0825 §2, #94 6122028727): this reader's own role verdict on ONE amount, for the figure-credit
+ * verifier. `conditional` (its sentence is conditional), `aim` (a bound, goal word, desire lead, target or change-to verb
+ * governs it; a bare subject + target verb stays a statement), `past` (a past marker in its window), `current` (a
+ * present-state governor or marker in its window), else null. The same C1 governors and markers `judgeOccurrence` reads,
+ * in the same order of precedence; no new vocabulary.
+ */
+export function occurrenceRoleOf(text: string, index: number): "conditional" | "aim" | "past" | "current" | null {
+  if (CONDITIONAL_MARKER.test(sentenceAround(text, index))) return "conditional";
+  const window = windowBefore(text, index).replace(/[£$€\s]+$/, " ");
+  if (BOUND_GOVERNOR.test(window) || GOAL_WORD_GOVERNOR.test(window) || DESIRE_GOVERNOR.test(window) || CHANGE_TO_GOVERNOR.test(window)) return "aim";
+  const verb = TARGET_VERB_GOVERNOR.exec(window);
+  if (verb !== null && ((verb.groups?.verb ?? "").toLowerCase().startsWith("target")
+    || !BARE_SUBJECT_LEAD.test((verb.groups?.lead ?? "").toLowerCase()))) return "aim";
+  if (PAST_MARKER.test(window)) return "past";
+  return PRESENT_STATE_GOVERNOR.test(window) || PRESENT_STATE_MARKER.test(window) ? "current" : null;
+}
+
+/**
  * Derive the goal target from the goal node's own label, attested against the
  * brief AND bound to a target statement in the user's words. See the module
  * header and the ROUND 5 block for why every half is required.

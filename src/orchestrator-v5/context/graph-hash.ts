@@ -1,3 +1,4 @@
+import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
 /**
  * V5 Phase 1.5 — deterministic graph hash.
  *
@@ -16,10 +17,14 @@
  */
 
 import { createHash } from 'node:crypto';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { computeAnalysisReadyStatusWithReason } from '../../cee/transforms/option-status.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
+import { endsOfGraph, heldLinkBeforeRouteOnce, heldLinkBeforeValidatedDefinition, heldLinkOf, type LinkHold } from '../goal-target/held-user-links.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
@@ -63,6 +68,14 @@ export function computeDeterministicGraphHash(
 }
 
 /**
+ * Which analysis-affecting projection to hash. 'current' is the only one freshness ever reads. The others identify HISTORY
+ * only (`graph-identity.ts`): 'legacy' (frozen), 'pre_hold' (before hold-at-1.0, Codex r2 #2643) and 'pre_definition'
+ * (the user-only hold, before a validated definition held whoever drew it; Science d5 #87 6011224941), and 'pre_route_once'.
+ * Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+ */
+export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_definition' | 'pre_route_once';
+
+/**
  * Compute a deterministic 16-char hex hash of all graph fields that AFFECT
  * analysis output. Used by V5 freshness derivation: comparing the hash at
  * `run_analysis` time against the hash on the current turn determines whether
@@ -85,8 +98,12 @@ export function computeDeterministicGraphHash(
  *     encoding_map,
  *     nonlinear_identity (C46 carrier, as stored),
  *     scale_frame, goal_threshold_frame, goal_direction, quantity_frame, analysis_participation,
+ *     goal_target_basis (CEE-local; only when present and well-formed — Batch C gap 2),
  *     interventions: per-factor { value, value_type, encoding_map,
- *                                  target_match: { node_id } }
+ *                                  target_match: { node_id } },
+ *     unresolved_targets: sorted distinct admission gaps from the canonical
+ *                         option carrier (unique matching mirror, else node),
+ *                         plus retained node gaps even when a ready mirror shadows them
  *   }
  *   edges: sorted by (from, to), each → {
  *     from, to, edge_type,
@@ -109,7 +126,7 @@ export function computeDeterministicGraphHash(
  *   origin, observed_state.{extractionType, reviewed_by_user, elicited_from},
  *   intervention.{unit, source, reasoning, value_confidence, display_value},
  *   target_match.{match_type, confidence}, edge.validation, edge.defaulted,
- *   option.{description, unresolved_targets, user_questions, brief_quote}.
+ *   option.{description, user_questions, brief_quote}.
  *
  * Also intentionally EXCLUDED — Monte Carlo configuration parameters
  * passed to PLoT alongside the graph (`seed`, `n_samples`, request_id):
@@ -121,8 +138,9 @@ export function computeDeterministicGraphHash(
  */
 export function computeAnalysisAffectingGraphHash(
   graph: GraphStateIngress | null | undefined,
+  projection: AnalysisHashProjection = 'current',
 ): string | null {
-  const full = computeAnalysisAffectingGraphHashSha256(graph);
+  const full = computeAnalysisAffectingGraphHashSha256(graph, projection);
   return full === null ? null : full.slice(0, HASH_HEX_LENGTH);
 }
 
@@ -135,7 +153,9 @@ export function computeAnalysisAffectingGraphHash(
  */
 export function computeAnalysisAffectingGraphHashSha256(
   graph: GraphStateIngress | null | undefined,
+  projection: AnalysisHashProjection = 'current',
 ): string | null {
+  if (projection === 'legacy') return frozenLegacyProjectionHash(graph);
   if (!graph) return null;
 
   const nodes = graph.nodes;
@@ -153,10 +173,36 @@ export function computeAnalysisAffectingGraphHashSha256(
     return null;
   }
 
+  const factorIds = new Set(nodes.filter((node) => node != null && node.kind === 'factor').map((node) => node.id));
+  // The hold this projection hashes (`EdgeHold`): the current one reads this graph's ends (d5 6011224941: a VALIDATED
+  // definition holds whoever flagged it); 'pre_definition' is the user-only hold of #2643/#2653; 'pre_hold' none (history).
+  const endsOf = endsOfGraph(graph);
+  const hold: EdgeHold = projection === 'pre_hold' ? () => null
+    : projection === 'pre_definition' ? heldLinkBeforeValidatedDefinition
+      : projection === 'pre_route_once' ? (edge) => heldLinkBeforeRouteOnce(edge, endsOf(edge))
+        : (edge) => heldLinkOf(edge, endsOf(edge));
+  const mirroredOptions = Array.isArray(options)
+    ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
+        .filter((option) => option !== null)
+    : [];
+
   const canonical = stableStringify({
-    nodes: nodes.map(projectNode).sort((a, b) => a.id.localeCompare(b.id)),
+    nodes: nodes.map((node) => {
+      // Match canonical readiness: one valid mirror owns this option, even in
+      // a partial mirror; missing/invalid/duplicate mirrors fall back to the node.
+      const mirrors = node != null && node.kind === 'option' && typeof node.id === 'string'
+        ? mirroredOptions.filter((option) => option.id === node.id.trim()) : [];
+      const option = node != null && node.kind === 'option' && typeof node.id === 'string'
+        ? mirrors.length === 1 ? mirrors[0]! : projectOptionForCanonicalBuilder(node, factorIds) : null;
+      // A matching mirror owns Run admission, but cannot erase retained node
+      // uncertainty from the model's analytical identity. Approved clearance
+      // edits both carriers, including a node gap shadowed by a ready mirror.
+      const nodeOption = node != null && node.kind === 'option'
+        ? projectOptionForCanonicalBuilder(node, factorIds) : null;
+      return { ...projectNode(node), ...projectAdmissionGaps(option, nodeOption?.unresolved_targets) };
+    }).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges
-      .map(projectEdge)
+      .map((edge) => projectEdge(edge, hold))
       .sort((a, b) => {
         const fromCmp = a.from.localeCompare(b.from);
         return fromCmp !== 0 ? fromCmp : a.to.localeCompare(b.to);
@@ -238,9 +284,17 @@ function projectIntervention(raw: unknown): Record<string, unknown> | undefined 
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  if (r.value !== undefined) out.value = r.value;
-  if (r.value_type !== undefined) out.value_type = r.value_type;
-  if (r.encoding_map !== undefined) out.encoding_map = r.encoding_map;
+  // ⭐ THE PUBLISHED INTERVENTION VOCABULARY, IMPORTED (schemas 0.66.0, projection v5): `value`, `value_type`,
+  // `encoding_map` and TEMPORAL's `range` (DL #75 5914755517). An option's stated range decides its chance of meeting
+  // a limit on that value, so "5–20 days" → "5–30 days" moves the revision, and so does who stated it. `range` is
+  // hashed as stored (its declared members); absent on every intervention without one, so no other graph's hash moves.
+  for (const key of VOCABULARY.intervention.fields) {
+    const v = r[key];
+    if (v === undefined) continue;
+    out[key] = key === 'range' && v !== null && typeof v === 'object'
+      ? pickDefined(v as Record<string, unknown>, ['low', 'high', 'meaning', 'source', 'source_quote'])
+      : v;
+  }
   // ⭐ THE NATIVE QUANTITY AND ITS UNIT — in the identity because a consumer
   // reads them for a DISPLAYED verdict.
   //
@@ -301,7 +355,18 @@ interface NodeProjection {
 
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  // Hash stored basis bytes as written, without interpreting validity. Its bound meaning also affects freshness.
+  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '',
+    ...(r.horizon_basis !== undefined ? Object.fromEntries([
+      ['horizon_basis', r.horizon_basis],
+      ['horizon_basis_goal_meaning', [
+        typeof r.label === 'string' ? r.label.trim().toLowerCase().replace(/\s+/g, ' ') : null,
+        r.goal_threshold_unit ?? null, r.goal_horizon_months ?? null,
+      ]],
+    ]) : {}),
+  };
+  const scope = goalScopeAnalysisMeaning(r.goal_scope);
+  if (scope !== undefined) out.goal_scope = scope;
 
   // The published node vocabulary (schemas 0.62.0): the 0.61.0 frame / direction / quantity fields, `scale_frame`
   // (read with `unit` / `raw_value` by `percentLimitFrameProvable`), the C46 `nonlinear_identity` carrier and
@@ -309,6 +374,17 @@ function projectNode(raw: unknown): NodeProjection {
   for (const key of VOCABULARY.node.fields) {
     if (key !== 'id' && r[key] !== undefined) out[key] = r[key];
   }
+
+  // RC3 a′ is CEE-local until the shared vocabulary catches up. This identity changes readiness and Run inclusion,
+  // so removing/rebinding it must invalidate the old analysis; absent/malformed stamps preserve legacy hashes.
+  const reliesOn = NodeV3.shape.relies_on.safeParse(r.relies_on);
+  if (reliesOn.success && reliesOn.data !== undefined) out.relies_on = reliesOn.data;
+
+  // Recovery Batch C (gap 2): the goal's stated target basis (reference, denominator, period, effect timing) decides which
+  // goal chance may be said, so a change to it alone must stale a stored Run. CEE-local like `relies_on`: it enters ONLY
+  // when present and well-formed, so every graph without one hashes byte-identically to before.
+  const targetBasis = NodeV3.shape.goal_target_basis.safeParse(r.goal_target_basis);
+  if (targetBasis.success && targetBasis.data !== undefined) out.goal_target_basis = targetBasis.data;
 
   const observed = projectObservedState(r.observed_state);
   if (observed !== undefined && Object.keys(observed).length > 0) {
@@ -334,7 +410,14 @@ interface EdgeProjection {
   [key: string]: unknown;
 }
 
-function projectEdge(raw: unknown): EdgeProjection {
+/**
+ * The hold a projection applies to one edge. The current projection's is `heldLinkOf` with the graph's ends. A HISTORY
+ * projection's is the hold of its day: none for 'pre_hold' (Codex r2 #2643), the user-only hold for 'pre_definition'
+ * (d5 #87 6011224941), so a model version or Run recorded then still validates as IMMUTABLE history. Never freshness.
+ */
+type EdgeHold = (edge: unknown) => LinkHold | { readonly reason?: undefined; readonly std: number } | null;
+
+function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: EdgeProjection = {
     from: typeof r.from === 'string' ? r.from : '',
@@ -362,7 +445,17 @@ function projectEdge(raw: unknown): EdgeProjection {
       const ne = pickDefined((p.natural_effect as Record<string, unknown>), VOCABULARY.edge.provenance_natural_effect_fields);
       if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
     }
+    if (Object.hasOwn(p, 'share_by_date')) provenance.share_by_date = p.share_by_date;
     if (Object.keys(provenance).length > 0) out.provenance = provenance;
+  }
+
+  // ⭐ HOLD-AT-1.0 (d5 #87 6008807178; Codex r1 #2643 P1): the analysis-affecting identity of a HELD link is what the Run
+  // is SENT — existence 1 and its range's spread — through the same fields (no new key), so a range edit is an input change
+  // and a Run computed before the hold is not "fresh". Only a graph with a held link hashes differently.
+  const held = hold(r);
+  if (held !== null) {
+    out.exists_probability = 1;
+    if (held.reason !== 'route_once') out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
   }
 
   return out;
@@ -371,6 +464,24 @@ function projectEdge(raw: unknown): EdgeProjection {
 interface OptionProjection {
   id: string;
   [key: string]: unknown;
+}
+
+function projectAdmissionGaps(
+  option: ReturnType<typeof projectOptionForCanonicalBuilder>,
+  retainedNodeTargets: readonly string[] = [],
+): Record<string, unknown> {
+  const targets = [...(option?.unresolved_targets ?? []), ...retainedNodeTargets];
+  // Absence/empty is omitted entirely, preserving every pre-gap hash byte.
+  if (!option || targets.length === 0) return {};
+  // Reuse the status authority's unresolvedTargetCount override. Other inputs
+  // cannot override a carried gap; this does not re-decide numeric readiness.
+  const { status } = computeAnalysisReadyStatusWithReason(
+    Object.keys(option.interventions ?? {}).length, option.status, false, 0,
+    option.is_baseline === true, targets.length,
+  );
+  return status === 'needs_user_mapping'
+    ? { unresolved_targets: [...new Set(targets)].sort() }
+    : {};
 }
 
 function projectOption(raw: unknown): OptionProjection {
@@ -387,6 +498,303 @@ function projectOption(raw: unknown): OptionProjection {
 
   // Only include raw_interventions when option is not yet ready — that signals
   // the encoding state still affects analysis preconditions.
+  if (r.status !== 'ready' && r.raw_interventions && typeof r.raw_interventions === 'object') {
+    out.raw_interventions = r.raw_interventions;
+  }
+
+  return out;
+}
+
+/** Private frozen-version implementation of this hash authority. Historical
+ * records require the exact old vocabulary; this helper has no export or live
+ * freshness consumer. Both widths and versions enter through the EXISTING
+ * computeAnalysisAffectingGraphHash authorities above, never a second door. */
+const legacyVOCABULARY = {
+  "node": {
+    "fields": [
+      "id",
+      "kind",
+      "category",
+      "factor_type",
+      "is_baseline",
+      "goal_threshold",
+      "goal_threshold_raw",
+      "goal_threshold_cap",
+      "intercept",
+      "encoding_map",
+      "goal_threshold_frame",
+      "goal_direction",
+      "quantity_frame",
+      "scale_frame",
+      "nonlinear_identity",
+      "analysis_participation",
+      "proposed_by"
+    ],
+    "observed_state_fields": [
+      "value",
+      "baseline",
+      "cap",
+      "source",
+      "unit",
+      "raw_value",
+      "std"
+    ],
+    "prior_fields": [
+      "distribution",
+      "range_min",
+      "range_max"
+    ],
+    "interventions_field": "interventions"
+  },
+  "edge": {
+    "fields": [
+      "from",
+      "to",
+      "edge_type",
+      "exists_probability",
+      "effect_direction"
+    ],
+    "strength_fields": [
+      "mean",
+      "std"
+    ],
+    "provenance_fields": [
+      "source",
+      "magnitude"
+    ],
+    "provenance_natural_effect_fields": [
+      "amount_unit"
+    ]
+  },
+  "option": {
+    "fields": [
+      "id",
+      "status",
+      "is_baseline"
+    ],
+    "interventions_field": "interventions",
+    "conditional_field": {
+      "field": "raw_interventions",
+      "include_when": {
+        "field": "status",
+        "not_equals": "ready"
+      }
+    }
+  },
+  "intervention": {
+    "fields": [
+      "value",
+      "value_type",
+      "encoding_map",
+      "range"
+    ],
+    "target_match_field": "target_match",
+    "target_match_fields": [
+      "node_id"
+    ]
+  }
+} as const;
+
+function frozenLegacyProjectionHash(
+  graph: GraphStateIngress | null | undefined,
+): string | null {
+  if (!graph) return null;
+
+  const nodes = graph.nodes;
+  const edges = graph.edges;
+  const options = (graph as { options?: unknown }).options;
+  const goalNodeId = (graph as { goal_node_id?: unknown }).goal_node_id;
+  const goalConstraints = (graph as { goal_constraints?: unknown }).goal_constraints;
+
+  if (
+    nodes.length === 0 &&
+    edges.length === 0 &&
+    !Array.isArray(options) &&
+    goalNodeId === undefined
+  ) {
+    return null;
+  }
+
+  const canonical = stableStringify({
+    nodes: nodes.map(legacyProjectNode).sort((a, b) => a.id.localeCompare(b.id)),
+    edges: edges
+      .map(legacyProjectEdge)
+      .sort((a, b) => {
+        const fromCmp = a.from.localeCompare(b.from);
+        return fromCmp !== 0 ? fromCmp : a.to.localeCompare(b.to);
+      }),
+    options: Array.isArray(options)
+      ? options.map(legacyProjectOption).sort((a, b) => a.id.localeCompare(b.id))
+      : [],
+    goal_node_id: typeof goalNodeId === 'string' ? goalNodeId : null,
+    goal_constraints: Array.isArray(goalConstraints) ? goalConstraints : [],
+    run_semantics: legacyRunSemantics(graph, goalNodeId),
+  });
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+function legacyRunSemantics(graph: unknown, goalNodeId: unknown): Record<string, unknown> {
+  const direction = typeof goalNodeId === 'string' ? resolveGoalDirection(graph, goalNodeId) : undefined;
+  return {
+    goal_direction: direction?.direction ?? null,
+    goal_direction_provenance: direction?.provenance ?? null,
+    goal_threshold_strict: typeof goalNodeId === 'string' ? resolveGoalThresholdStrict(graph, goalNodeId) : false,
+  };
+}
+
+function legacyPickDefined<T extends Record<string, unknown>>(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): T {
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+}
+
+function legacyProjectObservedState(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  return legacyPickDefined(raw as Record<string, unknown>, legacyVOCABULARY.node.observed_state_fields);
+}
+
+function legacyProjectPrior(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  return legacyPickDefined(raw as Record<string, unknown>, [
+    'distribution',
+    'range_min',
+    'range_max',
+  ]);
+}
+
+function legacyNormaliseRawValueForIdentity(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  const trimmed = raw.trim();
+  if (trimmed === '') return raw;
+  const asNumber = Number(trimmed);
+  return Number.isFinite(asNumber) && String(asNumber) === trimmed ? asNumber : raw;
+}
+
+function legacyProjectIntervention(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (r.value !== undefined) out.value = r.value;
+  if (r.value_type !== undefined) out.value_type = r.value_type;
+  if (r.encoding_map !== undefined) out.encoding_map = r.encoding_map;
+  if (r.raw_value !== undefined) {
+    out.raw_value = legacyNormaliseRawValueForIdentity(r.raw_value);
+    if (r.unit !== undefined) out.unit = r.unit;
+  }
+  if (r.target_match && typeof r.target_match === 'object') {
+    const tm = r.target_match as Record<string, unknown>;
+    if (tm.node_id !== undefined) out.target_match = { node_id: tm.node_id };
+  }
+  return out;
+}
+
+function legacyProjectInterventionRecord(
+  raw: unknown,
+): Record<string, Record<string, unknown> | undefined> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, Record<string, unknown> | undefined> = {};
+  for (const factorId of Object.keys(r)) {
+    const projected = legacyProjectIntervention(r[factorId]);
+    if (projected !== undefined) out[factorId] = projected;
+  }
+  return out;
+}
+
+interface legacyNodeProjection {
+  id: string;
+  [key: string]: unknown;
+}
+
+function legacyProjectNode(raw: unknown): legacyNodeProjection {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: legacyNodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  const scope = goalScopeAnalysisMeaning(r.goal_scope);
+  if (scope !== undefined) out.goal_scope = scope;
+
+  for (const key of legacyVOCABULARY.node.fields) {
+    if (key !== 'id' && r[key] !== undefined) out[key] = r[key];
+  }
+
+  const observed = legacyProjectObservedState(r.observed_state);
+  if (observed !== undefined && Object.keys(observed).length > 0) {
+    out.observed_state = observed;
+  }
+
+  const prior = legacyProjectPrior(r.prior);
+  if (prior !== undefined && Object.keys(prior).length > 0) {
+    out.prior = prior;
+  }
+
+  const interventions = legacyProjectInterventionRecord(r.interventions);
+  if (interventions !== undefined && Object.keys(interventions).length > 0) {
+    out.interventions = interventions;
+  }
+
+  return out;
+}
+
+interface legacyEdgeProjection {
+  from: string;
+  to: string;
+  [key: string]: unknown;
+}
+
+function legacyProjectEdge(raw: unknown): legacyEdgeProjection {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: legacyEdgeProjection = {
+    from: typeof r.from === 'string' ? r.from : '',
+    to: typeof r.to === 'string' ? r.to : '',
+  };
+
+  if (r.edge_type !== undefined) out.edge_type = r.edge_type;
+  if (r.exists_probability !== undefined) out.exists_probability = r.exists_probability;
+  if (r.effect_direction !== undefined) out.effect_direction = r.effect_direction;
+
+  if (r.strength && typeof r.strength === 'object') {
+    const s = r.strength as Record<string, unknown>;
+    const strength: Record<string, unknown> = {};
+    if (s.mean !== undefined) strength.mean = s.mean;
+    if (s.std !== undefined) strength.std = s.std;
+    if (Object.keys(strength).length > 0) out.strength = strength;
+  }
+
+  if (r.provenance && typeof r.provenance === 'object') {
+    const p = r.provenance as Record<string, unknown>;
+    const provenance: Record<string, unknown> = legacyPickDefined(p, legacyVOCABULARY.edge.provenance_fields);
+    if (p.natural_effect && typeof p.natural_effect === 'object') {
+      const ne = legacyPickDefined((p.natural_effect as Record<string, unknown>), legacyVOCABULARY.edge.provenance_natural_effect_fields);
+      if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
+    }
+    if (Object.keys(provenance).length > 0) out.provenance = provenance;
+  }
+
+  return out;
+}
+
+interface legacyOptionProjection {
+  id: string;
+  [key: string]: unknown;
+}
+
+function legacyProjectOption(raw: unknown): legacyOptionProjection {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: legacyOptionProjection = { id: typeof r.id === 'string' ? r.id : '' };
+
+  if (r.status !== undefined) out.status = r.status;
+  if (r.is_baseline !== undefined) out.is_baseline = r.is_baseline;
+
+  const interventions = legacyProjectInterventionRecord(r.interventions);
+  if (interventions !== undefined && Object.keys(interventions).length > 0) {
+    out.interventions = interventions;
+  }
+
   if (r.status !== 'ready' && r.raw_interventions && typeof r.raw_interventions === 'object') {
     out.raw_interventions = r.raw_interventions;
   }

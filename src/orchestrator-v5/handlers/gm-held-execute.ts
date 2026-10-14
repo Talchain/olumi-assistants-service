@@ -39,8 +39,10 @@
  * All user-facing wording in this file: provisional_doctrine_v0.
  */
 
+import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
+import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
-import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
+import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember, recheckAddFactorBatch, stampNewUserTodayLevels, type UserTodayLevel } from '../routing/add-factor-transaction.js';
 import { toGraphView } from './add-option-dispatch.js';
@@ -63,6 +65,7 @@ import {
   applyAndValidateMutation,
   type PersistedGraphV3T,
 } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
 import {
   buildEditGraphHandlerFact,
   buildGenericEditGraphHandlerFact,
@@ -501,6 +504,8 @@ export type GmHeldResumeRead =
        * confirm writes in the same apply (`stampNewUserTodayLevels`). Absent on every other hold.
        */
       readonly userToday?: readonly UserTodayLevel[];
+      /** event_risk.v1 slice 2a: validated hold member. */
+      readonly userEventRisk?: UserEventRisk;
     };
 
 /**
@@ -539,9 +544,13 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   const rawUserToday = patch[GM_HELD_USER_TODAY_KEY];
   const userToday = rawUserToday === undefined ? undefined : readUserTodayMember(rawUserToday);
   if (rawUserToday !== undefined && userToday === undefined) return { kind: 'no_payload' };
+  const rawUserEventRisk = patch[GM_HELD_USER_EVENT_RISK_KEY];
+  const userEventRisk = rawUserEventRisk === undefined ? undefined : readUserEventRiskMember(rawUserEventRisk);
+  if (rawUserEventRisk !== undefined && userEventRisk === undefined) return { kind: 'no_payload' };
   return {
     kind: 'ok',
     operations: parsed.data,
+    ...(userEventRisk !== undefined ? { userEventRisk } : {}),
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
     ...(userStatedNodeIds !== undefined ? { userStatedNodeIds } : {}),
@@ -569,6 +578,8 @@ export interface GmHeldExecuteInput {
   readonly gradedToday?: readonly GradedTodayLevel[];
   /** ⭐ PJ-E-FIG — the add-factor door's figures, the user's (`readGmHeldResume`); they land in this apply. */
   readonly userToday?: readonly UserTodayLevel[];
+  /** event_risk.v1 slice 2a: validated hold member. */
+  readonly userEventRisk?: UserEventRisk;
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -587,10 +598,14 @@ export type GmHeldExecuteOutcome =
       /** Re-referee blocked the batch — a "yes" never overrides integrity. */
       readonly status: 'referee_blocked';
       readonly governing: EditGmGoverningVerdict;
+      /** Only the central rule's typed label-based refusal; never raw diagnostics. */
+      readonly userReason?: string;
     }
   | {
       /** Apply/validate/fact construction failed — nothing to persist. */
       readonly status: 'apply_failed';
+      /** Only the central rule's typed label-based refusal; never raw diagnostics. */
+      readonly userReason?: string;
       /**
        * `incomplete_apply` (P1b): the batch applied without throwing, but at
        * least one confirmed op did NOT land on the canonical persisted graph
@@ -697,6 +712,12 @@ export function confirmationSatisfies(governing: EditGmGoverningVerdict): boolea
   }
 }
 
+function preconditionLinkRefusalOf(err: unknown): string | undefined {
+  if (err instanceof PatchApplyError && err.code === 'PRECONDITION_RISK_LINKED') return err.message;
+  if (err instanceof D1HandlerError && err.details?.violation_code === 'PRECONDITION_RISK_LINKED') return err.userGuidance;
+  return undefined;
+}
+
 /**
  * Re-referee + apply + receipt for a confirmed hold. Pure with respect to
  * storage; never throws.
@@ -705,11 +726,14 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // ValidatedPatchOperation (Zod output) is structurally assignable to the
   // pipeline's PatchOperation — a plain widening copy, no unsafe cast.
   const operations: PatchOperation[] = [...input.operations];
+  // Re-check the stamp and zero-edge invariant against THIS graph before the normal producer-field referee.
+  const refereeOperations = reliesOnRefereeOperations(operations, input.currentGraph);
+  if (refereeOperations === undefined) return { status: 'apply_failed', reason: 'apply_error' };
 
   // ── 2. Re-referee (defence-in-depth; redacted telemetry re-emitted) ──
   const decision = evaluateEditGraphMutations({
     mode: 'live',
-    operations,
+    operations: refereeOperations,
     currentGraph: input.currentGraph,
     currentGraphHash: input.currentGraphHash,
     // The caller verified the pin === the current hash, so the batch is
@@ -723,7 +747,18 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
   });
   if (!confirmationSatisfies(decision.governing)) {
-    return { status: 'referee_blocked', governing: decision.governing };
+    // A hold minted before the incident-link rule shipped is still refused.
+    // Rebuild its pure candidate only to recover the central typed reason;
+    // unrelated referee/schema diagnostics remain redacted as before.
+    let userReason: string | undefined;
+    try {
+      const parsed = GraphV3.safeParse(input.currentGraph);
+      if (parsed.success) applyPatchOperations(parsed.data, operations);
+    } catch (err) {
+      userReason = preconditionLinkRefusalOf(err);
+    }
+    return { status: 'referee_blocked', governing: decision.governing,
+      ...(userReason === undefined ? {} : { userReason }) };
   }
 
   // ── 2a. A new switch's today-0 (Canonical #70 5854919806 item 1) ──────
@@ -792,7 +827,10 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     );
     return { status: 'apply_failed', reason: 'apply_error' };
   }
-  const stampedOperations: PatchOperation[] = userTodayStamp.operations;
+  // event_risk.v1 slice 2a: pipeline-owned occurrence and conditional impact, after the re-referee.
+  const eventRiskStamp = stampUserEventRisk(userTodayStamp.operations, input.userEventRisk, input.currentGraph);
+  if (eventRiskStamp === undefined) return { status: 'apply_failed', reason: 'apply_error' };
+  const stampedOperations: PatchOperation[] = eventRiskStamp;
 
   // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
@@ -937,7 +975,9 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
       },
       'GM held-execute — confirmed batch failed to apply/validate; declining (nothing persisted)',
     );
-    return { status: 'apply_failed', reason: 'apply_error' };
+    const userReason = preconditionLinkRefusalOf(err);
+    return { status: 'apply_failed', reason: 'apply_error',
+      ...(userReason === undefined ? {} : { userReason }) };
   }
 
   // A confirmed removal must also leave the option representation consumed by

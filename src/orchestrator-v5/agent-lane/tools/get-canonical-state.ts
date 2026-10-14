@@ -69,7 +69,7 @@ const NOT_FOUND = {
   ok: false as const,
   refusal: 'not_found' as const,
   detail:
-    'No readable decision model for that scenario. This is the same answer for a scenario that ' +
+    'No readable model for that scenario. This is the same answer for a scenario that ' +
     'does not exist and one you cannot read, deliberately.',
 };
 

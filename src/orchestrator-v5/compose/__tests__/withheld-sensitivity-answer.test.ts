@@ -271,6 +271,7 @@ describe('the withhold guarantee is unchanged', () => {
       expect(out.changed).toBe(true);
       expect(out.reason).toBe('leader_claim_replaced');
       expect(out.text).not.toContain('currently leads');
+      expect(out.text).not.toContain('scored highest');
       expect(textAssertsLeadingOption(out.text)).toBe(false);
     }
   });

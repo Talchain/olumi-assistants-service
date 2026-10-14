@@ -343,9 +343,11 @@ export function hasReducedSamplesDisclosure(
  *                                   value, which is an assumption and not the
  *                                   team's stated aim.
  *   GOAL_THRESHOLD_NOT_CONVERTIBLE  the stated goal level could not be converted
- *                                   into the samples' frame (the goal node has no
- *                                   observed baseline), so no option was tested
- *                                   against it.
+ *                                   into the samples' frame, so no option was
+ *                                   tested against it. ISL names one of ten
+ *                                   reasons (a missing baseline is only one);
+ *                                   PLoT #444 carries it as `detail.reason`, read
+ *                                   by {@link thresholdReasonOf}.
  */
 const PLOT_GOAL_DIRECTION_UNATTESTED = 'GOAL_DIRECTION_UNATTESTED';
 const PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE = 'GOAL_THRESHOLD_NOT_CONVERTIBLE';
@@ -447,6 +449,60 @@ export function withoutDirectionUnattestedOnHeldFloor<T>(response: T, goalPoints
     || (brief !== undefined && ((next.decision_brief as Record<string, unknown>).warning_codes !== brief.warning_codes
       || (next.decision_brief as Record<string, unknown>).warnings !== brief.warnings));
   return moved ? next as T : response;
+}
+
+/**
+ * GOAL-REACH build 3b: the ten reasons ISL names when it refuses to convert the goal's level
+ * (robustness_analyzer_v2.py), plus PLoT #444's own fallback 'unknown'. A CLOSED set: an unlisted value is 'unknown'.
+ */
+export const THRESHOLD_REASONS = [
+  'missing_goal_baseline', 'root_goal', 'goal_pinned_by_intervention', 'goal_values_outside_normalised_domain',
+  'non_finite_conversion_input', 'epsilon_breaks_status_quo_reference', 'auto_scaled_noise_breaks_status_quo_reference',
+  'change_rel_raw_range_missing', 'change_rel_base_zero', 'goal_node_missing', 'unknown',
+] as const;
+export type ThresholdReasonCode = (typeof THRESHOLD_REASONS)[number];
+export interface ThresholdReason {
+  readonly reason: ThresholdReasonCode;
+  /** root_goal only: which root form ISL refused (PLoT reads it from ISL's detail KEY). */
+  readonly root_case: 'root_value_source' | 'root_intercept' | 'unknown' | null;
+}
+
+/**
+ * Science §(g): the reasons with NO user action. Each is "explain only + logged as an Olumi defect"; none is ever
+ * offered a control. A root goal is Olumi-side only in its intercept form (or when the form is unknown).
+ */
+export const OLUMI_SIDE_THRESHOLD_REASONS: ReadonlySet<ThresholdReasonCode> = new Set<ThresholdReasonCode>([
+  'goal_values_outside_normalised_domain', 'non_finite_conversion_input', 'goal_node_missing',
+  'epsilon_breaks_status_quo_reference', 'auto_scaled_noise_breaks_status_quo_reference', 'change_rel_raw_range_missing', 'unknown',
+]);
+
+/** The one predicate for "explain only + Olumi defect": the set above, or a root goal not in its value-source form. */
+export function isOlumiSideThreshold(t: ThresholdReason): boolean {
+  return OLUMI_SIDE_THRESHOLD_REASONS.has(t.reason) || (t.reason === 'root_goal' && t.root_case !== 'root_value_source');
+}
+
+/**
+ * The ONE reader of GOAL_THRESHOLD_NOT_CONVERTIBLE's carried reason (PLoT #444: `inference_warnings[].detail
+ * {reason, root_case}`; PLoT's `decision_brief` carries the code only). Returns a closed code, never warning text, so a
+ * consumer of it is not a consumer of the Tier-3 channel. `null` when the code is absent, or present WITHOUT a carried
+ * reason (a pre-#444 payload): callers then keep their old words rather than guess a reason.
+ */
+export function thresholdReasonOf(response: unknown): ThresholdReason | null {
+  const arr = response !== null && typeof response === 'object' ? (response as Record<string, unknown>)['inference_warnings'] : undefined;
+  if (!Array.isArray(arr)) return null;
+  for (const entry of arr) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    if (e.code !== PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE) continue;
+    const detail = e.detail !== null && typeof e.detail === 'object' ? (e.detail as Record<string, unknown>) : undefined;
+    if (detail === undefined || !('reason' in detail)) return null;
+    const reason = (THRESHOLD_REASONS as readonly unknown[]).includes(detail.reason) ? (detail.reason as ThresholdReasonCode) : 'unknown';
+    const rc = detail.root_case;
+    const root_case = reason !== 'root_goal' ? null
+      : rc === 'root_value_source' || rc === 'root_intercept' ? rc : 'unknown';
+    return { reason, root_case };
+  }
+  return null;
 }
 
 /**

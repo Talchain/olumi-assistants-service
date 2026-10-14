@@ -526,7 +526,7 @@ describe('projectTurnReferents — the claim record cannot name what it does not
     + 'final answer.\n\nICP Validation Sprint Before Hiring scored highest against your goal in 82% of '
     + 'runs of this model, but treat this as provisional: the link between Sales '
     + 'Headcount Investment and Runway Depletion Risk is fragile.\n\nYour first '
-    + 'analysis is ready. Take a moment to explore the leading option and the '
+    + 'analysis is ready. Take a moment to explore the most-supported option and the '
     + 'factors shaping it before acting on the result.\n\nThe analysis used a '
     + 'default value for one of the factors in your model, which has no value set, '
     + 'so the comparison is illustrative until those values are set.';

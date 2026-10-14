@@ -54,6 +54,8 @@ export interface LimitEditRequest {
    * which keeps the row's own `operator_as_stated`.
    */
   readonly stated_operator?: CandidateOperator;
+  /** S-E S4: the approved words for a re-stated limit, in the same bounded quote as an added limit. */
+  readonly source_quote?: string;
 }
 
 export interface ApplyLimitEditParams {
@@ -66,7 +68,7 @@ export interface ApplyLimitEditParams {
 
 const refused = (reason: string): GoalTargetEditResult => ({ kind: 'refused', reason });
 
-type Row = { constraint_id?: unknown; node_id?: unknown; operator?: unknown; operator_as_stated?: unknown; value?: unknown; unit?: unknown; value_frame?: unknown; label?: unknown; provenance?: unknown };
+type Row = { constraint_id?: unknown; node_id?: unknown; operator?: unknown; operator_as_stated?: unknown; value?: unknown; unit?: unknown; value_frame?: unknown; label?: unknown; provenance?: unknown; source_quote?: unknown };
 /** The held operator a stated comparator is the twin of (`<` → `<=`, `>` → `>=`). */
 const heldOf = (op: CandidateOperator): '<=' | '>=' => (op === '<' || op === '<=' ? '<=' : '>=');
 const rowsOf = (g: unknown): Row[] => {
@@ -111,6 +113,8 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
   if (rows.length === 0) return refused('no_existing_limit');
   if (rows.length > 1) return refused('limit_ambiguous');
   const row = rows[0]!;
+  if (request.source_quote !== undefined && (typeof request.source_quote !== 'string'
+    || request.source_quote.trim() === '' || request.source_quote.length > 200)) return refused('invalid_source_quote');
   const unit = typeof row.unit === 'string' && row.unit !== '' ? row.unit : undefined;
   // ⛔ A row stored as a FRACTION of one (the pricing example's NRR: 1.1 'fraction', shown as 110%). The writer stores
   // the figure as given, in the row's unit, and the user states a percent: 115 would land as 11,500%. The percent →
@@ -140,6 +144,7 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
     rawValue: request.raw_value,
     ...(unit !== undefined ? { unit } : {}),
     ...(label !== undefined ? { label } : {}),
+    ...(request.source_quote !== undefined ? { confirmedConstraintSourceQuote: request.source_quote } : {}),
     // ⭐ KEPT, NEVER RELABELLED: the row's frame, which the handler would drop for a new figure.
     ...(frame !== undefined ? { confirmedConstraintValueFrame: frame } : {}),
     // A2: only a comparator the user STATED is relayed; a new figure alone leaves the handler to keep the row's own.
@@ -159,6 +164,7 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
     && w!.value_frame === row.value_frame
     && (label === undefined || w!.label === label)
     && w!.provenance === 'explicit'
+    && (request.source_quote === undefined || w!.source_quote === request.source_quote)
     // A2: the comparator as the user stated it — kept on a new figure alone, replaced when they stated one.
     && statedOperatorOf(w!) === statedAfter
     // Every other limit is untouched.

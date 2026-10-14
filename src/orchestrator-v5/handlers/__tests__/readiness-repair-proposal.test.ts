@@ -117,7 +117,7 @@ describe('canonical readiness authority', () => {
     (graph.edges as Dict[]).push(edge('fac_capacity', 'goal_1'));
     const assessment = assessCanonicalAnalysisReadiness(graph);
     expect(assessment.blockingIssues).toHaveLength(1);
-    expect(assessment.blockingIssues[0]?.code).toBe('UNREACHABLE_CONTROLLABLE_FACTOR');
+    expect(assessment.blockingIssues[0]?.code).toBe('MISSING_FACTOR_LEVEL');
     expect(assessment.repairProposal).toBeNull();
     expect(assessAnalysisReadiness(graph).nextStep).toContain('Delivery capacity');
   });

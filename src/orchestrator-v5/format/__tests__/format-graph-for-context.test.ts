@@ -40,6 +40,7 @@ import {
   type DisplaySafeGraph,
 } from '../format-graph-for-context.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from '../influence-bands.js';
+import { CANVAS_BAND_WORD } from '../edge-strength-bands.js';
 import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
 
 function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
@@ -98,11 +99,11 @@ describe('relationshipPhrase', () => {
     expect(relationshipPhrase(0.55)).toBe('strong positive link');
     expect(relationshipPhrase(0.85)).toBe('very strong positive link');
     expect(relationshipPhrase(0.99)).toBe('very strong positive link');
-    expect(relationshipPhrase(0.10)).toBe('weak positive link');
+    expect(relationshipPhrase(0.10)).toBe('slight positive link');
   });
 
   it('classifies negative bands and preserves sign', () => {
-    expect(relationshipPhrase(-0.15)).toBe('weak negative link');
+    expect(relationshipPhrase(-0.15)).toBe('slight negative link');
     expect(relationshipPhrase(-0.3)).toBe('moderate negative link');
     expect(relationshipPhrase(-0.5)).toBe('strong negative link');
     expect(relationshipPhrase(-1.0)).toBe('very strong negative link');
@@ -121,7 +122,7 @@ describe('relationshipPhrase', () => {
 
   it('crosses band boundaries inclusively at lower bound — the canvas cuts 0.2 / 0.4 / 0.7', () => {
     expect(relationshipPhrase(0.20)).toBe('moderate positive link');
-    expect(relationshipPhrase(0.199)).toBe('weak positive link');
+    expect(relationshipPhrase(0.199)).toBe('slight positive link');
     expect(relationshipPhrase(0.40)).toBe('strong positive link');
     expect(relationshipPhrase(0.399)).toBe('moderate positive link');
     expect(relationshipPhrase(0.70)).toBe('very strong positive link');
@@ -151,7 +152,7 @@ describe('bidirectedRelationshipPhrase', () => {
     expect(bidirectedRelationshipPhrase(0.3)).toBe(`moderate positive co-movement, ${COMMON_CAUSE}`);
     expect(bidirectedRelationshipPhrase(0.5)).toBe(`strong positive co-movement, ${COMMON_CAUSE}`);
     expect(bidirectedRelationshipPhrase(-0.5)).toBe(`strong negative co-movement, ${COMMON_CAUSE}`);
-    expect(bidirectedRelationshipPhrase(-0.15)).toBe(`weak negative co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(-0.15)).toBe(`slight negative co-movement, ${COMMON_CAUSE}`);
     expect(bidirectedRelationshipPhrase(0.99)).toBe(`very strong positive co-movement, ${COMMON_CAUSE}`);
   });
 
@@ -166,7 +167,7 @@ describe('bidirectedRelationshipPhrase', () => {
     // Forking the band constants would let the two families disagree about
     // where "moderate" starts. Both read edge-strength-bands.ts.
     expect(bidirectedRelationshipPhrase(0.20)).toContain('moderate');
-    expect(bidirectedRelationshipPhrase(0.199)).toContain('weak');
+    expect(bidirectedRelationshipPhrase(0.199)).toContain('slight');
     expect(bidirectedRelationshipPhrase(0.70)).toContain('very strong');
     expect(bidirectedRelationshipPhrase(0.699)).toMatch(/^strong/);
   });
@@ -200,7 +201,8 @@ describe('bidirected phrase allowlist — derived corpus, not a hand-maintained 
         expected.add(
           abs < NEAR_ZERO_INFLUENCE_THRESHOLD
             ? 'negligible'
-            : `${bandFromMagnitude(abs)} ${signed < 0 ? 'negative' : 'positive'}`,
+            // The band in the canvas's word (DL D4 row: ONE word per band), the same word the phrase says.
+            : `${CANVAS_BAND_WORD[bandFromMagnitude(abs)]} ${signed < 0 ? 'negative' : 'positive'}`,
         );
 
         const once = formatGraphForContext(bidirectedGraph(signed));
@@ -224,6 +226,28 @@ describe('bidirected phrase allowlist — derived corpus, not a hand-maintained 
     // band would round-trip perfectly and prove nothing about completeness.
     expect(expected.size).toBeGreaterThanOrEqual(9);
     expect(observed).toEqual(expected);
+  });
+});
+
+describe('ONE word per band (DL D4 row): the canvas\'s "slight", never the enum\'s "weak"', () => {
+  it('RED: a STORED legacy "weak … link" (no strength) is the same band said the canvas\'s way, never dropped to "negligible"', () => {
+    const out = formatGraphForContext(rawGraph({ edges: [{ from: 'fac_marketing', to: 'fac_leads', relationship: 'weak positive link' }] }));
+    expect(out.edges[0]!.relationship).toBe('slight positive link');
+  });
+  it('RED: a stored legacy bidirected "weak … co-movement" → "slight … co-movement"', () => {
+    const out = formatGraphForContext(rawGraph({ edges: [{ from: 'fac_marketing', to: 'fac_leads', edge_type: 'bidirected',
+      relationship: `weak negative co-movement, ${COMMON_CAUSE}` }] }));
+    expect(out.edges[0]!.relationship).toBe(`slight negative co-movement, ${COMMON_CAUSE}`);
+  });
+  it('CONTROL: an unsafe legacy string is still dropped to the near-zero phrase (the allowlist is not widened)', () => {
+    const out = formatGraphForContext(rawGraph({ edges: [{ from: 'fac_marketing', to: 'fac_leads', relationship: 'weak link of 0.55' }] }));
+    expect(out.edges[0]!.relationship).toBe('negligible link');
+  });
+  it('no producer phrase says "weak"', () => {
+    for (const v of [0.1, -0.15, 0.199]) {
+      expect(relationshipPhrase(v)).not.toMatch(/\bweak\b/);
+      expect(bidirectedRelationshipPhrase(v)).not.toMatch(/\bweak\b/);
+    }
   });
 });
 

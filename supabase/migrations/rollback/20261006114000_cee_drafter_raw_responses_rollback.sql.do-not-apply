@@ -1,0 +1,15 @@
+-- ============================================================================
+-- ROLLBACK for 20261006114000_cee_drafter_raw_responses.sql
+--
+-- Safe at any time for users: nothing in CEE (at any pin) READS this table, and
+-- the CEE writer treats a missing table as "log and skip". Dropping it only loses
+-- the banked raw drafter answers — bench evidence, not user data. Export first
+-- if any of them are still wanted:
+--   COPY (SELECT * FROM public.cee_drafter_raw_responses) TO STDOUT WITH CSV HEADER;
+--
+-- Filename carries `.do-not-apply` per the estate convention: this is a
+-- recovery procedure a human runs deliberately, never something a migration
+-- runner picks up.
+-- ============================================================================
+
+DROP TABLE IF EXISTS public.cee_drafter_raw_responses;

@@ -940,3 +940,20 @@ describe('the provisional arm cannot be bypassed by a constraint withhold', () =
     );
   });
 });
+
+
+describe('withheld analysis preserves model reasoning', () => {
+  it('retains the draft model by reference while removing a current result recommendation', () => {
+    const model = { type: 'draft_graph', body: `${LEADER} is the leading option; finance disagrees.`,
+      graph: { nodes: [{ id: 'human-risk', kind: 'risk', label: 'Finance disagrees', provenance: { source: 'user' } }], edges: [] } };
+    const before = JSON.stringify(model);
+    const response = envelope('The model is saved.', { blocks: [model, { type: 'analysis_result', leading_option_id: 'hire', summary: CLAIM }] });
+    const out = enforceLeadingOptionClaimsAtWire(response, { requestId: 'shared-model', exitPath: 'test',
+      mayNameLeadingOption: false, graph: ROSTER_GRAPH,
+      analysisReady: { analysis_admission: { structurally_analysable: false, permitted_analysis_mode: 'none' } } });
+    expect(out.response.blocks[0]).toBe(model);
+    expect(JSON.stringify(model)).toBe(before);
+    expect(out.response.blocks[1]).toMatchObject({ leading_option_id: null });
+    expect((out.response.blocks[1] as { summary?: unknown }).summary).not.toBe(CLAIM);
+  });
+});

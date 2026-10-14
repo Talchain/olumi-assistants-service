@@ -1,0 +1,166 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph reload + typed recovery) > flag OFF parity: route-v2 reload read_failure matches staging reads, RPC arguments and outcome 1`] = `
+{
+  "caseName": "read_failure",
+  "combinedReaderCalls": [
+    [
+      "33333333-3333-4333-8333-333333333333",
+    ],
+  ],
+  "dispatchedGraph": null,
+  "graphReloaded": false,
+  "hasPersistedEditBase": false,
+  "invalidations": [],
+  "loadGraphCalls": [
+    [
+      "33333333-3333-4333-8333-333333333333",
+    ],
+  ],
+  "reads": [
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+  ],
+  "recoveryReason": "session_store_failed",
+  "rpc": [],
+  "sequence": [
+    "loadGraph",
+    "read:scenarios:graph, brief_text",
+    "loadGraphAndBriefText",
+    "read:scenarios:graph, brief_text",
+  ],
+  "status": 200,
+  "writes": 0,
+}
+`;
+
+exports[`POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph reload + typed recovery) > flag OFF parity: route-v2 reload success matches staging reads, RPC arguments and outcome 1`] = `
+{
+  "caseName": "success",
+  "combinedReaderCalls": [
+    [
+      "33333333-3333-4333-8333-333333333333",
+    ],
+  ],
+  "dispatchedGraph": {
+    "edges": [
+      {
+        "from": "fac-1",
+        "to": "opt-1",
+      },
+    ],
+    "nodes": [
+      {
+        "id": "opt-1",
+        "kind": "option",
+        "label": "Option A",
+      },
+      {
+        "id": "fac-1",
+        "kind": "factor",
+        "label": "Cost",
+      },
+    ],
+  },
+  "graphReloaded": true,
+  "hasPersistedEditBase": false,
+  "invalidations": [
+    [
+      "33333333-3333-4333-8333-333333333333",
+    ],
+  ],
+  "loadGraphCalls": [
+    [
+      "33333333-3333-4333-8333-333333333333",
+    ],
+  ],
+  "reads": [
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+  ],
+  "recoveryReason": null,
+  "rpc": [
+    [
+      "append_turn_atomic_v5",
+      {
+        "p_assistant_message": null,
+        "p_brief_text": null,
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 1,
+        "p_expected_base_known": true,
+        "p_expected_graph_identity_hash": null,
+        "p_fence_generation": 1,
+        "p_graph": {
+          "edges": [
+            {
+              "from": "fac-1",
+              "to": "opt-1",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "opt-1",
+              "kind": "option",
+              "label": "Option A",
+            },
+            {
+              "id": "fac-1",
+              "kind": "factor",
+              "label": "Cost",
+            },
+          ],
+        },
+        "p_handler_facts": [],
+        "p_handler_id": null,
+        "p_incoming_graph_identity_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "p_llm_calls_used": 0,
+        "p_pending_actions": [],
+        "p_request_hash": "route-reload-parity",
+        "p_response_emitted": true,
+        "p_scenario_id": "33333333-3333-4333-8333-333333333333",
+        "p_turn_class": "direct_answer",
+        "p_turn_id": "11111111-1111-4111-8111-111111111100",
+        "p_user_message": null,
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "11111111-1111-4111-8111-111111111100",
+      },
+    ],
+  ],
+  "sequence": [
+    "loadGraph",
+    "read:scenarios:graph, brief_text",
+    "dispatch",
+    "read:v5_conversation_turns:request_hash",
+    "rpc",
+    "loadGraphAndBriefText",
+    "read:scenarios:graph, brief_text",
+  ],
+  "status": 200,
+  "writes": 1,
+}
+`;

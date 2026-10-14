@@ -93,6 +93,27 @@ export function edgeBandFromStrengthBand(band: StrengthBand): InfluenceBand {
   }
 }
 
+/**
+ * CEE's band word → the contract's (`StrengthBand`): the inverse of {@link edgeBandFromStrengthBand}, for a record that
+ * travels in the contract's vocabulary (schemas 0.70.0 Run snapshot `links[].band`). Exhaustive like its twin.
+ */
+export function strengthBandFromEdgeBand(band: InfluenceBand): StrengthBand {
+  switch (band) {
+    case 'very strong':
+      return 'very_strong';
+    case 'strong':
+      return 'strong';
+    case 'moderate':
+      return 'moderate';
+    case 'weak':
+      return 'slight';
+    default: {
+      const unmapped: never = band;
+      throw new Error(`CEE band word has no contract band: ${String(unmapped)}`);
+    }
+  }
+}
+
 /** The band a link's |β| falls in. */
 export function edgeBandFromMagnitude(absValue: number): InfluenceBand {
   if (absValue >= EDGE_STRENGTH_CUTS.veryStrong) return 'very strong';

@@ -595,6 +595,16 @@ export const DECISIONS: readonly Decision[] = [
       "5854387709). CEE only keeps it in step with the cells (`reindex-intervention-keys.ts`) and never mints it, so a " +
       "snake_case twin cannot arise here. (No orphan entry: that re-derivation reads it.)",
   },
+  // ── F1 semantic model (schemas 0.69.0) ────────────────────────────────
+  {
+    id: "orphan:goal_stated_as",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED, TEMPORARY. `goal_stated_as` (0.69.0, F1 spec §1: the figures the user stated, verbatim, before any period conversion) is declared on cee.NodeV3 so the strict mirror KEEPS " +
+      "it rather than stripping it. This PR is F1 T1 + T6 (option status) split out to land first (DL 380e54 on #2454); " +
+      "its writer is F1 T5 `set_goal` (CEE #2454, `goal_target_edit` → `add_constraint`), which lands next. When T5 " +
+      "lands, this finding stops reproducing and the guard demands this entry be deleted.",
+  },
   {
     id: "orphan:starterId",
     status: "ACCEPTED",

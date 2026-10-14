@@ -53,7 +53,7 @@ const GRAPH = {
 };
 
 /** The producer's own summary — honest figures, goal-fit wording, no caveat. */
-const PRODUCER_SUMMARY = `${LEAD} scored highest against your goal in 55% of runs, ${OTHER} in 36%.`;
+const PRODUCER_SUMMARY = `${LEAD} was supported by 55% of runs, ${OTHER} in 36%.`;
 
 function runFact(): RunAnalysisHandlerFact {
   return RunAnalysisHandlerFactSchema.parse({

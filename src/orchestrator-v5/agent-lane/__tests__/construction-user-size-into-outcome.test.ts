@@ -127,9 +127,10 @@ describe('A4f: the user\'s £ size into an intermediate £ outcome fits that out
     expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(false);
   });
 
-  it('control: the same size into a FACTOR is never widened — it stays cut and the question is still asked', async () => {
+  it('control: the same size into a FACTOR is never widened — stored clamped at ±1 (its full β marked), and still asked', async () => {
     const { g, out } = await build(draft({ fundingAsFactor: true }));
-    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
+    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBe(1);
+    expect(Math.abs(edge(g, ...DEAL).provenance.clamped_from)).toBeGreaterThan(1);
     expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
   });
 });
@@ -234,14 +235,19 @@ describe('A4f cascade is path independent (construction and the F4 card share it
     expect(edge(a, ...DEAL).provenance.natural_effect.amount).toBe(edge(b, ...DEAL).provenance.natural_effect.amount);
   });
 
-  // ⚠ NAMED RESIDUAL (MG #75, to R3): Olumi's drafted "+£1 per £1" outcome → goal link is typed `definitional` on the frameless
-  // build (the normalising frame holds it) but SET ASIDE when the brief states the target: the target's frame (£1m) cannot
-  // hold £3m at 1:1 when it is sized, before any refit, so B carries a placeholder there and the goal's frame differs. The
-  // same class as the pinned Olumi-estimate residual in `construction-goal-normalising-frame.test.ts`. Pinned so either side moving is seen.
-  it('RESIDUAL (pinned): the outcome → goal link is definitional on A, a placeholder on B (set aside at sizing)', async () => {
+  // ⚠ NAMED RESIDUAL (MG #75, to R3), CLOSED by G1b pass-through (CEE #2663): Olumi's drafted "+£1 per £1" outcome → goal
+  // link was typed `definitional` on the frameless build (the normalising frame holds it) but SET ASIDE when the brief states
+  // the target: the target's frame (£1m) could not hold £3m at 1:1 when it was sized, before any refit, so B carried a
+  // placeholder there. The part (an outcome) is now measured on its total's frame at sizing (`admit-model.ts`), so the
+  // definition is typed on both paths and the refit fits the user's chain around it. Pinned so either side moving is seen.
+  it('RESIDUAL CLOSED (#2663): the outcome → goal link is definitional on A AND on B, at £1 per £1, nothing cut', async () => {
+    const a = (await build(draft({ fundingMax: 3000000 }))).g;
     const b = (await build(draft({ fundingMax: 3000000, target: 1000000 }), `${PAUL} We need to raise at least £1m.`)).g;
-    const goalId = b.nodes.find((n: Rec) => n.kind === 'goal').id;
-    expect(edge(b, DEAL[1], goalId).provenance.definitional).toBeUndefined();
+    for (const g of [a, b]) {
+      const goalId = g.nodes.find((n: Rec) => n.kind === 'goal').id;
+      expect(edge(g, DEAL[1], goalId).provenance).toMatchObject({ definitional: true, natural_effect: { amount: 1, per_source_change: 1 } });
+      expect((g.edges as Rec[]).filter((e) => e.provenance?.clamped_from !== undefined || Math.abs(e.strength?.mean ?? 0) > 1)).toEqual([]);
+    }
   });
 });
 
@@ -357,6 +363,7 @@ describe('persist invariant: construction stores no |mean| > 1', () => {
   it.each([
     ['raw-1 shape', {}], ['deals max 100 (cascade)', { dealsMax: 100 }], ['outcome £3m (p3)', { fundingMax: 3000000 }],
     ['with a stated target', { fundingMax: 3000000, target: 1000000 }],
+    ['a factor target (refused → clamped at persist, DL 5924108406)', { fundingAsFactor: true }],
   ] as const)('%s → every stored |mean| ≤ 1, and the model is writable', async (_label, o) => {
     const { isEditableGraph } = await import('../../system-events/editable-graph.js');
     const { g } = await build(draft(o as never));
@@ -364,11 +371,6 @@ describe('persist invariant: construction stores no |mean| > 1', () => {
     expect(isEditableGraph(g)).toBe(true);
   });
 
-  it('RESIDUAL (pinned): a user size into a FACTOR is refused by the refit — stored as stated (> 1) and asked', async () => {
-    const { g, out } = await build(draft({ fundingAsFactor: true }));
-    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
-    expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
-  });
 
   it('REPLAY 52f8cd (guest 61a8c07c, served): the stored 1.667 makes the model unwritable; the refit this PR runs makes it writable', async () => {
     const { isEditableGraph } = await import('../../system-events/editable-graph.js');

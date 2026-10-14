@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
 /**
  * Ghost-selection honesty through the real TurnExecutor.
  *
@@ -27,6 +28,7 @@ import type {
 } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { ANY_LEAD_CLAUSE_RE } from './support/lead-clause.support.js';
 
 type GraphReadMode = 'ok_present' | 'degraded';
 
@@ -251,13 +253,12 @@ vi.mock('../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => RUN_ANALYSIS_FACT,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => PERSISTED_GRAPH,
     loadGraphAndBriefText: async () => {
       if (harness.graphReadMode === 'degraded') {
         throw new Error('simulated canonical graph read failure');
       }
-      return {
+      return { revision: 7,
         graph: PERSISTED_GRAPH,
         briefText: 'Hire locally or use an offshore partner?',
       };
@@ -669,6 +670,7 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(result.response.blocks.some((block) => block.type === 'error')).toBe(false);
     expect(result.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
     expect(result.response.assistant_text).not.toContain('currently leads');
+    expect(result.response.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(result.response.assistant_text).not.toContain('62%');
     expect(result.response.blocks).toEqual([]);
     expect(result.response.suggested_actions).toEqual([]);
@@ -680,6 +682,7 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     const persisted = harness.appendedRows.at(-1);
     expect(persisted?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
     expect(persisted?.assistantMessage).not.toContain('currently leads');
+    expect(persisted?.assistantMessage ?? '').not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(persisted?.assistantMessage).not.toContain('62%');
     expect(persisted?.pending_actions).toEqual([]);
     expect(persisted?.graph).toBeUndefined();
@@ -694,6 +697,7 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     );
     expect(modelInput).toContain(NOT_IN_MODEL_TEXT);
     expect(modelInput).not.toContain('currently leads');
+    expect(modelInput).not.toMatch(ANY_LEAD_CLAUSE_RE);
   });
 
   it('the next routed turn sees the refusal in history, never the discarded leader answer', async () => {
@@ -823,7 +827,10 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     ]);
   });
 
+
   it('preserves a committed selected-mutation receipt when the canonical read is degraded', async () => {
+    // A2: legacy graph-only recovery; CAS ON cannot recover a revision from this failed combined double.
+    __setUseAppendV6ForTest(false);
     harness.graphReadMode = 'degraded';
     const adapter = failingAdapter();
     const result = await run(
@@ -862,3 +869,5 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     expect(withGhostSelection.response.assistant_text).not.toBe(COULD_NOT_CHECK_TEXT);
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

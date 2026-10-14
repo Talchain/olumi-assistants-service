@@ -65,7 +65,7 @@ function nodeUpdate(field: string, to: unknown) {
 }
 
 /**
- * THE SIX ZERO-READER SMUGGLE NAMES, DERIVED — not listed.
+ * THE 24 ZERO-READER SMUGGLE NAMES, DERIVED — not listed.
  *
  *   CEE_ANALYSIS_OWNED_ROOTS \ INTERVENTION_CONTRACT_KEYS
  *
@@ -75,12 +75,11 @@ function nodeUpdate(field: string, to: unknown) {
  * contract keys (`InterventionV3.shape`), which is why the exemption exists at
  * all and why the live option-configure write still works.
  *
- * The J2 union adds five MORE names the tunnel would also have carried
+ * The J2 union adds five more names the tunnel would also have carried
  * (`threshold_source` + the four edge `*Source` stamps) — asserted separately
- * below so "six" stays the historical, reviewable figure rather than a number
- * that silently drifts with the union.
+ * below; the six original names are historical, while the current smuggle set has 24 names.
  *
- * The corpus half spells the same six out by hand
+ * The corpus half spells the same 24 out by hand
  * (`field-safety-corpus.test.ts`) — deriving them here proves the screen and
  * the contract agree; spelling them there is what would notice the CONTRACT
  * itself changing shape underneath.
@@ -89,11 +88,14 @@ const SMUGGLE_NAMES = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
   .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
   .sort();
 
-describe('the six zero-reader smuggle names — enumerated at the bytes', () => {
+describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
   it('is exactly the CEE-owned names that are NOT intervention contract keys', () => {
     // Six at 2.478; A6e adds `exists_defaulted` (Canonical #70 5855416983), a CEE-owned edge stamp;
     // A6f adds `std_defaulted` (AIQ N1 on #2096), the same stamp for the spread.
     expect(SMUGGLE_NAMES).toEqual([
+      // + F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority, written only by construction / the adoption
+      // door / the option-status writer — an AI add carrying it would forge the adoption inference.
+      'analysis_participation',
       'defaulted',
       'exists_defaulted',
       'extractiontype',
@@ -102,16 +104,30 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
+      // S4: recorded reference/count and stock reading are pipeline-owned; producer adds cannot forge them.
+      'goal_horizon_reference_date',
+      'goal_horizon_stated_months',
       // + MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
       'goal_level_reading',
       // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
+      'goal_scope',
       'goal_sense_reading',
+      'goal_stock_reading',
+      // Batch C: ruling 4 — the target's stated basis, written only by construction (`admitGoalTargetBasis`).
+      'goal_target_basis',
+      // S4 §(ad): the horizon basis stamps are CEE-owned.
+      'horizon_basis',
+      'horizon_basis_months',
+      'horizon_basis_source',
       // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
       // NodeV3 so writes keep them, so a producer must never be able to set them.
       'interventionkeys',
+      'option_status',
       'origin',
+      'proposed_by',
       'provenance',
       'provenance_display',
+      'relies_on', // RC3: host-authored option precondition, never producer-writable.
       'starterid',
       'startertitle',
       'std_defaulted',
@@ -126,15 +142,15 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (21 total with A6e + A5 + A6f + G1 + E-A2 + #2306 + AIQ (b), not 13)', () => {
+  it('the union adds six MORE names the same screen now kills (33 total: 27 smuggle names + five J2 names + event_risk)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    // 14 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
-    // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
-    // + #2306's `goal_sense_reading` + AIQ (b)'s `goal_level_reading`) + the 5 J2 names.
-    expect(all.length).toBe(21);
+    // 27 CEE-owned smuggle names include the three new S4 pipeline-owned fields and three horizon-basis stamps; add five J2 names and event_risk.
+    // Batch C: ruling 4 — +1 smuggle name (`goal_target_basis`), so 34 in all; the six non-smuggle names are unchanged.
+    expect(all.length).toBe(34);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',
+      'event_risk',
       'strengthstdsource',
       'threshold_source',
       'weightsource',
@@ -165,7 +181,7 @@ describe('2.478 — the add path screen is RECURSIVE (the nested spelling is the
     expect(v.blocker?.code).toBe(PIPELINE_OWNED_FIELD);
   });
 
-  it('every one of the six smuggle names is refused on the add path, nested', () => {
+  it('every one of the 24 smuggle names is refused on the add path, nested', () => {
     for (const name of SMUGGLE_NAMES) {
       const v = addNode({ observed_state: { value: 1, [name]: 'x' } });
       expect(v.blocker?.code, `nested add smuggle: ${name}`).toBe(PIPELINE_OWNED_FIELD);

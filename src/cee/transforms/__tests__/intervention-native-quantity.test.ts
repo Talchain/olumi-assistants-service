@@ -179,6 +179,35 @@ describe("quantity projection respects conversion evidence", () => {
 });
 
 describe("percentage record conventions remain separate from native display units", () => {
+  it.each([
+    { name: "cap 50 with carried 8%", cap: 50, level: 0.16, raw: 8, displayRaw: 8, display: "8%" },
+    { name: "cap 100 with carried 8%", cap: 100, level: 0.08, raw: 8, displayRaw: 8, display: "8%" },
+    { name: "scale_frame 50 with carried 8%", scale_frame: 50, level: 0.16, raw: 8, displayRaw: 8, display: "8%" },
+    // Preserve the pre-change output. The level x 100 fallback at
+    // display-value.ts:289 is a separate MC FOLLOW-UPS item, not this change.
+    { name: "cap 50 without a raw carrier", cap: 50, level: 0.16, display: "16%" },
+    { name: "cap 50 with a fraction-convention carrier", cap: 50, level: 0.16, raw: 0.08, display: "16%" },
+    { name: "cap 0.5 with carried 0.08 never displays 0.08%", cap: 0.5, level: 0.16, raw: 0.08, display: "16%" },
+  ])("$name", ({ cap, scale_frame, level, raw, displayRaw, display }) => {
+    const input = option("rise", level, raw, "%");
+    input.interventions[FACTOR]!.source = "brief_extraction";
+    const payload = project([input], {
+      ...(scale_frame !== undefined ? { scale_frame } : {}),
+      observed_state: { value: 0, raw_value: 0, unit: "%", cap, source: "brief_extraction" },
+      display_value: "0%",
+    });
+    expect(detail(payload, "rise")).toEqual({
+      normalised_value: level, ...(displayRaw !== undefined ? { raw_value: displayRaw } : {}),
+      unit: "%", display_value: display,
+    });
+    // The option card joins this display with the transported brief source.
+    expect(payload.options[0]!.interventions[FACTOR]).toEqual({
+      value: level, display_value: display, source: "brief_extraction",
+    });
+    expect(payload.options[0]!.extraction_metadata?.source).toBe("brief_extraction");
+    if (raw !== undefined) expect(payload.options[0]!.raw_interventions?.[FACTOR]).toBe(raw);
+  });
+
   it("preserves the captured fraction-record display rather than changing 18% into 0.18%", () => {
     const payload = project([option("fraction", 0.18, 0.18, "%")], {
       observed_state: { value: 0.12, unit: "%", source: "cee_inference" },

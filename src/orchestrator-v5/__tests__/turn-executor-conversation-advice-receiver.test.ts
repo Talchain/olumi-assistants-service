@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../context/analysis-projection-policy.js';
 /** Real executor receiving-path test; storage and one routing adapter are mocked.
  * Proves contextual prompt/response transport and no canonical write, not live model quality. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,7 +51,6 @@ const mockState: {
   persistedGraphReadError: Error | null;
   appendWrites: Array<Record<string, unknown>>;
   invalidationCalls: number;
-  storeDraftGraphCalls: number;
 } = {
   priorTurns: [],
   priorFacts: [],
@@ -64,7 +64,6 @@ const mockState: {
   persistedGraphReadError: null,
   appendWrites: [],
   invalidationCalls: 0,
-  storeDraftGraphCalls: 0,
 };
 
 vi.mock('../session/index.js', () => ({
@@ -139,9 +138,6 @@ vi.mock('../session/index.js', () => ({
         scope: { kind: 'structural' as const },
         entries_invalidated: [],
       };
-    },
-    storeDraftGraph: async () => {
-      mockState.storeDraftGraphCalls += 1;
     },
     loadGraph: async () => {
       if (mockState.persistedGraphReadError)
@@ -376,7 +372,6 @@ function capturedRoutingPrompt(
 }
 
 function expectNoCanonicalAuthorityWrite(): void {
-  expect(mockState.storeDraftGraphCalls).toBe(0);
   expect(mockState.invalidationCalls).toBe(0);
   expect(
     mockState.appendWrites.length,
@@ -406,7 +401,6 @@ describe('conversation advice reaches contextual reasoning', () => {
     mockState.persistedGraphReadError = null;
     mockState.appendWrites = [];
     mockState.invalidationCalls = 0;
-    mockState.storeDraftGraphCalls = 0;
   });
 
   it.each([
@@ -478,6 +472,7 @@ describe('conversation advice reaches contextual reasoning', () => {
       fact_type: 'run_analysis', fact_version: 1, noop: false,
       result: {
         ...captured.analysis_result,
+        enrichment: stampRunAnalysisProjection(captured.analysis_result.enrichment ?? {}),
         scenario_id: captured.source.scenario_id,
         graph_hash_at_run: captured.analysis_result.computed_against_hash,
         computed_at: captured.analysis_state.run_state.computed_at,
@@ -689,7 +684,6 @@ describe('conversation advice reaches contextual reasoning', () => {
     //   on every turn.
     mockState.appendWrites = [];
     mockState.invalidationCalls = 0;
-    mockState.storeDraftGraphCalls = 0;
     const fact = researchFact(separation);
     // The DURABLE selected fact is the one the prompt's analysis comes from.
     mockState.newestAnalysisFact = fact;

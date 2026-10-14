@@ -1,4 +1,5 @@
 import { readStoredGoalCertainty } from '../tools/handlers/run-goal-certainty.js';
+import { GOAL_CHANCE_COMPANION_KEYS } from '../../orchestrator/context/option-result-source.js';
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue | null =>
@@ -40,6 +41,8 @@ export function projectGoalProbabilitiesForTransport(
           || (typeof row.option_id === 'string' && earned.get(row.option_id) === probability)) continue;
         projected ??= { ...row };
         delete projected[key];
+        // An unearned exact figure's precision (`n_met` = 0 or n) and drivers reveal it: they go with it (design-g4g6 Q3).
+        for (const k of GOAL_CHANCE_COMPANION_KEYS) delete projected[k];
       }
       return projected ?? raw;
     });

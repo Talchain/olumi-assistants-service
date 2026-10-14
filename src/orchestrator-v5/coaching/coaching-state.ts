@@ -47,6 +47,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/a
 import { selectRunAnalysisFact, type FreshnessDerivation } from '../context/freshness.js';
 import { summariseReadiness } from '../routing/readiness-summary.js';
 import { edgeReviewedByUser } from '../../cee/graph-readiness/obligation-provenance.js';
+import { linkSizing, isSizedOnlyByOlumi } from '../../cee/magnitude/link-sizing.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -364,14 +365,13 @@ function deriveDefaultedValueSignals(
   persistedGraph: unknown | null,
   graphHash: string | null,
 ): CoachingStateSignal[] {
-  // Permissive raw read mirroring decision-context.ts readGraphNodes guards. `defaulted`
-  // is a genuine structured boolean on edges (z.boolean().optional()); test `=== true`.
   // The object + edges-array gate is the shared `isGraphProjectionEvaluable` predicate.
   if (!isGraphProjectionEvaluable(persistedGraph)) return [];
   const edges = (persistedGraph as { edges: unknown[] }).edges;
-  // R11: a defaulted strength the user CONFIRMED is not an unseen default (it keeps `defaulted` for credit only).
+  // One sizing rule: a projected user-drawn link is unsized, while a user's size beside a defaulted spread is sized.
+  // Preserve the legacy unmarked/defaulted fallback; R11 reviewed links are not asked about again.
   const hasDefaulted = edges.some(
-    (e) => e != null && typeof e === 'object' && (e as { defaulted?: unknown }).defaulted === true && !edgeReviewedByUser(e),
+    (e) => (linkSizing(e) === 'placeholder' || (linkSizing(e) === 'unmarked' && isSizedOnlyByOlumi(e))) && !edgeReviewedByUser(e),
   );
   if (!hasDefaulted) return [];
   return [

@@ -55,6 +55,7 @@ import {
   readRobustnessLevel,
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
+import { RETAINED_LIMIT_WITHHELD, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../../graph/retained-limit.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
@@ -80,6 +81,8 @@ import { readFlipClaimPosture, readTopLevelFlipRows } from '../context/flip-thre
 import {
   SCAFFOLD_ANY_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
+  IDENTICAL_ARMS_DISCLOSURE_RE_SRC,
+  IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
 // D-ask-1 (2.11) applied to the population it did not cover: CEE-INFERRED
 // FACTOR values. Same claim-safety ruling — "the analysis result must never
@@ -179,6 +182,7 @@ import {
 // — a builder-side mirror is exactly the drift class that silently
 // swallowed the disclosure for ID-shaped labels ("Plan E_2").
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+import { LEAD_QUANTITY_MAX_CHARS, resolveLeadQuantity, type LeadQuantity } from './lead-quantity.js';
 // SEPARABILITY (31 Aug 2026): "does this model tell the options apart at all?"
 // A leaf module rather than a predicate inlined here, because the question has
 // to be named APART from the five neighbouring ones it resembles — and in
@@ -223,7 +227,14 @@ import {
  * This widens what `isAllowedRunAnalysisAssistantText` admits by the same 18
  * characters, which is intended: the same sentence, in longer words.
  */
-const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
+/**
+ * ⭐ LEAD LADDER (Science d5 #87 6008575410 + 6008589328 + 6009457056; WORDING c6 lease 6009413360): the goal-framed
+ * opening this budget was derived from is RETIRED — "your goal" now reads as the target, and the share is a ranking on
+ * the goal's QUANTITY (see `lead-quantity.ts`). Its length (35) stays the REFERENCE every lead's cap is moved from, so
+ * no headline sheds that did not shed before and none survives that did not survive before: length-neutral by
+ * construction, as the rewording above was. Recorded as a number, like the opening it replaced.
+ */
+const LEAD_LENGTH_REFERENCE_CHARS = 35;
 /**
  * Length of the RETIRED opening (`came out ahead in`) — recorded as a NUMBER,
  * not as a string constant, and deliberately so: a literal of the retired copy
@@ -235,9 +246,31 @@ const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
  */
 const RETIRED_LEAD_CLAUSE_OPENING_CHARS = 17;
 const LEAD_CLAUSE_COPY_DELTA_CHARS =
-  LEAD_CLAUSE_OPENING.length - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
+  LEAD_LENGTH_REFERENCE_CHARS - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
 
 export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
+
+/**
+ * Rung 3 of the ladder, true of every Run: the share as what it is, no direction and no quantity. RT-10 B′'s minimise
+ * lead ("came out lowest for {goal}") is rung 1's "gave the lowest {quantity}" now, under the same rule: only when THIS
+ * Run sent minimise (`minimised_goal_label`, the handler's own payload).
+ */
+const RUN_SHARE_LEAD_OPENING = 'was supported by';
+/**
+ * The number-free shed forms state the PLURALITY, so they ride only where the numeric lead is licensed (d5 b): the
+ * length sheds of Cases A/B/C/SC and a licensed Case E. A low-plurality E says the share; a near-tie E names no option.
+ */
+const RUN_SHARE_PLAIN = 'was supported by the most runs of this model';
+/** The plain form's reference length (the retired "scored … in this model", 28), moved from like the lead's. */
+const PLAIN_LENGTH_REFERENCE_CHARS = 28;
+const quantityLead = (q: LeadQuantity): string => `gave the ${q.extreme} ${q.quantity} in`;
+const quantityPlain = (q: LeadQuantity): string => `gave the ${q.extreme} ${q.quantity} in the most runs of this model`;
+/** The most a lead, in either form, adds over the reference it is measured from: budgeted on the registry cap. */
+const LEAD_QUANTITY_EXTRA_MAX_CHARS = Math.max(
+  quantityLead({ extreme: 'highest', quantity: 'x'.repeat(LEAD_QUANTITY_MAX_CHARS) }).length - LEAD_LENGTH_REFERENCE_CHARS,
+  quantityPlain({ extreme: 'highest', quantity: 'x'.repeat(LEAD_QUANTITY_MAX_CHARS) }).length - PLAIN_LENGTH_REFERENCE_CHARS,
+  RUN_SHARE_PLAIN.length - PLAIN_LENGTH_REFERENCE_CHARS,
+);
 
 /**
  * ⛔ WHEN THE RUN COULD NOT TEST THE GOAL, THE LEAD CLAUSE DOES NOT CLAIM IT.
@@ -291,14 +324,24 @@ export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
  * The three are built from two shared clauses, so the combined sentence cannot
  * drift from either half.
  */
-const UNTESTED_GOAL_LEAD_CLAUSE_OPENING = 'scored highest in';
-const GOAL_DIRECTION_ASSUMED_CLAUSE =
-  'The analysis was not told which way your goal points, so it assumed a higher value is better';
+// ⭐ RT-10 B′ (DL ruling; words APPROVED 5 Oct): the assumption is OLUMI'S and model-relative, and the sentence after it
+// names the ONE correction that works. An "at most" target set on the goal in the Model panel (`goal_target_edit`) now
+// holds the user's ceiling (`add-constraint.ts`), so the rerun minimises (`resolveGoalDirection`, the goal-row branch);
+// chat has no door that holds a direction, so the words never say "tell me". It works on a goal with no target yet (the
+// goal editor opens with its at least / at most select). No goal label: the headline input carries none (see above).
+const GOAL_DIRECTION_ASSUMED_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
+const GOAL_DIRECTION_CORRECTION = ' If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const GOAL_UNTESTED_CLAUSE = 'could not test whether any option reaches your goal';
 const GOAL_UNTESTED_DISCLOSURE = ` The model ${GOAL_UNTESTED_CLAUSE}.`;
-const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.${GOAL_DIRECTION_CORRECTION}`;
 const GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE =
-  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and it ${GOAL_UNTESTED_CLAUSE}.`;
+  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and the model ${GOAL_UNTESTED_CLAUSE}.${GOAL_DIRECTION_CORRECTION}`;
+// ⛔ Codex r1 (#2600): the correction is said ONLY where its door opens. `goal_target_edit` refuses a goal whose target
+// is a CHANGE from today (`goal_is_a_change`), so there the assumption is stated and no correction is promised
+// (`goal_direction_correctable`, set by the caller from the same predicate the door refuses on).
+const GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE =
+  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and the model ${GOAL_UNTESTED_CLAUSE}.`;
 /**
  * The sentence each goal frame carries. A total map over {@link GoalFrame}, so a
  * new frame cannot compile without choosing its sentence.
@@ -309,23 +352,20 @@ const GOAL_FRAME_SENTENCE: Readonly<Record<GoalFrame, string>> = Object.freeze({
   attainment_untested: GOAL_UNTESTED_DISCLOSURE,
   direction_assumed_and_attainment_untested: GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
 });
+/** The same map where the goal's direction cannot be corrected through the goal target (a change target): no promise. */
+const GOAL_FRAME_SENTENCE_UNCORRECTABLE: Readonly<Record<GoalFrame, string>> = Object.freeze({
+  ...GOAL_FRAME_SENTENCE,
+  direction_assumed: GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE,
+  direction_assumed_and_attainment_untested: GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE,
+});
 /** The goal-frame sentence's budget: the LONGEST of the three, since exactly one rides. */
 const GOAL_FRAME_DISCLOSURE_MAX_CHARS = Math.max(
   GOAL_UNTESTED_DISCLOSURE.length,
   GOAL_DIRECTION_ASSUMED_DISCLOSURE.length,
   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE.length,
+  GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE.length,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE.length,
 );
-/**
- * How much SHORTER the withdrawn opening is than the goal-framed one (18). The
- * cases that carry the lead clause are measured against a cap reduced by this,
- * so their length verdicts are identical with and without the warnings. That
- * is a LEADER-PERMISSION property, not a nicety: a near-tie that overflows
- * returns null, so without the reduction a sentence that overflows today by up
- * to 18 characters would fit once the codes are present, and the warnings would
- * turn a withheld leader into a named one.
- */
-const GOAL_UNTESTED_LEAD_SHORTFALL_CHARS =
-  LEAD_CLAUSE_OPENING.length - UNTESTED_GOAL_LEAD_CLAUSE_OPENING.length;
 
 // ============================================================================
 // Lane 3 narration-completeness tails (Mission B — provisional_doctrine_v0)
@@ -337,7 +377,7 @@ const GOAL_UNTESTED_LEAD_SHORTFALL_CHARS =
  * the result is not robust: `robustness.is_robust === false` OR
  * `robustness.level === 'low'`. One plain clause — no numbers, no labels.
  */
-const NOT_ROBUST_SENTENCE =
+export const NOT_ROBUST_SENTENCE =
   ' The result is not yet robust — small changes could flip it.';
 
 /**
@@ -380,7 +420,7 @@ const NOT_ROBUST_SENTENCE =
  * added anywhere else is silently rejected at egress and the user receives the
  * locked template instead (the failure mode the constraint-gap disclosure hit).
  */
-const NOT_ROBUST_NO_FLIP_SENTENCE =
+export const NOT_ROBUST_NO_FLIP_SENTENCE =
   ' The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
 
 /**
@@ -434,7 +474,7 @@ function eliminatedSentence(count: number): string {
   //
   // Still an integer percentage ("1%", no raw decimal) so the defence-in-depth
   // decimal rule holds, and still plural-safe (count >= ELIMINATED_MIN_COUNT).
-  return ` ${count} options are effectively eliminated (each scored highest in less than 1% of runs).`;
+  return ` ${count} options are effectively eliminated (each supported by under 1% of runs).`;
 }
 
 /**
@@ -462,6 +502,8 @@ export const REDUCED_SAMPLES_SUFFIX =
  */
 export const MAX_ASSISTANT_TEXT_CHARS =
   MAX_HEADLINE_CHARS +
+  // The lead ladder's longest form (a bounded quantity), so an honest headline is never swapped for the template.
+  LEAD_QUANTITY_EXTRA_MAX_CHARS +
   // 2.278: derived over EVERY robustness-honesty variant, not just the first.
   NOT_ROBUST_SENTENCE_MAX_CHARS +
   ELIMINATED_SENTENCE_MAX_CHARS +
@@ -521,7 +563,8 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // with an unevaluated constraint may ALSO be running on values the product
   // supplied. Budgeted from the builder's own worst case, never
   // hand-estimated, so an honest disclosure cannot be dropped on length.
-  INFERRED_VALUE_DISCLOSURE_MAX_CHARS;
+  INFERRED_VALUE_DISCLOSURE_MAX_CHARS +
+  IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -716,6 +759,26 @@ export interface AnalysisResultHeadlineInput {
    * sends `maximise`), so the headline must not say the direction was assumed. Omitted / false ⇒ today's frame.
    */
   readonly goal_points_up_as_held?: boolean;
+  /**
+   * ⛔ RT-10 B′ (Codex r1 #2600): true only when the goal's direction CAN be corrected through the Model panel goal
+   * target ("at most"), i.e. `goal_target_edit` accepts this goal: its target is not a CHANGE from today
+   * (`isChangeFrame`, the door's own `goal_is_a_change` refusal). Absent or false ⇒ the direction-assumed sentence
+   * states the assumption WITHOUT the correction, so no door is promised that would refuse.
+   */
+  readonly goal_direction_correctable?: boolean;
+  /**
+   * ⭐ RT-10 B′ (DL e8 condition 1): the goal's label, present ONLY when THIS Run sent `goal_direction: minimise` to
+   * PLoT — the handler's own `plotPayload.goal_direction`, never re-derived here. It makes the lead ladder's extreme
+   * "lowest" (`lead-quantity.ts`).
+   */
+  readonly minimised_goal_label?: string;
+  /**
+   * ⭐ LEAD LADDER (d5 #87 6008589328): the goal's label and unit, read by the handler off the graph the Run used. With a
+   * unit the lead names the QUANTITY ("gave the highest {quantity}"); without one it is rung 3 ("was supported by").
+   * Omitted ⇒ rung 3. `minimised_goal_label`, when present, is the label and makes the extreme "lowest".
+   */
+  readonly goal_label?: string;
+  readonly goal_unit?: string;
   /**
    * T1. True for the constraint verdict's `identity_unresolved` state: the
    * producer plainly evaluated constraints, but not one of the ids it returned
@@ -953,6 +1016,7 @@ function resolveGoalFrame(enrichment: Record<string, unknown>, goalPointsUpAsHel
   return attainmentTested ? 'direction_assumed' : 'direction_assumed_and_attainment_untested';
 }
 
+
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const {
     enrichment,
@@ -1138,8 +1202,8 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // the tails, on every emitted case, budgeted on top like its siblings. It
   // never decides a case: see `leadCap`.
   const goalFrame = resolveGoalFrame(enrichment, input.goal_points_up_as_held === true);
-  const goalUntestable = goalFrame !== 'goal_framed';
-  const goalUntestedSuffix = GOAL_FRAME_SENTENCE[goalFrame];
+  const goalUntestedSuffix = (input.goal_direction_correctable === true
+    ? GOAL_FRAME_SENTENCE : GOAL_FRAME_SENTENCE_UNCORRECTABLE)[goalFrame];
   const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
   const lengthCap =
     MAX_HEADLINE_CHARS + goalUntestedSuffix.length + narrationTail.length + reducedSamplesSuffix.length;
@@ -1147,7 +1211,24 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // unless the goal frame was withdrawn, when it is reduced by exactly the
   // characters the withdrawal saved, so every length verdict (and therefore the
   // leader permission) is the one the goal-framed sentence would have got.
-  const leadCap = lengthCap - (goalUntestable ? GOAL_UNTESTED_LEAD_SHORTFALL_CHARS : 0);
+  //
+  // ⭐ LEAD LADDER: the goal's quantity when it has a unit, else the share itself (`lead-quantity.ts`). Every cap is moved
+  // by exactly what its opening adds over the retired goal-framed reference, so the length verdict, and therefore the
+  // leader permission, is the one that sentence would have got — on every goal frame alike.
+  // RT-10 B′'s frame rule, kept: "lowest" never rides beside a sentence that says the direction was ASSUMED (the cage
+  // rejects that pair, and the user would silently get the locked template). A minimise Run on such a frame is a
+  // contradiction, so it takes rung 3, which is true either way.
+  const minimisedOnAssumedFrame = input.minimised_goal_label !== undefined
+    && goalFrame !== 'goal_framed' && goalFrame !== 'attainment_untested';
+  const leadQuantity = minimisedOnAssumedFrame ? null : resolveLeadQuantity({
+    goalLabel: input.minimised_goal_label ?? input.goal_label,
+    goalUnit: input.goal_unit,
+    minimised: input.minimised_goal_label !== undefined,
+  });
+  const leadOpening = leadQuantity !== null ? quantityLead(leadQuantity) : RUN_SHARE_LEAD_OPENING;
+  const leadCap = lengthCap + (leadOpening.length - LEAD_LENGTH_REFERENCE_CHARS);
+  const leadsPlain = leadQuantity !== null ? quantityPlain(leadQuantity) : RUN_SHARE_PLAIN;
+  const plainCap = lengthCap + (leadsPlain.length - PLAIN_LENGTH_REFERENCE_CHARS);
   const marginBucket = computeMarginBucket(winner);
   const hasDriver = driverLabel !== null;
   const hasFragility = caution !== null;
@@ -1242,12 +1323,15 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // goal as stated, "against your goal" is withdrawn and the statistic is
   // reported for what it is (see GOAL_UNTESTED_DISCLOSURE).
   const leadPercent = Math.round(winnerProbability * 100);
-  const leadClause = `${goalUntestable ? UNTESTED_GOAL_LEAD_CLAUSE_OPENING : LEAD_CLAUSE_OPENING} ${leadPercent}% of runs of this model`;
+  const leadClause = `${leadOpening} ${leadPercent}% of runs of this model`;
 
   // The number-free shed form, kept verbatim for the bands that must not carry
   // a statistic: the Case E floor (every enriching gate declined the run) and
   // the length-shed A→C / B variants, where dropping the clause IS the shed.
-  const LEADS_PLAIN = 'currently leads';
+  // Principle audit (5 Oct, DL ruling on W-HEAD): the number-free floor names the option only as a finding about this
+  // model, in the lead clause's own verb. "Scored highest" stays visible to `LEADER_CLAIM_PATTERNS` (scored_highest),
+  // and RT-10 B′'s "came out lowest for {goal}" to its `came_out_lowest`.
+  const LEADS_PLAIN = leadsPlain;
 
   // Doctrine D-W (ROADMAP 2.52): the DECLARED leader (PLoT's leading_option_id)
   // is NOT the highest raw win_probability — a runner-up strictly edges it on
@@ -1293,9 +1377,15 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       rawGap >= MIN_MARGINAL_RAW_ODDS_GAP - RAW_ODDS_GAP_FLOAT_EPSILON &&
       rawGap <= MARGINAL_RAW_ODDS_GAP_PP / 100 + RAW_ODDS_GAP_FLOAT_EPSILON
     ) {
+      // DL 0df0e1 (#2609): no selection claim ("the option this analysis names" read as Olumi picking). The served
+      // leader is the strict win-share argmax of the Run's own records (run-analysis.ts selectLeadingOptionId), so
+      // this arm fires only when the headline's source array disagrees — there is no "on average" reason to state.
+      // The sentence says what is true in that source and invites the change that would separate them.
+      const leaderPct = Math.round(winner.winnerProb * 100);
+      const runnerUpPct = Math.round(winner.runnerUpProb * 100);
       const disambig =
-        `${winnerLabel} leads overall, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;
-      if (disambig.length <= lengthCap) {
+        `In this model, ${winner.runnerUpLabel} was supported by marginally more runs than ${winnerLabel} (${runnerUpPct}% against ${leaderPct}%), so the two are close. Change a figure you’re unsure about to see what separates them.${suffix}`;
+      if (runnerUpPct > leaderPct && disambig.length <= lengthCap) {
         return {
           text: disambig,
           descriptor: buildDescriptor('LT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -1357,7 +1447,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         };
       }
       const caseC = `${winnerLabel} ${LEADS_PLAIN}${cautionTail}`;
-      if (caseC.length <= lengthCap) {
+      if (caseC.length <= plainCap) {
         return {
           text: caseC,
           descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1377,7 +1467,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         };
       }
       const caseB = `${winnerLabel} ${LEADS_PLAIN}${driverTail}`;
-      if (caseB.length <= lengthCap) {
+      if (caseB.length <= plainCap) {
         return {
           text: caseB,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1615,7 +1705,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // condition's lower floor already excluded the very weak < 0.30 leads), so
       // it is a caveated, bounded fallback — not a free-for-all sub-40% claim.
       const scNoMargin = `${winnerLabel} ${LEADS_PLAIN}${cautionTail}`;
-      if (scNoMargin.length <= lengthCap) {
+      if (scNoMargin.length <= plainCap) {
         return {
           text: scNoMargin,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
@@ -1716,9 +1806,17 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // non-overclaiming "{Label} currently leads." (+ status suffix).
   // No "best", "winner", "recommended", "optimal", "preferred". No
   // probability number. No driver/fragility clauses.
-  const caseE = `${winnerLabel} ${LEADS_PLAIN}.${suffix}`;
+  // ⭐ d5 (#87 6009457056): the number-free form states the plurality, so only a LICENSED floor (a meaningful lead that
+  // fell here on length) keeps it. A low plurality says its share instead. A near tie names no option at all: the
+  // separability gate above already withholds every one measured (0.31/0.29, 0.39/0.36, 0.33/0.31 …: options_not_
+  // separable), so this is defence in depth, and it adds no sentence — the locked template, as the gate returns.
   const reason = deriveCaseEReason(winner, driverLabel, hasFragility);
-  if (caseE.length <= lengthCap) {
+  if (winner.runnerUpProb !== null
+    && Math.round((winner.winnerProb - winner.runnerUpProb) * 100) < Math.round(MIN_LEAD_MARGIN * 100)) {
+    return { text: null, descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }) };
+  }
+  const caseE = hasMeaningfulLead(winner) ? `${winnerLabel} ${LEADS_PLAIN}.${suffix}` : `${winnerLabel} ${leadClause}.${suffix}`;
+  if (caseE.length <= (hasMeaningfulLead(winner) ? plainCap : leadCap)) {
     return {
       text: caseE,
       descriptor: buildDescriptor('E', reason, { hasDriver, hasFragility, marginBucket }),
@@ -1758,7 +1856,7 @@ function tieHeadlineText(
   suffix: string,
 ): string {
   return tieReason === 'margin'
-    ? `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`
+    ? `${winnerLabel} was supported by only fractionally more runs of this model, so the options are effectively tied.${suffix}`
     : `${winnerLabel} ${leadClause}, but the analysis treats this as a close call.${suffix}`;
 }
 
@@ -2192,7 +2290,8 @@ function cautionReasonText(caution: CautionCandidate): string {
     case 'factor':
       return `the result is sensitive to ${caution.label}`;
     case 'edge':
-      return `the link between ${caution.fromLabel} and ${caution.toLabel} is fragile`;
+      // Principle audit (5 Oct): "fragile" is retired from user copy; say what the result rests on.
+      return `it rests heavily on how much ${caution.fromLabel} changes ${caution.toLabel}`;
     case 'generic':
       return 'the result is not highly stable';
   }
@@ -2370,6 +2469,21 @@ function isNotRobust(enrichment: Record<string, unknown>): boolean {
 }
 
 /**
+ * One robustness-honesty selection rule for the headline and licensed Explain replies.
+ * A positive no-flip attestation changes the reason only when it is not guaranteed
+ * by every option setting every swept factor. Undefined keeps today's non-vacuous
+ * reading; trimming lets other composers own their spacing without changing either sentence.
+ */
+export function robustnessHonestySentence(
+  enrichment: Record<string, unknown>,
+  factorIdsSetByEveryOption?: ReadonlySet<string>,
+): string {
+  return (readFlipClaimPosture(enrichment) === 'attested_no_flip'
+    && !isNoFlipAttestationVacuous(enrichment, factorIdsSetByEveryOption)
+    ? NOT_ROBUST_NO_FLIP_SENTENCE : NOT_ROBUST_SENTENCE).trim();
+}
+
+/**
  * Build the Mission B narration tail: robustness honesty first, then the
  * eliminated-options clause. Empty string when neither applies — the
  * headline is then byte-identical to the pre-doctrine output.
@@ -2381,19 +2495,7 @@ function buildNarrationTail(
 ): string {
   let tail = '';
   if (isNotRobust(enrichment)) {
-    // 2.278: the run's OWN flip evidence picks the REASON. `permitted` — which
-    // includes every run carrying no flip evidence at all — keeps the original
-    // sentence byte-identical.
-    //
-    // P2: an attestation over factors EVERY option sets is vacuous — the sweep
-    // could not have moved the winner — so it is treated exactly like no flip
-    // evidence (`permitted`) rather than stated as a finding. The VERDICT stays:
-    // dropping the sentence would hide a true caveat (see 2.278 above).
-    tail +=
-      readFlipClaimPosture(enrichment) === 'attested_no_flip' &&
-      !isNoFlipAttestationVacuous(enrichment, factorIdsSetByEveryOption)
-        ? NOT_ROBUST_NO_FLIP_SENTENCE
-        : NOT_ROBUST_SENTENCE;
+    tail += ` ${robustnessHonestySentence(enrichment, factorIdsSetByEveryOption)}`;
   }
   if (winner.eliminatedCount >= ELIMINATED_MIN_COUNT) {
     tail += eliminatedSentence(winner.eliminatedCount);
@@ -2530,7 +2632,7 @@ const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
 // from the grammar is rejected at egress and the user silently receives the
 // locked template instead.
 const ELIMINATED_RE_SRC =
-  ' \\d{1,3} options are effectively eliminated \\(each scored highest in less than 1% of runs\\)\\.';
+  ' \\d{1,3} options are effectively eliminated \\(each supported by under 1% of runs\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // The goal-frame sentence rides FIRST of the tails, mirroring `suffix` in
 // computeHeadline. It is a headline PREFIX family (before the status suffix)
@@ -2541,6 +2643,8 @@ const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${[
   GOAL_UNTESTED_DISCLOSURE,
   GOAL_DIRECTION_ASSUMED_DISCLOSURE,
   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE,
 ]
   .map(escapeForRegex)
   .join('|')})`;
@@ -2577,7 +2681,20 @@ const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?`;
+/** R8 Science legacy disclosure, immediately after a named leader sentence. */
+const LEGACY_FIGURES_DISCLOSURE_RE_SRC = " Olumi supplied the figures for the links? from ‘[^’]+’ to ‘[^’]+’(?:(?:, | and )from ‘[^’]+’ to ‘[^’]+’){0,2}(?: and [1-9][0-9]* more)?\\. Set your own to see how much (?:it matters|they matter)\\.";
+const TAIL_PATTERN = `(?:${LEGACY_FIGURES_DISCLOSURE_RE_SRC})?(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})?`;
+
+/** Insert after the leader sentence, before the headline's already-composed caution/status tails. */
+export function appendLegacyFiguresAfterLeaderSentence(headline: string, disclosure: string): string {
+  if (disclosure === '') return headline;
+  const tail = new RegExp(`${TAIL_PATTERN}$`).exec(headline)?.[0] ?? '';
+  const base = headline.slice(0, headline.length - tail.length);
+  const followup = ' Run the follow-up checks before treating this as final.';
+  return base.endsWith(followup)
+    ? `${base.slice(0, -followup.length)}${disclosure}${followup}${tail}`
+    : `${base}${disclosure}${tail}`;
+}
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2706,6 +2823,7 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   // two disagree, which is how a suffix silently stops being admitted.
   { name: 'INFERRED_VALUE_DISCLOSURE_RE_SRC', source: INFERRED_VALUE_DISCLOSURE_RE_SRC },
   { name: 'SEPARABILITY_DISCLOSURE_RE_SRC', source: SEPARABILITY_DISCLOSURE_RE_SRC },
+  { name: 'IDENTICAL_ARMS_DISCLOSURE_RE_SRC', source: IDENTICAL_ARMS_DISCLOSURE_RE_SRC },
 ];
 
 /** A `*_RE_SRC` grammar that is deliberately NOT on the template branch. */
@@ -2805,7 +2923,7 @@ const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
 // improvised "provisional" prose cannot ride through the caution shapes.
 const CAUTION_REASON_PATTERN =
-  '(?:the result is sensitive to .+?|the link between .+? and .+? is fragile|the result is not highly stable)';
+  '(?:the result is sensitive to .+?|it rests heavily on how much .+? changes .+?|the result is not highly stable)';
 
 /**
  * Grammar source for the lead clause emitted by `leadClause` in
@@ -2844,42 +2962,63 @@ const CAUTION_REASON_PATTERN =
 // withdrawn clause only when one IS present (the user is owed the reason the
 // goal frame is gone). The builder emits exactly these two shapes, so the
 // allowlist admits exactly these two.
+//
+// RT-10 B′ adds a THIRD: the minimise lead ("came out lowest for {goal}"), admitted with no goal-frame sentence or
+// beside the untested one, and never beside a sentence that says the direction was assumed (the Run sent it).
+const GOAL_DIRECTION_ASSUMED_RE_SRC = `(?:${[
+  GOAL_DIRECTION_ASSUMED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE,
+]
+  .map(escapeForRegex)
+  .join('|')})`;
+// ⭐ LEAD LADDER: rung 3 on any frame; rung 1/2 with the goal's quantity, "lowest" never beside a sentence that says the
+// direction was ASSUMED (a Run that assumed it sent no minimise).
 const LEAD_CLAUSE_RE_SRC =
-  `(?:${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?!.*${GOAL_FRAME_WITHDRAWN_RE_SRC})` +
-  `|${UNTESTED_GOAL_LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?=.*${GOAL_FRAME_WITHDRAWN_RE_SRC}))`;
+  `(?:${RUN_SHARE_LEAD_OPENING} \\d{1,3}% of runs of this model` +
+  `|gave the highest .+? in \\d{1,3}% of runs of this model` +
+  `|gave the lowest .+? in \\d{1,3}% of runs of this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
+/** The number-free shed forms, under the same frame rule as their leads. */
+const PLAIN_LEAD_RE_SRC =
+  `(?:${RUN_SHARE_PLAIN}|gave the highest .+? in the most runs of this model` +
+  `|gave the lowest .+? in the most runs of this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
 
-const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
+function headlineGrammarRegexes(legacyFiguresDisclosure = ''): RegExp[] {
+  const legacyPattern = legacyFiguresDisclosure === '' ? LEGACY_FIGURES_DISCLOSURE_RE_SRC : escapeForRegex(legacyFiguresDisclosure);
+  const tailPattern = TAIL_PATTERN.replace(LEGACY_FIGURES_DISCLOSURE_RE_SRC, () => legacyPattern);
+  return [
   // Case A: winner + margin + provisional caution naming the fragile reason.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${tailPattern}$`,
   ),
   // Case C: provisional caution naming the fragile reason, no margin.
   new RegExp(
-    `^.+? currently leads, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? ${PLAIN_LEAD_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${tailPattern}$`,
   ),
   // Case B (with margin): winner + margin + driver.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC} because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC} because .+? is the strongest driver\\.${tailPattern}$`,
   ),
   // Case B (no margin): winner + driver.
   new RegExp(
-    `^.+? currently leads because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? ${PLAIN_LEAD_RE_SRC} because .+? is the strongest driver\\.${tailPattern}$`,
   ),
   // Case D (margin only): winner + margin.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.${tailPattern}$`,
   ),
   // Case D (probability): winner + integer-percentage probability + nudge.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}\\. Run the follow-up checks before treating this as final\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.(?:${legacyPattern})? Run the follow-up checks before treating this as final\\.${tailPattern}$`,
   ),
   // Case NT (close): small but real lead, flagged as close.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the options are close\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the options are close\\.${tailPattern}$`,
   ),
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
-    `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
+    `^.+? was supported by only fractionally more runs of this model, so the options are effectively tied\\.${tailPattern}$`,
   ),
   // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
   // flagged as a tie — the winner is nominally ahead but the analysis treats it
@@ -2906,7 +3045,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // this alternation must be widened to `(?:${LEAD_CLAUSE_RE_SRC}|currently
   // leads)` in the same commit.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the analysis treats this as a close call\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the analysis treats this as a close call\\.${tailPattern}$`,
   ),
   // Doctrine D-W (ROADMAP 2.52): leader-trails-argmax honest disambiguation —
   // "{leader} leads overall, though {runner-up} has marginally better raw
@@ -2914,20 +3053,24 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // banned vocabulary, so the ordinary forbidden-vocab / ID / decimal defences
   // (applied after the grammar match) still bite on a leaky slot.
   new RegExp(
-    `^.+? leads overall, though .+? has marginally better raw probability\\.${TAIL_PATTERN}$`,
+    `^In this model, .+? was supported by marginally more runs than .+? \\(\\d{1,3}% against \\d{1,3}%\\), so the two are close\\. Change a figure you’re unsure about to see what separates them\\.${tailPattern}$`,
   ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
-  // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is
+  // MUST stay last — the trailing `\\.${tailPattern}$` anchor is
   // strictly less specific than the other cases and would not match their
   // outputs (those extend "leads" with " by N percentage points", "because",
   // ", but", "with N% probability", or " is currently only fractionally
   // ahead" before the terminal period), so ordering is for clarity rather
   // than correctness.
-  new RegExp(`^.+? currently leads\\.${TAIL_PATTERN}$`),
+  new RegExp(`^.+? ${PLAIN_LEAD_RE_SRC}\\.${tailPattern}$`),
 ];
+}
 
-function matchesHeadlineGrammar(text: string): boolean {
-  for (const re of HEADLINE_GRAMMAR_REGEXES) {
+const HEADLINE_GRAMMAR_REGEXES = headlineGrammarRegexes();
+
+function matchesHeadlineGrammar(text: string, legacyFiguresDisclosure = ''): boolean {
+  const grammars = legacyFiguresDisclosure === '' ? HEADLINE_GRAMMAR_REGEXES : headlineGrammarRegexes(legacyFiguresDisclosure);
+  for (const re of grammars) {
     if (re.test(text)) return true;
   }
   return false;
@@ -2962,7 +3105,7 @@ function matchesHeadlineGrammar(text: string): boolean {
  *        - no ID-prefix tokens (opt_, fac_, …)
  *        - no raw decimal numbers (only integer % allowed)
  */
-export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = ''): boolean {
+export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = '', legacyFiguresDisclosure = ''): boolean {
   if (typeof text !== 'string') return false;
   // ⭐ OLUMI'S GOAL READINGS, BY EXACT EQUALITY (AIQ 5895590866 (2); DL lease 5895635885): `goalReadingTail` is the
   // forwarder's own rebuild of `buildGoalReadingDisclosure` for the graph this Run analysed. The reply may carry that
@@ -2972,8 +3115,8 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
     const at = text.indexOf(goalReadingTail);
     if (at > 0 && text.indexOf(goalReadingTail, at + 1) === -1) {
       const base = text.slice(0, at);
-      return isAllowedRunAnalysisAssistantText(base)
-        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length))
+      return isAllowedRunAnalysisAssistantText(base, '', legacyFiguresDisclosure)
+        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length), '', legacyFiguresDisclosure)
         && passesAssistantTextContentDefences(goalReadingTail);
     }
   }
@@ -2982,6 +3125,7 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
   // (provisional_doctrine_v0) — see MAX_ASSISTANT_TEXT_CHARS.
   if (text.length === 0 || text.length > MAX_ASSISTANT_TEXT_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
+  if (text === RETAINED_LIMIT_WITHHELD || text === RETAINED_LIMIT_QUANTITY_WITHHELD) return true;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
   // D-ask-1 (2.11 P0-1) + T1: a locked template may carry the scaffold
   // disclosure suffix and/or the constraint-gap disclosure suffix (the headline
@@ -2999,7 +3143,12 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
       return passesAssistantTextContentDefences(text);
     }
   }
-  if (!matchesHeadlineGrammar(text)) return false;
+  // The forwarder rebuilds this exact Science sentence from the Run's graph
+  // and complete link list. Labels may contain either quotation mark; they are
+  // escaped as literal strings, never widened into arbitrary prose slots.
+  if (legacyFiguresDisclosure !== '' && (text.indexOf(legacyFiguresDisclosure) < 0
+    || text.indexOf(legacyFiguresDisclosure, text.indexOf(legacyFiguresDisclosure) + 1) !== -1)) return false;
+  if (!matchesHeadlineGrammar(text, legacyFiguresDisclosure)) return false;
   // Defence-in-depth: grammar-shaped but content-leaky strings still
   // fail. A slot filler that happens to contain forbidden vocabulary
   // or an internal ID is caught here even though the surrounding

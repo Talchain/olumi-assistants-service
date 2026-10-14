@@ -26,6 +26,7 @@ import type {
   GraphDiff,
 } from "./types.js";
 import { config } from "../../config/index.js";
+import { isProductionDeployment } from "../../config/env-resolver.js";
 
 // ============================================================================
 // Collector Interface
@@ -137,7 +138,7 @@ export function createObservabilityCollector(
   let graphMetrics: GraphQualityMetrics | undefined;
 
   // Production check: NEVER include raw I/O in production
-  const isProduction = config.server.nodeEnv === "production";
+  const isProduction = config.server.nodeEnv === "production" || isProductionDeployment();
   const effectiveCaptureRawIO = captureRawIO && !isProduction;
 
   /**

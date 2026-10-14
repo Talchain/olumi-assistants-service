@@ -1,0 +1,9 @@
+-- Order-safe because the store falls back to its existing guidance/v2 path.
+-- The only data lost is the stored offers (including their Run references).
+DROP FUNCTION IF EXISTS public.append_agent_answer_with_offers(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, jsonb, jsonb, text
+);
+ALTER TABLE public.v5_conversation_turns
+  DROP COLUMN IF EXISTS suggested_actions,
+  DROP COLUMN IF EXISTS suggested_actions_run_key;
+NOTIFY pgrst, 'reload schema';

@@ -1,0 +1,14 @@
+{
+  "head": "335528888d77f00a4d4f279f094e09f6897b2bfa",
+  "branch": "dl/b2-zero-spread-when-none-licensed",
+  "canonical_matches_staging": true,
+  "production_source_matches_head": true,
+  "supabase_untouched": true,
+  "detached_staging_worktree_removed": true,
+  "fixture_sha256": "3dbbdc4b02038cac8e965cf7c202c93c00a0e131397a9af4a7dee59b1f8a499d",
+  "production_sha256": {
+    "src/routes/canonical-analysis-view.ts": "d23820939130890363a7ba58b14e52a99e11f72e233785accdc8371bbf68d639",
+    "src/orchestrator-v5/goal-target/goal-chance-licence.ts": "4d89b261863472a2161d2d576db2acb0790389a3db1b814510247ace99e8614c",
+    "src/orchestrator-v5/goal-target/goal-chance-range-agent.ts": "3a79d0279a5761eac4462bbaeb3fbdcfdd27eacfbd1f533a768b2311da125484"
+  }
+}

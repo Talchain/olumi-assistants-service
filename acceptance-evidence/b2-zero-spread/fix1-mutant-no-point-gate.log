@@ -1,0 +1,41 @@
+Load gate exit: 0
+{"load":3.86767578125,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/b2-zero-spread.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'reviewer row' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts (17 tests | 1 failed | 16 skipped) 23ms
+     × reviewer row: an empty licence preserves Keep’s zero-spread reason and leaves unearned Starter none 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > reviewer row: an empty licence preserves Keep’s zero-spread reason and leaves unearned Starter none
+AssertionError: expected [ { …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "code": "reason_not_recorded",
++     "message": null,
++   },
++ ]
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:140:64
+    138|       pct_by_option: {}, withheld_option_ids: [STARTER, KEEP], withhel…
+    139|     const result = { enrichment: output.public_enrichment };
+    140|     expect(goalChanceWithheldReasonsForAgent(result, STARTER)).toEqual…
+       |                                                                ^
+    141|     expect(output.canonical_view.options.find((row: Rec) => row.option…
+    142|     expect(goalChanceWithheldReasonsForAgent(result, KEEP)).toEqual([{…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 16 skipped (17)
+   Start at  21:36:57
+   Duration  2.32s (transform 1.54s, setup 105ms, import 2.08s, tests 23ms, environment 0ms)
+

@@ -21,7 +21,6 @@ import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
   WITHHELD_NO_OPTION_MEETS_LIMIT,
-  WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_UNREQUESTED_ANALYSIS,
   composeAnalysisStateV1,
@@ -152,8 +151,8 @@ describe('F-LIMIT — the claim: the two codes, their precedence, and their read
   it('PRECEDENCE (AI Conversation 5850621263): on an OUT-OF-DATE run neither fires — analysis_out_of_date', () => {
     expect(compose('stale', { limit: 'none_meets' }).leader_claim.withheld_reason).toBe(WITHHELD_RUN_OUT_OF_DATE);
     expect(compose('stale', { limit: 'likely_breaks' }).leader_claim.withheld_reason).toBe(WITHHELD_RUN_OUT_OF_DATE);
-    // #2047's merged order is untouched: a stated nonlinear identity still outranks out-of-date.
-    expect(compose('stale', { limit: 'none_meets', identity: true }).leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    // DL 7 Oct (W1c, #2764) supersedes #2047's order: out-of-date now leads over the nonlinear identity too.
+    expect(compose('stale', { limit: 'none_meets', identity: true }).leader_claim.withheld_reason).toBe(WITHHELD_RUN_OUT_OF_DATE);
   });
 
   it('row 5: the limit-UNCHECKED card fires on neither (the limit was checked)', () => {

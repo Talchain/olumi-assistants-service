@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ A RUN'S REPLY TAKES ITS REASON FROM THE ENGINE'S TYPED OUTCOME (DL #72 5867687155 + AIQ 5867754251; one seam,
  * DL order 5867785083).
@@ -57,8 +58,10 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
   let modelCalls = 0;
   let mode: Mode = 'engine';
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       modelCalls += 1;
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: FALSE_REASON }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -96,12 +99,12 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
     return r.json() as { assistant_text: string; suggested_actions: { id: string; label: string; message: string }[] };
   };
 
-  it('RED (served 9cd467e, engine refused): the reply is the engine’s outcome in Olumi’s words, the option is never named, no model is called', async () => {
+  it('RED (served 9cd467e, engine refused): the reply is the engine’s outcome in Olumi’s words, the option is never named, invented model causes are rejected', async () => {
     const b = await run();
     expect(b.assistant_text.startsWith(ENGINE_WORDS), b.assistant_text).toBe(true);
     expect(b.assistant_text).not.toContain(FALSE_REASON);
     expect(b.assistant_text).not.toMatch(/50\/50|New feature availability/);
-    expect(modelCalls, 'nothing interprets it').toBe(0);
+    expect(modelCalls, 'the loop calls Run and reads its refusal').toBe(2);
     expect(b.suggested_actions.map((a) => a.id)).toContain(STATUS_CHIP.id);
     expect(b.suggested_actions.map((a) => a.id), 'not a model gap: no "what it still needs"').not.toContain('agent-suggest-what-it-needs');
   });
@@ -110,7 +113,7 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
     mode = 'busy';
     const b = await run();
     expect(b.assistant_text.startsWith(BUSY_WORDS), b.assistant_text).toBe(true);
-    expect(modelCalls).toBe(0);
+    expect(modelCalls).toBe(2);
     expect(b.suggested_actions).toContainEqual(expect.objectContaining({ id: RETRY_CHIP.id, action_type: 'run_analysis' }));
   });
 
@@ -119,14 +122,14 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
     const b = await run();
     expect(b.assistant_text.startsWith("The figures don't add up:"), b.assistant_text).toBe(true);
     expect(b.assistant_text).toContain(IDENTITY_WORDS);
-    expect(modelCalls).toBe(0);
+    expect(modelCalls).toBe(2);
     expect(b.suggested_actions).toContainEqual(expect.objectContaining({ id: IDENTITY_CHIP.id, label: 'Check the figures', message: IDENTITY_CHIP.message }));
   });
 
   it('CONTROL (readiness stopped it): explained as before — the one interpreting call, and the next-step chip', async () => {
     mode = 'readiness';
     const b = await run();
-    expect(modelCalls, 'the readiness refusal is still interpreted').toBe(1);
+    expect(modelCalls, 'the loop reads the readiness refusal').toBe(2);
     expect(b.suggested_actions.map((a) => a.id)).toContain('agent-suggest-what-it-needs');
   });
 

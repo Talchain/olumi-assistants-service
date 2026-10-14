@@ -17,6 +17,7 @@ import {
   computeGraphIdentityHash,
   computeVersionAnalysisAffectingHashRecord,
 } from './graph-identity.js';
+import { matchesHistoricalAnalysisIdentity } from './historical-analysis-identity.js';
 
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -41,7 +42,7 @@ function supportedIdentity(version: ModelVersionRecord, graph: GraphStateIngress
     full !== null &&
     analysis !== null &&
     version.graph_identity_hash === full.value &&
-    version.analysis_affecting_hash === analysis.value &&
+    matchesHistoricalAnalysisIdentity(graph, version.analysis_affecting_hash) &&
     version.hash_algorithm === full.algorithm &&
     version.identity_projection_version === full.projection_version &&
     version.identity_normaliser_version === full.normaliser_version &&

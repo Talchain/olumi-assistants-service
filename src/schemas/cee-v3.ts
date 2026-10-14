@@ -13,12 +13,14 @@
  */
 
 import { z } from "zod";
+import { GoalScopeSchema } from './goal-scope.js';
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema, InterventionRangeSchema, InterventionRangeMeaning } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
+import { EventRiskV1 } from "./event-risk.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
 
@@ -127,6 +129,8 @@ export const ObservedStateV3 = z.object({
    *  couldn't save that change." Derived BY EXECUTION at this tip, with a
    *  `user_override` positive control, before this line was written. */
   source: z.enum(OBSERVED_STATE_SOURCE_LITERALS).optional(),
+  /** Drafter claimed user material, but current-level quote validation refused credit. */
+  user_material_unverified: z.literal(true).optional(),
   /** Raw value before normalization (preserves original extraction) */
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
@@ -182,6 +186,25 @@ export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
 export const FactorCategoryV3 = z.enum(["controllable", "observable", "external"]);
 export type FactorCategoryV3T = z.infer<typeof FactorCategoryV3>;
 
+/** Server-authored draft widening receipt; the drafter cannot author this metadata. */
+export const DraftOptionWidening = z.object({
+  provenance: z.literal('ai_suggested_widen'),
+}).strict();
+export type DraftOptionWideningT = z.infer<typeof DraftOptionWidening>;
+
+export const DraftRiskWidening = z.object({
+  provenance: z.literal('ai_suggested_widen'),
+  hits: z.object({ id: z.string().regex(CANONICAL_ID_REGEX), label: z.string(), kind: z.enum(['option', 'factor']) }).strict(),
+  through: z.object({ id: z.string().regex(CANONICAL_ID_REGEX), label: z.string(), direction: z.enum(['positive', 'negative']) }).strict(),
+  affects: z.object({ id: z.string().regex(CANONICAL_ID_REGEX), label: z.string(), direction: z.enum(['positive', 'negative']) }).strict(),
+  mechanism: z.enum(['drives', 'relies_on']),
+  relies_on: z.string().min(1),
+  watch_for: z.string().min(1),
+}).strict();
+export type DraftRiskWideningT = z.infer<typeof DraftRiskWidening>;
+export const DraftWidening = z.union([DraftRiskWidening, DraftOptionWidening]);
+export type DraftWideningT = z.infer<typeof DraftWidening>;
+
 /**
  * V3 node schema.
  */
@@ -202,6 +225,8 @@ export const NodeV3 = z.object({
   ref: z.string().regex(/^(OC|G|O|F|R|D|A)[1-9][0-9]{0,8}$/).optional().catch(undefined),
   /** Quantitative data for factor nodes */
   observed_state: ObservedStateV3.optional(),
+  /** Approved scope of this goal; unresolved readings stay on the pending-action carrier. */
+  goal_scope: GoalScopeSchema.optional(),
   /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */
   category: FactorCategoryV3.optional(),
   /**
@@ -271,6 +296,24 @@ export const NodeV3 = z.object({
     source_quote: z.string().min(1).max(500),
   }).strict().optional().catch(undefined),
   /**
+   * ⭐ F1 SEMANTIC MODEL FIELDS (`@talchain/schemas` 0.69.0, MG; spec `output/mg-0ebb952a/SEMANTIC-MODEL-SPEC.md`).
+   * Declared because `NodeV3` strips undeclared keys: without them a `goal_target_edit` (period / horizon / stated
+   * figures, T5), an `option_status_edit` (T6), construction's `count_noun` (T8) or the elision's `full_label` (T14)
+   * would be lost on the next re-parse — F5 I1.1 "held byte-equal after reload". The shapes ARE the contract's
+   * (imported, never re-typed). A malformed value is dropped, never a reason to refuse a stored graph. None is an
+   * analysis-hash input: an option's exclusion moves `analysis_participation`, which is.
+   */
+  goal_period: GoalPeriod.optional().catch(undefined),
+  goal_horizon: GoalHorizonSchema.optional().catch(undefined),
+  /** S4: the recorded draft reference and count reading, retained through reload. */
+  goal_horizon_reference_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
+  goal_horizon_stated_months: z.number().int().positive().optional().catch(undefined),
+  goal_stock_reading: z.literal('one_off').optional().catch(undefined),
+  goal_stated_as: z.array(GoalStatedAsSchema).min(1).max(20).optional().catch(undefined),
+  option_status: OptionStatus.optional().catch(undefined),
+  count_noun: CountNounSchema.optional().catch(undefined),
+  full_label: z.string().min(1).max(500).optional().catch(undefined),
+  /**
    * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
    *
    * THIS DECLARATION IS LOAD-BEARING, the same warning `goal_threshold_frame` carries above. The UI keeps
@@ -305,6 +348,14 @@ export const NodeV3 = z.object({
    */
   goal_direction: z.enum(['>=', '<=', '>', '<']).optional().catch(undefined),
   goal_horizon_months: z.number().int().positive().optional().catch(undefined),
+  /** User's steady-state judgement, written only through the approved goal-steady door. Never defaulted. */
+  horizon_basis: z.object({
+    basis: z.literal('steady_attested'),
+    source: z.literal('user_stated'),
+    bound_months: z.number().int().positive(),
+    metric: z.string(),
+    proof: z.string(),
+  }).strict().optional().catch(undefined),
   /**
    * ⛔ THE DEADLINE AS THE BRIEF STATES IT (goal nodes only; PJ-E-A2 part 2, MG #72 5867208469, Canonical 5867397963).
    * The brief's own words, verbatim, at most 60 characters ("by Q3"). NOT a month count: turning "by Q3" into months
@@ -354,6 +405,33 @@ export const NodeV3 = z.object({
     /** The drafter's comparator as read at construction; a comparator the user holds (`goal_direction`) speaks first. */
     bound: z.enum(['<=', '<', '>=', '>']).optional(),
   }).optional().catch(undefined),
+  /**
+   * ⭐ RECOVERY BATCH C — WHAT THE GOAL'S TARGET IS MEASURED AGAINST (goal nodes only; Batch 0 change-goal decision rulings
+   * 1–14, amendments 1–7). Olumi's validated reading of the drafter's stated semantics (`goal-target-basis.ts`): the
+   * reference (today / launch), the denominator of a percentage change, the period (at its end / over it), the unit every
+   * option's effect on the goal is stated in, whether those effects are their size at the period's end (amendment 2),
+   * the other conditions this target leaves out (amendment 4), and an open question when the target reads more than one
+   * way (amendment 3). `quantity_frame`, `target_frame` and `target_raw` are the staleness key: once the target is edited the
+   * reading is never applied. Written ONLY by construction, and by the user's approved answer to its open question, which
+   * removes that one member (`goal-reading-write.ts`); CEE-owned (`field-safety.ts`); in the analysis hash (Batch C gap 2:
+   * a change to it stales a stored Run, though it changes only what may be SAID about one); a malformed value is absence.
+   */
+  goal_target_basis: z.object({
+    quantity_frame: z.enum(['level', 'change']),
+    target_frame: z.enum(['level', 'change_abs', 'change_rel']),
+    target_raw: z.number().finite(),
+    reference: z.enum(['today', 'launch']),
+    denominator: z.string().min(1).max(120).optional(),
+    period_months: z.number().int().min(1).max(120),
+    period_kind: z.enum(['at_end', 'over_period']),
+    effect_unit: z.string().min(1).max(120),
+    effects_at_period_end: z.boolean(),
+    // Recovery Batch C re-scope (r2 BLOCKING 2; re-scope r1 BLOCKING 1): every retained condition is kept byte-for-byte —
+    // up to 20, each up to 500 characters on one line; admission refuses the whole reading otherwise (`goal-target-basis.ts`).
+    also_required: z.array(z.string().min(1).max(500)).max(20).optional(),
+    open_question: z.string().min(1).max(300).optional(),
+    source: z.literal('olumi_reading'),
+  }).strict().optional().catch(undefined),
   /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
@@ -482,6 +560,9 @@ export const NodeV3 = z.object({
    *  options[] remains the canonical source for analysis; graph nodes carry this for ConnRow rendering.
    *  Typed as z.any() per-value to avoid forward reference to InterventionV3; canonical shape lives on OptionV3. */
   interventions: z.record(z.string(), z.any()).optional(),
+  /** Existing option-gap carriers, retained on canonical option nodes. */
+  unresolved_targets: z.array(z.string()).optional(),
+  user_questions: z.array(z.string()).optional(),
   /** Marks the status-quo / baseline option node (option-kind nodes only, v191+). */
   is_baseline: z.boolean().optional(),
   /** ⭐ An option OLUMI added rather than the user (option-kind nodes only; MG `olumi-option-marker.ts`, DL #72
@@ -490,13 +571,15 @@ export const NodeV3 = z.object({
    *  reconciliation (typed extras), never re-derived from the brief. Declared here because `NodeV3` strips undeclared
    *  keys: without it the mark would be lost on the register write. Adopting the option removes it. */
   proposed_by: z.literal('olumi').optional(),
+  /** Draft-time suggestions retain their origin and risk attachment without creating a causal link. */
+  draft_widening: DraftWidening.optional(),
   /** UI display vocabulary for the node's origin. Set by the V3 transform from
    *  `extractionType`: `explicit`/`observed` → `from_brief`,
    *  `inferred`/`range` → `ai_inferred`, absent/unknown → `ai_inferred`.
    *  RESPONSE-ONLY: recomputed deterministically by `transformResponseToV3`
    *  on every response. Not read by analysis, repair, or PLoT pipelines.
    *  Safe to ignore on round-tripped graphs — value is regenerated. */
-  provenance: z.enum(["from_brief", "ai_inferred", "user_set"]).optional(),
+  provenance: z.enum(["from_brief", "ai_inferred", "user_set", "unverified_brief"]).optional(),
   /** ⭐⭐ THE USER'S EXACT WORDS, for the inspector and the hover surface.
    *
    *  Present only on nodes projected from a stated record, carrying that
@@ -603,9 +686,10 @@ export const NodeV3 = z.object({
    * `openapi.yaml`; a consumer on a stale pin simply drops it.
    *
    * `operation: 'sum'` (R3-2, AIQ #72 5867700610): a limited spend tally that IS the sum of its
-   * levers (`admit-model.ts` `findSumTallies`), ONLY with `stated_in_brief: false` (a stated sum is
-   * malformed and dropped). Every C46 reader above reads `product` only (`readCarrier`), so a sum
-   * never withholds a leader.
+   * levers (`admit-model.ts` `findSumTallies`), always `stated_in_brief: false`; or (L2) a sum the
+   * drafter declared and admission checked whole (`checkDeclaredSums`), `stated_in_brief: true` only
+   * where CEE located the brief's own defining sentence. Every C46 reader above reads `product` only
+   * (`readCarrier`), so a sum never withholds a leader.
    */
   nonlinear_identity: z
     .union([
@@ -614,17 +698,61 @@ export const NodeV3 = z.object({
         factor_ids: z.array(z.string().min(1)).min(2),
         stated_in_brief: z.boolean(),
       }).strict(),
-      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`).
-      // ONLY as Olumi's reading — construction never mints a stated sum, so one is malformed and dropped. PLoT
-      // (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both operations.
+      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`), Olumi's
+      // reading. L2: a DECLARED sum checked whole (`checkDeclaredSums`) is the user's (`stated_in_brief: true`) only where
+      // the brief's own sentence defines it. PLoT (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both.
       z.object({
         operation: z.literal('sum'),
         factor_ids: z.array(z.string().min(1)).min(2),
-        stated_in_brief: z.literal(false),
+        stated_in_brief: z.boolean(),
+      }).strict(),
+      // S4 Q1: graph-level validation below restricts this arm to a goal's accumulation carrier.
+      z.object({
+        operation: z.literal('sum'),
+        factor_ids: z.tuple([z.string().min(1)]),
+        stated_in_brief: z.boolean(),
+      }).strict(),
+      // ⭐ `accumulation` (Science goals §(v); contract: programme-docs design/ACCUMULATION-CARRIER-CONTRACT-20261008.md):
+      // a STOCK at the goal's horizon, worked out without time-stepping, S_T = S₀(1−c)^T + inflow·(1−(1−c)^T)/c, on a
+      // DERIVED node (never the goal). `factor_ids` is POSITIONAL: [stock today, churn rate per month, inflow per month],
+      // three distinct parents. `rate_scale` turns the churn factor's user-unit value into a fraction (0.01 for "%").
+      // Read-tolerant FIRST (CEE #3): before this member, `.catch(undefined)` erased the carrier on every read.
+      z.object({
+        operation: z.literal('accumulation'),
+        factor_ids: z.tuple([z.string().min(1), z.string().min(1), z.string().min(1)])
+          .refine((ids) => new Set(ids).size === 3, 'three distinct ids'),
+        horizon_months: z.number().int().min(1).max(120),
+        rate_scale: z.number().gt(0).lte(1),
+        rate_sigma_log: z.tuple([z.number().finite().min(0), z.number().finite().min(0)]).optional(),
+        stated_in_brief: z.boolean(),
       }).strict(),
     ])
     .optional()
     .catch(undefined),
+  /**
+   * event_risk.v1 (Science 393023 pilot §4): this risk is an EVENT that may happen within a
+   * horizon. Owner: `./event-risk.ts`.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING (the `scale_frame` warning above): this `NodeV3` STRIPS
+   * undeclared keys, so without it every model writer and the Run loader deleted the block.
+   *
+   * `.catch(undefined)`, as for `nonlinear_identity`: a block that is malformed on READ must not make
+   * the whole stored graph unparseable. It cannot be written malformed, because the write door
+   * (`eventRiskIngressIssues`) refuses it (422). Absent ⇒ today's risk node, byte-identically.
+   */
+  event_risk: EventRiskV1.optional().catch(undefined),
+  /**
+   * RC3 (a′): server-authored identity of the option whose precondition this risk describes.
+   * `inertRiskBranch` reads a valid stamp with an existing option and NO incident edges to leave
+   * it out of readiness (`graph-structure-validator`), admission's ledger (`admit-model`), the
+   * Agent's `structural-facts` and `decision-input-ask`, and the `run-analysis` wire projection.
+   * `routing/relies-on-risk` re-checks held/apply/card operations; `agent-capabilities` discloses
+   * it in canonical context; `context/graph-hash` binds its analysis-inclusion meaning.
+   * The risk stays on the shared model; option-conditional effects are not yet computed.
+   * Declared here so persistence writers, re-parses and `loadScenarioSnapshotForRunAnalysis`
+   * retain the stamp. Malformed on read degrades to absence, so the unstamped orphan still blocks.
+   */
+  relies_on: z.object({ option_id: z.string().regex(CANONICAL_ID_REGEX) }).strict().optional().catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 
@@ -641,7 +769,9 @@ export const EdgeProvenanceV3 = z.object({
   /** Optional reasoning */
   reasoning: z.string().optional(),
   /** Who sized the link (magnitude contract D9); `source: 'user_specified'` wins at read time. A malformed value is dropped. */
-  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder"]).optional().catch(undefined),
+  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder", "example_figure"]).optional().catch(undefined),
+  /** The Agent proposed this typed reading of the user's own figures, and the user confirmed its approval card. */
+  reading: z.enum(["agent_proposed_user_confirmed"]).optional().catch(undefined),
   /**
    * The size the link carries in natural units (magnitude contract; #70 5845713522). `strength_mean` is the β it was
    * written for: a reader says it only while the edge's mean equals it (R&C 5845818897). A malformed value is dropped.
@@ -653,14 +783,19 @@ export const EdgeProvenanceV3 = z.object({
     per_source_change_unit: z.string(),
     strength_mean: z.number().finite(),
     strength_mean_frame: z.literal("edge_strength"),
-    /** A4: `amount` is one end of this range the user wrote ("£1-2m"); said with it, never alone. Malformed: dropped. */
-    stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high"]) }).optional().catch(undefined),
+    /**
+     * A4: `amount` is one end of this range the user wrote ("£1-2m"); said with it, never alone. `centre`: `amount` is the
+     * user's point inside it ("about 150, between 80 and 250"; d5 6009282279). Malformed: dropped.
+     */
+    stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high", "centre"]) }).optional().catch(undefined),
   }).optional().catch(undefined),
   /**
    * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL
    * #75 5916504679), so its size is not Olumi's guess. Only `true` or absent; anything else is dropped.
    */
   definitional: z.literal(true).optional().catch(undefined),
+  /** Producer projected the mean, independently of projected spread/existence. R8 predicate (c). */
+  mean_projected: z.literal(true).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
@@ -801,6 +936,16 @@ export const RawInterventionValue = z.union([
 export type RawInterventionValueT = z.infer<typeof RawInterventionValue>;
 
 /**
+ * TEMPORAL — an option's stated RANGE for the value it sets, in RAW units, with its MEANING and its own author:
+ * schemas 0.66.0 `InterventionRangeSchema` (S1), IMPORTED — never re-spelled here. Declared on `InterventionV3` so
+ * the edit referee's intervention screen (`field-safety.ts`) types it from the contract; the writer rule (the range
+ * contains its value) lives at the persisted form (`intervention-range.ts`).
+ */
+export const InterventionRangeMeaningV3 = InterventionRangeMeaning;
+export const InterventionRangeV3 = InterventionRangeSchema;
+export type InterventionRangeV3T = z.infer<typeof InterventionRangeV3>;
+
+/**
  * A single intervention on a factor.
  *
  * Supports the Raw+Encoded pattern:
@@ -825,6 +970,9 @@ export const InterventionV3 = z.object({
   value_confidence: z.enum(["high", "medium", "low"]).optional(),
   /** Explanation for transparency */
   reasoning: z.string().optional(),
+  /** Olumi's draft-widening level, with a basis the user can check; never user-authored. */
+  estimate: z.boolean().optional(),
+  basis: z.string().optional(),
   // --- Raw+Encoded pattern fields (additive, optional) ---
   /** Original value before encoding (for categorical/boolean interventions) */
   raw_value: RawInterventionValue.optional(),
@@ -840,6 +988,8 @@ export const InterventionV3 = z.object({
    * read `value` (and optionally `raw_value`) only.
    */
   display_value: z.string().optional(),
+  /** TEMPORAL: the stated range for this value (schemas 0.66.0 S1). Absent = no range stated. */
+  range: InterventionRangeV3.optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type InterventionV3T = z.infer<typeof InterventionV3>;
 
@@ -979,7 +1129,17 @@ export type ValidationWarningV3T = z.infer<typeof ValidationWarningV3>;
  */
 export const GraphV3 = z.object({
   /** Graph nodes */
-  nodes: z.array(NodeV3),
+  nodes: z.array(NodeV3).transform((nodes): NodeV3T[] => nodes.map(node => {
+    const identity = node.nonlinear_identity;
+    if (identity?.operation !== 'sum' || identity.factor_ids.length !== 1) return node;
+    const operand = nodes.find(n => n.id === identity.factor_ids[0]);
+    const carrier = operand?.nonlinear_identity;
+    if (node.kind === 'goal' && operand?.kind === 'outcome' && carrier?.operation === 'accumulation'
+      && carrier.horizon_months === node.goal_horizon_months && typeof operand.scale_frame === 'number'
+      && operand.scale_frame > 0) return node;
+    const { nonlinear_identity: _invalid, ...withoutIdentity } = node;
+    return withoutIdentity;
+  })),
   /** Graph edges */
   edges: z.array(EdgeV3),
   /**
@@ -1155,6 +1315,13 @@ export const CEEGraphResponseV3 = z.object({
         value: z.number().optional(),
         /** The unit the user stated, alongside `value` (e.g. `"£"`, `"%"`). */
         unit: z.string().optional(),
+        /**
+         * SPINE X8 (schemas 0.77.0): the refused record is a RELATIONSHIP the user stated (see
+         * `DroppedRecordRef.stated_relationship`). Declared here because this object STRIPS undeclared keys —
+         * left to ride, the flag would vanish before `buildModelBuildingNotices` and the user's relationship
+         * would be counted as Olumi's.
+         */
+        stated_relationship: z.literal(true).optional(),
       }),
     )
     .optional(),

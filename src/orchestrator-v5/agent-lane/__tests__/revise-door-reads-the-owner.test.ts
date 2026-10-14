@@ -40,7 +40,7 @@ async function authorship(graph: unknown, text: string, values: Record<string, n
   const store = new ProposalStore();
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-4466554400f2', authenticated_user_id: null, request_id: 'r', user_text: text },
-    { assumptions: Object.entries(values).map(([factor_label, value]) => ({ factor_label, value, unit: unitOf(graph, factor_label), basis: 'as the user said', revise: true })) },
+    { assumptions: Object.entries(values).map(([factor_label, value]) => ({ user_stated: true, factor_label, value, unit: unitOf(graph, factor_label), basis: 'as the user said', revise: true })) },
   ) as R;
   expect(r.ok, JSON.stringify(r)).toBe(true);
   const p = store.get(r.proposal_id)!;

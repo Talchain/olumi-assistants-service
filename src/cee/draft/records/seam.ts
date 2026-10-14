@@ -59,6 +59,7 @@ const StatedItemWire = z.object({
   kind: z.enum(DRAFT_RECORD_STATED_KINDS),
   source_quote: z.string(),
   value: z.number().optional(),
+  baseline: z.number().optional(),
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
   // The convention the user's number is written in. Optional and additive,
@@ -138,6 +139,12 @@ const InferenceClaimWire = z.object({
   to_stated: z.number().int().optional(),
   to_claim: z.number().int().optional(),
   effect: z.enum(DRAFT_RECORD_EFFECTS).optional(),
+  effect_detail: z.object({
+    amount: z.number(),
+    amount_unit: z.string(),
+    per_source_change: z.number(),
+    per_source_change_unit: z.string(),
+  }).optional(),
   strength: z.number().optional(),
   category: z.enum(DRAFT_RECORD_CATEGORIES).optional(),
   value: z.number().optional(),
@@ -306,6 +313,7 @@ export function projectDraftRecords(
       kind: item.kind,
       source_quote: item.source_quote,
       ...(item.value !== undefined ? { value: item.value } : {}),
+      ...(item.baseline !== undefined ? { baseline: item.baseline } : {}),
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.value_scale !== undefined ? { value_scale: item.value_scale } : {}),
@@ -323,6 +331,7 @@ export function projectDraftRecords(
       ...(claim.to_stated !== undefined ? { to_stated: claim.to_stated } : {}),
       ...(claim.to_claim !== undefined ? { to_claim: claim.to_claim } : {}),
       ...(claim.effect !== undefined ? { effect: claim.effect } : {}),
+      ...(claim.effect_detail !== undefined ? { effect_detail: claim.effect_detail } : {}),
       ...(claim.strength !== undefined ? { strength: claim.strength } : {}),
       ...(claim.category !== undefined ? { category: claim.category } : {}),
       ...(claim.value !== undefined ? { value: claim.value } : {}),
@@ -509,7 +518,11 @@ function exampleValueForSchema(spec: unknown): unknown {
     case "array":
       return [exampleValueForSchema(s.items)];
     case "object":
-      return {};
+      return Object.fromEntries(
+        Object.entries((s.properties ?? {}) as Record<string, unknown>).map(
+          ([key, value]) => [key, exampleValueForSchema(value)],
+        ),
+      );
     default:
       return "x";
   }

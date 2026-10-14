@@ -65,7 +65,10 @@ TSC_OUT="$(mktemp)"
 trap 'rm -f "${TSC_OUT:-}" "${CUR_FILES:-}" "${BASE_FILES:-}" 2>/dev/null || true' EXIT
 
 # Force single-line, color-free diagnostics so parsing is stable across TTY/CI.
-pnpm exec tsc --noEmit --pretty false >"$TSC_OUT" 2>&1
+# The full program (src + tests) sits at Node's default ~4 GB heap: CEE #2573 (5 Oct) died here with "JavaScript heap
+# out of memory" (SIGABRT) while staging, a few hundred lines smaller, passed. A crash measures nothing, so the heap is
+# raised (6 GB fits the 7 GB hosted runner); any NODE_OPTIONS the caller set are kept.
+NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=6144" pnpm exec tsc --noEmit --pretty false >"$TSC_OUT" 2>&1
 TSC_EXIT=$?
 
 # An error line looks like:  path.ts(line,col): error TSxxxx: message

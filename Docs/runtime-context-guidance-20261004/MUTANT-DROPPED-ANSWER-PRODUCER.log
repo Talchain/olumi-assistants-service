@@ -1,0 +1,89 @@
+ WARN  Issue while reading "/Users/paulslee/.codex/workspaces/runtime-context-restart-20261004/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/.codex/workspaces/runtime-context-restart-20261004/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /Users/paulslee/.codex/workspaces/runtime-context-restart-20261004
+
+{"level":"info","time":1791125013012,"pid":74019,"hostname":"Mac.net","event":"agent_lane.route_mounted","msg":"POST /agent/v1/turn mounted"}
+{"level":"info","time":1791125013043,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013057,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f601","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013070,"pid":74019,"hostname":"Mac.net","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f602","method_turn":"choose_plan","msg":"agent-lane: method turn answered without a model call"}
+{"level":"info","time":1791125013070,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f602","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013080,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f603","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013086,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f604","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013093,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013097,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f604","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013102,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f605","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013106,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f605","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013112,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013117,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f605","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013123,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013127,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f606","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013131,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f606","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013137,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_spend","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013140,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f607","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013150,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013154,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f608","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013160,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013163,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f609","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013166,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f609","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1791125013171,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013173,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f610","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1791125013174,"pid":74019,"hostname":"Mac.net","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f610","err":"Error: database unavailable","msg":"agent-lane: guidance history unreadable"}
+{"level":"info","time":1791125013178,"pid":74019,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"quarterly_revenue","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791125013181,"pid":74019,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f611","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+ ❯ src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts (21 tests | 3 failed) 363ms
+     × records content-free surviving guidance WITH the final answer, including an unnamed turn 10ms
+     × records a pressed event ONLY for the S1 item the successful held card actually targets 11ms
+     × a new route instance consumes the same persisted settled entry, without reconstructing conversation history 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts > the real route: the row rides the typed turn, and only it > records content-free surviving guidance WITH the final answer, including an unnamed turn
+TypeError: Cannot read properties of undefined (reading '1')
+ ❯ src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts:223:81
+    221|     const b = await turn({ message: 'Where does this leave me?' });
+    222|     const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    223|     const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SC…
+       |                                                                                 ^
+    224|     expect(saved.assistant_message).toBe(b.assistant_text);
+    225|     expect(saved.agent_guidance).toEqual({ version: 1, entries: { [key…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts > the real route: the row rides the typed turn, and only it > records a pressed event ONLY for the S1 item the successful held card actually targets
+AssertionError: expected undefined to be 'pressed' // Object.is equality
+
+- Expected:
+"pressed"
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts:236:93
+    234|     const events = [...rows.entries()].filter(([k]) => k.startsWith(`$…
+    235|     const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    236|     expect(guidanceHistoryOf(events.filter(e => e !== undefined).rever…
+       |                                                                                             ^
+    237|     expect(events.some(e => Object.values(e?.entries ?? {}).some(v => …
+    238|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts > the real route: the row rides the typed turn, and only it > a new route instance consumes the same persisted settled entry, without reconstructing conversation history
+TypeError: Cannot read properties of undefined (reading '1')
+ ❯ src/orchestrator-v5/agent-lane/__tests__/t2-guidance-wire.test.ts:249:81
+    247|     const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    248|     // A recorded event fixture; this verifies the real HTTP consumer,…
+    249|     const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SC…
+       |                                                                                 ^
+    250|     saved.agent_guidance = { version: 1, entries: { [key]: { status: '…
+    251|       state_key_hash: (first.guidance as { slot1: { state_key_hash: st…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 18 passed (21)
+   Start at  15:43:27
+   Duration  6.14s (transform 4.11s, setup 126ms, import 5.53s, tests 363ms, environment 0ms)
+

@@ -1,0 +1,26 @@
+RED: marker regex regresses to cross-line whitespace
+RED: shared classifier receives raw newline runs
+RED: bare leader tokens reject ordinary prose
+RED: shared leader classifier removed
+RED: comparative claim predicates removed
+RED: duration exemption removed
+RED: worded figure guard removed
+RED: numeric figure guard removed
+RED: per-ban leader masking replaced with plain masking
+RED: lever template replaced by non-lever template
+RED: link fallback regresses to effect of how
+RED: risk fallback inverts meaning
+RED: limit fallback loses breach meaning
+RED: non-lever factor is called a lever
+RED: own levers replace grounding union
+RED: own levers follow union
+RED: decision card-null projection removed
+RED: licensed-leader lever control widened
+RED: licensed-leader card control widened
+RED: licensed fallback changed
+RED: licensed directive changed
+RED: licensed settlement applies new decision guard
+RED: typed story-only decision mode removed
+RED: C whole-object directive pin discriminates
+RED: C whole-object check_inputs pin discriminates
+RED: policy duration exemption drifts

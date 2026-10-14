@@ -48,6 +48,21 @@ const CURRENCY_MAP: Record<string, string> = {
 /** The one currency vocabulary. See the note on {@link CURRENCY_MAP}. */
 export const CURRENCY_SYMBOL_TO_CODE: Readonly<Record<string, string>> = CURRENCY_MAP;
 
+/**
+ * Currency WORDS → ISO (Science U-GRAMMAR G0, PR-U1): "pounds a month", "sterling". A SEPARATE export on purpose — the
+ * symbol map's keys build `findStatedAmounts`' prefix pattern, and a word key there would make "pounds" a currency
+ * PREFIX of the number. Read by `readUnitParts` (same-unit.ts) for unit strings only.
+ */
+export const CURRENCY_WORD_TO_CODE: Readonly<Record<string, string>> = {
+  pound: "GBP",
+  pounds: "GBP",
+  sterling: "GBP",
+  dollar: "USD",
+  dollars: "USD",
+  euro: "EUR",
+  euros: "EUR",
+};
+
 /** The recognised currency CODES, derived from the map rather than restated. */
 const CURRENCY_CODES: ReadonlySet<string> = new Set(Object.values(CURRENCY_MAP));
 

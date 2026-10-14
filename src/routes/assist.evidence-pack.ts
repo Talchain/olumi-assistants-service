@@ -37,7 +37,7 @@ const EvidencePackInputSchema = z.object({
 });
 
 export default async function route(app: FastifyInstance) {
-  app.post("/assist/evidence-pack", async (req, reply) => {
+  app.post("/assist/evidence-pack", { config: { scenarioId: 'none' } }, async (req, reply) => {
     // Feature flag guard: return 404 if evidence pack feature is disabled
     if (env.ENABLE_EVIDENCE_PACK !== 'true') {
       reply.code(404);

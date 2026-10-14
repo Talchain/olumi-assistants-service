@@ -14,6 +14,8 @@ import {
   getTimingSummary,
   withLlmTiming,
   withDownstreamTiming,
+  withLlmInvocationCapture,
+  captureLlmPhysicalAttempt,
 } from "../../src/utils/request-timing.js";
 import { setTestSink, TelemetryEvents } from "../../src/utils/telemetry.js";
 import { attachRequestId } from "../../src/utils/request-id.js";
@@ -32,6 +34,52 @@ describe("Request Timing Context", () => {
     setTestSink(null);
     // Safety net: restore real timers even if a fake-timer test failed mid-way.
     vi.useRealTimers();
+  });
+
+  it('RED: physical response metadata failure cannot replace the original fetch result', async () => {
+    const response = new Response('offline', { status: 200 });
+    vi.spyOn(response.headers, 'get').mockImplementation(() => { throw new Error('offline observer failure'); });
+    const result = await withLlmInvocationCapture({ provider: 'openai', model: 'offline', step: 'offline' }, () =>
+      captureLlmPhysicalAttempt('openai', { body: '{}' }, async () => response));
+    expect(result).toBe(response);
+  });
+
+  it('a failed physical transport preserves the original thrown object and terminal join', async () => {
+    const failure = new Error('offline transport failure');
+    await expect(withLlmInvocationCapture({ provider: 'openai', model: 'offline', step: 'offline' }, () =>
+      captureLlmPhysicalAttempt('openai', undefined, async () => { throw failure; }))).rejects.toBe(failure);
+    const trace = emittedEvents.find(e => e.event === TelemetryEvents.LlmCall)!.data.provider_trace;
+    expect(trace.outcome).toBe('failure');
+    expect(trace.attempts[0]).toMatchObject({ logical_call_id: trace.logical_call_id, outcome: 'transport_error', error_name: 'Error', http_status: null });
+  });
+
+  it('RED: final streamed draft message usage is retained while absent usage stays unknown', async () => {
+    const identity = { provider: 'anthropic' as const, model: 'offline', step: 'draft_graph' };
+    // This is the existing draft retry callback's final result envelope.
+    const result = { kind: 'complete', message: { usage: { input_tokens: 3, output_tokens: 1 } }, timeToEdgesMs: null };
+    expect(await withLlmInvocationCapture(identity, async () => result)).toBe(result);
+    await withLlmInvocationCapture(identity, async () => ({ kind: 'runaway', chars: 12, elapsedMs: 5, trigger: 'stall' }));
+    const traces = emittedEvents.filter(e => e.event === TelemetryEvents.LlmCall).map(e => e.data.provider_trace);
+    expect(traces[0].usage).toMatchObject({ input_tokens: 3, output_tokens: 1 });
+    expect(traces[1].usage).toMatchObject({ input_tokens: null, output_tokens: null });
+    expect(traces[1].outcome).toBe('runaway');
+  });
+
+  it('RED: a recoverable structured-output rejection is recorded rather than called successful', async () => {
+    const result = { kind: 'so_reject', error: Object.assign(new Error('offline schema rejection'), { status: 400 }) };
+    expect(await withLlmInvocationCapture({ provider: 'anthropic', model: 'offline', step: 'draft_graph' }, async () => result)).toBe(result);
+    const trace = emittedEvents.find(e => e.event === TelemetryEvents.LlmCall)!.data.provider_trace;
+    expect(trace).toMatchObject({ outcome: 'so_reject', error_name: 'Error', error_status: 400 });
+  });
+
+  it('RED: request metadata failure cannot prevent the original fetch', async () => {
+    const init: { body?: unknown } = {};
+    Object.defineProperty(init, 'body', { get: () => { throw new Error('offline body metadata failure'); } });
+    const response = new Response('offline');
+    const fetch = vi.fn(async () => response);
+    expect(await withLlmInvocationCapture({ provider: 'openai', model: 'offline', step: 'offline' }, () =>
+      captureLlmPhysicalAttempt('openai', init, fetch))).toBe(response);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   /**

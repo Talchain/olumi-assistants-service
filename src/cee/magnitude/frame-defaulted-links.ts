@@ -82,7 +82,15 @@ export function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<
     observed_state: isRec(n.observed_state) ? (n.observed_state as MagnitudeNode['observed_state']) : undefined,
     goal_threshold_cap: n.goal_threshold_cap,
     goal_threshold_unit: n.goal_threshold_unit,
-    unit: null,
+    ...(n.quantity_frame !== undefined ? { quantity_frame: n.quantity_frame } : {}),
+    // Draft records carry claim units on `data.unit`; the old view only read
+    // observed_state and consequently made outcome/goal-path sizing refuse even
+    // when the model had stated the natural unit.
+    // RT-6 step 2: after the node's own unit, ONLY the user's own stated reading (Science U1–U4). An Olumi-written
+    // reading never governs sizing or P5 (DL 5999243055: it would move the Run headline with no analysis-hash move).
+    unit: [isRec(n.data) ? n.data.unit : undefined,
+      isRec(n.unit_reading) && n.unit_reading.source === 'user_stated' ? n.unit_reading.unit : undefined]
+      .find((u): u is string => typeof u === 'string' && u.trim() !== '') ?? null,
     option_levels: optionLevels.get(n.id as string) ?? [],
     ...(percentLevel.has(n.id as string) ? { percent_level: true } : {}),
   }]));
@@ -143,9 +151,10 @@ export function frameDefaultedLinks<G>(graph: G, factorId: string): FramedLinks<
     }
     // Nothing to size against any more (no level held, or no frame): back to today's default, exactly as admission writes it.
     if (provenance.magnitude !== 'olumi_placeholder') return edge;
+    if (provenance.natural_effect === undefined && strength.mean === sizing.mean && strength.std === sizing.std) return edge;
     sized.push(`${String(edge.from)}::${String(edge.to)}`);
     const { magnitude: _m, natural_effect: _n, ...rest } = provenance;
-    return { ...edge, strength: { ...strength, mean: sizing.mean, std: sizing.std }, provenance: rest, defaulted: true };
+    return { ...edge, strength: { ...strength, mean: sizing.mean, std: sizing.std }, provenance: { ...rest, mean_projected: true }, defaulted: true };
   });
   return sized.length > 0 ? { graph: { ...graph, edges } as G, sized } : { graph, sized };
 }

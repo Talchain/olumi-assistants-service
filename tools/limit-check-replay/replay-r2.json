@@ -1,0 +1,86 @@
+{
+  "checks": [
+    {
+      "constraint_id": "agent-lane:monthly_recurring_revenue:>=",
+      "limit": "monthly recurring revenue",
+      "state": "scored",
+      "say": "‘monthly recurring revenue’ was checked against the figures in your model."
+    }
+  ],
+  "goal_path_withholds": [],
+  "inferred_units": [
+    [
+      "customers_lost_from_price_rise",
+      "customers"
+    ]
+  ],
+  "mediator": {
+    "via": "user_sized_links",
+    "unit": "customers",
+    "child": "monthly_recurring_revenue"
+  },
+  "testability": {
+    "kind": "testable",
+    "goal_id": "monthly_recurring_revenue"
+  },
+  "licence": {
+    "code": "GOAL_CHANCE_LICENSED",
+    "severity": "info",
+    "message": "Each option’s chance of meeting your goal is licensed on this Run.",
+    "form": "each",
+    "option_ids": [
+      "raise_prices_10",
+      "launch_starter_tier",
+      "keep_pricing_as_it_is"
+    ],
+    "pct_by_option": {
+      "raise_prices_10": 47,
+      "launch_starter_tier": 34,
+      "keep_pricing_as_it_is": 0
+    },
+    "target": {
+      "comparator": "at_least",
+      "value": 126000,
+      "unit": "£/month"
+    },
+    "user_link_existence": {
+      "links": 3,
+      "one_in": 5
+    },
+    "summary_withheld": {
+      "cause": "olumi_existence_assumption",
+      "form": "highest"
+    },
+    "display_rounding_by_option": {
+      "raise_prices_10": "whole",
+      "launch_starter_tier": "whole",
+      "keep_pricing_as_it_is": "whole"
+    },
+    "driver_by_option": {
+      "raise_prices_10": {
+        "quantity_id": "existing_price_rise->monthly_recurring_revenue",
+        "kind": "link_strength",
+        "from": "existing_price_rise",
+        "to": "monthly_recurring_revenue",
+        "side": "low",
+        "strength": "weaker",
+        "authored_by": "user",
+        "user_stated_link": true
+      },
+      "launch_starter_tier": {
+        "quantity_id": "starter_tier_availability->starter_tier_subscribers",
+        "kind": "link_strength",
+        "from": "starter_tier_availability",
+        "to": "starter_tier_subscribers",
+        "side": "low",
+        "strength": "weaker",
+        "authored_by": "user",
+        "user_stated_link": true
+      }
+    },
+    "no_driver_by_option": {
+      "keep_pricing_as_it_is": "none"
+    }
+  },
+  "controls": "PASS: disagreement, all touching links, both sides, estimates/hypotheses/projected means, explicit units, unsized, cost, singular, stale, identity absent/mismatch, no writes"
+}

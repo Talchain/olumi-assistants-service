@@ -19,7 +19,7 @@ import { CanonicalCommittedGraphReceiptSchema } from '@talchain/schemas/boundary
 
 const mocks = vi.hoisted(() => ({
   executeOptionInterventionEdit: vi.fn(),
-  loadPriorFactsWithReadState: vi.fn(),
+  loadScenarioAnalysisFactsForRead: vi.fn(),
   getSessionStore: vi.fn(() => ({ marker: 'AUTHORISED_STORE' })),
 }));
 
@@ -29,7 +29,7 @@ vi.mock('../option-intervention-edit.js', () => ({
 
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../build-turn-context.js')>()),
-  loadPriorFactsWithReadState: mocks.loadPriorFactsWithReadState,
+  loadScenarioAnalysisFactsForRead: mocks.loadScenarioAnalysisFactsForRead,
 }));
 
 vi.mock('../../session/index.js', async (importOriginal) => ({
@@ -43,6 +43,7 @@ vi.mock('../../commit.js', async (importOriginal) => ({
 }));
 
 import { dispatchSystemEvent, SYSTEM_EVENT_HANDLING } from '../dispatch.js';
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { buildAppliedGraphWireField } from '../../compose/applied-graph-emit.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -82,12 +83,13 @@ function payload(): SystemEventTurnPayload {
 
 /** A prior-fact read that succeeded and carries no analysis at all. */
 function freshRead() {
-  return { status: 'ok' as const, facts: [] as never[] };
+  return { hotWindow: { status: 'ok' as const, facts: [] },
+    factSet: { status: 'complete' as const, source: 'scenario', facts: [], total_count: 0 }, priorFactsWithTurn: [] };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.loadPriorFactsWithReadState.mockResolvedValue(freshRead());
+  mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(freshRead());
   mocks.getSessionStore.mockReturnValue({ marker: 'AUTHORISED_STORE' });
   mocks.executeOptionInterventionEdit.mockResolvedValue({ kind: 'refused', reason: 'test_default' });
 });
@@ -149,14 +151,15 @@ describe('C — freshness is server-derived and FAILS CLOSED', () => {
     // Defaulting a degraded read to `none` would hand the referee a permission
     // the history never granted, and the writer refuses `unknown` for exactly
     // that reason.
-    mocks.loadPriorFactsWithReadState.mockResolvedValue({ status: 'degraded', facts: [] });
+    mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue({ hotWindow: { status: 'degraded', facts: [] },
+      factSet: { status: 'degraded', reason: 'durable_read_failed', facts: [] }, priorFactsWithTurn: [] });
     await dispatchSystemEvent({ payload: payload(), requestId: 'req-5' });
     expect(mocks.executeOptionInterventionEdit.mock.calls[0]?.[0]?.freshness).toBe('unknown');
     expect(mocks.executeOptionInterventionEdit.mock.calls[0]?.[0]?.hasExistingAnalysis).toBe(false);
   });
 
   it('refuses to append at all when the fact read THROWS', async () => {
-    mocks.loadPriorFactsWithReadState.mockRejectedValue(new Error('history unavailable'));
+    mocks.loadScenarioAnalysisFactsForRead.mockRejectedValue(new Error('history unavailable'));
     const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-6' });
     expect(mocks.executeOptionInterventionEdit).not.toHaveBeenCalled();
     expect(result.commitPerformed).toBe(false);
@@ -385,4 +388,38 @@ describe('E — the committed postimage returns as a CANONICAL receipt', () => {
       expect((result.response as { draft_graph?: unknown }).draft_graph).toBeUndefined();
     },
   );
+});
+
+
+describe('option writer carries complete evidence before AND after every commit', () => {
+  for (const kind of ['legacy', 'stamped'] as const) it.each(['failed', 'capped', 'hot-edit', 'healthy'])('%s read for a '+kind+' Run stays identity-bound', async state => {
+    const at = '2026-10-01T00:00:00.000Z';
+    const run = { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+      scenario_id: SCENARIO_ID, run_id: 'selected-option-run', summary: 'Saved Run', graph_hash_at_run: HASH,
+      computed_at: at, enrichment: kind === 'stamped' ? stampRunAnalysisProjection({ analysis_status: 'computed' }) : { analysis_status: 'computed' },
+    } };
+    const edit = { fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'option_configuration', status: 'applied', operations_count: 1, affected_entities: [],
+      graph_hash_before: HASH, graph_hash_after: HASH, safe_summary: 'Cleared a gap.', impact: 'moderate', rerun_recommended: true,
+    } };
+    const facts = [run]; // Chronology is in the DB-authored evidence, outside this Run-only chain.
+    const input = { hotWindow: { status: 'ok', facts }, priorFactsWithTurn: state === 'hot-edit'
+      ? [{ fact: edit, fact_row_id: 'new-edit', turn_id: 'edit-turn', fact_created_at: '2026-10-02T00:00:00.000Z' }] : [],
+      factSet: { status: 'complete', source: 'scenario', facts, total_count: 1,
+        legacy_edit_facts: { since: at, facts: [], readOk: state !== 'failed' && state !== 'capped',
+          total_count: state === 'capped' ? 22 : state === 'failed' ? null : 0 } },
+    };
+    mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(input);
+    mocks.executeOptionInterventionEdit.mockResolvedValue({ kind: 'committed', response: {
+      response_version: 2, assistant_text: 'Updated.', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse',
+    }, graph: COMMITTED_GRAPH, analysisGraphHash: HASH, persistedRowId: 'committed-row' });
+    const out = await dispatchSystemEvent({ payload: payload(), requestId: 'identity-bound-writer' });
+    const expected = state === 'hot-edit' || (kind === 'legacy' && state !== 'healthy') ? 'stale' : 'fresh';
+    expect(mocks.executeOptionInterventionEdit.mock.calls[0]?.[0]).toMatchObject({ freshness: expected, hasExistingAnalysis: true });
+    expect(mocks.loadScenarioAnalysisFactsForRead).toHaveBeenCalledTimes(2);
+    expect(out.commitPerformed).toBe(true);
+    expect(out.freshness).toMatchObject({ freshness: expected, graph_hash_at_run: HASH, computed_at: at });
+    expect(input.factSet.facts[0]!.result).toMatchObject({ scenario_id: SCENARIO_ID, run_id: 'selected-option-run',
+      graph_hash_at_run: HASH, computed_at: at });
+  });
 });

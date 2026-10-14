@@ -112,8 +112,38 @@ fi
 # forbidden patterns in EXECUTABLE code. The old awk filter dropped whole
 # comment LINES but could not see a trailing comment on a code line — the
 # tokeniser can.
+# The only numeric parse owned here is HTTP-status metadata, not a PLoT measurement.
+# Positively pin its complete function and exact source location before excluding that ONE scan match.
+HTTP_STATUS_PARSE_LINE=$(node - "$HANDLER_FILE" <<'NODE'
+const fs = require('node:fs');
+const ts = require('typescript');
+const file = process.argv[2];
+const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+const compact = (s) => s.replace(/\s+/g, '').replaceAll(',)', ')').replaceAll(',}', '}').replaceAll(',]', ']');
+const expected = `function readDownstreamHttpStatus(v2Err: V2RunError | undefined): number | null {
+  const reason = v2Err?.status_reason;
+  if (typeof reason !== 'string') return null;
+  const match = PLOT_DOWNSTREAM_HTTP_STATUS_RE.exec(reason);
+  if (match === null || match[1] === undefined) return null;
+  const status = Number.parseInt(match[1], 10);
+  return Number.isFinite(status) ? status : null;
+}`;
+const functions = source.statements.filter((n) => ts.isFunctionDeclaration(n) && n.name?.text === 'readDownstreamHttpStatus');
+if (functions.length !== 1 || compact(functions[0].getText(source)) !== compact(expected)) {
+  console.error('HTTP-status parser ownership changed: re-derive the metadata boundary; scientific parses remain forbidden.');
+  process.exit(1);
+}
+const node = functions[0];
+const lines = source.text.split('\n');
+const first = source.getLineAndCharacterOfPosition(node.getStart(source)).line;
+const last = source.getLineAndCharacterOfPosition(node.end).line;
+for (let i = first; i <= last; i++) if (lines[i].includes('Number.parseInt(')) console.log(`${file}:${i + 1}:${lines[i]}`);
+NODE
+) || fail 'HTTP-status metadata parser is not the pinned non-scientific reader' ''
+
 FORBIDDEN_HELPERS=$(
-  node "$STRIPPER" --scan "Math\.(round|floor|ceil|abs)|\.toFixed\(|parseFloat\(|parseInt\(" "$HANDLER_FILE" 2>/dev/null || true
+  node "$STRIPPER" --scan "Math\.(round|floor|ceil|abs)|\.toFixed\(|parseFloat\(|parseInt\(" "$HANDLER_FILE" 2>/dev/null \
+  | grep -vFx "${HTTP_STATUS_PARSE_LINE:-}" || true
 )
 NUMBER_COERCIONS=$(
   node "$STRIPPER" --scan "Number\(" "$HANDLER_FILE" 2>/dev/null \
@@ -157,17 +187,17 @@ fi
 # 6. `result.enrichment` is assigned from a pass-through, not constructed
 #
 # Specifically, grep for the handler's enrichment assignment and verify it
-# references `response` (the validated PLoT envelope) rather than building
+# references the validated PLoT `response` through the owned projection stamp rather than building
 # a new object literal from response fields.
 # ---------------------------------------------------------------------------
 ENRICHMENT_OK=$(
   awk '/enrichment: /{print}' "$HANDLER_FILE" \
-  | grep -E "enrichment: response as Record" \
+  | grep -F "enrichment: stampRunAnalysisProjection(response as Record<string, unknown>)" \
   || true
 )
 if [ -z "$ENRICHMENT_OK" ]; then
   fail 'result.enrichment is not a verbatim pass-through of the validated PLoT response' \
-    "Expected a line matching 'enrichment: response as Record' in $HANDLER_FILE; none found."
+    "Expected the PLoT pass-through via stampRunAnalysisProjection in $HANDLER_FILE; none found."
 fi
 
 # ---------------------------------------------------------------------------
@@ -195,15 +225,48 @@ fi
 
 # (i) NON-VACUITY + exactly-once: the verdict is a first-class field on the
 #     fact, written inside the single safeParse. Zero occurrences fails.
-VERDICT_WRITE='constraint_verdict: projectClaimSafety(constraintVerdict),'
-VERDICT_COUNT=$(grep -cF "$VERDICT_WRITE" "$HANDLER_FILE" || true)
-if [ "$VERDICT_COUNT" -ne 1 ]; then
-  fail "the claim-safety verdict is not written exactly once (found $VERDICT_COUNT)" \
-    "Expected exactly one '$VERDICT_WRITE' in $HANDLER_FILE.
-0 means the mechanism this check polices has MOVED — do not leave this guard
-counting a symbol that no longer exists (that is the defect this block replaced).
-Re-derive where the verdict is written and re-point the check.
->1 means two derivations can disagree inside one response (CLAUDE.md trap #12)."
+# The single writer now persists the composed, REMOVE-ONLY leader permission:
+# constraint evidence -> intake -> nonlinear identity -> provisional / scope withhold.
+# Pin the actual AST producer, writer and validating boundary. Zero and duplicate writes BOTH fail.
+if ! node - "$HANDLER_FILE" <<'NODE'
+const fs = require('node:fs');
+const ts = require('typescript');
+const file = process.argv[2];
+const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+const compact = (s) => s.replace(/\s+/g, '').replaceAll(',)', ')').replaceAll(',}', '}').replaceAll(',]', ']');
+const nodes = [];
+function visit(node) { nodes.push(node); ts.forEachChild(node, visit); }
+visit(source);
+function pin(matches, text, name) {
+  if (matches.length !== 1 || compact(matches[0].getText(source)) !== compact(text)) {
+    console.error(`FAIL: ${name} must have exactly one current owned producer (found ${matches.length})`);
+    process.exitCode = 1;
+  }
+}
+const declarations = (name) => nodes.filter((n) => ts.isVariableDeclaration(n) && n.name.getText(source) === name);
+const properties = (name) => nodes.filter((n) => ts.isPropertyAssignment(n) && n.name.getText(source) === name);
+pin(declarations('leaderPermission').map((n) => n.initializer),
+  `applyNonlinearIdentityToLeaderPermission(applyIntakeToLeaderPermission(projectClaimSafety(constraintVerdict), intakeReconciliation), nonlinearIdentityWithhold)`,
+  'claim-safety permission composition');
+const projections = nodes.filter((n) => ts.isCallExpression(n) && n.expression.getText(source) === 'projectClaimSafety');
+pin(projections, 'projectClaimSafety(constraintVerdict)', 'constraint verdict derivation');
+const writes = properties('constraint_verdict');
+pin(writes, `constraint_verdict: keptOlumiProvisional
+  || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
+  ? { ...leaderPermission, may_name_leading_option: false } : leaderPermission`, 'claim-safety single writer');
+const candidates = declarations('factCandidate');
+const candidate = candidates.length === 1 ? candidates[0] : null;
+const withinCandidate = (n) => candidate !== null && n.getStart(source) >= candidate.getStart(source) && n.end <= candidate.end;
+if (writes.length !== 1 || !withinCandidate(writes[0])) {
+  console.error('FAIL: claim-safety writer must be inside the validated factCandidate'); process.exitCode = 1;
+}
+const enrichment = properties('enrichment').filter(withinCandidate);
+pin(enrichment, 'enrichment: stampRunAnalysisProjection(response as Record<string, unknown>)', 'PLoT pass-through with owned projection stamp');
+const validations = nodes.filter((n) => ts.isCallExpression(n) && n.expression.getText(source) === 'RunAnalysisHandlerFactSchema.safeParse');
+pin(validations, 'RunAnalysisHandlerFactSchema.safeParse(factCandidate)', 'single fact validation');
+NODE
+then
+  fail 'handler claim-safety ownership drifted from its current single writer' ''
 fi
 
 # (ii) The post-validation enrichment bolt must not come back. Matched on the
@@ -396,9 +459,10 @@ done
 if [ "$EXIT" -eq 0 ]; then
   echo 'Handler ownership invariant OK:'
   echo '  - runAnalysisHandler imported only by registry.ts'
-  echo '  - no direct HTTP calls; no UI-repo refs; no math/formatting helpers'
+  echo '  - no direct HTTP calls; no UI-repo refs; no scientific math/formatting helpers (HTTP metadata reader pinned)'
   echo '  - template enum has exactly 2 entries'
-  echo '  - result.enrichment is a verbatim pass-through of the PLoT envelope'
+  echo '  - result.enrichment is the PLoT pass-through with the owned projection stamp'
+  echo '  - one composed remove-only claim-safety writer inside one validated fact'
   echo '  - placeholder scenario reader acceptable (classifier prompt still direct_answer/clarify only)'
   echo '  - Phase 1: Anthropic SDK confined to route-with-tool-use.ts'
   echo '  - Phase 1: context-pack-assembler + validator free of LLM/UI imports'

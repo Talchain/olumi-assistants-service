@@ -312,7 +312,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * store version, and preview chars. Useful for confirming deployments and
    * detecting cache/store drift without exposing full prompt text.
    */
-  app.get('/admin/prompts/verify', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts/verify', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const prompts = getPromptVerifySnapshot();
@@ -332,7 +332,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * GET /admin/prompts - List all prompts
    * Permission: read
    */
-  app.get('/admin/prompts', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     if (!isPromptManagementEnabled()) {
@@ -373,7 +373,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /admin/prompts - Create new prompt
    */
-  app.post('/admin/prompts', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/prompts', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -445,7 +445,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * GET /admin/prompts/:id - Get prompt by ID
    * Permission: read
    */
-  app.get('/admin/prompts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts/:id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     if (!isPromptManagementEnabled()) {
@@ -486,7 +486,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * PATCH /admin/prompts/:id - Update prompt metadata
    */
-  app.patch('/admin/prompts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/admin/prompts/:id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -651,7 +651,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * DELETE /admin/prompts/:id - Delete/archive prompt
    */
-  app.delete('/admin/prompts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/admin/prompts/:id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -710,7 +710,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /admin/prompts/:id/versions - Create new version
    */
-  app.post('/admin/prompts/:id/versions', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/prompts/:id/versions', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -773,7 +773,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /admin/prompts/:id/rollback - Rollback to version
    */
-  app.post('/admin/prompts/:id/rollback', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/prompts/:id/rollback', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -882,7 +882,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * - validation: { valid: boolean, issues?: string[] }
    */
   app.post('/admin/prompts/:id/test', {
-    config: {
+    config: { scenarioId: 'none',
       rateLimit: {
         max: 10,
         timeWindow: '1 minute',
@@ -1108,7 +1108,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * - notes: Optional notes/reason for approval
    */
   app.post('/admin/prompts/:id/approve', {
-    config: {
+    config: { scenarioId: 'none',
       rateLimit: {
         max: 20,
         timeWindow: '1 minute',
@@ -1240,7 +1240,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * Test cases are used for golden testing during prompt validation.
    */
   app.patch('/admin/prompts/:id/test-cases', {
-    config: {
+    config: { scenarioId: 'none',
       rateLimit: {
         max: 30,
         timeWindow: '1 minute',
@@ -1336,7 +1336,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * Permission: read
    */
   app.get('/admin/prompts/:id/diff', {
-    config: {
+    config: { scenarioId: 'none',
       rateLimit: {
         max: 60,
         timeWindow: '1 minute',
@@ -1439,7 +1439,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * GET /admin/experiments - List experiments
    * Permission: read
    */
-  app.get('/admin/experiments', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/experiments', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const manager = getBraintrustManager();
@@ -1458,7 +1458,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /admin/experiments - Start experiment
    */
-  app.post('/admin/experiments', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/experiments', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     const body = StartExperimentSchema.safeParse(request.body);
@@ -1529,7 +1529,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
    * DELETE /admin/experiments/:name - End experiment
    */
-  app.delete('/admin/experiments/:name', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/admin/experiments/:name', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     const params = ExperimentNameParamsSchema.safeParse(request.params);
@@ -1561,7 +1561,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * GET /admin/experiments/:name/stats - Get experiment stats
    * Permission: read
    */
-  app.get('/admin/experiments/:name/stats', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/experiments/:name/stats', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const params = ExperimentNameParamsSchema.safeParse(request.params);
@@ -1605,7 +1605,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    *
    * Returns all observations for a prompt with average rating.
    */
-  app.get('/admin/prompts/:id/observations', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts/:id/observations', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     if (!isPromptManagementEnabled()) {
@@ -1660,7 +1660,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    *
    * Returns observations for a specific prompt version with average rating.
    */
-  app.get('/admin/prompts/:id/versions/:version/observations', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/prompts/:id/versions/:version/observations', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     if (!isPromptManagementEnabled()) {
@@ -1720,7 +1720,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    * Creates a new observation for a prompt version.
    * Validates that content is provided for note/failure/success types.
    */
-  app.post('/admin/prompts/:id/observations', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/prompts/:id/observations', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {
@@ -1800,7 +1800,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
    *
    * Deletes a specific observation by ID.
    */
-  app.delete('/admin/prompts/:id/observations/:obsId', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/admin/prompts/:id/observations/:obsId', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply)) return;
 
     if (!isPromptManagementEnabled()) {

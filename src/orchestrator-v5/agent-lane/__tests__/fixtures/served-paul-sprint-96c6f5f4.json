@@ -1,0 +1,615 @@
+{
+ "_source": "CEE /graph read of Paul's 1 Oct manual test, scenario 96c6f5f4, graph f34bc5e3, 10:0xZ (MG 5929251661)",
+ "graph": {
+  "nodes": [
+   {
+    "id": "how_should_i_approach_this_trade_off",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "How should I approach this trade-off?",
+    "provenance": "from_brief"
+   },
+   {
+    "id": "quarterly_revenue",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "quarterly revenue",
+    "provenance": "ai_inferred",
+    "goal_direction": ">=",
+    "goal_threshold": 0.8,
+    "threshold_source": "user",
+    "success_threshold": 200000,
+    "goal_threshold_cap": 250000,
+    "goal_threshold_raw": 200000,
+    "goal_threshold_unit": "\u00a3 per month",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "ai_reporting_sprint",
+    "ref": "O1",
+    "kind": "option",
+    "label": "AI Reporting Sprint",
+    "provenance": "from_brief",
+    "interventions": {
+     "ai_reporting_sprint_capacity": {
+      "unit": "% of upcoming sprint",
+      "value": 1,
+      "source": "cee_hypothesis",
+      "raw_value": 100,
+      "target_match": {
+       "node_id": "ai_reporting_sprint_capacity",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "signup_bug_fix_sprint_capacity": {
+      "unit": "% of upcoming sprint",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "signup_bug_fix_sprint_capacity",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "signup_fix_sprint",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Signup Fix Sprint",
+    "provenance": "from_brief",
+    "interventions": {
+     "ai_reporting_sprint_capacity": {
+      "unit": "% of upcoming sprint",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "ai_reporting_sprint_capacity",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "signup_bug_fix_sprint_capacity": {
+      "unit": "% of upcoming sprint",
+      "value": 1,
+      "source": "cee_hypothesis",
+      "raw_value": 100,
+      "target_match": {
+       "node_id": "signup_bug_fix_sprint_capacity",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "split_sprint",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Split Sprint",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "ai_reporting_sprint_capacity": {
+      "unit": "% of upcoming sprint",
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "raw_value": 50,
+      "target_match": {
+       "node_id": "ai_reporting_sprint_capacity",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "signup_bug_fix_sprint_capacity": {
+      "unit": "% of upcoming sprint",
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "raw_value": 50,
+      "target_match": {
+       "node_id": "signup_bug_fix_sprint_capacity",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "carry_on_as_now",
+    "ref": "O4",
+    "kind": "option",
+    "label": "Carry On As Now",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "ai_reporting_sprint_capacity",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "AI reporting sprint capacity",
+    "category": "controllable",
+    "provenance": "user_set",
+    "scale_frame": 100,
+    "display_value": "10 % of upcoming sprint",
+    "observed_state": {
+     "unit": "% of upcoming sprint",
+     "value": 0.1,
+     "source": "user_override",
+     "raw_value": 10
+    }
+   },
+   {
+    "id": "signup_bug_fix_sprint_capacity",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Signup bug-fix sprint capacity",
+    "category": "controllable",
+    "provenance": "user_set",
+    "scale_frame": 100,
+    "display_value": "50 % of upcoming sprint",
+    "observed_state": {
+     "unit": "% of upcoming sprint",
+     "value": 0.5,
+     "source": "user_override",
+     "raw_value": 50
+    }
+   },
+   {
+    "id": "total_sprint_capacity_allocated",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Total sprint capacity allocated",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "% of upcoming sprint",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "ai_reporting_module_readiness",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "AI reporting module readiness",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "% ready by next month",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "profile_setup_abandonment_rate",
+    "ref": "F5",
+    "kind": "factor",
+    "label": "Profile setup abandonment rate",
+    "category": "observable",
+    "provenance": "user_set",
+    "display_value": "25%",
+    "observed_state": {
+     "cap": 100,
+     "unit": "%",
+     "value": 0.25,
+     "source": "user_override",
+     "raw_value": 25,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "quarterly_revenue_lost_to_signup_abandonment",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Quarterly revenue lost to signup abandonment",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000000
+   },
+   {
+    "id": "enterprise_contract_revenue",
+    "ref": "OC1",
+    "kind": "outcome",
+    "label": "Enterprise contract revenue",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000000
+   },
+   {
+    "id": "fac_projected_enterprise_monthly_revenue",
+    "ref": "F6",
+    "kind": "factor",
+    "label": "Projected enterprise monthly revenue",
+    "category": "external",
+    "observed_state": {
+     "cap": 100000,
+     "unit": "\u00a3 per month",
+     "value": 0.25,
+     "source": "user_override",
+     "raw_value": 25000,
+     "declared_scale": "unit_interval",
+     "reviewed_by_user": {
+      "quote": "One thing I do know is that the enterprise revenue is projected to be \u00a325,000 per month.",
+      "intent": "confirm_pairing"
+     }
+    }
+   }
+  ],
+  "edges": [
+   {
+    "to": "ai_reporting_sprint",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "signup_fix_sprint",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "split_sprint",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "carry_on_as_now",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "ai_reporting_sprint_capacity",
+    "from": "ai_reporting_sprint",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "signup_bug_fix_sprint_capacity",
+    "from": "ai_reporting_sprint",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "ai_reporting_sprint_capacity",
+    "from": "signup_fix_sprint",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "signup_bug_fix_sprint_capacity",
+    "from": "signup_fix_sprint",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "ai_reporting_sprint_capacity",
+    "from": "split_sprint",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "signup_bug_fix_sprint_capacity",
+    "from": "split_sprint",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "ai_reporting_sprint_capacity",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "signup_bug_fix_sprint_capacity",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "total_sprint_capacity_allocated",
+    "from": "ai_reporting_sprint_capacity",
+    "strength": {
+     "std": 0.425,
+     "mean": 0.85
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.219Z",
+      "band": "very strong",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "total_sprint_capacity_allocated",
+    "from": "signup_bug_fix_sprint_capacity",
+    "strength": {
+     "std": 0.425,
+     "mean": 0.85
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.230Z",
+      "band": "very strong",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "ai_reporting_module_readiness",
+    "from": "ai_reporting_sprint_capacity",
+    "strength": {
+     "std": 0.275,
+     "mean": 0.55
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.237Z",
+      "band": "strong",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "profile_setup_abandonment_rate",
+    "from": "signup_bug_fix_sprint_capacity",
+    "strength": {
+     "std": 0.15,
+     "mean": -0.3
+    },
+    "provenance": {
+     "source": "user_specified",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.255Z",
+      "band": "strong",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "negative",
+    "exists_defaulted": true,
+    "exists_probability": 0.8,
+    "provenance_display": "user_set"
+   },
+   {
+    "to": "enterprise_contract_revenue",
+    "from": "ai_reporting_module_readiness",
+    "strength": {
+     "std": 0.075,
+     "mean": 0.3
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.262Z",
+      "band": "moderate",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "quarterly_revenue_lost_to_signup_abandonment",
+    "from": "profile_setup_abandonment_rate",
+    "strength": {
+     "std": 0.075,
+     "mean": 0.3
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.269Z",
+      "band": "moderate",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "quarterly_revenue",
+    "from": "enterprise_contract_revenue",
+    "strength": {
+     "std": 0.1375,
+     "mean": 0.55
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.273Z",
+      "band": "strong",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "quarterly_revenue",
+    "from": "quarterly_revenue_lost_to_signup_abandonment",
+    "strength": {
+     "std": 0.1375,
+     "mean": -0.55
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reviewed_by_user": {
+      "at": "2026-10-01T09:25:10.278Z",
+      "band": "strong",
+      "intent": "confirm"
+     }
+    },
+    "std_defaulted": true,
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "enterprise_contract_revenue",
+    "from": "fac_projected_enterprise_monthly_revenue",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "goal_constraints": [
+   {
+    "unit": "%",
+    "label": "Total sprint capacity allocated",
+    "value": 100,
+    "node_id": "total_sprint_capacity_allocated",
+    "operator": "<=",
+    "provenance": "inferred",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:total_sprint_capacity_allocated:<=",
+    "provenance_unit_relabelled": {
+     "rule": "agent_lane_limit_pct_of_level_v1",
+     "pre_normalisation_unit": "% of upcoming sprint",
+     "pre_normalisation_value": 100
+    }
+   },
+   {
+    "unit": "\u00a3 per month",
+    "label": "quarterly revenue",
+    "value": 200000,
+    "node_id": "quarterly_revenue",
+    "operator": ">=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "gc-147640d5-fab3-4aeb-890c-53c051374fb6"
+   }
+  ]
+ }
+}

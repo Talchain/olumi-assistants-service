@@ -110,7 +110,8 @@ describe('⭐ one batch adds the factor and the option', () => {
         exists_probability: DEFAULT_EXISTS_PROBABILITY,
         effect_direction: 'positive',
         defaulted: true,
-        provenance: { source: 'cee_hypothesis' },
+        // Science 393023 LICENCE (a)/(b), 7 Oct: new default hypotheses carry the placeholder tag.
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' },
       });
       expect(e.value.strength.mean).not.toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean);
     }

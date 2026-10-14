@@ -1,0 +1,82 @@
+ WARN  Issue while reading "/Users/paulslee/.codex/workspaces/runtime-context-restart-20261004/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/.codex/workspaces/runtime-context-restart-20261004/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /Users/paulslee/.codex/workspaces/runtime-context-restart-20261004
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts (6 tests | 4 failed) 26ms
+     × honours the existing selector cooldown for a pressed entry 12ms
+     × honours the existing selector cooldown for a completed entry 3ms
+     × honours the existing selector cooldown for a dismissed entry 2ms
+     × does not treat an unreadable history as an empty one 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts > Context guidance history consumer > honours the existing selector cooldown for a pressed entry
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts > Context guidance history consumer > honours the existing selector cooldown for a completed entry
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts > Context guidance history consumer > honours the existing selector cooldown for a dismissed entry
+AssertionError: the settled row must not be reoffered unchanged: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts:24:115
+     22|     const next = turnGuidanceFor(withHistory({ [key]: { status, state_…
+     23|     expect(next?.slot1?.policy_id === prior.policy_id && next?.slot1?.…
+     24|       && next?.slot1?.state_key_hash === prior.state_key_hash, 'the se…
+       |                                                                                                                   ^
+     25|   });
+     26|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts > Context guidance history consumer > does not treat an unreadable history as an empty one
+AssertionError: expected { slot1: { …(8) } } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "slot1": {
+    "copy": {
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it.",
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+    },
+    "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+    "item_ref": {
+      "from_id": "sprint_capacity_for_ai_reporting",
+      "kind": "link",
+      "to_id": "ai_reporting_module_availability",
+    },
+    "policy_id": "RC-STRENGTHEN-ITEM",
+    "primary_action": {
+      "action_kind": "edit_inline",
+      "label": "Give your estimate",
+      "target": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+    },
+    "priority": "P1",
+    "state_key_hash": "d4e5d6b64180",
+    "variant": "S1",
+  },
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts:44:48
+     42|
+     43|   it('does not treat an unreadable history as an empty one', () => {
+     44|     expect(turnGuidanceFor(withHistory(null))).toBeUndefined();
+       |                                                ^
+     45|   });
+     46| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 2 passed (6)
+   Start at  15:12:38
+   Duration  1.88s (transform 1.20s, setup 131ms, import 1.61s, tests 26ms, environment 0ms)
+

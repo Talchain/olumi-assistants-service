@@ -33,6 +33,7 @@
  */
 
 import type { ToolDefinition, ToolResponseBlock } from '../../adapters/llm/types.js';
+import { isRevisionConflict } from '../graph-revision-conflict.js';
 
 /** A tool the model may call. `kind` is the safety-relevant half. */
 export interface AgentTool {
@@ -261,6 +262,7 @@ export async function runAgentLoop(
       try {
         outcome = await tool.execute(use.input);
       } catch (err) {
+        if (isRevisionConflict(err)) throw err;
         results.push({
           type: 'tool_result',
           tool_use_id: use.id,

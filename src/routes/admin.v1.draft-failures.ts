@@ -68,7 +68,7 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       ),
   });
 
-  app.get('/admin/v1/draft-failures', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/draft-failures', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const query = ListQuerySchema.safeParse(request.query);
@@ -119,7 +119,7 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
     });
   });
 
-  app.get('/admin/v1/draft-failures/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/draft-failures/:id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const params = IdParamsSchema.safeParse(request.params);

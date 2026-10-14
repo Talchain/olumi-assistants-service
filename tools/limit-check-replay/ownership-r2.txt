@@ -1,0 +1,10 @@
+Handler ownership invariant OK:
+  - runAnalysisHandler imported only by registry.ts
+  - no direct HTTP calls; no UI-repo refs; no scientific math/formatting helpers (HTTP metadata reader pinned)
+  - template enum has exactly 2 entries
+  - result.enrichment is the PLoT pass-through with the owned projection stamp
+  - one composed remove-only claim-safety writer inside one validated fact
+  - placeholder scenario reader acceptable (classifier prompt still direct_answer/clarify only)
+  - Phase 1: Anthropic SDK confined to route-with-tool-use.ts
+  - Phase 1: context-pack-assembler + validator free of LLM/UI imports
+  - Phase 1: canonical §5 enums defined only in routing/types.ts

@@ -36,6 +36,12 @@ export interface StatedLinkBand {
   readonly to: string;
   /** The band the user named, in the tool's words. */
   readonly band: InfluenceBand;
+  /**
+   * ⭐ F1 (#87 6006627551; d5 6006667946): the user asked in their own words, this turn, to REPLACE the figure this link
+   * holds (`replaceFigureTheUserWrote`). Held on the approved proposal and carried here, never on the wire
+   * (`EdgeStrengthEditIntent` is closed), so no client can claim it.
+   */
+  readonly replacesUserFigure?: true;
 }
 
 const store = new AsyncLocalStorage<StatedLinkBand>();
@@ -61,4 +67,14 @@ export function statedLinkBandFor(
   if (s.scenarioId !== scenarioId || s.from !== from || s.to !== to) return undefined;
   if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return undefined;
   return edgeBandFromMagnitude(Math.abs(magnitude)) === s.band ? s.band : undefined;
+}
+
+/**
+ * ⭐ F1: whether THIS write is the user's explicit replace of their own figure on this exact link — only when the
+ * context names this scenario and this `(from, to)` link and carries the replace. Anything else (every UI write, another
+ * link, an approval without the user's replace words) is no replace, and the writer refuses to drop their figure.
+ */
+export function statedLinkReplacesUserFigureFor(scenarioId: string, from: string, to: string): boolean {
+  const s = store.getStore();
+  return s !== undefined && s.scenarioId === scenarioId && s.from === from && s.to === to && s.replacesUserFigure === true;
 }

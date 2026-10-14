@@ -15,6 +15,7 @@ import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
+import { endsOfGraph, heldLinkOf } from "../../orchestrator-v5/goal-target/held-user-links.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
   observedValueAuthorship,
@@ -24,6 +25,9 @@ import {
 import { collectDirectedReachable } from "../../graph/reachability.js";
 import type { ObservedStateStatedRole } from "../../cee/context-integrity/stated-role-vocabulary.js";
 import { mergeInterventionSourceObjects } from "../tools/analysis-ready-helper.js";
+import { linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
+import { linkDrawingDisplayOf } from '../../cee/provenance/provenance-of.js';
+import { edgeStrengthWords } from '../../orchestrator-v5/format/edge-strength-words.js';
 
 // ============================================================================
 // Output Types
@@ -145,6 +149,8 @@ export interface CompactEdge {
   from: string;
   to: string;
   strength: number;   // mean only
+  /** The canonical edge's sizing class, carried before provenance is projected. */
+  sizing?: LinkSizing;
   exists: number;     // exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY if absent)
   /** Human-readable causal interpretation (causal edges only, omitted for structural/bidirected). */
   plain_interpretation?: string;
@@ -600,6 +606,13 @@ function buildPlainInterpretation(
   // Skip structural edges based on endpoint node kinds
   if (isStructuralEdge(edge, kindMap)) return undefined;
 
+  const magnitude = edgeStrengthWords(edge, 'compact-adverb');
+  const fromLabel = labelMap.get(edge.from) ?? edge.from;
+  const toLabel = labelMap.get(edge.to) ?? edge.to;
+  if (magnitude === 'not sized yet') {
+    return { text: `The link from ${fromLabel} to ${toLabel} is ${magnitude}.` };
+  }
+
   const mean = edge.strength?.mean ?? 0;
   const std = edge.strength?.std ?? 0;
 
@@ -617,24 +630,10 @@ function buildPlainInterpretation(
     : (mean > 0 ? 'positive' : 'negative');
   const verb = direction === 'positive' ? 'increases' : 'decreases';
 
-  // Magnitude from |mean|: [0.7, 1.0] strongly, [0.4, 0.7) moderately, [0.1, 0.4) weakly
-  let magnitude: string;
-  if (absMean >= 0.7) {
-    magnitude = 'strongly';
-  } else if (absMean >= 0.4) {
-    magnitude = 'moderately';
-  } else {
-    magnitude = 'weakly';
-  }
-
-  // One classification feeds both the existing prose and the structured
-  // prompt-safe carrier. Keeping the thresholds here prevents a formatter-
-  // side twin from drifting away from the producer's established wording.
+  // One confidence classification feeds both the existing prose and the structured
+  // prompt-safe carrier. The shared edge-word helper owns the magnitude words.
   const coefficientConfidence = classifyCoefficientConfidence(std);
   const confidence = confidencePhrase(coefficientConfidence);
-
-  const fromLabel = labelMap.get(edge.from) ?? edge.from;
-  const toLabel = labelMap.get(edge.to) ?? edge.to;
 
   return {
     text: `${fromLabel} ${magnitude} ${verb} ${toLabel}${confidence ? ' ' + confidence : ''}`,
@@ -770,6 +769,7 @@ function buildOptionReachability(
  * Output is sorted: nodes by id, edges by from then to.
  */
 export function compactGraph(graph: GraphV3T): GraphV3Compact {
+  const endsOf = endsOfGraph(graph);
   // Build lookup maps for resolving factor IDs to labels and node kinds
   const labelMap = new Map<string, string>();
   const framePairs = new Map<string, Record<string, unknown>>();
@@ -937,27 +937,15 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
           // the role is added and the authorship chain still runs to a verdict.
           n.stated_role = 'constraint';
         }
-        if (authored !== undefined) {
-          n.source = authored.source;
-          n.provenance = authored.provenance;
-        } else if (et === 'explicit') {
-          n.source = 'user';
-          n.provenance = 'from_brief';
-        } else if (et === 'inferred') {
-          n.source = 'assumption';
-          n.provenance = 'ai_inferred';
-        } else if (et === 'observed') {
-          n.source = 'system';
-          n.provenance = 'from_brief';
-        } else if (et === 'range') {
-          n.source = 'system';
-          n.provenance = 'ai_inferred';
-        } else {
-          n.source = 'system';
-          n.provenance = 'ai_inferred';
-          if (typeof et === 'string' && et.length > 0) {
-            n._raw_provenance = et; // unrecognised value — preserved for debug
-          }
+        // ⭐ ONE PROVENANCE AUTHORITY (DL 12 Oct): the pair is `provenanceOf`'s, total for any observed_state — the
+        // extraction-type chain that used to follow here is the authority's own (unchanged for the four canonical
+        // values); a recognised stamp decides where no extraction type is held, and an unestablished origin says
+        // `unverified_brief`, never `ai_inferred`.
+        const pair = authored ?? { source: 'system' as const, provenance: 'unverified_brief' as const };
+        n.source = pair.source;
+        n.provenance = pair.provenance;
+        if (typeof et === 'string' && et.length > 0 && et !== 'explicit' && et !== 'inferred' && et !== 'observed' && et !== 'range') {
+          n._raw_provenance = et; // unrecognised value — preserved for debug
         }
       } else {
         // No observed_state — treat as system-derived / ai_inferred.
@@ -1002,8 +990,11 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         from: edge.from,
         to: edge.to,
         strength: edge.strength?.mean ?? 0,
-        exists: edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
+        // Hold-at-1.0 (d5 #87 6008807178): the model reasons with the existence the Run USES, never a held link's stored doubt.
+        exists: heldLinkOf(edge, endsOf(edge)) !== null ? 1 : edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
       };
+      const sizing = linkSizing(edge);
+      if (sizing !== 'unmarked') e.sizing = sizing;
 
       // Non-default only: `directed` is the default and is omitted, so a graph
       // with no bidirected edges pays nothing for this field.
@@ -1019,34 +1010,13 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         }
       }
 
-      // Edge provenance projection. EdgeProvenanceV3.source ∈
-      // {brief_extraction, cee_hypothesis, domain_knowledge, user_specified}.
-      // Read as `unknown` so the fallback branch can defensively log future
-      // (post-schema-bump) values that wouldn't satisfy the typed union.
-      // Mapping:
-      //   brief_extraction  → from_brief
-      //   user_specified    → user_set
-      //   cee_hypothesis    → ai_inferred
-      //   domain_knowledge  → ai_inferred
-      //   unknown / absent  → ai_inferred (safe default per brief)
-      // `_raw_provenance` is debug-only and only emitted for unrecognised
-      // upstream values (see node-side comment above). Canonical mappings are
-      // recoverable from `provenance` + the mapping table.
-      const rawSource: unknown = edge.provenance?.source;
-      if (rawSource === 'brief_extraction') {
-        e.provenance = 'from_brief';
-      } else if (rawSource === 'user_specified') {
-        e.provenance = 'user_set';
-      } else if (rawSource === 'cee_hypothesis') {
-        e.provenance = 'ai_inferred';
-      } else if (rawSource === 'domain_knowledge') {
-        e.provenance = 'ai_inferred';
-      } else {
-        e.provenance = 'ai_inferred';
-        if (typeof rawSource === 'string' && rawSource.length > 0) {
-          e._raw_provenance = rawSource; // unrecognised value — preserved for debug
-        }
-      }
+      // Edge provenance projection: WHO DREW the link, asked of the ONE provenance authority (`linkDrawingDisplayOf`):
+      // brief_extraction → from_brief, user_specified → user_set, cee_hypothesis / domain_knowledge → ai_inferred, as
+      // before; an absent or unrecognised stamp says what the authority establishes, never `ai_inferred` wholesale.
+      // `_raw_provenance` is debug-only and only emitted for unrecognised upstream values.
+      const drawn = linkDrawingDisplayOf(edge, { fromKind: kindMap.get(edge.from) });
+      e.provenance = drawn.provenance;
+      if (drawn.raw !== undefined) e._raw_provenance = drawn.raw;
 
       return e;
     })

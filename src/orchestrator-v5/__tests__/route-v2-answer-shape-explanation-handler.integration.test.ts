@@ -62,7 +62,6 @@ vi.mock('../session/index.js', () => ({
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),

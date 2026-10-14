@@ -46,6 +46,26 @@ const APPLIED = { ok: true, mutated: true, applied: true, receipts: [{ version: 
 const REFUSED = { ok: false, mutated: false, refusal: 'superseded' };
 
 describe('the write-status line is composed from the tool results', () => {
+  // R2 T1 (friction audit row T1): typed "Yes, that is my deadline." met "Not saved: the change could not be made this time —
+  // ask me to try again", which was false: the change was waiting for its card, not failed.
+  it('R2 T1: approval_required says the change waits for its card (AIE AMENDED 6128697025: the button only), never "try again"', () => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, true);
+    expect(n.status).toBe('Not saved yet: press the approval button on the card.');
+    expect(n.status).not.toContain('type its words');
+    expect(n.status).not.toContain('could not be made this time');
+  });
+  // Independent check, non-blocking (recovery/bR2/check): typed words bind only when exactly ONE card waits.
+  it.each([['more than one card waits', false], ['the count is not known', undefined]] as const)(
+    'R2 T1: when %s, approval_required names the button only, never "or type its words"', (_name, one) => {
+      const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, one);
+      expect(n.status).toBe('Not saved yet: press the approval button on the card.');
+      expect(n.status).not.toContain('type its words');
+    });
+  it('R2 T1 CONTRAST: an unworded refusal keeps the generic line', () => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'some_new_code' }]);
+    expect(n.status).toBe('Not saved: the change could not be made this time — ask me to try again.');
+  });
+
   it('RED: nothing landed + the model claims a save → the claim is removed and the server says nothing was saved', () => {
     const text = 'Applied proposal `prop_7584aa939980c0257ad2ef0b58d9f2ad` successfully. The comparison can now run.';
     const n = narrateWriteOutcome(text, [{ name: 'authorise_change' }], [REFUSED]);
@@ -208,7 +228,8 @@ describe('a compact build names what it left out', () => {
 
   it('RED: the status line lists the left-out items and offers to add them back', () => {
     const n = built({ left_out_to_stay_compact: [{ kind: 'factor', label: 'Team morale' }, { kind: 'risk', label: 'Key-person dependency' }] });
-    expect(n.status).toBe('The model was saved as version 1. To keep it readable, I left out: Team morale; Key-person dependency. Ask me to add any of them back.');
+    expect(n.status).not.toMatch(/\bsaved\b/i);
+    expect(n.status).toBe('To keep it readable, I left out: Team morale; Key-person dependency. Ask me to add any of them back.');
   });
 
   it('a long list is capped at five, with the remainder counted', () => {
@@ -218,11 +239,44 @@ describe('a compact build names what it left out', () => {
 
   it('RED: the questions the build parked are stated as what the model does not answer yet', () => {
     const n = built({ open_questions: ['Is the bottleneck coordination or capacity?', 'What does onboarding cost the team?'] });
-    expect(n.status).toBe('The model was saved as version 1. Questions this model does not answer yet: Is the bottleneck coordination or capacity? What does onboarding cost the team?');
+    expect(n.status).not.toMatch(/\bsaved\b/i);
+    expect(n.status).toBe('Questions this model does not answer yet: Is the bottleneck coordination or capacity? What does onboarding cost the team?');
   });
 
-  it('CONTRAST: nothing left out → the save line alone', () => {
-    expect(built({}).status).toBe('The model was saved as version 1.');
-    expect(built({ left_out_to_stay_compact: [] }).status).toBe('The model was saved as version 1.');
+  it('CONTRAST: nothing left out → no build status', () => {
+    expect(built({}).status).toBeNull();
+    expect(built({ left_out_to_stay_compact: [] }).status).toBeNull();
+    expect(built({ open_questions: ['What matters next?'] }).status).toBe('Questions this model does not answer yet: What matters next?');
+  });
+});
+
+describe('P50: the save indicator owns "saved"', () => {
+  const build = { ok: true, mutated: true, model_version: { version_number: 3 } };
+
+  it('a successful build alone has no status, even when a completion claim was stripped; questions still survive', () => {
+    const n = narrateWriteOutcome('Saved the model. Here is your model.', [{ name: 'build_model_from_brief' }], [build]);
+    expect(n.status).toBeNull();
+    expect(n.text).toBe('Here is your model.');
+    expect(n.stripped).toEqual(['Saved the model.']);
+    const control = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ...build, open_questions: ['What matters next?'] }]);
+    expect(control.status).toBe('Questions this model does not answer yet: What matters next?');
+    expect(control.status).not.toMatch(/\bsaved\b/i);
+  });
+
+  it('pending figures say exactly what approval changes', () => {
+    const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_assumptions' }],
+      [build, { ok: true, mutated: false, proposal_id: 'prop_p50' }]);
+    expect(n.status).toBe('Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.');
+    expect(n.status).not.toMatch(/\bsaved\b/i);
+  });
+
+  it('a replayed build keeps its exact explanation', () => {
+    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ...build, mutated: false, replayed: true }]).status)
+      .toBe('This model had already been built (version 3); nothing was built twice.');
+  });
+
+  it('an approval after an empty build line keeps its exact save receipt without extra spaces', () => {
+    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'authorise_change' }],
+      [build, { ok: true, mutated: true, applied: true, receipts: [{ version: 4 }] }]).status).toBe('Saved as version 4.');
   });
 });

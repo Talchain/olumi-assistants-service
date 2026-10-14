@@ -94,14 +94,22 @@ export const PLACEHOLDER_ZERO_SENTENCE = ' These figures treat it as 0 until you
  * inside the warning's message, each QUOTED as its structural id ('current_annual_salary_spend'), so this reads exact
  * quoted slug tokens only — never words. ⚠ A typed ancestor-id field on the warning would retire this read (asked of
  * PLoT's owner on the PR).
+ *
+ * Given the graph's own ids (`candidates`), it tests each one's exact quoted form instead, so an id in any grammar the
+ * graph holds is found (hyphens, colons, `fac_price__2`; Codex #2581 r2) and only ids of that graph are returned.
  */
-export function placeholderZeroFactorIds(analysisResult: unknown): ReadonlySet<string> {
+export function placeholderZeroFactorIds(analysisResult: unknown, candidates?: readonly string[]): ReadonlySet<string> {
   const out = new Set<string>();
   const warnings = readRecord(readRecord(analysisResult)?.enrichment)?.inference_warnings;
   if (!Array.isArray(warnings)) return out;
   for (const w of warnings.map(readRecord)) {
     if (w?.code !== 'GOAL_ANCESTOR_DATA_GAP' || typeof w.message !== 'string') continue;
-    for (const m of w.message.matchAll(/'([a-z0-9]+(?:_[a-z0-9]+)*)'/g)) out.add(m[1]!);
+    const message = w.message;
+    if (candidates !== undefined) {
+      for (const id of candidates) if (message.includes(`'${id}'`)) out.add(id);
+      continue;
+    }
+    for (const m of message.matchAll(/'([a-z0-9]+(?:_[a-z0-9]+)*)'/g)) out.add(m[1]!);
   }
   return out;
 }

@@ -18,6 +18,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 import { registrationRequestHash, registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { runFirstAnalysisAfterConstruction } from '../first-analysis.js';
 import { RUN_PROVENANCE_ENRICHMENT_KEY, buildAutoRunProvenance, buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
@@ -160,7 +161,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
   it('RED: a retry with a NEW turn id and the same brief recovers the construction and runs nothing more', async () => {
     const p = product();
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Hire a tech lead')) }; };
+    const call: CallStructuredModel = async (req) => { if (!isDraftWideningRequest(req)) generations += 1; return { text: JSON.stringify(candidate('Hire a tech lead')) }; };
     await build(capsFor(p, call));
     const retry = await build(capsFor(p, call));
     expect(retry.replayed, 'the real replay arm (findConstructionVersion)').toBe(true);
@@ -297,3 +298,26 @@ describe('the confirm card on the first pass (DL 5888399097; `../identity-card.t
   });
 });
 
+
+
+describe('T4e K1: first Run never computes an unknown sampled root as zero', () => {
+  it.each(['risk', 'outcome'])('withholds a %s root, with its named next-step ask', async (kind) => {
+    const graph = { ...READY_GRAPH, nodes: [...READY_GRAPH.nodes,
+      { id: 'unknown_root', kind, label: 'Delivery disruption' }],
+      edges: [...READY_GRAPH.edges, { from: 'unknown_root', to: 'goal_x',
+        strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }],
+    };
+    let calls = 0;
+    const result = await runFirstAnalysisAfterConstruction({ scenarioId: SCENARIO, constructionTurnId: 't4e',
+      revisionHash: 't4e', revisionGraph: graph, requestId: 't4e', deadlineAt: Date.now() + 60000,
+      readPriorFacts: async () => ({ status: 'ok', facts: [] }),
+      dispatchRunAnalysis: async () => { calls++; throw new Error('Unknown root must never run'); },
+    });
+    expect(result.ran).toBe(false);
+    expect(calls).toBe(0);
+    const { assessCanonicalAnalysisReadiness } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
+      ? 'How likely or how large is "Delivery disruption" today? The numerical analysis is withheld until this risk has a supported value.'
+      : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
+  });
+});

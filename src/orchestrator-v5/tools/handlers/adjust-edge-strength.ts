@@ -15,21 +15,27 @@
  * HandlerInvocation's trusted side band; natural-language callers retain the
  * legacy positive default and cannot self-authorise by inventing a parameter.
  *
- * Confirmation language uses `edgeBandFromMagnitude` (the one edge-strength table) so the user-visible
+ * Confirmation language uses `edgeStrengthWords` (the sizing-aware edge-strength table) so the user-visible
  * text says "moderate to strong" (not "0.4 to 0.7"). Sign reversal is
  * surfaced explicitly.
  */
 
+import { drawnLinkAdoptionFor } from '../../agent-lane/drawn-link-adoption-context.js';
+import { isPlaceholderLink, linkSizing, sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { z } from 'zod';
 
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
+import { ADJUST_EDGE_STRENGTH_STD_MAX, olumiSpreadForMean } from '../../../cee/magnitude/olumi-spread.js';
+// Moved to a pure module (#2482 r2); re-exported so every existing importer is unchanged.
+export { ADJUST_EDGE_STRENGTH_STD_MAX, olumiSpreadForMean };
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, identityRunUseFromFacts } from '../../compose/definitional-links.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
 import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../format/edge-strength-words.js';
+import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -41,13 +47,25 @@ import {
   formatEdgeStrengthUnchanged,
 } from './d1-shared/format-confirmation.js';
 import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
-/**
- * The top of a link's std on this writer — the bound `AdjustEdgeStrengthStdSchema` has always enforced, named once so
- * the spread this writer derives itself (`olumiSpreadForMean`) is held to the same bound, not a second copy of it.
- */
-export const ADJUST_EDGE_STRENGTH_STD_MAX = 0.5;
+
+function unsizedGoalPathNote(graph: GraphV3T, from: string, to: string): string | undefined {
+  const verdict = targetTestabilityOf(graph);
+  if (verdict.kind !== 'not_testable') return undefined;
+  const goal = graph.nodes.find((node) => node.id === verdict.goal_id);
+  const failure = verdict.failures.find((item) => item.code === 'goal_path_unsized' || item.code === 'goal_path_placeholder');
+  if (goal === undefined || failure?.lever === undefined) return undefined;
+  const source = graph.nodes.find((node) => node.id === from);
+  const target = graph.nodes.find((node) => node.id === to);
+  if (typeof source?.label !== 'string' || source.label !== failure.lever || target?.id !== goal.id) return undefined;
+  const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : 'the goal unit';
+  const sourceLabel = source.label;
+  const targetLabel = typeof target.label === 'string' ? target.label : 'the goal';
+  const goalLabel = typeof goal.label === 'string' ? goal.label : 'your goal';
+  return ` That sets how strongly ${sourceLabel} moves ${goalLabel}, but to test your goal Olumi still needs the size in ${goalUnit}: how much does ${targetLabel} change when ${sourceLabel} changes by its unit?`;
+}
 // V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
 // so a value of 0 would pass parameter validation but fail the
 // post-mutation `GraphV3.parse`, surfacing as a misleading
@@ -55,35 +73,6 @@ export const ADJUST_EDGE_STRENGTH_STD_MAX = 0.5;
 // bound here so the user-visible error is the right class.
 export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(ADJUST_EDGE_STRENGTH_STD_MAX);
 
-/**
- * ⭐ A6f — OLUMI'S SPREAD, CARRIED TO THE MEAN THE USER WROTE (AIQ N1 on #2096, 5856128077).
- *
- * An exact figure states a mean and no range, so the link's std stays Olumi's. It must not stay Olumi's ABSOLUTE std:
- * that was sized for Olumi's mean. Paul's `price_sensitivity → monthly_churn` (captures `17d1cd3a` / `08bf9a1f`) kept
- * std 0.00375 — sized for 0.0075 — on the user's 0.85, a CV of 0.4 %, so the analysis ran near-certain on a spread
- * nobody chose. Olumi's RELATIVE spread is kept instead: std × |new| / |old| (0.00375 → 0.425, CV 0.5 either side).
- *
- *  - The magnitude did not move (a confirm, or a sign flip): the std is returned exactly — nothing to rescale.
- *  - |old| > 0 and a finite std: the relative spread, computed CV-first so an exact ratio stays exact, held to the
- *    writer's own top bound (`ADJUST_EDGE_STRENGTH_STD_MAX`).
- *  - Otherwise — Olumi's mean was 0 (no relative spread exists), the stored std is unusable, or the new mean is 0 (a
- *    relative spread of 0 breaks `EdgeStrengthV3.std > 0`): the estate's default spread, `DEFAULT_STRENGTH_STD`.
- */
-export function olumiSpreadForMean(args: {
-  readonly oldMean: number;
-  readonly oldStd: number;
-  readonly newMean: number;
-}): number {
-  const oldAbs = Math.abs(args.oldMean);
-  const newAbs = Math.abs(args.newMean);
-  const usableStd = Number.isFinite(args.oldStd) && args.oldStd > 0;
-  if (usableStd && newAbs === oldAbs) return args.oldStd;
-  if (usableStd && Number.isFinite(oldAbs) && oldAbs > 0) {
-    const relative = (args.oldStd / oldAbs) * newAbs;
-    if (Number.isFinite(relative) && relative > 0) return Math.min(relative, ADJUST_EDGE_STRENGTH_STD_MAX);
-  }
-  return DEFAULT_STRENGTH_STD;
-}
 /**
  * Optional explicit direction for callers whose intent cannot be represented
  * by the sign of the numeric strength — specifically a zero-strength edge.
@@ -344,6 +333,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         ...factEndpointLabels,
         strength: { ...targetEdge.strength },
         effect_direction: targetEdge.effect_direction,
+        // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side says nobody sized it, so no reader names
+        // the prior as a band ("Strong → Moderate"). Additive: \`before\` is a record on both receipt schemas.
+        ...(isPlaceholderLink(targetEdge) ? { sizing: 'placeholder' as const } : {}),
       };
       // Direction at numeric zero is authority-sensitive. It therefore rides
       // the invocation side band stamped by the strict system-event adapter,
@@ -408,9 +400,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       }
       // ⭐ A6e — A NAMED BAND STATES A RANGE, SO ITS SPREAD IS THE LINK'S STD (AIQ #70 5855345225, 5855430153).
       // The band rides the trusted side band, set only when the approval that sent this write carried the band the
-      // user named for this exact link (`stated-link-band-context.ts`). The std is the band of the RESULTING |mean|,
-      // whether the mean moved to the band's midpoint (`set`) or was kept (`confirm_current`); a band that does not
-      // contain the result is a contradiction and refuses rather than storing a spread for the wrong range.
+      // user named for this exact link (`stated-link-band-context.ts`). The std is the band of the RESULTING |mean| when
+      // the mean MOVED to the band's midpoint (`set`); a kept strength keeps its own std (#2473 CR, below). A band that
+      // does not contain the result is a contradiction and refuses rather than storing a spread for the wrong range.
       const bandAuthority = invocation.edgeStrengthBandAuthority;
       let bandStd: number | undefined;
       if (bandAuthority !== undefined) {
@@ -429,14 +421,42 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // EdgeStrengthV3 requires std > 0 (positive). A band or an explicit std states the spread. An exact figure states
       // none, so the spread stays OLUMI'S — carried to the new mean as Olumi's relative spread, never the stale absolute
       // std sized for Olumi's mean (A6f, AIQ N1 on #2096) — and is flagged as Olumi's below (`std_defaulted`).
-      const statedStd = bandStd ?? newStd;
-      const finalStd =
-        statedStd ??
-        olumiSpreadForMean({
-          oldMean: beforeMean,
-          oldStd: targetEdge.strength.std,
-          newMean,
-        });
+      // Only a newly added drawn link's exact structural postimage may replace its temporary user stamp.
+      const drawn = drawnLinkAdoptionFor(invocation.context.session_id, parsed.from, parsed.to, Math.abs(newMean), targetEdge);
+      const statedStd = drawn !== undefined ? edgeBandStd(drawn.band) : bandStd ?? newStd;
+      // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): a NO-CHANGE confirm is byte-equal for every author,
+      // through every door — chat words, chip, a restored proposal, the canvas pill's typed band. Naming the band a link
+      // already sits in states nothing new about its uncertainty, so its spread is KEPT (it once became the band's own
+      // spread, σ 0.3 → 0.0866, staling the Run). Only an explicit typed std changes σ on a write that keeps the mean.
+      // ⭐ F1 — the user's own figure on this link, read off the RAW edge (it keeps the passthrough `source_quote`), and
+      // whether this write is their explicit replace of it. Decided BEFORE "keeps the strength": a replace is a real write
+      // even in the band the link already sits in, or at a midpoint equal to its mean (buddy r1 #4), so it takes the band's
+      // spread and drops the figure, never a review. A replace keeps the sign (d5; buddy r1 #5): a reversal is refused.
+      const rawEdges = (rawGraph as { edges?: unknown }).edges;
+      const rawTargetEdge = Array.isArray(rawEdges)
+        ? (rawEdges as Array<{ from?: unknown; to?: unknown }>).find((e) => e?.from === parsed.from && e?.to === parsed.to)
+        : undefined;
+      const heldNow = userFigureHeld(rawTargetEdge ?? targetEdge);
+      const replacesHeldFigure = heldNow !== null && invocation.edgeStrengthReplacesUserFigureAuthority === true;
+      if (replacesHeldFigure && newDirection !== targetEdge.effect_direction) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          `adjust_edge_strength: ${parsed.from}→${parsed.to} — a figure replace keeps the link's direction.`,
+          {
+            details: { handler_id: 'adjust_edge_strength', reason: 'replace_keeps_direction', from: parsed.from, to: parsed.to },
+            userGuidance: REPLACE_KEEPS_DIRECTION_TEXT,
+          },
+        );
+      }
+      const keepsStrength = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction && newStd === undefined;
+      const finalStd = keepsStrength
+        ? targetEdge.strength.std
+        : statedStd ??
+          olumiSpreadForMean({
+            oldMean: beforeMean,
+            oldStd: targetEdge.strength.std,
+            newMean,
+          });
       const afterSnapshot = {
         from: targetEdge.from,
         to: targetEdge.to,
@@ -445,7 +465,26 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         effect_direction: newDirection,
       };
       // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
-      const reviewOnly = newMean === beforeMean && newDirection === targetEdge.effect_direction;
+      const reviewOnly = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction;
+      // Batch A ruling 2: placeholder confirmation succeeds as review and preserves its sizing.
+      // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's
+      // own figure would drop that figure (below: the magnitude contract strips `natural_effect` + `magnitude`). Refused
+      // for every caller, nothing written, the figure quoted — unless the approval carried the user's explicit replace
+      // (`edgeStrengthReplacesUserFigureAuthority`). The canvas adapter and the Agent's proposal doors refuse first, in
+      // these words (`user-figure-held.ts`). Read off the RAW edge, which keeps the passthrough `source_quote`.
+      const heldFigure = reviewOnly ? null : heldNow;
+      // These words describe the explicit proposed result, not the stored before-edge's prior.
+      const resultBandWord = edgeStrengthWords({ ...afterSnapshot, sizing: 'user' });
+      if (heldFigure !== null && !replacesHeldFigure) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          `adjust_edge_strength: ${parsed.from}→${parsed.to} holds the user's own figure; refusing to drop it without their replace.`,
+          {
+            details: { handler_id: 'adjust_edge_strength', reason: 'user_figure_held', from: parsed.from, to: parsed.to },
+            userGuidance: userFigureHeldRefusalText(heldFigure, resultBandWord),
+          },
+        );
+      }
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const edge = clone.edges.find(
@@ -458,7 +497,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             { userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE },
           );
         }
-        edge.strength = { mean: newMean, std: finalStd };
+        // A kept strength is left exactly as stored (every byte), never rebuilt.
+        if (!keepsStrength) edge.strength = { mean: newMean, std: finalStd };
         edge.effect_direction = newDirection;
 
         // ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the DL; storage by the
@@ -468,10 +508,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // byte of who-authored-what stays exactly as it was: `provenance.source`, `magnitude`, `natural_effect`,
         // `reasoning`, `provenance_display`, `defaulted` / `exists_defaulted` / `std_defaulted`. The act is RECORDED
         // (`provenance.reviewed_by_user`, on the `.passthrough()` provenance — no schema change), with the band when the
-        // user named one; a band confirm still stores that band's spread (A6f/A6e, above). An edge with no provenance
+        // user named one; the strength itself is kept byte-equal (#2473 CR, above). An edge with no provenance
         // has no source to keep, and none may be invented, so nothing is recorded on it.
         if (reviewOnly) {
           if (edge.provenance !== undefined) {
+            // Batch A ruling 2: confirmation records review only, including unsized placeholders.
             edge.provenance = {
               ...edge.provenance,
               reviewed_by_user: {
@@ -509,17 +550,29 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           // goes: it restated the OLD size in natural units. The agreement IS recorded, as review (R11, the same record a
           // confirm writes above, with Olumi's band): the user's settled view, so the magnitude contract never re-sizes
           // the band they just agreed to (`sizedByOlumi`; Canonical seam check 5874263009, DL 5874274221).
-          const { natural_effect: _oldNaturalEffect, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
+          // A real write: the clamp marker spoke for the OLD stored size, so it goes with it (CODEX 5925312387).
+          // #2848 buddy r2 #2: Olumi's `basis` justified the OLD size, so it goes with `natural_effect` (this branch is a real write).
+          const { natural_effect: _oldNaturalEffect, clamped_from: _oldClamp, basis: _oldBasis, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
           const reviewed: Record<string, unknown> = {
-            ...keptProvenance,
+            // A newly supplied, different band can size a placeholder; confirmation cannot.
+            ...sizedByApproval(keptProvenance, targetEdge, newMean),
+            ...(drawn !== undefined ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {}),
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
           };
           edge.provenance = reviewed as typeof edge.provenance;
+          if (drawn !== undefined) edge.provenance_display = 'ai_inferred';
         } else {
           const {
             natural_effect: _naturalEffect,
             magnitude: _magnitude,
+            mean_projected: _projectedMean,
             reasoning: _reasoning,
+            // #2848: Olumi's basis line explains Olumi's size; it goes with that size.
+            basis: _basis,
+            clamped_from: _clampedFrom,
+            // ⭐ F1 (d5 6006667946): the user's sentence that stated the figure goes WITH the figure. Kept, it read as the
+            // source of a size the link no longer holds (the stale quote the red team saw, #87 6006627551).
+            source_quote: _sourceQuote,
             ...existingProvenance
           } = (edge.provenance ?? {}) as Record<string, unknown>;
           edge.provenance = {
@@ -586,8 +639,17 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // `noop` was computed for the fact above but the narration always
       // claimed an adjustment, yielding "Adjusted the link between A and
       // B from moderate to moderate." on a turn that changed nothing.
-      const assistantText = noop
-        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean })
+      // ⭐ F1: an explicit replace says exactly what it replaced (d5 6006667946), never only the band move.
+      const savedEdge = (result.mutatedGraph as { edges?: Array<{ from?: unknown; to?: unknown }> }).edges
+        ?.find((e) => e.from === parsed.from && e.to === parsed.to);
+      const assistantText = replacesHeldFigure && heldFigure !== null
+        ? userFigureReplacedReceipt(heldFigure, resultBandWord)
+        : noop && reviewOnly && linkSizing(savedEdge) === 'olumi_accepted'
+        ? `Confirmed Olumi's estimate for the link between ${fromLabel} and ${toLabel} without a numerical change.`
+        : noop
+        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean,
+            // The saved sizing governs the receipt.
+            edge: savedEdge })
         : formatEdgeAdjustment({
             fromLabel,
             toLabel,
@@ -595,10 +657,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             afterMean: newMean,
             beforeDirection: beforeSnapshot.effect_direction,
             afterDirection: afterSnapshot.effect_direction,
+            beforeEdge: rawTargetEdge ?? targetEdge,
+            afterEdge: savedEdge,
           });
+      const truthfulSizeNote = unsizedGoalPathNote(graph, parsed.from, parsed.to);
 
       return {
-        assistant_text: assistantText,
+        assistant_text: `${assistantText}${truthfulSizeNote ?? ''}`,
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
         mutated_graph: result.mutatedGraph,

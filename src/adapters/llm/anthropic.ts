@@ -16,6 +16,7 @@ import {
 } from '../../config/model-assignment.js';
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { assertProviderAllowed } from "./provider-policy.js";
+import { captureLlmPhysicalAttempt, withLlmInvocationCapture } from '../../utils/request-timing.js';
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
 import {
@@ -240,11 +241,11 @@ const anthropicDispatcher = new Agent({
 // Scoped fetch that uses our Anthropic-tuned dispatcher without polluting the global
 const anthropicFetch: typeof globalThis.fetch = (input, init) => {
   // ⛔ The network choke point: refused BEFORE I/O under an OpenAI-only request policy.
-  assertProviderAllowed('anthropic', 'anthropic.transport');
-  return undiciFetch(input as Parameters<typeof undiciFetch>[0], {
+  const policyCallHandle = assertProviderAllowed('anthropic', 'anthropic.transport');
+  return captureLlmPhysicalAttempt('anthropic', init, () => undiciFetch(input as Parameters<typeof undiciFetch>[0], {
     ...init as Parameters<typeof undiciFetch>[1],
     dispatcher: anthropicDispatcher,
-  }) as unknown as Promise<Response>;
+  }) as unknown as Promise<Response>, { policy_index: policyCallHandle });
 };
 /** Test seam: the transport ALONE, so its own guard is pinned (review of #1749, finding 1). */
 export const anthropicFetchForTests = anthropicFetch;
@@ -255,8 +256,8 @@ let client: Anthropic | null = null;
 let clientApiKey: string | null = null;
 let clientSdkMaxRetries: number | undefined;
 
-function getClient(): Anthropic {
-  assertProviderAllowed('anthropic', 'anthropic.client');
+function getClient(): { client: Anthropic; policyCallHandle: number | undefined } {
+  const policyCallHandle = assertProviderAllowed('anthropic', 'anthropic.client');
   const apiKey = getApiKey();
   const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {
@@ -271,7 +272,7 @@ function getClient(): Anthropic {
     clientApiKey = apiKey;
     clientSdkMaxRetries = sdkMaxRetries;
   }
-  return client;
+  return { client, policyCallHandle };
 }
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
@@ -710,6 +711,7 @@ function isStructuredOutputsRejection(err: unknown): boolean {
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
   opts?: {
+    requestId?: string;
     collector?: CorrectionCollector;
     refreshPrompts?: boolean;
     forceDefault?: boolean;
@@ -941,7 +943,7 @@ export async function draftGraphWithAnthropic(
   }
 
   try {
-    const apiClient = getClient();
+    const { client: apiClient, policyCallHandle } = getClient();
 
     /**
      * Build the messages.create params for a given structured-outputs mode.
@@ -1587,7 +1589,14 @@ export async function draftGraphWithAnthropic(
         );
       }
 
-      const attemptResult = await withRetry(
+      const attemptResult = await withLlmInvocationCapture({
+        provider: 'anthropic',
+        model: model,
+        step: 'draft_graph',
+        request_id: opts?.requestId ?? ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+        provider_policy_index: policyCallHandle,
+        prompt_meta: promptMeta,
+      }, () => withRetry(
         () => {
           streamInvocations++;
           // Re-derive the abort authorization AND max_tokens from the LIVE clock
@@ -1688,7 +1697,7 @@ export async function draftGraphWithAnthropic(
           return streamOneDraftAttempt(attemptBody, attemptIdempotencyKey, attemptDetectDeadlineMs);
         },
         { adapter: "anthropic", model, operation: "draft_graph" },
-      );
+      ));
 
       if (attemptResult.kind === "complete") {
         response = attemptResult.message;
@@ -2090,10 +2099,14 @@ export async function draftGraphWithAnthropic(
           thinking: { type: "disabled" },
         } as Anthropic.MessageCreateParamsNonStreaming;
         completionRequestIdentity = draftRequestIdentity(completionBody);
-        const completionMessage = await getClient().messages.create(
+        const { client: completionClient, policyCallHandle: completionPolicyCallHandle } = getClient();
+        const completionMessage = await withLlmInvocationCapture({
+          provider: 'anthropic', model: completionBody.model, step: 'draft_completion',
+          request_id: opts?.requestId, provider_policy_index: completionPolicyCallHandle,
+        }, () => completionClient.messages.create(
           completionBody,
           { signal: ac.signal },
-        );
+        ));
         const completionText = (completionMessage.content ?? [])
           .filter((b: { type: string }) => b.type === "text")
           .map((b: unknown) => (b as { text: string }).text)
@@ -2812,7 +2825,7 @@ export async function suggestOptionsWithAnthropic(args: {
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
   model?: string;
-}, opts?: { preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
+}, opts?: { requestId?: string; preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
   const prompt = await buildSuggestPrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
@@ -2828,8 +2841,15 @@ export async function suggestOptionsWithAnthropic(args: {
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
 
   try {
-    const apiClient = getClient();
-    const response = await withRetry(
+    const { client: apiClient, policyCallHandle } = getClient();
+    const response = await withLlmInvocationCapture({
+      provider: 'anthropic',
+      model: model,
+      step: 'suggest_options',
+      request_id: opts?.requestId ?? ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+      provider_policy_index: policyCallHandle,
+      prompt_meta: suggestPromptMeta,
+    }, () => withRetry(
       async () =>
         apiClient.messages.create(
           {
@@ -2849,7 +2869,7 @@ export async function suggestOptionsWithAnthropic(args: {
         model,
         operation: "suggest_options",
       }
-    );
+    ));
 
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
@@ -3045,6 +3065,7 @@ ${previousContext}${currencyInstruction}`;
 export async function clarifyBriefWithAnthropic(
   args: ClarifyArgs,
   opts?: {
+    requestId?: string;
     preloadedSystemPrompt?: string;
     promptMeta?: ReturnType<typeof getSystemPromptMeta>;
   },
@@ -3064,8 +3085,15 @@ export async function clarifyBriefWithAnthropic(
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
 
   try {
-    const apiClient = getClient();
-    const response = await withRetry(
+    const { client: apiClient, policyCallHandle } = getClient();
+    const response = await withLlmInvocationCapture({
+      provider: 'anthropic',
+      model: model,
+      step: 'clarify_brief',
+      request_id: opts?.requestId ?? ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+      provider_policy_index: policyCallHandle,
+      prompt_meta: clarifyPromptMeta,
+    }, () => withRetry(
       async () =>
         apiClient.messages.create(
           {
@@ -3085,7 +3113,7 @@ export async function clarifyBriefWithAnthropic(
         model,
         operation: "clarify_brief",
       }
-    );
+    ));
 
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
@@ -3268,7 +3296,7 @@ ${briefContext}${focusContext}`;
 
 export async function critiqueGraphWithAnthropic(
   args: CritiqueArgs,
-  opts?: { preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> },
+  opts?: { requestId?: string; preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> },
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
   const prompt = await buildCritiquePrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
@@ -3295,8 +3323,15 @@ export async function critiqueGraphWithAnthropic(
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
 
   try {
-    const apiClient = getClient();
-    const response = await withRetry(
+    const { client: apiClient, policyCallHandle } = getClient();
+    const response = await withLlmInvocationCapture({
+      provider: 'anthropic',
+      model: model,
+      step: 'critique_graph',
+      request_id: opts?.requestId ?? ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+      provider_policy_index: policyCallHandle,
+      prompt_meta: critiquePromptMeta,
+    }, () => withRetry(
       async () =>
         apiClient.messages.create(
           {
@@ -3316,7 +3351,7 @@ export async function critiqueGraphWithAnthropic(
         model,
         operation: "critique_graph",
       }
-    );
+    ));
 
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
@@ -3469,8 +3504,14 @@ Return ONLY valid JSON in this format:
   const timeoutId = setTimeout(() => abortController.abort(), TIMEOUT_MS);
 
   try {
-    const apiClient = getClient();
-    const response = await withRetry(
+    const { client: apiClient, policyCallHandle } = getClient();
+    const response = await withLlmInvocationCapture({
+      provider: 'anthropic',
+      model: model,
+      step: 'explain_diff',
+      request_id: ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+      provider_policy_index: policyCallHandle,
+    }, () => withRetry(
       async () =>
         apiClient.messages.create(
           {
@@ -3489,7 +3530,7 @@ Return ONLY valid JSON in this format:
         model,
         operation: "explain_diff",
       }
-    );
+    ));
 
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
@@ -3722,7 +3763,7 @@ export async function chatWithAnthropic(
   }
 
   try {
-    const apiClient = getClient();
+    const { client: apiClient, policyCallHandle } = getClient();
 
     // Schema is compliant by construction — no runtime normalisation needed.
     const normalisedOutputSchema = args.outputSchema;
@@ -3779,7 +3820,13 @@ export async function chatWithAnthropic(
 
     let { body: createBody, options: createOptions } = buildChatCallParams(useStructuredOutputs);
 
-    const response = await withRetry(
+    const response = await withLlmInvocationCapture({
+      provider: 'anthropic',
+      model: model,
+      step: 'chat',
+      request_id: ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+      provider_policy_index: policyCallHandle,
+    }, () => withRetry(
       async () => {
         try {
           return await apiClient.messages.create(createBody, createOptions);
@@ -3814,7 +3861,7 @@ export async function chatWithAnthropic(
         model,
         operation: "chat",
       }
-    );
+    ));
 
     clearTimeout(timeoutId);
     if (externalSignal && onExternalAbort) {
@@ -4013,7 +4060,7 @@ export async function chatWithToolsAnthropic(
   const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
   try {
-    const apiClient = getClient();
+    const { client: apiClient, policyCallHandle } = getClient();
 
     // Convert messages to Anthropic SDK format
     const anthropicMessages: Anthropic.MessageParam[] = args.messages.map((msg) => {
@@ -4093,7 +4140,13 @@ export async function chatWithToolsAnthropic(
           : {}),
     };
 
-    const response = await withRetry(
+    const response = await withLlmInvocationCapture({
+      provider: 'anthropic',
+      model: model,
+      step: 'chat_with_tools',
+      request_id: ('requestId' in args && typeof args.requestId === 'string' ? args.requestId : null),
+      provider_policy_index: policyCallHandle,
+    }, () => withRetry(
       async () =>
         apiClient.messages.create(createParams, {
           signal: abortController.signal,
@@ -4105,7 +4158,7 @@ export async function chatWithToolsAnthropic(
         operation: "chat_with_tools",
       },
       retryConfigForLiveEval(),
-    );
+    ));
 
     clearTimeout(timeoutId);
     const latencyMs = Date.now() - startTime;
@@ -4322,7 +4375,7 @@ export async function* streamChatWithToolsAnthropic(
   }
 
   try {
-    const apiClient = getClient();
+    const { client: apiClient } = getClient();
 
     // Convert messages — same logic as chatWithToolsAnthropic
     const anthropicMessages: Anthropic.MessageParam[] = args.messages.map((msg) => {
@@ -4616,6 +4669,7 @@ export class AnthropicAdapter implements LLMAdapter {
         attachment: args.attachment,
       },
       {
+        requestId: opts.requestId,
         collector: opts.collector,
         refreshPrompts: opts.bypassCache,
         forceDefault: opts.forceDefault,
@@ -4681,6 +4735,7 @@ export class AnthropicAdapter implements LLMAdapter {
       ...args,
       model: this.model,
     }, {
+      requestId: opts.requestId,
       preloadedSystemPrompt:
         opts.preloadedSystemPrompt?.operation === 'suggest_options'
           ? opts.preloadedSystemPrompt.content
@@ -4708,6 +4763,7 @@ export class AnthropicAdapter implements LLMAdapter {
       model: this.model,
       currencyInstruction,
     } as any, {
+      requestId: opts.requestId,
       preloadedSystemPrompt:
         opts.preloadedSystemPrompt?.operation === 'clarify_brief'
           ? opts.preloadedSystemPrompt.content
@@ -4738,6 +4794,7 @@ export class AnthropicAdapter implements LLMAdapter {
         model: this.model,
       },
       {
+        requestId: opts.requestId,
         preloadedSystemPrompt:
           opts.preloadedSystemPrompt?.operation === 'critique_graph'
             ? opts.preloadedSystemPrompt.content

@@ -229,7 +229,7 @@ export default async function route(app: FastifyInstance) {
   const RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_GRAPH_READINESS_RATE_LIMIT_RPM");
   const FEATURE_VERSION = "graph-readiness-1.0.0";
 
-  app.post("/assist/v1/graph-readiness", async (req, reply) => {
+  app.post("/assist/v1/graph-readiness", { config: { scenarioId: { from: 'body', key: 'scenario_id', allowMissing: true } } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 
@@ -360,7 +360,7 @@ export default async function route(app: FastifyInstance) {
       // it happens SILENTLY, which is what `assessed_from` fixes.
       let assessedGraph: unknown = input.graph;
       let assessedFrom: CEEGraphReadinessResponseV1["assessed_from"] = "request_graph";
-      if (input.scenario_id) {
+      if (input.scenario_id && req.scenarioAccess?.scenarioMissing !== true) {
         const persisted = await loadPersistedScenarioStateStrict(input.scenario_id);
         if (persisted.graph !== null && persisted.graph !== undefined) {
           assessedGraph = persisted.graph;

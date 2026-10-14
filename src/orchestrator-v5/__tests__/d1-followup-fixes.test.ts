@@ -254,12 +254,12 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
     };
 
     const fakeStore = {
+      readMostRecentPendingActions: async () => [],
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],
       readFactsFor: async () => [],
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
-      storeDraftGraph: async () => undefined,
       loadGraph: async () => graphWithConstraints as unknown,
       loadGraphAndBriefText: async () => ({
         graph: graphWithConstraints as unknown,
@@ -285,12 +285,12 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
   it('omits goal_constraints when the graph has none', async () => {
     const graphWithoutConstraints = buildReadyD1SnapshotGraph();
     const fakeStore = {
+      readMostRecentPendingActions: async () => [],
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],
       readFactsFor: async () => [],
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
-      storeDraftGraph: async () => undefined,
       loadGraph: async () => graphWithoutConstraints as unknown,
       loadGraphAndBriefText: async () => ({
         graph: graphWithoutConstraints as unknown,
@@ -430,6 +430,7 @@ const mockState: {
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [],
     append: async (write: { graph?: unknown; handler_id?: unknown; handler_facts?: unknown }) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };
@@ -457,7 +458,6 @@ vi.mock('../session/index.js', () => ({
       }),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

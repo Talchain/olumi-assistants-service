@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import OpenAI from "openai";
 import { Agent, setGlobalDispatcher } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, REASONING_MODEL_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
@@ -7,7 +8,8 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import { assertProviderAllowed } from "./provider-policy.js";
+import { assertProviderAllowed, recordProviderAttempt, recordProviderRetry, recordProviderUsage, type ProviderCallDetail, type ProviderCallHandle } from "./provider-policy.js";
+import { captureLlmPhysicalAttempt, withLlmInvocationCapture } from '../../utils/request-timing.js';
 import {
   retryConfigForLiveEval,
   sdkMaxRetriesForLiveEval,
@@ -75,8 +77,10 @@ function getClient(): OpenAI {
     throw new Error("OPENAI_API_KEY environment variable is required but not set");
   }
   if (!client || clientSdkMaxRetries !== sdkMaxRetries) {
+    const sdkFetch = globalThis.fetch.bind(globalThis);
     client = new OpenAI({
       apiKey,
+      fetch: (input, init) => captureLlmPhysicalAttempt('openai', init, () => sdkFetch(input, init)),
       ...(sdkMaxRetries === undefined ? {} : { maxRetries: sdkMaxRetries }),
     });
     clientSdkMaxRetries = sdkMaxRetries;
@@ -89,9 +93,9 @@ function getClient(): OpenAI {
  * provider ledger (and refuses it under a policy that forbids OpenAI) immediately
  * before the adapter's request is built. See `provider-policy.ts`.
  */
-function guardedClient(purpose: string, model: string): OpenAI {
-  assertProviderAllowed('openai', `openai-adapter.${purpose}`, { model, purpose });
-  return getClient();
+function guardedClient(purpose: string, model: string): { client: OpenAI; policyCallHandle: number | undefined } {
+  const policyCallHandle = assertProviderAllowed('openai', `openai-adapter.${purpose}`, { model, purpose });
+  return { client: getClient(), policyCallHandle };
 }
 
 const TIMEOUT_MS = HTTP_CLIENT_TIMEOUT_MS;
@@ -539,7 +543,7 @@ export class OpenAIAdapter implements LLMAdapter {
     }
 
     try {
-      const apiClient = guardedClient('draft_graph', this.model);
+      const { client: apiClient, policyCallHandle } = guardedClient('draft_graph', this.model);
       // Derive the draft token cap from the call-site timeout — the SAME
       // affordability mechanism the Anthropic path uses (ROADMAP 2.90, Codex #9).
       // Previously this sent the raw configured value or NO cap at all
@@ -569,7 +573,14 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] draft_graph request parameters");
 
-      const response = await withRetry(
+      const response = await withLlmInvocationCapture({
+        provider: 'openai',
+        model: this.model,
+        step: 'draft_graph',
+        request_id: opts.requestId,
+        provider_policy_index: policyCallHandle,
+        prompt_meta: promptMeta,
+      }, () => withRetry(
         async () =>
           apiClient.chat.completions.create(
             {
@@ -593,7 +604,7 @@ export class OpenAIAdapter implements LLMAdapter {
           model: this.model,
           operation: "draft_graph",
         }
-      );
+      ));
 
       clearTimeout(timeoutId);
       if (onExternalAbort && externalSignal) {
@@ -1019,7 +1030,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
     try {
-      const apiClient = guardedClient('suggest_options', this.model);
+      const { client: apiClient, policyCallHandle } = guardedClient('suggest_options', this.model);
       const maxTokens = getMaxTokensFromConfig('suggest_options');
       const modelParams = buildModelParams(this.model, 0.7, { maxTokens }); // 0.7 for creativity in options
 
@@ -1036,7 +1047,14 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] suggest_options request parameters");
 
-      const response = await withRetry(
+      const response = await withLlmInvocationCapture({
+        provider: 'openai',
+        model: this.model,
+        step: 'suggest_options',
+        request_id: opts.requestId,
+        provider_policy_index: policyCallHandle,
+        prompt_meta: preloadedSuggestPrompt.meta,
+      }, () => withRetry(
         async () =>
           apiClient.chat.completions.create(
             {
@@ -1058,7 +1076,7 @@ export class OpenAIAdapter implements LLMAdapter {
           model: this.model,
           operation: "suggest_options",
         }
-      );
+      ));
 
       clearTimeout(timeoutId);
       const _elapsedMs = Date.now() - startTime;
@@ -1133,7 +1151,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
     const prompt = buildClarifyBriefPrompt(brief, round, previous_answers, currencyInstruction);
 
-    const client = guardedClient('clarify_brief', this.model);
+    const { client, policyCallHandle } = guardedClient('clarify_brief', this.model);
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
 
     try {
@@ -1159,7 +1177,13 @@ export class OpenAIAdapter implements LLMAdapter {
         timeout_ms: effectiveTimeout,
       }, "[OpenAI] clarify_brief request parameters");
 
-      const response = await withRetry(
+      const response = await withLlmInvocationCapture({
+        provider: 'openai',
+        model: this.model,
+        step: 'clarify_brief',
+        request_id: opts.requestId,
+        provider_policy_index: policyCallHandle,
+      }, () => withRetry(
         async () =>
           client.chat.completions.create(
             {
@@ -1178,7 +1202,7 @@ export class OpenAIAdapter implements LLMAdapter {
           model: this.model,
           operation: "clarify_brief",
         }
-      );
+      ));
 
       clearTimeout(timeoutId);
       const content = response.choices[0]?.message?.content?.trim() || "";
@@ -1562,7 +1586,7 @@ export class OpenAIAdapter implements LLMAdapter {
       // ⭐ BOTH SIDES KEPT. `guardedClient` is #1749's OpenAI-only provider
       // guard and is the more important of the two — it must not be lost to a
       // merge that only wanted a parameter.
-      const apiClient = guardedClient('chat', this.model);
+      const { client: apiClient, policyCallHandle } = guardedClient('chat', this.model);
       // `reasoningEffort` is threaded from the caller so a call site can choose
       // it. Omitting it keeps `buildModelParams`' existing `?? "medium"`
       // default, so every existing caller stays byte-identical — the only
@@ -1584,7 +1608,13 @@ export class OpenAIAdapter implements LLMAdapter {
         reasoningEffort: args.reasoningEffort,
       });
 
-      const response = await withRetry(
+      const response = await withLlmInvocationCapture({
+        provider: 'openai',
+        model: this.model,
+        step: 'chat',
+        request_id: opts.requestId,
+        provider_policy_index: policyCallHandle,
+      }, () => withRetry(
         async () =>
           apiClient.chat.completions.create(
             {
@@ -1606,7 +1636,7 @@ export class OpenAIAdapter implements LLMAdapter {
           model: this.model,
           operation: "chat",
         }
-      );
+      ));
 
       clearTimeout(timeoutId);
       if (onExternalAbort && externalSignal) {
@@ -1721,7 +1751,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
-      const apiClient = guardedClient('chat_with_tools', this.model);
+      const { client: apiClient, policyCallHandle } = guardedClient('chat_with_tools', this.model);
       const modelParams = buildModelParams(this.model, temperature, { maxTokens });
 
       // Convert messages: ToolResponseBlock[] content → OpenAI format.
@@ -1804,7 +1834,13 @@ export class OpenAIAdapter implements LLMAdapter {
         }
       }
 
-      const response = await withRetry(
+      const response = await withLlmInvocationCapture({
+        provider: 'openai',
+        model: this.model,
+        step: 'chat_with_tools',
+        request_id: opts.requestId,
+        provider_policy_index: policyCallHandle,
+      }, () => withRetry(
         async () =>
           apiClient.chat.completions.create(
             {
@@ -1821,7 +1857,7 @@ export class OpenAIAdapter implements LLMAdapter {
           ),
         { adapter: 'openai', model: this.model, operation: 'chat_with_tools' },
         retryConfigForLiveEval(),
-      );
+      ));
 
       clearTimeout(timeoutId);
       const latencyMs = Date.now() - startTime;
@@ -1955,4 +1991,86 @@ export function clampRationaleWhy(why: string): string {
   // away; a 280-char run with no space at all still has to be cut somewhere.
   const body = lastSpace > room * 0.6 ? slice.slice(0, lastSpace) : slice;
   return `${body.trimEnd()}\u2026`;
+}
+
+/** Responses transport for the Agent turn. The caller's body and success Response are untouched.
+ * Retries remain owned by the existing turn retry policy; this adapter records each physical attempt.
+ */
+export async function postResponses(
+  body: Readonly<Record<string, unknown>>,
+  options: {
+    readonly detail: ProviderCallDetail;
+    readonly site?: string;
+    readonly signal?: AbortSignal;
+    /** Legacy opt-in prediction; Agent retry owners leave absent and mark the actual resend themselves. */
+    readonly retryOnTransportFailure?: boolean;
+    readonly onProviderHandle?: (handle: ProviderCallHandle) => void;
+    readonly retryOfHandle?: ProviderCallHandle;
+    /** Status-only callers must not wait for an error body they never consume. */
+    readonly readHttpErrorBody?: boolean;
+    /** Existing research/construction/brief callers own their JSON errors and retry decisions. */
+    readonly preserveResponseErrors?: boolean;
+  },
+): Promise<{ r: Response; usageHandle: number | undefined }> {
+  const handle = assertProviderAllowed('openai', options.site ?? 'agent-v1-turn.callModel', {
+    ...options.detail, model: String(body.model),
+    settings: Object.fromEntries(['reasoning', 'max_output_tokens', 'tool_choice', 'temperature', 'max_tool_calls'].filter(k => body[k] !== undefined).map(k => [k, body[k]])),
+  });
+  options.onProviderHandle?.(handle);
+  if (options.retryOfHandle !== undefined) recordProviderRetry(options.retryOfHandle, 'transport');
+  const isTimeout = (err: unknown): boolean => {
+    const e = err as { name?: unknown; cause?: { code?: unknown } } | null | undefined;
+    return e?.name === 'TimeoutError' || options.preserveResponseErrors === true
+      && (e?.cause?.code === 'UND_ERR_HEADERS_TIMEOUT' || e?.cause?.code === 'UND_ERR_BODY_TIMEOUT');
+  };
+  let r: Response;
+  try {
+    r = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    const outcome = isTimeout(err) ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'transport_error';
+    recordProviderAttempt(handle, { transport_status: null, result: name || 'transport_failure', outcome,
+      retry: outcome === 'transport_error' && options.retryOnTransportFailure === true,
+      ...(outcome === 'transport_error' && options.retryOnTransportFailure === true ? { retry_reason: 'transport' as const } : {}) });
+    throw err;
+  }
+  if (!r.ok) {
+    // The route reads this body next; an unreadable error body is a transport failure it retries, so the receipt must
+    // say so (a received status with retry:false but a second request would be a false receipt).
+    let bodyUnreadable = false;
+    let bodyError: unknown;
+    if (options.readHttpErrorBody !== false) {
+      try { await r.clone().text(); } catch (err) { bodyUnreadable = true; bodyError = err; }
+    }
+    const willRetry = bodyUnreadable && options.retryOnTransportFailure === true
+      && !isTimeout(bodyError) && !(bodyError instanceof Error && bodyError.name === 'AbortError');
+    recordProviderAttempt(handle, { transport_status: r.status, result: bodyUnreadable ? 'http_error_body_unreadable' : 'http_error',
+      outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: willRetry,
+      ...(willRetry ? { retry_reason: 'transport' as const } : {}) });
+    return { r, usageHandle: handle };
+  }
+  try {
+    const responseBytes = await r.clone().text();
+    const j = JSON.parse(responseBytes) as { usage?: unknown; status?: unknown };
+    recordProviderUsage(handle, j?.usage);
+    recordProviderAttempt(handle, { transport_status: r.status, result: typeof j?.status === 'string' ? j.status : 'response', outcome: 'success', retry: false,
+      response_sha256: createHash('sha256').update(responseBytes).digest('hex') });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    const willRetry = options.preserveResponseErrors === true && options.retryOnTransportFailure === true
+      && !isTimeout(err) && name !== 'AbortError';
+    recordProviderAttempt(handle, { transport_status: r.status, result: name || 'invalid_json',
+      outcome: isTimeout(err) ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'invalid_response', retry: willRetry,
+      ...(willRetry ? { retry_reason: 'transport' as const } : {}) });
+    // Return the original response so these callers encounter their original parsing/stream error.
+    if (options.preserveResponseErrors === true) return { r, usageHandle: handle };
+    // A received response with unreadable JSON is not a no-response transport failure.
+    throw new Error('openai_invalid_response');
+  }
+  return { r, usageHandle: handle };
 }

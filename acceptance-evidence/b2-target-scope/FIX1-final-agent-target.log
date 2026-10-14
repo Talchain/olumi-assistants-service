@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":21.83154296875,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/bprime-target-only-goal-chance.test.ts src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  17:53:23
+   Duration  10.56s (transform 6.34s, setup 324ms, import 9.60s, tests 207ms, environment 0ms)
+

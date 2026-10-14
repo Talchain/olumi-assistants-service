@@ -484,6 +484,7 @@ describe('tryClarificationResume — kind classification regression', () => {
   > = {
     // Graph-mutating today.
     set_factor_value: 'mutating',
+    elicit_goal_current_level: 'mutating',
     // GO(A) — answering "what does <option> cost, in <unit>?" WRITES a native
     // quantity onto an option->factor cell, so it fails closed as mutating for
     // the same reason its model-unit sibling does.
@@ -516,6 +517,7 @@ describe('tryClarificationResume — kind classification regression', () => {
     // Non-mutating: resuming reads from analysis state, does not
     // change the graph.
     run_analysis: 'non_mutating',
+    reconcile_goal_scope: 'non_mutating',
     what_would_flip: 'non_mutating',
     // V5 P0 proposal-memory continuation — server-only, never applies
     // a graph mutation when resumed (the resumer in edit-graph-dispatch

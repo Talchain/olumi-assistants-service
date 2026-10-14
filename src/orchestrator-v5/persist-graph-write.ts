@@ -1,113 +1,26 @@
 /**
- * THE SHARED PERSISTENCE FLOOR — one authority for HOW a graph is persisted,
- * two callers for WHAT is being persisted.
- *
- * ── WHY THIS MODULE EXISTS (C3 closure) ────────────────────────────────────
- * `scenarios.graph` has THREE production writers. ALL THREE now stand on the
- * INVARIANT CHECK; TWO of them also take the APPEND (C8, 27 Aug 2026). Saying
- * exactly which half each one uses is the point — an earlier draft of this
- * header said "TWO production writers, not one", which is the same
- * false-absolute defect this module exists to refute, one remove down, and the
- * draft after it said the third writer was simply "NOT ON THIS FLOOR" when what
- * was true is that it could not take the floor's APPEND. The floor has two
- * halves and they have different populations. Do not collapse them again.
- *
- * MANIFEST, measured at 87cb9f4f over every `.ts` file under `src/` plus all
- * 34 `.sql` files (written without a glob on purpose: the obvious spelling of
- * that glob contains the sequence that closes a block comment):
- *   · `commit.ts` → `commitDirectAnswer` — a TURN commit: a composed
- *     `OlumiResponse` plus its graph, under BI-01 exactly-one-response.  ✅ here
- *   · `routes/assist.v1.scenario-graph-register.ts` — a REGISTRATION: no LLM,
- *     no composed response, no referee, `response_emitted: false`.      ✅ here
- *   · `routes/assist.v1.scenario-versions.ts` — the RESTORE tier:
- *     `service.restoreVersionAtomic` → `restore_model_version_atomic_v1`
- *     → `UPDATE public.scenarios SET graph = p_graph`.
- *                                      ✅ CHECK ONLY — its own atomic RPC appends
- *   · `store_draft_graph` — zero production callers; the absence is guarded by
- *     `context/__tests__/graph-identity-guards.test.ts`.                    n/a
- *
- * The third writer is LIVE and client-reachable, not dark: registered
- * unconditionally at `server.ts:1214` (`POST /assist/v1/scenarios/
- * :scenario_id/versions/restore`), `CEE_MODEL_VERSIONS_ENABLED` default ON
- * (`config/index.ts:1372`), and the RPC's only content guard is emptiness.
- * Restoring an older version carrying a duplicate node id into a currently-clean
- * scenario is an INTRODUCED violation by this floor's own delta definition. C3
- * left it silently written on that path; C8 refuses it, via
- * `assertNoIntroducedGraphViolations` — the CHECK half, called by the route
- * between its projection and its RPC. Its APPEND stays where it is, on purpose:
- * that RPC owns graph + undo + version + head + event in a single statement AND
- * its CAS is strictly stronger than the turn path's (see that function's JSDoc
- * for the measurement). Converging it would have cost a guarantee.
- *
- * ⭐ YOU NO LONGER HAVE TO RE-DERIVE THIS LIST BY HAND, AND YOU SHOULD NOT: it is
- * pinned by execution in `__tests__/graph-writer-population.guard.test.ts`,
- * which sweeps production TS **and** the migration SQL and REDs when a fourth
- * writer appears by either route. This paragraph has been wrong twice; the pin
- * is what stops there being a third time. If it goes red, read that file's
- * header before editing anything here.
- *
- * ⚠ HOW IT RE-DERIVES THE LIST (the pin does this; kept here for readers):
- * `appendCheckedGraphWrite` and `store.append(` over `src/`, AND a `.sql` sweep
- * for `SET graph = p_graph`. Scope the SQL half carefully: a
- * `UPDATE public.scenarios` sweep MISSES the unqualified `UPDATE scenarios`
- * form, which is how most of the `append_turn_atomic` family is written.
- * `append_turn_atomic_v5` does not write `scenarios.graph` itself — it delegates
- * to `_v4` — so the whole v2..v5 family reaches the column through this floor.
- *
- * THE FIRST TWO answer DIFFERENT QUESTIONS, so they are not merged (this is a
- * statement about those two callers only — the restore tier is not "unmerged",
- * it is simply NOT ON THIS FLOOR): `commitDirectAnswer`
- * requires an `OlumiResponse` and hardcodes `response_emitted: true`, and
- * manufacturing a synthetic response to satisfy it would persist exactly the
- * turn row BI-01 exists to forbid. Naming the two apart is the fix; aligning
- * them would give the turn-commit predicate a second master.
- *
- * What WAS genuinely duplicated is the persistence DISCIPLINE — project, hash,
- * then write — which the register route hand-copied while its own comment
- * admitted it was replicating "the exact ordering defect `commit.ts` was
- * restructured to close". A rule kept correct by hand in two places is the
- * hand-maintained mirror (CLAUDE.md trap 12) one level down from the lists that
- * trap is usually about.
- *
- * ── THE DEFECT THIS CLOSES, MEASURED ───────────────────────────────────────
- * `commit.ts` claimed the terminal invariant check "covers EVERY lane ... by
- * construction rather than by a hand-listed set of call sites", justified by
- * `store.append` being "the single `scenarios.graph` writer in the service".
- * At 75029f4f that justification was FALSE: two production `store.append` call
- * sites, and `checkPersistedGraphInvariants` had exactly ONE production caller
- * (`commit.ts`) with ZERO in the register route — the contrast symbol
- * `projectGraphForPersistence` returning four hits in that same file, so the
- * zero was a measured absence rather than a blind probe.
- *
- * Consequence: a registration could persist a structural violation the turn
- * path refuses fail-closed. Demonstrated RED before this module existed —
- * `append` was called once with a graph carrying an introduced duplicate node
- * id. Routing both writers through here is what makes the "by construction"
- * claim true instead of aspirational.
- *
- * ── WHY THE REPORT IS RECOMPUTED HERE AND NEVER PASSED IN ──────────────────
- * The check MUST describe the bytes that are about to be appended. Accepting a
- * caller-supplied report would let the two drift — a guard whose discrimination
- * depends on a fixture nothing pins — and the drift would be invisible, because
- * a stale report is still a well-formed report. Computing it here from
- * `write.graph`, the same object handed to `store.append` on the next line,
- * makes "the check validates the ACTUAL PERSISTED BYTES" structural rather than
- * a convention every future caller must remember. `commit.ts` computes its own
- * report earlier for a DIFFERENT purpose (the advertised analysis hash); that
- * is not this one and must not be reused as this one.
- *
- * ── WHAT THIS MODULE DELIBERATELY DOES NOT DO ──────────────────────────────
- * · It does not project. Projection must precede HASHING at each call site,
- *   and the hashes are call-site concerns (CAS base, advertised identity), so
- *   moving it here would put a mutation after a hash — the very ordering defect
- *   above. Callers project, then hash, then call this.
- * · It does not choose the RPC generation. `SupabaseSessionStore.append()`
- *   selects between `append_turn_atomic_v2/v3/v4/v5` on the write's shape and
- *   the fence plan. That selection is a SEPARATE closure and is deliberately
- *   untouched here — this module is one CALL-GRAPH authority, which is a
- *   narrower claim than one storage generation.
+ * The existing controlled graph/model write door.
+ * appendCheckedGraphWrite handles turn appends; commitModelChange handles
+ * SAVE_VERSION, RESTORE_VERSION and COPY_GUEST_SCENARIO atomic RPCs.
+ * Ownership and graph checks precede dispatch; original revision CAS remains
+ * authoritative inside each RPC; guest copy binds checked source bytes there.
+ * Projection and hashing precede this module. Checks never repair or mutate
+ * graph bytes, and restore is never split into multiple writes.
  */
+import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
+import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
+import { assertUntouchedLevelQuantities } from './untouched-level-invariant.js';
+import { GuestCopyStoreError } from './guest-copy/index.js';
+import type { GuestCopyStorePort, GuestCopyOutcome } from './guest-copy/index.js';
+import { PersistedGraphInvariantError as GuestGraphInvariantError } from './persisted-graph-invariants.js';
+import { readVerifiedWriteCaller, assertDoorOwnership } from './ownership/door-ownership.js';
+import { computeGraphIdentityHash } from './context/graph-identity.js';
+import { ModelVersionSignInRequiredError, ModelVersionStoreError } from './model-management/store-adapter.js';
+import type { SaveVersionWrite, AtomicRestoreVersionWrite, ModelVersionStorePort } from './model-management/store-adapter.js';
+import type { VersionWriteOutcome, AtomicRestoreVersionOutcome, ModelVersionRecord } from './model-management/types.js';
+import type { GraphStateIngress } from './boundary/request-extensions.js';
 
 import {
   checkPersistedGraphInvariants,
@@ -116,12 +29,39 @@ import {
 } from './persisted-graph-invariants.js';
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
+import { preconditionRiskLinkViolations } from '../orchestrator/graph-structure-validator.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
+
+/** A semantic representation refusal; its label-based reason is safe for the authorised writer's reply. */
+export class PreconditionRiskLinkWriteError extends Error {
+  readonly code = 'PRECONDITION_RISK_LINKED' as const;
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'PreconditionRiskLinkWriteError';
+  }
+}
+
+/** All whole-graph writers use the same rule as edit/apply, including a restore's return leg. Never repairs. */
+export function assertNoPreconditionRiskLinks(graph: unknown): void {
+  if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return;
+  const raw = graph as { nodes?: unknown; edges?: unknown };
+  if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return;
+  // The floor accepts unknown graph supersets. Select object members for this narrow structural check;
+  // schema/referential checks retain their existing authority and the saved graph is never modified.
+  const record = (value: unknown): boolean => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const violation = preconditionRiskLinkViolations({
+    nodes: raw.nodes.filter(record), edges: raw.edges.filter(record),
+  } as Pick<GraphV3T, 'nodes' | 'edges'>)[0];
+  if (violation !== undefined) throw new PreconditionRiskLinkWriteError(violation.detail);
+}
 
 export interface CheckedGraphAppendParams {
   /** The write, already projected and hashed by the caller. */
   readonly write: SessionTurnWrite;
   /** The store to append through. Callers resolve their own. */
   readonly store: SessionStore;
+  readonly horizonBasisWrite?: import('./goal-target/goal-steady-write.js').HorizonBasisWrite;
+  readonly storedGraphForHorizonBasis?: unknown;
   /**
    * Whether this write carries a graph. Gates the NON-FATAL reporting only —
    * the fatal refusal below is deliberately NOT gated on it, preserving
@@ -167,6 +107,25 @@ export interface CheckedGraphAppendParams {
   readonly baseGraphForInvariants?: unknown;
   /** Free-form origin label for logs (`handler_id`, or a route name). */
   readonly source?: string | undefined;
+  /** Only successful, user-authorised scope withdrawals may retire this durable issue. */
+  readonly withdrawnGoalScopeChipIds?: readonly string[];
+  /**
+   * ⭐ S-D (lane EDIT-PANEL; Codex r1 P1-3 + r2 P1-2 on #2743): held proposals are reconciled against the latest row read
+   * HERE, just before the append, not only against the caller's earlier read. A request that reconciled its held
+   * proposals and then took seconds to answer must neither put back one another request approved or declined meanwhile
+   * (a supplied held item is kept only while the latest row still holds it) nor erase one another request minted
+   * meanwhile (a held item on the latest row that this request never saw is carried). `seenByThisRequest`: every held
+   * item this request read, so the ones it settled itself (approved, declined, lapsed: each said) are never re-added.
+   * S-D.1b compares the identity of this read inside the conditional append RPC,
+   * then rereads and repeats this reconciliation on contention (three attempts).
+   */
+  readonly heldProposals?: {
+    readonly isHeld: (pending: PendingAction) => boolean;
+    readonly seenByThisRequest: ReadonlySet<string>;
+    readonly offeredChipIds?: ReadonlySet<string>;
+    /** Re-project the answer sidecar and say capacity lapses from this final pending read, before the append. */
+    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[]) => SessionTurnWrite;
+  };
 }
 
 /**
@@ -237,6 +196,9 @@ export function assertNoIntroducedGraphViolations(
   params: GraphInvariantAssertionParams,
 ): void {
   const { graph, identity, writesGraph, source } = params;
+
+  // RC3 is an absolute representation rule, independent of baseline absorption or GM mode.
+  if (writesGraph) assertNoPreconditionRiskLinks(graph);
 
   const persistedInvariants = checkPersistedGraphInvariants(graph, {
     baseGraph: params.baseGraphForInvariants,
@@ -325,9 +287,8 @@ export function assertNoIntroducedGraphViolations(
 /**
  * Enforce the terminal persisted-graph invariants on the bytes about to be
  * written, then append them. THE SINGLE CALL-GRAPH AUTHORITY for a
- * `scenarios.graph` write THAT GOES THROUGH `store.append` — which, measured at
- * this tip, is every such write except the restore tier, whose own atomic RPC
- * takes the check alone via `assertNoIntroducedGraphViolations` above.
+ * turn graph write through `store.append`. Explicit save/restore operations
+ * take the same module's commitModelChange entry and their existing atomic RPCs.
  *
  * Throws `PersistedGraphInvariantError` when this write INTRODUCES a structural
  * violation — fail-closed, never a silent repair. Repairing here would put a
@@ -337,23 +298,209 @@ export function assertNoIntroducedGraphViolations(
 export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
-  const { write, store, writesGraph, source } = params;
+  const { store, writesGraph, source } = params;
+  if (writesGraph && params.baseGraphForInvariants === undefined) {
+    log.warn({ event: 'door.untouched_level_check_skipped', reason: 'no_base_supplied', source });
+  }
+  await assertDoorOwnership(store, params.write.scenario_id, source);
+  for (let attempt = 0; ; attempt += 1) {
+    // Always reconcile the ORIGINAL request against each fresh row. Reusing the
+    // previous attempt would retain obsolete scope issues or permanently drop holds.
+    let write = params.write;
+    let expectedLatestRowId: string | null | undefined;
+    // Pending issue lifetime is a persistence obligation even on a read-only conversational turn.
+    // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
+    if (typeof store.readMostRecentPendingActions === 'function') {
+      const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
+        ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
+      if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
+      let supplied = write.pending_actions ?? [];
+      // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
+      const heldOverCap: PendingAction[] = [];
+      if (params.heldProposals !== undefined) {
+        const { isHeld, seenByThisRequest } = params.heldProposals;
+        const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
+        const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
+        const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+        if (kept.length !== supplied.length || arrived.length > 0) {
+          const merged = [...kept, ...arrived];
+          const arriving = new Set(arrived.map(p => p.chip_id));
+          // A concurrently arriving offer keeps its room alongside this answer's offer. Other holds remain oldest first.
+          const priority = (p: PendingAction): number => p.action.kind === 'reconcile_goal_scope' ? 0
+            : isHeld(p) && params.heldProposals?.offeredChipIds?.has(p.chip_id) ? 1
+              : arriving.has(p.chip_id) ? 2 : isHeld(p) ? 3 : 4;
+          merged.sort((a, b) => priority(a) - priority(b) || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+          if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
+            heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(isHeld));
+            log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
+              '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
+          }
+          supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP).sort((a, b) =>
+            Number(b.action.kind === 'reconcile_goal_scope') - Number(a.action.kind === 'reconcile_goal_scope')
+            || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+          write = { ...write, pending_actions: supplied };
+        }
+      }
+      const missing = prior.filter(p => p.action.kind === 'reconcile_goal_scope'
+        && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
+        && !supplied.some(n => n.chip_id === p.chip_id))
+        .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
+      if (missing.length > 0) {
+        const merged = [...missing, ...supplied];
+        if (params.heldProposals !== undefined) heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(params.heldProposals.isHeld));
+        write = { ...write, pending_actions: merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
+      }
+      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
+    }
+    if (writesGraph) {
+      assertNoScopedIdentityConflict(write.graph);
+      assertUntouchedLevelQuantities(params.baseGraphForInvariants, write.graph);
+    }
 
-  // The check runs on `write.graph` — the same object handed to `store.append`
-  // on the last line of this function, with nothing between them.
-  assertNoIntroducedGraphViolations({
-    graph: write.graph,
-    identity: {
-      scenario_id: write.scenario_id,
-      turn_id: write.turn_id,
-      turn_class: write.turn_class,
-    },
-    writesGraph,
-    baseGraphForInvariants: params.baseGraphForInvariants,
-    source,
-  });
+    // The check runs on `write.graph` — the same object handed to `store.append`
+    // on the last line of this function, with nothing between them.
+    assertDoorProvenance(write.graph, params.storedGraphForHorizonBasis !== undefined ? params.storedGraphForHorizonBasis : params.baseGraphForInvariants, write.scenario_id, params.horizonBasisWrite);
+    assertNoIntroducedGraphViolations({
+      graph: write.graph,
+      identity: {
+        scenario_id: write.scenario_id,
+        turn_id: write.turn_id,
+        turn_class: write.turn_class,
+      },
+      writesGraph,
+      baseGraphForInvariants: params.baseGraphForInvariants,
+      source,
+    });
 
-  // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
-  // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
-  return await store.append(withoutAgentSubturnText(write));
+    // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
+    // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
+    // Reconciliation may replace the write, but it cannot replace the revision
+    // captured by its original server read. Bind it again at the append seam.
+    const { expectedRevision: _reconciledExpectedRevision, ...writeWithoutRevision } = write;
+    const storedWrite = withoutAgentSubturnText(
+      params.write.expectedRevision === undefined && !Object.prototype.hasOwnProperty.call(write, 'expectedRevision')
+        ? write
+        : {
+          ...writeWithoutRevision,
+          ...(params.write.expectedRevision !== undefined ? { expectedRevision: params.write.expectedRevision } : {}),
+        },
+    );
+    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
+    const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
+    if (!('status' in outcome)) return outcome;
+    if (attempt === 2) {
+      log.warn({ event: 'v5.agent_answer.latest_moved_exhausted', scenario_id: write.scenario_id, source, attempts: 3 },
+        '[persist] latest row moved on all three conditional attempts; rereading once more and appending the answer unconditionally');
+    }
+  }
+}
+
+/** The existing turn append and explicit version operations share this module's writer contract.
+ * Version operations dispatch their existing RPC once, without a fabricated turn or split transaction.
+ * All graphs are already projected/hashed. Neither checks nor dispatch may change their bytes.
+ */
+type CopyGuestChange = {
+  readonly operation: 'COPY_GUEST_SCENARIO';
+  readonly store: GuestCopyStorePort;
+  readonly sourceScenarioId: string;
+  readonly userId: string;
+};
+
+type ModelChange = CopyGuestChange | ({
+  readonly store: ModelVersionStorePort;
+} & ({ readonly operation: 'SAVE_VERSION'; readonly write: SaveVersionWrite }
+  | { readonly operation: 'RESTORE_VERSION'; readonly write: AtomicRestoreVersionWrite;
+      /** Server-read head, never a client-supplied admission flag. */
+      readonly restoreHead?: ModelVersionRecord | null }));
+
+/** Preserve the existing, identity-bound Undo admission; an arbitrary boolean cannot grant it. */
+export function isReturnLegRestore(params: {
+  readonly head: ModelVersionRecord | null;
+  readonly targetVersionId: string;
+  readonly currentGraph: unknown;
+}): boolean {
+  const { head, targetVersionId, currentGraph } = params;
+  if (head === null || head.provenance !== 'restore' || head.parent_version_id !== targetVersionId) return false;
+  const identity = computeGraphIdentityHash(currentGraph as GraphStateIngress | null | undefined);
+  return identity !== null && identity.value === head.graph_identity_hash
+    && identity.algorithm === head.hash_algorithm && identity.projection_version === head.identity_projection_version
+    && identity.normaliser_version === head.identity_normaliser_version && identity.graph_schema_version === head.graph_schema_version;
+}
+
+export function commitModelChange(params: Extract<ModelChange, { operation: 'SAVE_VERSION' }>): Promise<VersionWriteOutcome>;
+// eslint-disable-next-line no-redeclare -- TypeScript overloads share this one door implementation.
+export function commitModelChange(params: Extract<ModelChange, { operation: 'RESTORE_VERSION' }>): Promise<AtomicRestoreVersionOutcome>;
+// eslint-disable-next-line no-redeclare -- Same door, typed guest-copy operation.
+export function commitModelChange(params: CopyGuestChange): Promise<GuestCopyOutcome>;
+// eslint-disable-next-line no-redeclare -- Implementation of the TypeScript overload signatures above.
+export async function commitModelChange(params: ModelChange): Promise<VersionWriteOutcome | AtomicRestoreVersionOutcome | GuestCopyOutcome> {
+  if (params.operation === 'COPY_GUEST_SCENARIO') {
+    const userId = readVerifiedWriteCaller();
+    if (userId === null || userId !== params.userId) return { kind: 'refused', reason: 'unknown_user' };
+    // A replay writes nothing. Recover it even if the source has since moved or
+    // become invalid. The authoritative replay key remains inside the RPC.
+    // A replay can also appear AFTER this pre-read. Preserve created:false from
+    // the RPC: recovery does not certify the just-checked source was copied.
+    const replay = await params.store.readGuestCopy(params.sourceScenarioId, userId);
+    const source = replay ?? await params.store.readGuestSource(params.sourceScenarioId);
+    if (source === null) return { kind: 'refused', reason: 'not_copyable' };
+    const graph = JSON.parse(JSON.stringify(source.graph ?? {})) as unknown;
+    if (replay === null) {
+      if (source.user_id !== null) return { kind: 'refused', reason: 'not_copyable' };
+      if (source.graph === null || typeof source.graph !== 'object' || Array.isArray(source.graph)) {
+        return { kind: 'refused', reason: 'no_model' };
+      }
+      if (Buffer.byteLength(JSON.stringify(graph), 'utf8') > 1048576) {
+        return { kind: 'refused', reason: 'too_large' };
+      }
+      try {
+        assertNoIntroducedGraphViolations({ graph, writesGraph: true,
+          identity: { scenario_id: params.sourceScenarioId }, baseGraphForInvariants: null, source: 'guest_copy' });
+      } catch (error) {
+        if (error instanceof GuestGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
+          return { kind: 'refused', reason: 'no_model' };
+        }
+        throw error;
+      }
+    }
+    // Non-null checked arguments are mandatory, including on replay. No legacy
+    // downgrade, even if PostgREST has not reloaded the new function signature.
+    if (!Number.isSafeInteger(source.revision)) {
+      throw new GuestCopyStoreError('copy_guest_scenario checked source unavailable');
+    }
+    return params.store.copyGuestScenarioChecked({ sourceScenarioId: params.sourceScenarioId,
+      userId, graph, revision: source.revision });
+  }
+  const { store, write } = params;
+  let owner: string | null | undefined;
+  await assertDoorOwnership({
+    ...(store.getScenarioOwner === undefined ? {} : { getScenarioOwner: async (id: string) => {
+      owner = await store.getScenarioOwner!(id);
+      return owner;
+    } }),
+  }, write.scenario_id, params.operation);
+  // The shared scenario policy admits guest working models; explicit version history does not.
+  // Preserve MV001's existing typed result, now before any writing RPC.
+  if (owner === null) throw new ModelVersionSignInRequiredError('Version history requires sign-in');
+  if (params.operation === 'SAVE_VERSION') {
+    assertNoIntroducedGraphViolations({ graph: params.write.graph, writesGraph: true,
+      identity: { scenario_id: write.scenario_id, turn_id: null, turn_class: null },
+      baseGraphForInvariants: null, source: 'version_save' });
+    return store.saveVersion(params.write);
+  }
+  assertNoPreconditionRiskLinks(params.write.graph);
+  if (isReturnLegRestore({ head: params.restoreHead ?? null,
+    targetVersionId: params.write.version_id, currentGraph: params.write.current_graph })) {
+    const admitted = checkPersistedGraphInvariants(params.write.graph, { baseGraph: params.write.current_graph });
+    if (admitted.status === 'violated') log.warn({ event: 'v5.scenario_versions.return_leg_admitted',
+      scenario_id: write.scenario_id, version_id: params.write.version_id, head_version_id: params.restoreHead?.id,
+      admitted: admitted.violations.map(v => ({ code: v.code, count: v.count, entity_ids: v.entity_ids })) },
+    'Scenario versions — return leg: restoring a previously-held state that carries structural violations; admitted knowingly');
+  } else {
+    assertNoIntroducedGraphViolations({ graph: params.write.graph, writesGraph: true,
+      identity: { scenario_id: write.scenario_id, turn_id: null, turn_class: null },
+      baseGraphForInvariants: params.write.current_graph, source: 'version_restore' });
+  }
+  if (store.restoreVersionAtomic === undefined) throw new ModelVersionStoreError('Atomic model-version restore is not available in this store.');
+  return store.restoreVersionAtomic(params.write);
 }

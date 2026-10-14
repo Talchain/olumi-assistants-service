@@ -305,7 +305,7 @@ describe('POST /orchestrate/v2/turn — human-judgement receipts (P4 transport)'
 
   // ── 3. prior_range_edit — the user-set range PERSISTS ─────────────────────
 
-  it('⭐ a prior-range edit commits a typed fact; no graph write (carry, never compute)', async () => {
+  it('⭐ a prior-range edit on a factor with NO stated distribution keeps the fact-only carry (no invented shape, no silent refusal)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',

@@ -83,7 +83,7 @@ function project(flipThresholds?: readonly unknown[]) {
     BRIEF,
     enrichmentFromWitness(flipThresholds),
     WITNESS.leading_option_id,
-  );
+   undefined, true);
   expect(input).not.toBeNull();
   return input!;
 }

@@ -147,7 +147,7 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
     }
   };
 
-  app.post('/v1/prompts/warm', handleWarmPrompts);
+  app.post('/v1/prompts/warm', { config: { scenarioId: 'none' } }, handleWarmPrompts);
 
   /**
    * GET /v1/prompts/status - Get prompt cache status
@@ -206,12 +206,12 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
     });
   };
 
-  app.get('/v1/prompts/status', handlePromptStatus);
+  app.get('/v1/prompts/status', { config: { scenarioId: 'none' } }, handlePromptStatus);
 
   // ── Route aliases with /assist prefix ──────────────────────────────────────
   // The frontend calls /assist/v1/prompts/warm but the canonical routes are
   // /v1/prompts/warm and /v1/prompts/status. Register the same handlers on both.
 
-  app.post('/assist/v1/prompts/warm', handleWarmPrompts);
-  app.get('/assist/v1/prompts/status', handlePromptStatus);
+  app.post('/assist/v1/prompts/warm', { config: { scenarioId: 'none' } }, handleWarmPrompts);
+  app.get('/assist/v1/prompts/status', { config: { scenarioId: 'none' } }, handlePromptStatus);
 }

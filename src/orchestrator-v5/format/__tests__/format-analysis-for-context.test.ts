@@ -289,7 +289,7 @@ describe('Lane 21 display-safe breadth', () => {
         rank: '4',
         label: 'Tiered pricing',
         win_probability: '<1%',
-        win_probability_note: expect.stringContaining('came out best'),
+        win_probability_note: expect.stringContaining('almost no sampled simulation runs supported'),
       },
     ]);
     assertNoNumbersAnywhere(out);
@@ -741,7 +741,8 @@ describe('ROADMAP 2.54a near-zero win-probability note', () => {
     // The honest one-liner is present and states only what the analysis
     // data supports (argmax frequency across sampled runs).
     expect(hybrid.win_probability_note).toBeDefined();
-    expect(hybrid.win_probability_note).toContain('came out best');
+    expect(hybrid.win_probability_note).toContain('almost no sampled simulation runs supported');
+    expect(hybrid.win_probability_note).not.toMatch(/\bbest\b/);
     expect(hybrid.win_probability_note).toContain('not an error');
     // No fabricated reasons — the note must not invent a causal story.
     assertNoNumbersAnywhere(out);

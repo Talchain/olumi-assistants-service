@@ -118,7 +118,10 @@ describe('RED-first — attested-no-flip turns lose the flippability reason', ()
     expect(out).not.toMatch(FORBIDDEN_HEADLINE_VOCABULARY_REGEX);
     expect(out).not.toMatch(ASSISTANT_TEXT_ID_REGEX);
     expect(out).not.toMatch(RAW_DECIMAL_REGEX);
-    expect(out).not.toMatch(/\d+%/);
+    // Science d5 (#87 6009457056): a low plurality (34%, 12 points clear) at the floor states its share — never "the most
+    // runs", which only a licensed lead may say.
+    expect(out).toContain('Option A was supported by 34% of runs of this model.');
+    expect(out).not.toMatch(/the most runs/);
   });
 
   it('the replacement survives the egress GRAMMAR (else the user gets the locked template)', () => {

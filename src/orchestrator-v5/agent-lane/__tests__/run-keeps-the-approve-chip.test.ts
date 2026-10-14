@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ PRESSING RUN MUST NOT DELETE THE WAY TO APPROVE WHAT IS STILL WAITING.
  *
@@ -42,6 +43,8 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelCalls += 1;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] === 'none') {
         return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'On this provisional run, Team size matters most.' }] }] }), { status: 200 });
       }
@@ -86,10 +89,12 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     const r = await run();
     expect(r.statusCode).toBe(200);
     const b = r.json() as Body;
-    expect(b._diagnostic_trace.fast_path, 'the control: fast path 3 ran').toBe('run');
+    expect(b._diagnostic_trace.fast_path, 'the control: Run returns first').toBe('run');
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
     expect(b.suggested_actions.map((a) => [a.id, a.label])).toEqual([
       [`agent-approve-proposal:${proposalId}`, 'Make this change'],
       ['agent-amend-proposal', 'Change something first'],
+      [`agent-decline-proposal:${proposalId}`, 'Not now'],
     ]);
   });
 
@@ -113,12 +118,14 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     const T = '2b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a01';
     const S = '6a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a01';
     const once = (await run(T, S)).json() as Body;
-    expect(once.suggested_actions.map((a) => a.id)).toEqual([`agent-approve-proposal:${proposalId}`, 'agent-amend-proposal']);
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    expect(once.suggested_actions.map((a) => a.id)).toEqual([`agent-approve-proposal:${proposalId}`, 'agent-amend-proposal', `agent-decline-proposal:${proposalId}`]);
     const before = modelCalls;
     const again = (await run(T, S)).json() as Body & { _agent: { replayed?: boolean } };
     expect(again._agent.replayed, 'the control: this took the replay path').toBe(true);
     expect(modelCalls - before, 'no model call on replay').toBe(0);
-    expect(again.suggested_actions.map((a) => a.id)).toEqual([`agent-approve-proposal:${proposalId}`, 'agent-amend-proposal']);
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    expect(again.suggested_actions.map((a) => a.id)).toEqual([`agent-approve-proposal:${proposalId}`, 'agent-amend-proposal', `agent-decline-proposal:${proposalId}`]);
   });
 
   it('RED: REPLAY after the model moved → neither approve nor amend', async () => {

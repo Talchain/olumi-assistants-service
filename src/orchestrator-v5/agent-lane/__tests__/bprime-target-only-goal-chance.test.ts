@@ -1,0 +1,142 @@
+/**
+ * RT-10 B′ follow-through (Science #87 5999608477, template approved with edits; DL e8): when the target can't be tested
+ * but the run KEPT the ordering, the reply says ONE tail about the target — what Olumi can't yet say, what it needs, and
+ * the one question that unlocks it — and the Agent is licensed to say the shares as model findings in the goal's own
+ * direction, never as a chance of reaching the target.
+ *
+ * Served before (red team #87 5999041843, rt10b Run 2): a generic withheld opening, then
+ * "What is the most that 'monthly cancellations' can be?" — for the target the user had just set.
+ *
+ * Fixture: the red team's post-edit graph and the REAL PLoT body for its own payload (minimise, 2473ace). Science asked
+ * for a plural and a singular goal label: both bound by their exact words.
+ */
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { withholdGoalFiguresForUntestableTarget } from '../../tools/handlers/run-analysis.js';
+import {
+  goalChanceWithheldForAgent,
+  PLACEHOLDER_PATH_NOTE,
+  TARGET_ONLY_NOTE,
+  TARGET_ONLY_OUTCOME_KEPT_NOTE,
+} from '../goal-chance-withheld.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../orchestrator/context/option-result-source.js';
+import { targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
+import { sayFigure } from '../say-figure.js';
+
+type Json = Record<string, any>;
+const F = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {
+  graph_with_target: Json; plot_body_minimise: Json;
+};
+
+// Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+// effect that converts into goal units." These local sizes have no readable converting downstream route, so all six still fail.
+const PLURAL_TAIL = "I can't yet say how likely any option is to keep monthly cancellations at or below 400 cancellations / month: "
+  + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 3 more. '
+  + "What's today's level of monthly cancellations?";
+const SINGULAR_TAIL = "I can't yet say how likely any option is to keep monthly cancellation count at or below 400 cancellations / month: "
+  + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellation count, from Loyalty discount rate to monthly cancellation count and from Late-delivery cancellations to monthly cancellation count and 3 more. '
+  + "What's today's level of monthly cancellation count?";
+
+const RAW = JSON.parse(readFileSync(new URL('../../admission/__tests__/fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json };
+
+/** A goal holding a STRICT comparator ('<'): science can't yet score it (P3, case (b), a capability gap). */
+const heldStrict = (graph: Json): Json => {
+  const g = structuredClone(graph);
+  for (const n of g.nodes) if (n.kind === 'goal') n.goal_direction = '<';
+  return g;
+};
+/** Paul's funding graph made testable on every other precondition (target-testability.test.ts's control). */
+const paulTestable = (): Json => {
+  const c = structuredClone(RAW.paul);
+  const goal = c.nodes.find((n: Json) => n.kind === 'goal');
+  goal.observed_state = { value: 0, baseline: 0, raw_value: 0, unit: '£', cap: goal.goal_threshold_cap, source: 'user_stated' };
+  for (const e of c.edges) if (e.provenance?.source !== 'user_specified') e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
+  for (const e of c.edges) if (e.to === goal.id) e.provenance = { ...(e.provenance ?? {}), source: 'user_specified', natural_effect: { amount: 50000, amount_unit: goal.goal_threshold_unit, per_source_change: 1, per_source_change_unit: 'unit' } };
+  return c;
+};
+const tailOf = (g: Json): string | null => untestableTargetTail(g, targetTestabilityOf(g));
+
+const relabelled = (label: string): Json => {
+  const g = structuredClone(F.graph_with_target);
+  for (const n of g.nodes) if (n.kind === 'goal') n.label = label;
+  return g;
+};
+const runOn = (graph: Json): Json => ({ enrichment: withholdGoalFiguresForUntestableTarget(structuredClone(F.plot_body_minimise), graph) });
+const targetWarning = (block: Json): Json =>
+  (block.enrichment.inference_warnings as Json[]).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
+
+describe('B′ — the target tail and the target-only licence', () => {
+  it('plural label (served): the warning carries the tail, and the Agent says it once under the target-only licence', () => {
+    const block = runOn(F.graph_with_target);
+    expect(targetWarning(block).say).toBe(PLURAL_TAIL);
+    const chance = goalChanceWithheldForAgent(block);
+    expect(chance).toMatchObject({ withheld: true, say: PLURAL_TAIL, note: TARGET_ONLY_NOTE, node_ids: ['monthly_cancellations'] });
+  });
+
+  it('singular label: the same template, the label agrees', () => {
+    const block = runOn(relabelled('monthly cancellation count'));
+    expect(targetWarning(block).say).toBe(SINGULAR_TAIL);
+    expect(goalChanceWithheldForAgent(block)?.say).toBe(SINGULAR_TAIL);
+  });
+
+  // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q3, rulings 1ad7f7b2…): both notes no longer license a share of runs or a leader as a
+  // Run-result finding (that inherited permission contradicted P13); a separately permitted share is comparative reasoning only.
+  it('both target-only notes: no share or leader in a Run result reply, never a ranking for the withheld chance, never a recommendation', () => {
+    for (const note of [TARGET_ONLY_NOTE, TARGET_ONLY_OUTCOME_KEPT_NOTE]) {
+      expect(note).not.toMatch(/where lower is better, the option that came out lowest/);
+      expect(note).toContain('In a Run result reply, do not report relative shares of model runs or name an option leader from them.');
+      expect(note).toContain('Never substitute a relative ranking for an unavailable goal chance.');
+      expect(note).toContain('it is neither a goal chance nor a recommendation.');
+    }
+  });
+
+  it('(b) BESIDE needs (Science d5): a comparator Olumi can\'t test is named in its own sentence, never in "I need"', () => {
+    const g = heldStrict(F.graph_with_target);
+    expect(targetTestabilityOf(g)).toMatchObject({ kind: 'not_testable' });
+    expect(tailOf(g)).toBe("I can't yet say how likely any option is to keep monthly cancellations below 400 cancellations / month: "
+      + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 3 more. '
+      + "Olumi also can't yet test a '< 400 cancellations / month' target. What's today's level of monthly cancellations?");
+  });
+
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: a %s still contributes its own failing link', kind => {
+    const g = structuredClone(F.graph_with_target);
+    const e = g.edges.find((x: Json) => x.from === 'courier_on_time_delivery_rate' && x.to === 'late_delivery_cancellations');
+    if (kind === 'placeholder') { e.provenance.magnitude = 'olumi_placeholder'; e.strength.defaulted = true; }
+    else delete e.provenance.natural_effect;
+    const v = targetTestabilityOf(g);
+    expect(v.kind === 'not_testable' && v.failures.find(f => f.case === 'c')?.links)
+      .toContainEqual({ from: e.from, to: e.to });
+    expect(targetWarning(runOn(g)).say).toContain('and 3 more.');
+  });
+
+  it('(b) ALONE: the gap is named and nothing is asked', () => {
+    // ⭐ RE-PINNED, D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): a "<" the goal HOLDS beside its
+    // threshold, on a run that minimises, is now scored strictly (`goal_threshold_strict`) — testable, no gap.
+    expect(targetTestabilityOf(heldStrict(paulTestable())).kind).toBe('testable');
+    // The gap stays where "<" is NOT scored strictly: stated only on the goal's own row, the node holding no comparator.
+    const g = paulTestable();
+    const goal = g.nodes.find((n: Json) => n.kind === 'goal');
+    delete goal.goal_direction;
+    const row = g.goal_constraints.find((c: Json) => c.node_id === goal.id);
+    Object.assign(row, { operator: '<=', operator_as_stated: '<' });
+    const v = targetTestabilityOf(g);
+    expect(v.kind === 'not_testable' ? v.failures.map((f) => f.case) : v.kind).toEqual(['b']);
+    const fig = sayFigure(goal.goal_threshold_raw, goal.goal_threshold_unit);
+    expect(tailOf(g)).toBe(`I can't yet say how likely any option is to keep securing funding below ${fig}: Olumi can't yet test a '< ${fig}' target.`);
+  });
+
+  it('CONTRAST: a placeholder-path withhold (the shares go too) keeps its own licence, never the target-only one', () => {
+    const block = { enrichment: { inference_warnings: [{
+      code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'Not shown. A link Olumi has not sized moves these options.', severity: 'warning',
+      node_ids: ['monthly_cancellations'], option_ids: ['pause_instead_of_cancel'],
+    }] } };
+    expect(goalChanceWithheldForAgent(block)?.note).toBe(PLACEHOLDER_PATH_NOTE);
+  });
+
+  it('CONTRAST: a target warning that withheld the shares (`win_share`) is not the target-only licence', () => {
+    const block = runOn(F.graph_with_target);
+    const w = targetWarning(block);
+    w.withheld_claims = [...w.withheld_claims, 'win_share'];
+    expect(goalChanceWithheldForAgent(block)?.note).not.toBe(TARGET_ONLY_NOTE);
+  });
+});

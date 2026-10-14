@@ -13,7 +13,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../../utils/currency-alphabet.js';
 import { limitCardArm, type LimitCardArm } from '../../coaching/limit-unchecked-card.js';
 import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
 import { GoalConstraintSchema } from '../../../schemas/assist.js';
-import { classifyValueSource, DECLARED_VALUE_SOURCE_STAMPS } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { classifyValueSource, DECLARED_VALUE_SOURCE_STAMPS, valueClassOf } from '../../../cee/graph-readiness/obligation-provenance.js';
 import { deriveConstraintVerdict, readRatifiedConstraints } from '../../../orchestrator/context/constraint-feasibility.js';
 import { rebindCapture, rebindRecordedAnalysisHash } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 const hash = '0123456789abcdef';
@@ -720,9 +720,11 @@ const hiringWith = (mutateEdge: (e: Record<string, any>) => void, extra: (g: Rec
 };
 for (const [why, mutate, assumed] of [
  ['a link the user set (user_specified), even still stamped defaulted', (e: any)=>{ e.provenance={source:'user_specified'}; }, false],
- ['a user override', (e: any)=>{ e.provenance={source:'user_override'}; }, false],
- ['an UNKNOWN source (never asserted as Olumi\'s)', (e: any)=>{ e.provenance={source:'composer'}; }, false],
- ['no provenance at all', (e: any)=>{ delete e.provenance; }, false],
+ // ⭐ ONE PROVENANCE AUTHORITY: whoever DREW the link, a defaulted size on the door constants is linkSizing's placeholder —
+ // a size nobody chose, Olumi's starting assumption (Science 393023 LICENCE (b)); the census and the panel already say so.
+ ['a user override (off-contract drawing stamp; the size is the door default)', (e: any)=>{ e.provenance={source:'user_override'}; }, true],
+ ['an UNKNOWN drawing source (the size is the door default)', (e: any)=>{ e.provenance={source:'composer'}; }, true],
+ ['no provenance at all (the size is the door default)', (e: any)=>{ delete e.provenance; }, true],
  ['not defaulted (every number stated)', (e: any)=>{ delete e.defaulted; }, false],
  ['defaulted:false', (e: any)=>{ e.defaulted=false; }, false],
  ['a brief-stated link whose numbers Olumi projected (brief_extraction + defaulted)', (e: any)=>{ e.provenance={source:'brief_extraction'}; }, true],
@@ -931,8 +933,11 @@ test('ESTIMATED LIMIT — RATIFIED: Paul\'s served churn level (user_assumption,
 test('ESTIMATED LIMIT — whose figure comes from classifyValueSource for EVERY declared stamp: Olumi\'s → estimate words; ratified → ratified words; the user\'s own or unknown → no card',()=>{
  const seen={olumi:0,ratified:0,silent:0};
  for (const stamp of [...DECLARED_VALUE_SOURCE_STAMPS,'mystery_stamp',undefined]) {
-  const klass=classifyValueSource(stamp);
-  const est=estCards(estCase('evaluated_feasible',undefined,withChurnLevel(stamp))) as any[];
+  // ONE PROVENANCE AUTHORITY: whose the level is, read off the WHOLE observed_state the card sees (its extraction type
+  // decides for the stamps that defer to it), never the stamp alone.
+  const graph=withChurnLevel(stamp);
+  const klass=valueClassOf(graph.nodes.find((m: any)=>m.id==='monthly_churn').observed_state);
+  const est=estCards(estCase('evaluated_feasible',undefined,graph)) as any[];
   if (klass==='ai_drafted'||klass==='system_repaired') {
    assert.equal(est.length,1,String(stamp)); seen.olumi++;
    assert.equal(est[0].body,"Your limit on “Monthly churn” was checked against Olumi's estimate that it is about 4% today, not a figure you gave. If you know the real figure, it is worth saying.",String(stamp));
@@ -1117,9 +1122,9 @@ test('LEADER LIMIT RISK — a named option that probably breaks the user\'s own 
  assert.equal(runTurnCards(out.blocks as any).length,0,'and every link/limit/tie card');
  assert.equal(CoachingBlockSchema.safeParse(risk[0]).success,true);
  assert.ok(risk[0].signal_id.startsWith(`${RISK_CARD}${PAUL_HASH}:2026-09-25T17:27:54.315Z:`));
- assert.equal(risk[0].body,"On Olumi's estimates, the option that comes out ahead is more likely than not to break your limit on “Monthly churn” (10 percent per month). Worth deciding how firm it is before acting on this result.");
+ assert.equal(risk[0].body,"On Olumi's estimates, the option the most runs supported is more likely than not to break your limit on “Monthly churn” (10 percent per month). Worth deciding how firm it is before acting on this result.");
  assert.equal(risk[0].action_label,'Decide how firm my limit is');
- assert.equal(risk[0].action_prompt,"On Olumi's estimates, the option that comes out ahead is more likely than not to break my limit on “Monthly churn” (10 percent per month). Ask me how firm that limit is, and what I would give up to hold to it. Don't change the model or re-run anything yet.");
+ assert.equal(risk[0].action_prompt,"On Olumi's estimates, the option the most runs supported is more likely than not to break my limit on “Monthly churn” (10 percent per month). Ask me how firm that limit is, and what I would give up to hold to it. Don't change the model or re-run anything yet.");
  // Never a fit claim; the only number is the user's own figure (no probability quoted).
  for (const t of [risk[0].title,risk[0].body,risk[0].action_label,risk[0].action_prompt]) {
   assert.doesNotMatch(String(t),NEVER_CLAIMS_FIT);
@@ -1144,7 +1149,7 @@ test('LEADER LIMIT RISK — only on evaluated_feasible, a PERMITTED leader and a
  assert.equal(riskCards(withheld).length,0);
 });
 test('LEADER LIMIT RISK — limits are named only by identity on the run\'s own graph; otherwise the card speaks without a name',()=>{
- const generic="On Olumi's estimates, the option that comes out ahead is more likely than not to break at least one of your limits. Worth deciding how firm they are before acting on this result.";
+ const generic="On Olumi's estimates, the option the most runs supported is more likely than not to break at least one of your limits. Worth deciding how firm they are before acting on this result.";
  // A risk id the graph does not carry → no name, still the risk.
  const unknownId=riskCards(riskCase({risks:[{...CHURN_RISK,constraint_id:'gc-not-on-this-graph'}]}));
  assert.equal(unknownId.length,1); assert.equal(unknownId[0].body,generic);
@@ -1158,10 +1163,10 @@ test('LEADER LIMIT RISK — limits are named only by identity on the run\'s own 
  two.goal_constraints=[...two.goal_constraints,{...two.goal_constraints[0],constraint_id:'agent-lane:pro_subscribers:>=',node_id:'pro_subscribers',operator:'>=',value:200,unit:'subscribers',label:'Pro subscribers'}];
  const both=riskCards(riskCase({graph:two,risks:[CHURN_RISK,{...CHURN_RISK,constraint_id:'agent-lane:pro_subscribers:>=',label:'Pro subscribers',probability:0.2}]}));
  assert.equal(both.length,1);
- assert.equal(both[0].body,"On Olumi's estimates, the option that comes out ahead is more likely than not to break each of your limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Worth deciding how firm they are before acting on this result.");
+ assert.equal(both[0].body,"On Olumi's estimates, the option the most runs supported is more likely than not to break each of your limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Worth deciding how firm they are before acting on this result.");
  assert.equal(both[0].action_label,'Decide how firm my limits are');
  // The long prompt drops its trade-off clause to fit, never the figures or the no-write ask.
- assert.equal(both[0].action_prompt,"On Olumi's estimates, the option that comes out ahead is more likely than not to break each of my limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Ask me how firm each one is. Don't change the model or re-run anything yet.");
+ assert.equal(both[0].action_prompt,"On Olumi's estimates, the option the most runs supported is more likely than not to break each of my limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Ask me how firm each one is. Don't change the model or re-run anything yet.");
  for (const t of [both[0].title,both[0].body,both[0].action_label,both[0].action_prompt]) assert.doesNotMatch(String(t),NEVER_CLAIMS_FIT);
 });
 test('sayLevel — EVERY key of the canonical currency map: an all-letter key follows the figure, every other key prefixes it (#1948 AI Quality nit 5842591105)',()=>{

@@ -434,6 +434,16 @@ export const PLOT_VALIDATE_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("PLOT_VALIDATE_TIMEOUT_MS", 5_000),
 );
 
+/**
+ * SCIENCE ROBUSTNESS (EXPERIMENT; SCIENCE/DSK, programme-docs #85): the on-demand "What would change this?" call —
+ * a /v2/run body carrying `decision_flip`, which PLoT answers with ISL's tipping-point block instead of a Run.
+ * ONE attempt, never retried: PLoT's own ISL timeout is 60 s and ISL's hard deadline 80 s, so 70 s ends the call with a
+ * typed timeout (→ RC's honest limit) inside the turn budget, never a second minute-long computation.
+ */
+export const PLOT_DECISION_FLIP_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("PLOT_DECISION_FLIP_TIMEOUT_MS", 70_000),
+);
+
 // ---------------------------------------------------------------------------
 // PLoT retry accounting
 //
@@ -1599,6 +1609,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     PLOT_RUN_TIMEOUT_MS,
     PLOT_RUN_BRIEF_TIMEOUT_MS,
     PLOT_VALIDATE_TIMEOUT_MS,
+    PLOT_DECISION_FLIP_TIMEOUT_MS,
     EXTRACTION_TIMEOUT_MS,
     PROMPT_STORE_FETCH_TIMEOUT_MS,
     SSE_WRITE_TIMEOUT_MS,

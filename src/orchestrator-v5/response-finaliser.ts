@@ -1,3 +1,4 @@
+import { authorshipReasonForRun } from './compose/authorship-reason-for-run.js';
 /**
  * V5 response finaliser — single structurally-guaranteed stamping point for
  * envelope-level fields the product depends on, plus a *type-system* and
@@ -102,7 +103,7 @@ import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { projectEvidenceAssessment } from './compose/project-evidence-assessment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
-import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
+import { isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
 import { deriveEveryOptionLimitVerdict, readRatifiedConstraints, type ConstraintVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
 
@@ -126,14 +127,22 @@ export type RunDeltaDisclosureReason =
   | RunDeltaRefusal
   /** `ctx.priorFacts` was undefined — the exit carried no facts at all. */
   | 'prior_facts_absent'
+  /**
+   * The CALLER binds the run delta itself, so this exit does not produce one (`ctx.runDeltaBoundByCaller`). The Agent
+   * lane takes the Run's OWN delta from the captured route-v2 response (whose finaliser emitted the true outcome) and
+   * binds it to the post-turn readback (`runDeltaBoundToReadback`). Before this member, every Agent turn reported
+   * `prior_facts_absent` here: a false "no facts" on a turn that may well ship a delta (AI HARNESS; F5 I3.1).
+   */
+  | 'caller_binds_run_delta'
   /** The composer could not confirm the two runs are the same subject. */
   | 'run_identity_unconfirmed'
   /** The composer found the two runs are demonstrably different subjects. */
   | 'run_identity_conflict'
   /** A newer degraded Run supersedes the older successful pair. */
   | 'newer_run_degraded'
-  /** Selected goal-unit snapshot cannot attest the comparison as current. */
+  /** Selected goal snapshot (unit or sent direction) cannot attest the comparison as current. */
   | 'goal_unit_changed'
+  | 'goal_direction_changed'
   | 'goal_snapshot_unverified';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
@@ -178,6 +187,7 @@ export function isFinalisedV5Response(value: unknown): value is FinalisedV5Respo
 // ─── Context ──────────────────────────────────────────────────────────────
 
 export interface FinaliserContext {
+  readonly goalScopeClaimInput?: import('./compose/goal-scope-claim-input.js').GoalScopeClaimInput;
   /** Already carried by sendFinalised200; independent of selected fact scope. */
   readonly scenarioId?: string;
   /**
@@ -326,6 +336,7 @@ export interface FinaliserContext {
    * read, which binds it to one fact (`scenario-graph-analysis-read.ts`, H1).
    */
   readonly leaderWithheldBecauseNonlinearIdentity?: boolean;
+  readonly leaderWithheldBecauseUnsizedPath?: import('./agent-lane/unsized-path-cause.js').UnsizedPathLeaderCause;
   /**
    * The turn context's PERSISTED-GRAPH freshness derivation, carried to every
    * non-execute exit by `claimSafety.forExit()` (see `TurnExitStamp`).
@@ -389,6 +400,12 @@ export interface FinaliserContext {
    * response contradicts itself).
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * The caller binds `run_delta` itself (the Agent lane: `runDeltaBoundToReadback` over the captured Run), so this
+   * exit builds none and reports `caller_binds_run_delta` instead of the false `prior_facts_absent`. The identity and
+   * freshness skips above it still run first: they are true statements about this turn's state.
+   */
+  readonly runDeltaBoundByCaller?: true;
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -466,8 +483,7 @@ export function finaliseV5Response(
   // `'unknown'`; supersession requires `'none'`).
   const exitFreshnessForStamp = exitDerivationFor(ctx);
   const freshnessForStamp = ctx.analysisStateFreshness ?? ctx.freshness
-    ?? (exitFreshnessForStamp?.reason === 'goal_unit_changed' || exitFreshnessForStamp?.reason === 'goal_snapshot_unverified'
-      ? exitFreshnessForStamp : undefined);
+    ?? (isGoalSnapshotStaleReason(exitFreshnessForStamp?.reason) ? exitFreshnessForStamp : undefined);
   const stamped: OlumiResponse = payloadForStamp
     ? {
         ...scrubbed,
@@ -501,7 +517,7 @@ export function finaliseV5Response(
   // analysis block to the composed identity verdict. Other exits retain the
   // additive behaviour. Composed from already-loaded inputs — no engine call,
   // model call or store read.
-  const withAnalysisState = attachAnalysisState(withGraphHash, ctx);
+  const withAnalysisState = authorshipReasonForRun(attachAnalysisState(withGraphHash, ctx));
   // THE RUN-OVER-RUN CONSEQUENCE (schemas 0.39.0 `OlumiResponseSchema.run_delta`).
   // ADDITIVE BY CONSTRUCTION: adds at most one top-level key and rewrites none,
   // so a consumer that ignores it sees byte-identical behaviour.
@@ -633,6 +649,7 @@ function attachAnalysisState(
     && (selectedRun !== null
       || (ctx.analysisStateCanonical === undefined && canonical.selected_fact_index !== null));
   const analysisState = composeAnalysisStateV1({
+    goalScopeClaimInput: ctx.goalScopeClaimInput,
     canonical,
     // Read for `refusal_declared` only (see `composeRunState`). Substituting is
     // safe because a refusal turn can never reach supersession: its verdict is
@@ -645,6 +662,7 @@ function attachAnalysisState(
     withheldBecauseUnrequested: ctx.leaderWithheldBecauseUnrequested === true,
     // C46 (H2): stated by the same caller, on the same terms — never derived here.
     withheldBecauseNonlinearIdentity: ctx.leaderWithheldBecauseNonlinearIdentity === true,
+    withheldBecauseUnsizedPath: ctx.leaderWithheldBecauseUnsizedPath,
     // The caller supplies this beside its permission from ONE selected
     // scenario fact. The hot window can hold a different, older run.
     withheldWithoutConstraintCause: ctx.mayNameLeadingOption === false
@@ -670,6 +688,7 @@ function attachAnalysisState(
       runFactBinding: {
         scenarioId: ctx.scenarioId,
         selectedResult: selectedRun?.fact.result,
+        selectedFact: selectedRun?.fact,
       },
     }),
     // ROADMAP 2.1271 — passed through verbatim; the composer owns the arm's
@@ -863,7 +882,7 @@ function attachRunDelta(
 
   const freshnessReason = (ctx.analysisStateCanonical ?? ctx.canonicalState)?.freshness_reason
     ?? (ctx.analysisStateFreshness ?? ctx.freshness)?.reason ?? exitDerivationFor(ctx)?.reason;
-  if (freshnessReason === 'goal_unit_changed' || freshnessReason === 'goal_snapshot_unverified') {
+  if (isGoalSnapshotStaleReason(freshnessReason)) {
     const { run_delta: _unitUnboundDelta, ...withoutDelta } = response;
     return disclose('skipped', freshnessReason, withoutDelta as OlumiResponse);
   }
@@ -888,11 +907,13 @@ function attachRunDelta(
     const { run_delta: _shadowedDelta, ...withoutDelta } = response;
     return disclose('skipped', 'newer_run_degraded', withoutDelta as OlumiResponse);
   }
+  if (ctx.runDeltaBoundByCaller === true) return disclose('skipped', 'caller_binds_run_delta', response);
   if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({
     priorFacts: ctx.priorFacts,
     // Fail-closed on absence, per this member's own documented semantics.
-    mayNameLeadingOption: ctx.mayNameLeadingOption === true,
+    mayNameLeadingOption: ctx.mayNameLeadingOption === true
+      && (ctx.goalScopeClaimInput === undefined || ctx.goalScopeClaimInput.status === 'clear'),
   });
   // The producer's own union, passed through. This caller mints no taxonomy for
   // the five: re-spelling them here would be a second list free to drift from
@@ -1007,3 +1028,5 @@ function stripCeeTrace(response: OlumiResponse): OlumiResponse {
   }
   return clone as OlumiResponse;
 }
+
+export { authorshipReasonForRun } from './compose/authorship-reason-for-run.js';

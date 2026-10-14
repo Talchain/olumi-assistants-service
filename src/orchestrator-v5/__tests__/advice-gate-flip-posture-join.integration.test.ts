@@ -40,7 +40,6 @@ vi.mock('../session/index.js', () => ({
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),
@@ -211,7 +210,7 @@ describe('PR #788 R1 — flipClaimPosture JOIN through the REAL route + REAL tur
     // …replaced by the no-flip variant — present ONLY if the turn-executor
     // threading line executed (deleting it reverts to the old copy).
     expect(body.assistant_text).toMatch(
-      /no single factor we tested would change which option leads on its own/i,
+      /no single factor we tested would change the most-supported option on its own/i,
     );
   });
 });

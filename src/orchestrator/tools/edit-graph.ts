@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../../orchestrator-v5/goal-target/outbound-graph.js";
 /**
  * edit_graph Tool Handler
  *
@@ -88,7 +89,8 @@ import {
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { userTypedStoredFigure } from "../../orchestrator-v5/agent-lane/figure-scope.js";
-import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
+import { hasInterventionRangeWrite, hasReliesOnRiskWrite, stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
+import { getSessionStore } from "../../orchestrator-v5/session/index.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -98,7 +100,7 @@ import {
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
-import { clearInheritedInterventionSourceQuotes, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
+import { clearInheritedInterventionSourceQuotes, omitInheritedInterventionRanges, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -3030,7 +3032,37 @@ export async function handleEditGraph(
     }
 
     // Sanitise: remove legacy fields
-    let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+    // The stored graph is an authority only for likely-range consent. Do not
+    // make an ordinary edit depend on a readable store: staging accepted those
+    // edits even when no stored base existed. Load lazily once the request or
+    // postimage actually carries range metadata.
+    let storedRangeBase: unknown;
+    const loadStoredRangeBase = async (): Promise<boolean> => {
+      if (storedRangeBase !== undefined) return true;
+      try {
+        storedRangeBase = await getSessionStore().loadGraph(context.scenario_id);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let operations = omitInheritedInterventionRanges(
+      sanitiseOperations(validationResult.operations as PatchOperation[]), undefined);
+    if (hasInterventionRangeWrite(operations)) {
+      if (!(await loadStoredRangeBase())) {
+        return buildRejectionResult('The stored model could not be read. Nothing was changed.',
+          operations, baseGraphHash, turnId, startTime,
+          'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      }
+      operations = omitInheritedInterventionRanges(operations, storedRangeBase);
+      // An approved range may be repeated by a whole-map replacement.  Once
+      // the identical range metadata has been removed, only a genuinely new
+      // or changed range remains a consent-bearing write.
+      if (hasInterventionRangeWrite(operations)) {
+        return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
+          operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      }
+    }
 
     // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
     // REFEREE REFUSE THE WHOLE BATCH. Witnessed on a real user session: an
@@ -3063,6 +3095,13 @@ export async function handleEditGraph(
       );
     }
     operations = pipelineOwnedStrip.operations;
+
+    // Adds have already lost model-authored stamps above. Updates must refuse
+    // them before any local or PLoT apply, even with Graph Management off.
+    if (hasReliesOnRiskWrite(operations)) {
+      return buildRejectionResult('A precondition risk needs its dedicated proposal and approval; nothing was changed.',
+        operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+    }
 
     // Populate old_value for undo data capture (before PLoT submission)
     operations = populateOldValues(
@@ -3265,6 +3304,18 @@ export async function handleEditGraph(
       candidateGraph = applyPatchOperations(context.graph as GraphV3T, opsToApply);
     } catch (applyErr) {
       if (applyErr instanceof PatchApplyError) {
+        if (applyErr.code === 'PRECONDITION_RISK_LINKED') {
+          validationOutcome = 'patch_apply_error';
+          setViolationCodes([applyErr.code]);
+          recoveryPathChosen = 'patch_rejection_envelope';
+          branchTaken = 'rejection';
+          branchReason = 'precondition_risk_linked';
+          failureBranch = 'patch_apply_error';
+          failureCode = applyErr.code;
+          failureMessage = applyErr.message;
+          return { blocks: [], assistantText: applyErr.message, latencyMs: Date.now() - startTime,
+            appliedGraph: null, wasRejected: true, diagnostics: diagnostics() };
+        }
         if (intentCategory !== 'structural') {
           consecutiveNarrowStructuralFailures++;
           validationOutcome = 'patch_apply_error';
@@ -3971,7 +4022,22 @@ export async function handleEditGraph(
           diagnostics(),
         );
       }
-      const truthfullyQuoted = clearInheritedInterventionSourceQuotes(context.graph, encoded.graph);
+      // Echo-only ranges are not consent. Whenever the postimage CARRIES a likely
+      // range (rare), the stored graph is its authority: an unrelated edit must not
+      // launder an echoed range, or a stale echo of one, over the stored range. A
+      // postimage with no range at all never reads the store, as on staging.
+      if (hasNewInterventionRanges(undefined, encoded.graph)) {
+        if (!(await loadStoredRangeBase())) {
+          return buildRejectionResult('The stored model could not be read. Nothing was changed.',
+            operations, baseGraphHash, turnId, startTime,
+            'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+        }
+      }
+      if (hasNewInterventionRanges(storedRangeBase, encoded.graph)) {
+        return buildRejectionResult('A new or changed likely range needs its dedicated range proposal and approval.',
+          operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      }
+      const truthfullyQuoted = clearInheritedInterventionSourceQuotes(storedRangeBase, encoded.graph);
       if (truthfullyQuoted !== appliedGraph) {
         appliedGraph = truthfullyQuoted as GraphV3T;
         appliedGraphHash = computeGraphHash(appliedGraph);
@@ -4223,7 +4289,7 @@ export async function handleEditGraph(
       // Fix 5: past-tense summary so the UI can render the accepted card
       // without a patch_accepted round-trip. Optional and additive.
       applied_summary: buildPatchSummary(operations, llmResult.coaching?.summary, 'accepted', context.graph ?? null),
-      ...(appliedGraph && { applied_graph: appliedGraph }),
+      ...(appliedGraph && { applied_graph: toOutboundGraph(appliedGraph) }),
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
       ...(allWarnings.length > 0 && { validation_warnings: allWarnings }),

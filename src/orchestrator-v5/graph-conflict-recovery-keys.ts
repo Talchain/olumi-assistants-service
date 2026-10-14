@@ -27,6 +27,8 @@ export const GRAPH_CONFLICT_RECOVERY_KEYS = [
   'conflict_category',
   'fence_verdict',
   'expected_base_graph_hash',
+  'expected',
+  'current',
 ] as const;
 
 export type GraphConflictRecoveryKey = (typeof GRAPH_CONFLICT_RECOVERY_KEYS)[number];
@@ -47,6 +49,8 @@ export const GRAPH_CONFLICT_RECOVERY_COPY_MODE: Record<
   conflict_category: 'string',
   fence_verdict: 'string',
   expected_base_graph_hash: 'presence',
+  expected: 'presence',
+  current: 'presence',
 };
 
 /**

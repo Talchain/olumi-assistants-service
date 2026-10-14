@@ -32,12 +32,18 @@ import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 // =============================================================================
 
 export interface EnrichFactorsOptions {
+  /** Agent review includes observable drivers; legacy review remains controllable-only. */
+  factorScope?: "controllable" | "sensitive";
+  /** Per-call model assignment; omission retains the legacy extraction default. */
+  modelOverride?: string;
   /** Request ID for telemetry */
   requestId?: string;
   /** Maximum rank to include (default: 10) */
   maxRank?: number;
   /** Timeout in milliseconds (default: 30000) */
   timeoutMs?: number;
+  /** Outer turn deadline/cancellation; omission retains the legacy timeout. */
+  signal?: AbortSignal;
 }
 
 export interface EnrichFactorsResult {
@@ -111,9 +117,13 @@ export function extractControllableFactors(graph: GraphT): Array<{
     }
   }
 
-  // Extract factor nodes that are controllable
+  return extractFactorMetadata(graph, controllableFactorIds);
+}
+
+/** Only graph factor nodes in the caller's admitted set; never manufacture a node or controllability. */
+function extractFactorMetadata(graph: GraphT, factorIds: ReadonlySet<string>) {
   return graph.nodes
-    .filter((n: NodeT) => n.kind === "factor" && controllableFactorIds.has(n.id))
+    .filter((n: NodeT) => n.kind === "factor" && factorIds.has(n.id))
     .map((n: NodeT) => {
       const data = n.data as {
         factor_type?: string;
@@ -230,7 +240,8 @@ export function filterMismatchedSensitivity(
  */
 export function buildEnrichFactorsInput(
   graph: GraphT,
-  factorSensitivity: FactorSensitivityInputT[]
+  factorSensitivity: FactorSensitivityInputT[],
+  factorScope: NonNullable<EnrichFactorsOptions["factorScope"]> = "controllable"
 ): EnrichFactorsInputT {
   const goalLabel = extractGoalLabel(graph);
   if (!goalLabel) {
@@ -239,7 +250,9 @@ export function buildEnrichFactorsInput(
 
   const outcomeLabels = extractOutcomeLabels(graph);
   const riskLabels = extractRiskLabels(graph);
-  const controllableFactors = extractControllableFactors(graph);
+  const controllableFactors = factorScope === "sensitive"
+    ? extractFactorMetadata(graph, new Set(factorSensitivity.map(f => f.factor_id)))
+    : extractControllableFactors(graph);
 
   return {
     goal_label: goalLabel,
@@ -346,7 +359,8 @@ export async function enrichFactors(
   factorSensitivity: FactorSensitivityInputT[],
   options: EnrichFactorsOptions = {}
 ): Promise<EnrichFactorsResult> {
-  const { requestId, maxRank = MAX_ENRICHMENT_RANK, timeoutMs = EXTRACTION_TIMEOUT_MS } = options;
+  const { requestId, maxRank = MAX_ENRICHMENT_RANK, timeoutMs = EXTRACTION_TIMEOUT_MS,
+    factorScope = "controllable" } = options;
 
   const startTime = Date.now();
   const warnings: string[] = [];
@@ -361,8 +375,10 @@ export async function enrichFactors(
   );
 
   try {
-    // Extract controllable factors to validate sensitivity IDs
-    const controllableFactors = extractControllableFactors(graph);
+    // Legacy review admits controllable factors; Agent review admits sensitivity-listed graph factors.
+    const controllableFactors = factorScope === "sensitive"
+      ? extractFactorMetadata(graph, new Set(factorSensitivity.map(f => f.factor_id)))
+      : extractControllableFactors(graph);
     const controllableFactorIds = new Set(controllableFactors.map(f => f.factor_id));
 
     // Filter sensitivity entries: ID mismatch, invalid elasticity, or rank > maxRank
@@ -412,7 +428,7 @@ export async function enrichFactors(
     }
 
     // Build input with filtered sensitivity
-    const input = buildEnrichFactorsInput(graph, validSensitivity);
+    const input = buildEnrichFactorsInput(graph, validSensitivity, factorScope);
 
     // Validate input
     const inputValidation = EnrichFactorsInput.safeParse(input);
@@ -426,7 +442,10 @@ export async function enrichFactors(
     }
 
     // Build prompts
-    const systemPrompt = ENRICH_FACTORS_PROMPT;
+    // Retain the shared input key without teaching the model that observable drivers are controllable.
+    const systemPrompt = factorScope === "sensitive"
+      ? ENRICH_FACTORS_PROMPT + "\nFor this review, controllable_factors is a legacy field name: it contains sensitivity-listed graph factors, including observable factors. Membership does not imply controllability."
+      : ENRICH_FACTORS_PROMPT;
     const userPrompt = buildUserPrompt(input);
 
     // Call LLM
@@ -435,6 +454,8 @@ export async function enrichFactors(
       timeoutMs,
       maxTokens: 4000,
       temperature: 0,
+      ...(options.modelOverride !== undefined ? { modelOverride: options.modelOverride } : {}),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
     });
 
     if (!llmResult.success || !llmResult.response) {
@@ -470,7 +491,9 @@ export async function enrichFactors(
     );
 
     return {
-      enrichments,
+      enrichments: factorScope === "sensitive"
+        ? enrichments.filter(e => validSensitivity.some(f => f.factor_id === e.factor_id && f.rank === e.sensitivity_rank))
+        : enrichments,
       success: true,
       warnings: allWarnings,
       usage: llmResult.usage,

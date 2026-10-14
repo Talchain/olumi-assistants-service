@@ -100,7 +100,9 @@ import {
 import { ADD_CONSTRAINT_USER_GUIDANCE,
   SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from './d1-shared/user-guidance.js';
-import { retireNormalisingGoalFrame } from '../../agent-lane/normalising-goal-frame.js';
+import { retireNormalisingGoalFrameWithSetAside, rederiveGoalInLinksWithSetAside, setAsideEstimateDisclosure, type SetAsideEstimate } from '../../agent-lane/normalising-goal-frame.js';
+import { frameOf } from '../../agent-lane/refit-frames.js';
+import { pairGoalCeiling } from '../../goal-target/goal-ceiling-pair.js';
 
 /**
  * Parameter Zod schema. The brief originally listed
@@ -888,6 +890,9 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
+        ...(invocation.confirmedConstraintSourceQuote !== undefined
+          ? { source_quote: invocation.confirmedConstraintSourceQuote }
+          : existing?.source_quote !== undefined ? { source_quote: existing.source_quote } : {}),
         // BY-PRESENCE, never defaulted: an absent frame must stay absent on the
         // row, because `undefined` and "unattested" are the same fact here and
         // the contract forbids manufacturing the difference. This turn's own
@@ -899,6 +904,9 @@ export function createAddConstraintHandler(): HandlerFn {
             ? { value_frame: inheritedValueFrame }
             : {}),
         ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
+        // Batch B (SYS1 trace, DL 12 Oct): an edit of one of the goal's TARGETS stays a target. The row is rebuilt from
+        // this edit, so a marker it does not restate would be dropped, and the joint would read the target as a limit.
+        ...(existing?.role !== undefined ? { role: existing.role } : {}),
       };
 
       const newConstraint: GoalConstraintT = {
@@ -1044,15 +1052,42 @@ export function createAddConstraintHandler(): HandlerFn {
       const cardGoalDirection = ownsGoalThresholdChannel && invocation.holdsGoalDirection === true
         ? (operatorAsStated ?? operator) : undefined;
       // ⛔ An approved CEILING on the goal (CODEX CEE BUDDY 5918898090; DL 5918915292; AIQ 5919045720) contradicts any
-      // floor held before, so that direction goes (C3: the latest statement replaces). It is not held as `<=`: the
-      // goal's threshold channel carries floors only ("at most stamps nothing"), and a ceiling stamped there is sent no
-      // direction unless proven, so PLoT would score P(goal ≥ ceiling) under "at most" (measured, MG SUCCESSOR 30 Sep).
-      const cardClearsGoalDirection = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true
-        && operator === '<=';
+      // floor held before, so that floor goes (C3: the latest statement replaces). The goal's threshold channel still
+      // carries floors only ("at most stamps nothing": a ceiling stamped there was scored P(goal ≥ ceiling), MG SUCCESSOR
+      // 30 Sep).
+      // ⭐ RT-10 B′ (Science 5 Oct Q1; DL ruling): the approved ceiling IS the user's sense of the goal, so the goal HOLDS
+      // it (`<` when stated strict, else `<=`) instead of losing its direction. `resolveGoalDirection` reads a held ceiling
+      // beside its own approved row on the goal and sends `minimise`, so the run is never left on the maximiser and the
+      // ceiling is never scored as a floor. The assumption line's correction ("set the goal’s target to ‘at most’ and
+      // re-run", `analysis-result-headline.ts`) is this door, so it re-orders.
+      // ⭐ D3 step 1 (Science #87 6005138341; DL 0df0e1): the approved ceiling OWNS the goal's threshold channel, as ONE pair
+      // with its direction (`pairGoalCeiling`, below, in this same write): the ceiling's own row value on the goal's own
+      // level frame, or the channel cleared when there is no frame. A floor's £1.2m under an approved "at most £1.4m" can
+      // therefore never be minimised against: the latest statement replaces it (C3). Before this, the direction was dropped
+      // beside a different held figure and the ceiling held only its row and direction, so no option had a goal chance.
+      const cardIsAGoalCeiling = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true && operator === '<=';
+      const cardGoalCeiling = cardIsAGoalCeiling ? (operatorAsStated ?? operator) : undefined;
       const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
-        || (cardClearsGoalDirection && targetNode.goal_direction !== undefined && targetNode.goal_direction !== null);
+        || (cardGoalCeiling !== undefined && targetNode.goal_direction !== cardGoalCeiling);
+      // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE TARGET PER GOAL, no band. The approved card's row IS the goal's target,
+      // so every OTHER own target row on the goal (another operator; never a deadline row) is retired in this same write: a
+      // held "at least 300" never stays beside an approved "at most 400" as a second limit (a band needs ISL P(lo≤Y≤hi);
+      // parked). Two own rows on the card's operator are ONE target too (Codex buddy r1 F1 on #2618: the upsert set both to
+      // the card's row, so the pair had no one row to read): the card's row is kept once. A card that retires one is never
+      // a no-op.
+      const goalCard = invocation.holdsGoalDirection === true && targetNode.kind === 'goal';
+      // A TARGET row only: the goal's own level-frame (or unframed) row. A deadline, or a limit stated as a CHANGE on the
+      // goal (`change_abs` "growth at most £50k a quarter"), is an independent limit and stays (Codex buddy r2 F2, #2618).
+      const ownTarget = (c: { node_id: string; deadline_metadata?: unknown; value_frame?: unknown }): boolean =>
+        goalCard && c.node_id === targetId && (c.deadline_metadata === undefined || c.deadline_metadata === null)
+        && (c.value_frame === undefined || c.value_frame === 'level');
+      const retiresOtherTarget = (c: { node_id: string; operator: string; deadline_metadata?: unknown; value_frame?: unknown }): boolean =>
+        ownTarget(c) && c.operator !== operator;
+      const ownRows = (graph.goal_constraints ?? []).filter(ownTarget);
+      const retiresATarget = ownRows.some(retiresOtherTarget) || ownRows.filter((c) => c.operator === operator).length > 1;
       const rowValueUnchanged =
         !directionDisagrees &&
+        !retiresATarget &&
         existing !== undefined &&
         existing.value === newConstraint.value &&
         existing.unit === newConstraint.unit &&
@@ -1061,6 +1096,7 @@ export function createAddConstraintHandler(): HandlerFn {
         !userStampDisagrees;
       const nodeChannelUnchanged =
         !directionDisagrees &&
+        !retiresATarget &&
         ownsGoalThresholdChannel &&
         typeof targetNode.goal_threshold_raw === 'number' &&
         targetNode.goal_threshold_raw === params.value &&
@@ -1342,7 +1378,10 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
+      const setAside: SetAsideEstimate[] = [];
       const result = applyAndValidateMutation(rawGraph, (clone) => {
+        // Capture before ANY branch writes: ceiling pairing, target stamping and baseline minting can all move a frame.
+        const frameBefore = frameOf(clone.nodes.find((n) => n.id === targetId && n.kind === 'goal'));
         const list = clone.goal_constraints ?? [];
         // F8 backfill residual (self-review hardening): when there is no
         // existing row (`existing === undefined`) AND the value is
@@ -1382,14 +1421,25 @@ export function createAddConstraintHandler(): HandlerFn {
             : valueUnchanged
               ? list
               : [...list, constraintParse.data];
-        clone.goal_constraints = next;
-        if (cardClearsGoalDirection) {
+        if (retiresATarget) {
+          let kept = false;
+          clone.goal_constraints = next.filter((c) => {
+            if (!ownTarget(c)) return true;
+            if (retiresOtherTarget(c) || kept) return false;
+            kept = true;
+            return true;
+          });
+        } else clone.goal_constraints = next;
+        if (cardGoalCeiling !== undefined) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
-          if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
+          if (goalNode !== undefined) (goalNode as { goal_direction?: unknown }).goal_direction = cardGoalCeiling;
+          // The pair: the row this write just set, on the goal's own level frame (or the channel cleared). One writer.
+          pairGoalCeiling(clone, targetId);
         }
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
+            const capBefore = goalNode.goal_threshold_cap;
             const resolvedCap = resolveGoalThresholdCapWithProvenance(
               goalNode.goal_threshold_cap,
               params.value,
@@ -1433,6 +1483,39 @@ export function createAddConstraintHandler(): HandlerFn {
               // the line below the constant 0.8 for every target.
               goalNode.goal_threshold_cap_provenance = resolvedCap.provenance;
               goalNode.goal_threshold = params.value / cap; // model units (0–1)
+              /**
+               * ⭐⭐ D1 B — THE INVARIANT: A GOAL'S STORED LEVEL IS READ ON THE GOAL'S OWN CAP (DL #85 5930770727, adopting
+               * R3 F5 D1 5930715560 (a)). A goal `observed_state` carrying a numeric `raw_value` satisfies
+               * value = baseline = raw_value / goal cap. Today's level can now be carded BEFORE any target, on its own frame
+               * (`goal-current-level.ts`: Paul's "Our quarterly revenue is £100,000." → cap £125,000), and this stamp then
+               * sets the target's cap ("double that": £200,000 → cap £250,000). Left alone, the level would stay 0.8 of
+               * £125,000 while the target is 0.8 of £250,000: ISL would score P(goal) as if today were ALREADY at the
+               * target — a silently wrong chance of reaching the goal. So the level moves onto this cap IN THIS SAME WRITE:
+               * value and baseline become raw_value / cap and `cap` becomes this cap; `source`, `raw_value`, `unit` and
+               * every other field are untouched (the figure stays the user's own, at its own size). A level already on
+               * this cap is not touched (no byte moves). A goal `observed_state` with NO numeric `raw_value` (an Olumi value
+               * with no stated size) has no figure to re-read, and is left exactly as it was.
+               */
+              const level = goalNode.observed_state as Record<string, unknown> | undefined;
+              const rawLevel = level?.raw_value;
+              if (level !== undefined && level !== null && typeof rawLevel === 'number' && Number.isFinite(rawLevel)) {
+                // The frame the level is on: its own `cap`, else the goal's cap before this write.
+                const levelFrame = typeof level.cap === 'number' && Number.isFinite(level.cap) && level.cap > 0
+                  ? level.cap
+                  : capBefore;
+                if (levelFrame !== cap) {
+                  const onCap = rawLevel / cap;
+                  const k = typeof levelFrame === 'number' && levelFrame > 0 ? levelFrame / cap : undefined;
+                  goalNode.observed_state = {
+                    ...level,
+                    value: onCap,
+                    ...(typeof level.baseline === 'number' ? { baseline: onCap } : {}),
+                    // A real spread stays in natural units (`refit-frames` `reframed`'s own rule): std · F_old / F_new.
+                    ...(typeof level.std === 'number' && level.std > 0 && k !== undefined ? { std: level.std * k } : {}),
+                    cap,
+                  } as typeof goalNode.observed_state;
+                }
+              }
               // ROADMAP 2.273 — the chat-path twin of the draft-path baseline
               // stamp (cee/factor-extraction/enricher.ts). Same shared
               // extractor, so the two registration paths cannot drift.
@@ -1506,8 +1589,18 @@ export function createAddConstraintHandler(): HandlerFn {
         }
         // ⭐ F4 (R3 #75 5922368144): a target or level landing on a goal read on a normalising frame retires that frame
         // and re-derives the user's own sizes into it, so the analysis is the same as a build with this target present.
-        const retired = retireNormalisingGoalFrame(clone);
+        const retirement = retireNormalisingGoalFrameWithSetAside(clone);
+        setAside.push(...retirement.setAside);
+        const retired = retirement.graph;
         if (retired !== clone) { clone.nodes = retired.nodes; clone.edges = retired.edges; }
+        // The old frame, rather than a particular cap-writing branch, governs rederivation. Retirement already does it.
+        const frameAfter = frameOf(clone.nodes.find((n) => n.id === targetId && n.kind === 'goal'));
+        if (retired === clone && frameBefore !== undefined && frameAfter !== frameBefore) {
+          const rederived = rederiveGoalInLinksWithSetAside(clone, targetId, frameBefore);
+          setAside.push(...rederived.setAside);
+          const moved = rederived.graph;
+          if (moved !== clone) { clone.nodes = moved.nodes; clone.edges = moved.edges; }
+        }
         return {
           // ⛔ ON A CORRECTION `before` IS THE SOURCE ROW (Codex CX-195). It
           // was `null` because `existing` is undefined by construction on a
@@ -1689,7 +1782,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // thing, which is what put the limit on the wrong node in the first
       // place. `null` ⇒ nothing was offered ⇒ no pending (fail closed).
       let alternativeForCorrection: ReturnType<typeof findConstraintTargetAlternative> = null;
-      const fragments: string[] = [constraintText];
+      const fragments: string[] = [constraintText, ...setAside.map(setAsideEstimateDisclosure)];
       if (unevaluatedDurationSpan !== null) {
         fragments.push(
           formatConstraintDurationNotEvaluated({ span: unevaluatedDurationSpan }),

@@ -152,8 +152,11 @@ async function build(wire: Record<string, unknown>): Promise<Graph> {
  * (S) itself is pinned in `run-analysis-goal-figures-placeholder-path.test.ts`.
  */
 function sizedForC46<G>(g: G): G {
-  const copy = JSON.parse(JSON.stringify(g)) as { edges?: { provenance?: { magnitude?: unknown } }[] };
-  for (const e of copy.edges ?? []) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+  const copy = JSON.parse(JSON.stringify(g)) as { edges?: { provenance?: { magnitude?: unknown; mean_projected?: unknown } }[] };
+  for (const e of copy.edges ?? []) {
+    if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+    if (e.provenance !== undefined) delete e.provenance.mean_projected;
+  }
   return copy as G;
 }
 
@@ -203,6 +206,7 @@ function plotResponse(ranked: Ranked[], identityEvaluations?: unknown): V2RunRes
 /** Register body → production loader → the handler, PLoT faked. The persisted fact, as the handler wrote it. */
 async function runOn(registered: Graph, ranked: Ranked[], identityEvaluations?: unknown): Promise<RunAnalysisHandlerFact> {
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => registered,
     loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }),
   } as unknown as SessionStore;

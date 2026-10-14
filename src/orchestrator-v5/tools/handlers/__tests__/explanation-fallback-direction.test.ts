@@ -84,12 +84,12 @@ describe('formatEdgeStrengthMagnitude', () => {
   // The ONE edge-strength table (`format/edge-strength-bands.ts`), the canvas's own
   // cuts 0.2 / 0.4 / 0.7 — so an explanation names a link as the canvas draws it.
   it.each([
-    // Weak band (the canvas's "Slight"): |v| < 0.2.
-    [0, 'weak'],
-    [0.05, 'weak'],
-    [-0.099, 'weak'],
-    [0.1, 'weak'],
-    [0.199, 'weak'],
+    // The lowest band, in the canvas's word "slight" (DL D4 row: ONE word per band; the enum keeps `weak`): |v| < 0.2.
+    [0, 'slight'],
+    [0.05, 'slight'],
+    [-0.099, 'slight'],
+    [0.1, 'slight'],
+    [0.199, 'slight'],
     // Moderate band: [0.2, 0.4).
     [0.2, 'moderate'],
     [-0.3, 'moderate'],
@@ -108,9 +108,9 @@ describe('formatEdgeStrengthMagnitude', () => {
     expect(formatEdgeStrengthMagnitude(value)).toBe(expected);
   });
 
-  it('non-finite input falls back to weak (does not throw)', () => {
-    expect(formatEdgeStrengthMagnitude(Number.NaN)).toBe('weak');
-    expect(formatEdgeStrengthMagnitude(Number.POSITIVE_INFINITY)).toBe('weak');
+  it('non-finite input falls back to the lowest band, said "slight" (does not throw)', () => {
+    expect(formatEdgeStrengthMagnitude(Number.NaN)).toBe('slight');
+    expect(formatEdgeStrengthMagnitude(Number.POSITIVE_INFINITY)).toBe('slight');
   });
 
   it('output never contains a raw decimal', () => {

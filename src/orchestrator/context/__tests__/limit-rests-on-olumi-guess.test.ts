@@ -146,7 +146,10 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
   });
 
   it('CONTROL: the user\'s point → kept (arithmetic on their figure, not a guess)', () => {
-    expect(moved(setting('user')).has('switch_to_gcp')).toBe(false);
+    // ONE PROVENANCE AUTHORITY: the person's cell stamp on the contract (`InterventionV3.source`); the off-contract literal
+    // 'user' on a cell is not established as theirs (CHANGED-ANSWERS, settings).
+    expect(moved(setting('user_specified')).has('switch_to_gcp')).toBe(false);
+    expect(moved(setting('user')).has('switch_to_gcp')).toBe(true);
   });
 
   /** The range as TEMPORAL #2382 stores the user's answer: on the setting it qualifies, with its author. */

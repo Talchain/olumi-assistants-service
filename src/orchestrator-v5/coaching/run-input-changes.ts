@@ -26,9 +26,14 @@
 
 import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { routeOnceCoveredSources } from '../goal-target/held-user-links.js';
+import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
+import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
+import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
 
-type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
+/** One end of a row, as the contract types it (0.78: an `effect` end also carries `per`). */
+type Value = NonNullable<Row['before']>;
 
 const valueOf = (raw: number | string | boolean | undefined, unit: string | undefined): Value | null =>
   raw === undefined ? null : unit !== undefined ? { raw, unit } : { raw };
@@ -79,15 +84,148 @@ const labels = (a?: string, b?: string) => ({
   ...(b !== undefined ? { label_after: b } : {}),
 });
 
+/** The target's frame owns its meaning; a relative change never takes the metric's unit. */
+function goalTarget(goal: NonNullable<RunInputSnapshot['goal']>): Value | null {
+  const raw = goal.target_raw;
+  if (raw === undefined) return null;
+  if (goal.frame === 'change_rel') {
+    const percent = Number((raw * 100).toFixed(12));
+    return { raw: `${percent >= 0 ? '+' : ''}${percent}% from today` };
+  }
+  if (goal.frame === 'change_abs') return { raw: `${raw >= 0 ? '+' : ''}${raw}${goal.unit ? ` ${goal.unit}` : ''} from today` };
+  return valueOf(raw, goal.unit);
+}
+
 /** The rows only — see {@link diffRunInputs} for whether they are the whole difference. */
 export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInputSnapshot): Row[] {
   return diffRunInputs(prior, current).rows;
 }
 
+const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a));
+
+/**
+ * A link's new spread is EXPLAINED by its band move only when it is exactly a spread CEE's own writer derives for that
+ * move (`adjust-edge-strength.ts`): the TYPED band's own spread (`edgeBandStd` of the band the link moved into — the
+ * user named a band; DL ruling #2482 r3 P1-1), or, for an exact figure, Olumi's spread carried to the new mean
+ * (`olumiSpreadForMean` from the prior Run's mean and spread). Anything else — another stated spread, a spread on one
+ * Run only — is a change no row states.
+ */
+function spreadFollowsBand(prior: { mean: number; std?: number }, current: { mean: number; std?: number; band?: RunInputSnapshot['links'][number]['band'] }): boolean {
+  if (prior.std === current.std) return true;
+  if (prior.std === undefined || current.std === undefined) return false;
+  if (current.band !== undefined && sameNumber(edgeBandStd(edgeBandFromStrengthBand(current.band)), current.std)) return true;
+  return sameNumber(olumiSpreadForMean({ oldMean: prior.mean, oldStd: prior.std, newMean: current.mean }), current.std);
+}
+
+/**
+ * 0.72.0 (DL ruling #2482 r3, option A) — is a change in a link's AUTHORSHIP (`authorship_digest`) the one a `sizing`
+ * row states? Only two writers move authorship as part of an edit the pair shows: the user's own write (the link is now
+ * `user`) and the Accept (Olumi's `placeholder` → `olumi_accepted`). Any other authorship change — a source moving
+ * inside one sizing class (CODEX r2), a digest on one Run only — is unexplained.
+ */
+function authorshipExplained(prior: { sizing?: string; authorship_digest?: string }, current: { sizing?: string; authorship_digest?: string }): boolean {
+  if (prior.authorship_digest === current.authorship_digest) return true;
+  if (prior.authorship_digest === undefined || current.authorship_digest === undefined) return false;
+  if (prior.sizing === undefined || current.sizing === undefined || prior.sizing === current.sizing) return false;
+  return current.sizing === 'user' || (prior.sizing === 'placeholder' && current.sizing === 'olumi_accepted');
+}
+
+/**
+ * 0.73.0 (F1b lease #85 5945475375) — is a change in a factor's AUTHORSHIP (`authorship_digest`) explained? Only when BOTH
+ * hold: that factor's own value row moved, AND its current authorship is exactly what CEE's value writer leaves after
+ * writing a figure (`valueWriteAuthorshipDigests`: a typed figure or an approved adoption). Same-factor identity alone
+ * proves nothing (CODEX on 4c043a64 P1-2: an independent `extractionType` change beside a value write). Alone — a source
+ * moving at the same figure (CODEX r2), a digest on one Run only, a colleague's apply — it is unexplained.
+ */
+function factorAuthorshipExplained(
+  prior: { authorship_digest?: string },
+  current: { authorship_digest?: string; source?: string },
+  pair: ReturnType<typeof authoredPair>,
+): boolean {
+  if (prior.authorship_digest === current.authorship_digest) return true;
+  if (prior.authorship_digest === undefined || current.authorship_digest === undefined) return false;
+  if (pair === 'unexpressed' || pair[0] === null || pair[1] === null || same(pair[0], pair[1])) return false;
+  return current.source !== undefined && valueWriteAuthorshipDigests(current.source).includes(current.authorship_digest);
+}
+
+/**
+ * ⭐ SD-1 INTERIM (DL 0df0e1 ruling, 6 Oct, cut 5): a link whose size moved INSIDE one band between two Runs. No row can
+ * state it (the contract's `strength` row is a band literal; `effect` lands with schemas 0.78 in cut 6), so the pair is
+ * `partial` (`diffRunInputs` below). This list lets S7 NAME the link while coverage stays partial; it never rides the wire.
+ * Read from the two Runs' OWN persisted input snapshots (each Run's `mean` and `band`), never the current graph.
+ * - Counted: the link is in both Runs, both record a band and it is the same band, the sign is the same, the mean differs.
+ *   (A band move is a `strength` row; a sign flip is a direction change this sentence must not call a size change.)
+ * - `author` picks S7's words (c6's three lines):
+ *   - `user`: the pair's persisted record shows the USER wrote this link between the two Runs: user-sized now
+ *     (`sizing: 'user'`), its authorship (`authorship_digest`) differs between the Runs, AND `userWroteLink` finds the
+ *     write's own persisted receipt for exactly this move (buddy r1: a moved digest proves metadata changed, not who wrote
+ *     it). Without a receipt it is never `user` (DL: "you changed" only on a user write);
+ *   - `olumi`: Olumi-sized now (`olumi_estimate`, `olumi_accepted`), so the figure is said to be Olumi's;
+ *   - A recorded `placeholder` is unsized, so its refitted prior supplies no sized-band sentence. These labels were
+ *     recorded by `run-input-snapshot` through `linkSizing`; historical Runs are never reclassified from today's graph.
+ *   - `unknown`: anything else (no user write recorded, `unmarked`, sizing not recorded): no author is claimed.
+ */
+export interface WithinBandLinkMove {
+  readonly from: string;
+  readonly to: string;
+  readonly band: NonNullable<RunInputSnapshot['links'][number]['band']>;
+  readonly author: 'user' | 'olumi' | 'unknown';
+}
+
+type RecordedNaturalEffect = RunInputSnapshot['links'][number]['natural_effect'];
+/** Both Runs recorded the link's natural size and it is the same: amount, unit and the same source change. */
+function sameNaturalSize(pe: RecordedNaturalEffect, ce: RecordedNaturalEffect): boolean {
+  return pe !== undefined && ce !== undefined && pe.amount === ce.amount && pe.amount_unit === ce.amount_unit
+    && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit;
+}
+
+export function linksMovedWithinBand(
+  prior: RunInputSnapshot,
+  current: RunInputSnapshot,
+  /** The persisted receipt of a user write that moved `from → to` from `priorMean` to `currentMean`; absent = none. */
+  userWroteLink: (from: string, to: string, priorMean: number, currentMean: number) => boolean = () => false,
+  /** S5t-W: the link's whole move between the Runs is a frame refit's rescale (`frameRefitLinksForRunPair`); absent = none. */
+  refitMovedLink: (from: string, to: string, priorMean: number, currentMean: number) => boolean = () => false,
+): WithinBandLinkMove[] {
+  const key = (l: { from: string; to: string }) => `${l.from}->${l.to}`;
+  const pL = byId(prior.links, key);
+  const cL = byId(current.links, key);
+  const out: WithinBandLinkMove[] = [];
+  for (const id of [...cL.keys()].sort()) {
+    const pl = pL.get(id);
+    const cl = cL.get(id)!;
+    // Science 393023 LICENCE ruling 3: nobody sized this link. Its prior moving inside a band is not an estimate.
+    if (cl.sizing === 'placeholder') continue;
+    if (pl === undefined || pl.band === undefined || cl.band === undefined || pl.band !== cl.band) continue;
+    if (pl.mean === cl.mean || Math.sign(pl.mean) !== Math.sign(cl.mean)) continue;
+    // ⛔ A FRAME CHANGE IS NEVER A CHANGE (Science Q2 6009456901; e7 #87 6011176086): a move the refit's receipt accounts for
+    // whole, or one both Runs record at the same natural size (the rule `diffRunInputs` applies to a band row), is the frame's.
+    if (refitMovedLink(cl.from, cl.to, pl.mean, cl.mean) || sameNaturalSize(pl.natural_effect, cl.natural_effect)) continue;
+    const userWrite = cl.sizing === 'user'
+      && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined && pl.authorship_digest !== cl.authorship_digest
+      && userWroteLink(cl.from, cl.to, pl.mean, cl.mean);
+    const author = userWrite ? 'user' : cl.sizing === 'olumi_estimate' || cl.sizing === 'olumi_accepted' ? 'olumi' : 'unknown';
+    out.push({ from: cl.from, to: cl.to, band: cl.band, author });
+  }
+  return out;
+}
+
 /** The rows, and `complete: false` when a sent input changed that no row states. */
 export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];
-  let complete = true;
+  // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+  const coveredIn = (snapshot: RunInputSnapshot) => routeOnceCoveredSources(snapshot.links.map((link) => ({
+    from: link.from, to: link.to, isDefault: typeof link.exists_probability === 'number'
+      && Number.isFinite(link.exists_probability) && link.exists_probability > 0 && link.exists_probability < 1,
+  })));
+  const priorCovered = coveredIn(prior);
+  const currentCovered = coveredIn(current);
+
+  // ⭐ 0.71.0 — `complete` means VERIFIED (DL ruling #2482 5939864517): the rows below can only speak for the fields the
+  // snapshots record, so the pair is complete only when every OTHER analysis input is proven unchanged — both Runs
+  // carry a residual digest (`run-input-residual.ts`) and they are equal. An older Run without one is never complete.
+  let complete =
+    prior.residual_digest !== undefined && current.residual_digest !== undefined && prior.residual_digest === current.residual_digest;
   const push = (r: Row | null) => {
     if (r !== null) rows.push(r);
   };
@@ -135,10 +273,20 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
   // ── factor values ─────────────────────────────────────────────────────────
   const pF = byId(prior.factors, (f) => f.factor_id);
   const cF = byId(current.factors, (f) => f.factor_id);
+  // The producer records a goal entry even when it has no level. Without it, absence is unrecorded coverage,
+  // not evidence that the user added or removed a level. Both ends must attest their own goal-level coverage.
+  const goalLevelsRecorded = (prior.goal === null || pF.has(prior.goal.node_id))
+    && (current.goal === null || cF.has(current.goal.node_id));
+  if (!goalLevelsRecorded) complete = false;
   for (const factorId of unionIds(pF, cF)) {
     const pf = pF.get(factorId);
     const cf = cF.get(factorId);
-    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, authoredPair(pf, cf));
+    const isGoalLevel = prior.goal?.node_id === factorId || current.goal?.node_id === factorId;
+    if (isGoalLevel && !goalLevelsRecorded) continue;
+    const levelValue = (f: typeof pf) => f?.raw === undefined && f?.encoded === undefined ? undefined : f;
+    const pair = isGoalLevel ? authoredPair(levelValue(pf), levelValue(cf)) : authoredPair(pf, cf);
+    pushPair({ entity_kind: isGoalLevel ? 'goal' : 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, pair);
+    if (pf !== undefined && cf !== undefined && !factorAuthorshipExplained(pf, cf, pair)) complete = false;
   }
 
   // ── the goal ──────────────────────────────────────────────────────────────
@@ -148,8 +296,15 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     if (pg !== null && cg !== null && pg.node_id === cg.node_id) {
       const base = { entity_kind: 'goal' as const, entity_id: cg.node_id, ...labels(pg.label, cg.label) };
       const v = (raw: number | string | undefined): Value | null => (raw === undefined ? null : { raw });
-      push(changeRow({ ...base, field: 'target' }, pg.target_raw !== undefined ? valueOf(pg.target_raw, pg.unit) : null,
-        cg.target_raw !== undefined ? valueOf(cg.target_raw, cg.unit) : null));
+      // Target identity is its frame and authored threshold, not the metric's unit. The encoded threshold remains
+      // in the residual: a rescale or an unexpressed threshold change still makes coverage partial, never a false
+      // target receipt. Compare before formatting so a unit adoption cannot manufacture a target change.
+      // A relative target (+10% from today) has no unit of its own, so adopting the metric's unit never changes it.
+      // An absolute or level target's meaning includes its unit (55000 GBP ≠ 55000 USD): there a unit edit IS a target change.
+      const unitMovesTarget = cg.frame !== 'change_rel' && pg.unit !== cg.unit;
+      if (pg.target_raw !== cg.target_raw || pg.frame !== cg.frame || unitMovesTarget) {
+        push(changeRow({ ...base, field: 'target' }, goalTarget(pg), goalTarget(cg)));
+      }
       if (pg.frame !== cg.frame) complete = false;
       // A unit-only edit (AIQ 5912905493) is its own row even when the target number is unchanged.
       push(changeRow({ ...base, field: 'unit' }, v(pg.unit), v(cg.unit)));
@@ -195,8 +350,67 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     }
     // A link's mean, spread and existence probability are the ENGINE's numbers on the model scale — the user never
     // wrote them and they carry no unit. None is a row figure (AIQ 5918134795, the class rule already applied to
-    // `encoded`): any of them changing makes the pair partial.
-    if (pl.mean !== cl.mean || pl.std !== cl.std || pl.exists_probability !== cl.exists_probability) complete = false;
+    // `encoded`).
+    // ⭐ 0.70.0 (R3 DEFECT 3; DL 5937207590): each Run also records the link in the user's terms, and those ARE rows:
+    //   - its BAND moving (`moderate` → `strong`) is a `strength` row, raw = the contract's band literals; the engine
+    //     numbers that moved with it (mean, and the spread that follows the band) are what that row states;
+    //   - WHO SIZED it changing (`placeholder` → `olumi_accepted`: the user accepted Olumi's estimate, no number moved)
+    //     is a `sizing` row.
+    // Still partial, never a row: a mean/spread move INSIDE one band (or with a band unrecorded on either Run), any
+    // existence-probability move, and sizing recorded on one Run only (whether it changed cannot be known).
+    const linkBase = { entity_kind: 'link' as const, entity_id: id, link: { from: ends.from, to: ends.to } };
+    const pe = pl.natural_effect;
+    const ce = cl.natural_effect;
+    // ⛔ A FRAME CHANGE ALONE IS NEVER A CHANGE ROW (Science d5 on #2631, 6 Oct; DL 0df0e1): the band is read on the frames,
+    // which Olumi refits (#2631) or a goal's level re-frames (`normalising-goal-frame.ts`), while the link's natural size
+    // stays put. When both Runs recorded that size and it is the same (amount, unit and the same source change), the band
+    // move is the frame's, never a `strength` row. The mean move it carries stays partial below (coverage unchanged).
+    const sameNaturalEffect = sameNaturalSize(pe, ce);
+    const bandMoved = !sameNaturalEffect && pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
+    // Science 393023 LICENCE ruling 3: a placeholder's band is its default, not a size. A band move that ENDS on a link the
+    // later Run still reads as a placeholder is never a `strength` row (no surface may word either default band); the move
+    // stays partial coverage. A move FROM a placeholder to a sized link keeps its row: readers suppress the before band.
+    const unsizedEitherRun = cl.sizing === 'placeholder';
+    if (bandMoved && !unsizedEitherRun) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    else if (bandMoved) complete = false;
+    if (pl.sizing !== undefined && cl.sizing !== undefined) {
+      // Science 393023 LICENCE (a)/(b), 7 Oct: the same stored link can change class under the new reader.
+      const readerReclassified = ((pl.sizing === 'unmarked' && cl.sizing === 'placeholder')
+        || (pl.sizing === 'placeholder' && cl.sizing === 'unmarked'))
+        && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined
+        && pl.authorship_digest === cl.authorship_digest
+        && pl.mean === cl.mean && pl.std === cl.std;
+      if (pl.sizing !== cl.sizing && !readerReclassified) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
+    } else if (pl.sizing !== cl.sizing) {
+      complete = false;
+    }
+    // ⭐ 0.78.0 (SD-1 cut 6, #87 6008093205): the link's SIZE in the user's terms moved — an `effect` row, both ends the
+    // snapshots' own figures, only when both Runs recorded a current point size per the SAME source change (a size on one
+    // Run only, or per a different change, is no pair). Coverage is unchanged by it: whether an effect row states the
+    // mean move is Science's ruling, so a mean move inside one band stays partial below.
+    if (pe !== undefined && ce !== undefined
+      && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit) {
+      const per = { amount: ce.per_source_change, unit: ce.per_source_change_unit };
+      push(changeRow({ ...linkBase, field: 'effect' }, { raw: pe.amount, unit: pe.amount_unit, per }, { raw: ce.amount, unit: ce.amount_unit, per }));
+    }
+    // A band row states the move of the MEAN and nothing else (DL ruling #2482, P1 #1): the band never absorbs a sign
+    // flip or a spread the move does not explain. Either is a change no row states → partial.
+    if (pl.mean !== cl.mean && !bandMoved) complete = false;
+    if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
+    // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178; Review Desk 6b on #2643): the user's own size with a range that excludes
+    // zero holds the link at existence exactly 1 with the range's spread on the Run input. The sizing row that moved TO the
+    // user's states both moves; no writer sets a user link's existence, so the hold is the only source of that 1. Any other
+    // existence or spread move stays partial.
+    const heldBySizing = pl.sizing !== undefined && pl.sizing !== 'user' && cl.sizing === 'user'
+      && cl.exists_probability === 1 && typeof pl.exists_probability === 'number' && pl.exists_probability < 1;
+    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std) && !heldBySizing) complete = false;
+    const doubtMoved = (certain: typeof pl, doubtful: typeof pl, certainCovered: ReadonlySet<string>, doubtfulCovered: ReadonlySet<string>): boolean =>
+      certain.exists_probability === 1 && typeof doubtful.exists_probability === 'number'
+      && Number.isFinite(doubtful.exists_probability) && doubtful.exists_probability > 0 && doubtful.exists_probability < 1
+      && certainCovered.has(certain.from) && !doubtfulCovered.has(doubtful.from);
+    const heldByRouteOnce = doubtMoved(pl, cl, priorCovered, currentCovered) || doubtMoved(cl, pl, currentCovered, priorCovered);
+    if (pl.exists_probability !== cl.exists_probability && !heldBySizing && !heldByRouteOnce) complete = false;
+    if (!authorshipExplained(pl, cl)) complete = false;
   }
 
   return { rows, complete };

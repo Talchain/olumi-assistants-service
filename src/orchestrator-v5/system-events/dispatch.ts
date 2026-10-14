@@ -1,3 +1,12 @@
+import { type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
+import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
+import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
+import type { EventRiskV1T } from '../../schemas/event-risk.js';
+import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
+import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingProgress, guidedSizingReplyText } from '../agent-lane/guided-sizing.js';
+import { runExplanationKeyForRecord } from '../agent-lane/run-explanation.js';
+
 /**
  * V5 deterministic system-event dispatch.
  *
@@ -47,14 +56,26 @@ import {
   GraphStaleWriteError,
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
-  loadPriorFactsWithReadState,
+  loadPersistedScenarioStateStrict,
   loadScenarioAnalysisFactsForRead,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { UntouchedLevelRescaledError } from '../untouched-level-invariant.js';
+import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { getSessionStore } from '../session/index.js';
+import { useAppendV6 } from '../append-v6-flag.js';
+import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
+import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
+import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import type { ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
+import type { ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -64,10 +85,11 @@ import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
   isSuccessfulRunAnalysisFact,
+  selectRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import { identityRunUseFromFacts, type IdentityRunUse } from '../compose/definitional-links.js';
-import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
+import { isScenarioAnalysisReasoningAuthority, reconcileScenarioAnalysisFacts } from '../context/reconcile-scenario-analysis-facts.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildAppliedGraphWireField,
@@ -81,6 +103,8 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
+import { readCommittedOptionEffect } from '../routing/option-effect-write.js';
+import { applyPriorRangeEdit } from './prior-range-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
@@ -94,6 +118,7 @@ import {
   InvalidPersistedAddEdgeGraphError,
 } from './structural-add-edge.js';
 import { applyStructuralRename, findStaleRenamedLabel } from './structural-rename.js';
+import { applyOptionStatusEdit, optionStatusHolds, type OptionStatusEditEvent, type OptionStatusEditResult } from './option-status-edit.js';
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
 import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
@@ -118,21 +143,28 @@ import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
  * can hide an older run). `priorFactsReadOk` is consulted only when no fact is
  * selected, so a success in the window stays positive evidence compared by hash.
  *
- * ⚠ NOT YET `option_intervention_edit`: it also feeds the window's verdict into
- * its pre-write referee, so moving its source changes write behaviour, not only
- * the reply. Named follow-up with its own RED case.
+ * Every option-intervention referee and reply also consumes these complete inputs.
  */
 function deriveWriteReplyFreshness(
   read: WriteReplyAnalysisInputs,
   persistedAnalysisGraphHash: string | null,
   currentGraph: unknown,
+  allowLegacyWindowAbsence = false,
+  currentScenarioRevision?: number,
 ): FreshnessDerivation {
   const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
   const derived = deriveAnalysisFreshness(
     durableAuthority ? read.factSet.facts : read.hotWindow.facts,
     persistedAnalysisGraphHash,
     undefined,
-    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt, currentGraph },
+    { priorFactsReadOk: read.factSet.status === 'complete'
+        // Absent legacy ports retain the option writer's healthy-empty contract.
+        // An attempted failed/corrupt read can never take this compatibility arm.
+        || (allowLegacyWindowAbsence && read.factSet.status === 'degraded'
+          && read.factSet.reason === 'durable_unavailable' && read.hotWindow.status === 'ok'),
+      analysisInvalidatedAt: read.analysisInvalidatedAt,
+      currentGraph, currentScenarioRevision, priorFactsWithTurn: read.priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(read.factSet) },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
   // only turn a hash MATCH from fresh to stale, so when it could not be read a
@@ -141,7 +173,7 @@ function deriveWriteReplyFreshness(
   // (no fact-bound hashes: `unknown` only where data is genuinely missing, its
   // invariant 3). Independent pre-review 5828334202 on #1892.
   if (!read.analysisInvalidatedAtReadOk && derived.freshness === 'fresh') {
-    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph });
+    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph, currentScenarioRevision });
   }
   return derived;
 }
@@ -156,8 +188,8 @@ type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFa
  * EVERY WRITER'S ANALYSIS INPUTS: the facts AND the restore marker, read side by
  * side exactly as the reload reads them (`scenario-graph-analysis-read.ts`).
  *
- * The marker (`scenarios.analysis_invalidated_at`) is the ONLY input that can
- * make a hash MATCH read `stale`: restore the analysed version after a run
+ * The marker (`scenarios.analysis_invalidated_at`) carries restore chronology:
+ * it can make a hash MATCH read `stale`: restore the analysed version after a run
  * (A → analyse → B → restore A) and the bytes equal A again while the analysis
  * is no longer about the model the user is looking at. Without it, a write that
  * lands on the analysed hash — a rename never moves it — replied `fresh` while
@@ -176,31 +208,48 @@ async function loadWriteReplyAnalysisInputs(
   scenarioId: string,
   requestId: string,
 ): Promise<WriteReplyAnalysisInputs> {
-  // The store lookup sits INSIDE the guarded promise: `getSessionStore()` throws
-  // synchronously when the store is not configured, and a throw outside the
-  // `.catch` would fail the user's write over an observational read. An
-  // unavailable store degrades exactly like a failed read.
-  const markerRead = (async (): Promise<{ readonly value: string | null; readonly ok: boolean }> => ({
-    value: (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null,
-    ok: true,
-  }))();
-  const [read, marker] = await Promise.all([
-    loadScenarioAnalysisFactsForRead(scenarioId, requestId),
-    markerRead.catch((error: unknown) => {
-      log.warn(
-        {
-          event: 'session.read_degraded',
-          read: 'analysis_invalidated_at',
-          request_id: requestId,
-          scenario_id: scenarioId,
-          error_name: error instanceof Error ? error.name : typeof error,
-        },
-        'Restore-invalidation read degraded on a write reply — currency cannot be confirmed',
-      );
-      return { value: null, ok: false };
-    }),
-  ]);
-  return { ...read, analysisInvalidatedAt: marker.value, analysisInvalidatedAtReadOk: marker.ok };
+  try {
+    return await withAnalysisReadDeadline(async () => {
+      // The store lookup sits INSIDE the guarded promise: `getSessionStore()` throws
+      // synchronously when the store is not configured, and a throw outside the
+      // `.catch` would fail the user's write over an observational read. An
+      // unavailable store degrades exactly like a failed read.
+      const markerRead = (async (): Promise<{ readonly value: string | null; readonly ok: boolean }> => ({
+        value: (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null,
+        ok: true,
+      }))();
+      const [read, marker] = await Promise.all([
+        loadScenarioAnalysisFactsForRead(scenarioId, requestId),
+        markerRead.catch((error: unknown) => {
+          log.warn(
+            {
+              event: 'session.read_degraded',
+              read: 'analysis_invalidated_at',
+              request_id: requestId,
+              scenario_id: scenarioId,
+              error_name: error instanceof Error ? error.name : typeof error,
+            },
+            'Restore-invalidation read degraded on a write reply — currency cannot be confirmed',
+          );
+          return { value: null, ok: false };
+        }),
+      ]);
+      return { ...read, analysisInvalidatedAt: marker.value, analysisInvalidatedAtReadOk: marker.ok };
+    });
+  } catch (error) {
+    if (!(error instanceof AnalysisReadDeadlineError)) throw error;
+    log.warn({ event: 'session.read_degraded', read: 'write_reply_analysis_inputs',
+      request_id: requestId, scenario_id: scenarioId, error_name: error.name },
+    'Canonical write-reply reread timed out — currency cannot be confirmed');
+    return {
+      hotWindow: { status: 'degraded', facts: [] },
+      factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [],
+        durableRead: { status: 'degraded', reason: 'read_failed' } }),
+      priorFactsWithTurn: [],
+      analysisInvalidatedAt: null,
+      analysisInvalidatedAtReadOk: false,
+    };
+  }
 }
 
 /**
@@ -245,6 +294,20 @@ export interface DispatchSystemEventResult {
   readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
   /** Olumi's own links a committed value/range re-sized to fit the new level (P1-a): ids only, never a graph diff. */
   readonly linksResized?: readonly { readonly from: string; readonly to: string }[];
+  readonly reencodedSiblings?: readonly ReencodedSibling[];
+  /**
+   * ⭐ THE OPTION-STATUS WRITER'S OWN ACCOUNT OF THIS ATTEMPT (MG F1 T6, #2471; CODEX overflow 5937013605 + DL). Set by
+   * `dispatchOptionStatusEdit` only, and never put on the wire (`OlumiResponseSchema` is strict): the Agent reads it
+   * in-process (`commitOptionStatusInProcess`). Display bytes cannot stand in for it — a no-write replay also carries
+   * `draft_graph` (`replyForAttemptThatWroteNothing`).
+   *   · `attempt_wrote`: THIS turn's commit wrote the status, or this is a replay whose stored receipt proves this same
+   *     turn wrote it and the change is still visible (`earlierWriteByThisTurnProven && visible`).
+   *   · `version_minted`: the COMMIT says it minted a model version (`CommitResult.modelVersionReceipt !== null`); the
+   *     response's receipt then rides UNPARSED, for the Agent's one parser (`receiptSummaryOf`), and must name this turn —
+   *     a minted version whose receipt is missing is never "applied" (CODEX overflow 5937013605 P2).
+   * Absent ⇒ no typed evidence ⇒ the Agent says UNCONFIRMED, never "not changed".
+   */
+  readonly writeOutcome?: { readonly attempt_wrote: boolean; readonly version_minted: boolean; readonly model_version_receipt: unknown };
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
@@ -301,9 +364,9 @@ export interface DispatchSystemEventResult {
    */
   readonly graph: GraphV3T | null;
   /**
-   * Canonical analysis currency against the graph this turn actually wrote.
-   * Present on the edge writer only after a successful atomic commit; omitted
-   * on the reader floor so its deployed response remains byte-compatible.
+   * Canonical analysis currency against the authoritative graph. Writers supply
+   * their post-commit verdict; the shared return boundary reads it for
+   * graph-bearing committed no-write exits. Other exits retain their base verdict.
    */
   readonly freshness?: FreshnessDerivation;
   /**
@@ -314,6 +377,8 @@ export interface DispatchSystemEventResult {
   readonly graphConflict?: {
     readonly recovery_action: 'refresh_and_reconfirm' | 'start_new_draft';
     readonly conflict_category: string;
+    readonly expected?: number;
+    readonly current?: number;
     /**
      * ⚠ ALWAYS ANALYSIS-SPACE (16-hex), NEVER the 64-hex identity hash.
      * See `readClientRecoverableBaseHash` — this field is the target of a
@@ -535,6 +600,7 @@ function replyForAttemptThatWroteNothing(args: {
   readonly requestId: string;
   readonly committedResponse: OlumiResponse;
   readonly persistedGraphBytes: unknown;
+  readonly persistedScenarioRevision?: number;
   readonly persistedAnalysisGraphHash: string | null;
   /**
    * The writer's own analysis read — the durable record, the hot window and the
@@ -624,7 +690,7 @@ function replyForAttemptThatWroteNothing(args: {
   }
   // The shared rule, against the SNAPSHOT's hash: the durable record when it is
   // authority, the restore marker, and `unknown` when the marker is unread.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes, false, args.persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -711,10 +777,9 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // ack and DISCARDED the rating after hashing it into request_hash; the UI
   // has emitted the typed event since 0.22.0 and the server threw it away).
   feedback: 'fact_and_commit',
-  // 0.34.0 — the two judgement kinds that previously terminated in the
-  // browser (no wire shape existed at all).
+  // Judgement remains fact-only; a manual factor range is a canonical edit.
   edge_adjudication: 'fact_and_commit',
-  prior_range_edit: 'fact_and_commit',
+  prior_range_edit: 'mutating',
   // 0.42.0 Train C — canonical writer. Reverting THIS writer commit lands on
   // Train B's deployed explicit no-write refusal and its integrity-strict
   // pending carry-forward; reader and writer rollback remain independent.
@@ -807,6 +872,8 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // writes a turn row and NO graph, so the target the user set would vanish on
   // the next reload.
   goal_target_edit: 'mutating',
+  // 0.69.0 (MG, F1 T6): ONE option's lifecycle — status + derived participation, one commit (`option-status-edit.ts`).
+  option_status_edit: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -1096,6 +1163,55 @@ export function buildReaderOnlyRefusal(payload: SystemEventTurnPayload): OlumiRe
 export async function dispatchSystemEvent(
   params: DispatchSystemEventParams,
 ): Promise<DispatchSystemEventResult> {
+  let result: DispatchSystemEventResult;
+  try {
+    result = await dispatchSystemEventOperation(params);
+  } catch (err) {
+    if (!isRevisionConflict(err)) throw err;
+    result = { response: buildAcknowledgementResponse(params.payload), commitPerformed: false, graph: null,
+      graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: err.conflict_category,
+        expected_base_graph_hash: null, ...readRevisionConflictDetails(err) } };
+  }
+  if (result.graphConflict?.conflict_category === 'revision_conflict') {
+    result = { ...result, response: { ...result.response, assistant_text: REVISION_CONFLICT_MESSAGE } };
+  }
+  // A writer's post-commit verdict stays authoritative. Acknowledgements and
+  // uncommitted refusals retain their existing return shape.
+  if (result.freshness !== undefined || result.graphConflict !== undefined
+    || result.graph === null || !result.commitPerformed) return result;
+
+  // A graph-bearing committed no-write exit still needs the scenario's verdict.
+  // Read RAW persisted bytes under the same deadline as the analysis reads:
+  // the presentation graph may have lost fields that participate in the hash.
+  try {
+    return await withAnalysisReadDeadline(async () => {
+      // This existing graph-only read supplies no revision. Freshness must not
+      // expand its read surface just to enable the legacy no-hash fallback.
+      const persistedGraph = await loadPersistedGraphStrict(params.payload.scenario_id);
+      const parsed = GraphV3.safeParse(persistedGraph);
+      if (!parsed.success) return result;
+      const analysisInputs = await loadWriteReplyAnalysisInputs(params.payload.scenario_id, params.requestId);
+      const hash = computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      );
+      return { ...result, graph: parsed.data,
+        analysisReady: result.analysisReady ?? buildCanonicalAnalysisReadyFromGraph(persistedGraph),
+        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph, false, undefined) };
+    });
+  } catch (error) {
+    // Observational only: a failed reread cannot suppress the user's answer or
+    // manufacture currentness. The existing degraded finaliser arm remains.
+    log.warn({ request_id: params.requestId, scenario_id: params.payload.scenario_id,
+      event_kind: params.payload.event.kind,
+      error_name: error instanceof Error ? error.name : typeof error },
+    'System-event analysis reread failed — currency cannot be confirmed');
+    return result;
+  }
+}
+
+async function dispatchSystemEventOperation(
+  params: DispatchSystemEventParams,
+): Promise<DispatchSystemEventResult> {
   const { payload, requestId } = params;
   const startedAt = Date.now();
   const declaredHandling = SYSTEM_EVENT_HANDLING[payload.event.kind];
@@ -1104,7 +1220,7 @@ export async function dispatchSystemEvent(
   // typed FEATURE_NOT_ENABLED, strict newest-pending carry, no graph read/fact/
   // writer effect. Enabling the emitter is therefore insufficient on its own;
   // the service must be objectively running the RPC in enforce mode.
-  const handling =
+  let handling =
     payload.event.kind === 'edge_strength_edit' &&
     declaredHandling === 'mutating' &&
     config.features.graphCas.rpcEnforce !== true
@@ -1135,12 +1251,19 @@ export async function dispatchSystemEvent(
   // ── VALUE-CARRYING writers ────────────────────────────────────────────────
   // Value-less events retain their byte-identical acknowledgement. Each
   // writer below owns only its structured adapter + commit transaction; the
-  // canonical D1 handlers remain the sole graph mutators.
+  // existing D1 handlers and graph-management candidate applier own mutations.
   if (
     handling === 'mutating' &&
-    payload.event.kind === 'factor_value_edit'
+    (payload.event.kind === 'factor_value_edit' || payload.event.kind === 'prior_range_edit')
   ) {
-    return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
+    const edited = await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
+    // A range on a factor with no stated distribution cannot become a canonical prior without
+    // inventing its shape. It is not refused either (the editor's send is best-effort and a
+    // refusal would be silent): it keeps the judgement-fact carry it has always had, below.
+    if (!(payload.event.kind === 'prior_range_edit' && edited.refusal?.reason === 'distribution_required')) {
+      return edited;
+    }
+    handling = 'fact_and_commit';
   }
   if (
     handling === 'mutating' &&
@@ -1183,6 +1306,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'goal_target_edit'
   ) {
     return await dispatchGoalTargetEdit(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'option_status_edit'
+  ) {
+    return await dispatchOptionStatusEdit(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -1396,6 +1525,44 @@ async function readPriorPendingsForMutation(
  * graph to the existing atomic commit chokepoint. No branch below writes a
  * graph directly or carries pending JSONB around the canonical lifecycle.
  */
+function selectedRunForSizing(read: WriteReplyAnalysisInputs): unknown {
+  return selectRunAnalysisFact(isScenarioAnalysisReasoningAuthority(read.factSet)
+    ? read.factSet.facts : read.hotWindow.facts)?.fact.result;
+}
+
+async function withInspectorSizingProgress(
+  payload: SystemEventTurnPayload,
+  response: OlumiResponse,
+  storedGraph: unknown,
+  storedGraphHash: string,
+  freshness: FreshnessDerivation,
+  run: unknown,
+): Promise<OlumiResponse> {
+  const progress = run === undefined ? undefined : guidedSizingProgress(storedGraph, run);
+  const runKey = runExplanationKeyForRecord(payload.scenario_id,
+    { run_state: { computed_at: freshness.computed_at } },
+    { type: 'analysis_result', computed_against_hash: freshness.graph_hash_at_run });
+  // No stored Run means no guided-path offer exists to advance. Never invent a key.
+  if (progress === undefined || runKey === null) return response;
+  const replyText = guidedSizingReplyText(undefined, progress);
+  let recentReplies: Awaited<ReturnType<NonNullable<ReturnType<typeof getSessionStore>>['readRecent']>> = [];
+  try {
+    const rows = await getSessionStore()?.readRecent(payload.scenario_id, 20);
+    recentReplies = rows ?? [];
+  } catch { /* Observational history cannot invalidate a successful write. */ }
+  const sizingActions = guidedSizingActions(progress.draft, storedGraph, recentReplies);
+  const guidedSizing = bindGuidedSizing(progress.draft, sizingActions,
+    { graph_hash: storedGraphHash, run_key: runKey },
+    { remaining: progress.remaining, progress_line: progress.progress_line });
+  return {
+    ...response,
+    // This v2 functional system-event reply has no final reply-shape composer.
+    assistant_text: `${response.assistant_text}\n\n${replyText.progress}`,
+    suggested_actions: [...response.suggested_actions, ...sizingActions],
+    ...(guidedSizing !== undefined ? { guided_sizing: guidedSizing } : {}),
+  };
+}
+
 async function dispatchEdgeStrengthEdit(
   payload: SystemEventTurnPayload,
   event: Extract<SystemEventTurnPayload['event'], { kind: 'edge_strength_edit' }>,
@@ -1403,6 +1570,7 @@ async function dispatchEdgeStrengthEdit(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
@@ -1412,14 +1580,25 @@ async function dispatchEdgeStrengthEdit(
     // The integrity-strict pending read rejects a non-array, any invalid entry,
     // or a scenario mismatch. On either failure the prior row remains newest
     // and therefore authoritative: no refusal transcript is appended.
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(
-        payload.scenario_id,
-        requestId,
-      ),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(
+          payload.scenario_id,
+          requestId,
+        ),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(
+          payload.scenario_id,
+          requestId,
+        ),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -1571,6 +1750,7 @@ async function dispatchEdgeStrengthEdit(
 
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See `replyForAttemptThatWroteNothing`.
   let thisAttemptWrote: boolean | null = null;
@@ -1619,10 +1799,12 @@ async function dispatchEdgeStrengthEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -1644,6 +1826,7 @@ async function dispatchEdgeStrengthEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -1679,12 +1862,13 @@ async function dispatchEdgeStrengthEdit(
   // readback below would compare a reread snapshot, not this attempt's bytes.
   // See `replyForAttemptThatWroteNothing`.
   if (thisAttemptWrote === false) {
-    return replyForAttemptThatWroteNothing({
+    const replay = replyForAttemptThatWroteNothing({
       writer: 'edge_strength_edit',
       payload,
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The edit is in the model iff the unique (from, to) edge carries what the
@@ -1712,6 +1896,10 @@ async function dispatchEdgeStrengthEdit(
       },
       logFields: { intent: event.intent },
     });
+    return replay.graph !== null && replay.freshness !== undefined && persistedAnalysisGraphHash !== null
+      ? { ...replay, response: await withInspectorSizingProgress(payload, replay.response,
+        persistedGraphBytes, persistedAnalysisGraphHash, replay.freshness, selectedRunForSizing(factsRead)) }
+      : replay;
   }
 
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
@@ -1761,21 +1949,21 @@ async function dispatchEdgeStrengthEdit(
     return { response: result.response, commitPerformed: false, graph: null };
   }
   const graphForReadiness = committedParse.data;
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   // The exact graph this commit projected and handed to the atomic store is
   // the UI's authoritative readback. It is load-bearing for confirm_current:
   // graph_patch honestly stays `noop` for the unchanged scientific tuple,
   // while this receipt proves provenance was durably stamped.
-  const response: OlumiResponse = {
+  const response = await withInspectorSizingProgress(payload, {
     ...committedResponse,
     ...(persistedAnalysisGraphHash !== null
       ? { graph_hash: persistedAnalysisGraphHash }
       : {}),
     draft_graph: buildAppliedGraphWireField(committedParse.data),
-  };
+  }, persistedGraphBytes, persistedAnalysisGraphHash, freshness, selectedRunForSizing(factsRead));
   // Fact history is observational only: it never authorises or blocks the
   // write. A healthy empty read means canonical `none`; a degraded read must
   // not fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -1871,6 +2059,7 @@ async function dispatchStructuralDelete(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
@@ -1880,11 +2069,19 @@ async function dispatchStructuralDelete(
     // append. On failure the prior row stays newest and authoritative: no
     // transcript is appended, because a degraded read gives no trusted base and
     // guessing at one is how a server model gets clobbered.
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -2028,6 +2225,7 @@ async function dispatchStructuralDelete(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See `replyForAttemptThatWroteNothing`.
   let thisAttemptWrote: boolean | null = null;
@@ -2091,10 +2289,12 @@ async function dispatchStructuralDelete(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -2116,6 +2316,7 @@ async function dispatchStructuralDelete(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -2157,6 +2358,7 @@ async function dispatchStructuralDelete(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The removal is in the model iff every removed id and edge pair is ABSENT
@@ -2251,7 +2453,7 @@ async function dispatchStructuralDelete(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2291,7 +2493,7 @@ async function dispatchStructuralDelete(
 }
 
 /**
- * `factor_value_edit` — run the real mutation, commit it, and stamp readiness.
+ * Manual factor value/range edits share the checked commit and reply authority.
  *
  * The shape mirrors the turn-executor's own write chokepoint, and the ORDER is
  * the part that matters:
@@ -2307,13 +2509,18 @@ async function dispatchStructuralDelete(
  */
 async function dispatchFactorValueEdit(
   payload: SystemEventTurnPayload,
-  event: Extract<SystemEventTurnPayload['event'], { kind: 'factor_value_edit' }>,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'factor_value_edit' | 'prior_range_edit' }>,
   requestId: string,
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   try {
-    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    if (useAppendV6()) {
+      ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    } else {
+      persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    }
   } catch (err) {
     // Fail CLOSED. A degraded read gives no trusted merge base, so writing
     // anything risks clobbering a model we cannot see. Surface it as a failed
@@ -2351,21 +2558,40 @@ async function dispatchFactorValueEdit(
    * the window this function always read, so the handler's `priorFacts` input
    * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const {
-    hotWindow: priorFactsRead,
-    factSet: analysisFactSet,
-    analysisInvalidatedAt,
-    analysisInvalidatedAtReadOk,
-  } = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const analysisInputs = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const { hotWindow: priorFactsRead } = analysisInputs;
   const priorFacts = priorFactsRead.facts;
 
-  const result = await applyFactorValueEdit({
-    payload,
-    event,
-    requestId,
-    persistedGraph,
-    priorFacts,
-  });
+  const cas = computeExpectedGraphCasHashes(persistedGraph);
+  const rangeFact = event.kind === 'prior_range_edit' ? buildJudgementFact(event) : null;
+  const rangeFactParse = rangeFact === null ? null : HandlerFactSchema.safeParse(rangeFact);
+  const result = event.kind === 'prior_range_edit'
+    ? applyPriorRangeEdit({
+        payload, event, persistedGraph, baseGraphHash: cas.expectedGraphAnalysisHash,
+        handlerFacts: rangeFactParse?.success === true ? [rangeFactParse.data] : [],
+      })
+    : await applyFactorValueEdit({ payload, event, requestId, persistedGraph, priorFacts });
+
+  if (result.kind === 'unchanged') {
+    const graphHash = cas.expectedGraphAnalysisHash;
+    return {
+      response: {
+        ...buildAcknowledgementResponse(payload),
+        ...(graphHash !== null ? { graph_hash: graphHash } : {}),
+        draft_graph: buildAppliedGraphWireField(result.graph),
+      },
+      commitPerformed: false,
+      commitSkippedReason: 'verified_no_op', graph: result.baseGraph as GraphV3T,
+      freshness: deriveWriteReplyFreshness(analysisInputs, graphHash, result.baseGraph, false, persistedGraph != null ? expectedRevision : undefined),
+    };
+  }
+  if (event.kind === 'prior_range_edit' && (result.kind === 'refused' || rangeFactParse?.success !== true)) {
+    return {
+      response: result.response, commitPerformed: false, graph: null,
+      commitSkippedReason: 'refused_no_write',
+      refusal: { reason: result.kind === 'refused' ? result.reason : 'invalid_range_fact' },
+    };
+  }
 
   // ── the refusal path ─────────────────────────────────────────────────────
   // An above-cap value, an unknown target, an inconsistent scale: all land
@@ -2377,9 +2603,9 @@ async function dispatchFactorValueEdit(
   // this it passed none, and an above-cap value silently wiped every live hold
   // (#1947 review, non-blocking 1).
   const factorPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
-  if (result.kind === 'refused') {
+  async function commitRefusal(refusal: { response: OlumiResponse; reason: string; pendingActions: readonly PendingAction[] }): Promise<DispatchSystemEventResult> {
     try {
-      await commitDirectAnswer(result.response, {
+      await commitDirectAnswer(refusal.response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'direct_answer',
@@ -2395,8 +2621,8 @@ async function dispatchFactorValueEdit(
         // encode — deriving it from the chip set would lose the cap, which is the
         // whole point of the consent. Omitted entirely when empty so the normal
         // derivation still runs for every other refusal.
-        ...(result.pendingActions.length > 0
-          ? { pending_actions: result.pendingActions }
+        ...(refusal.pendingActions.length > 0
+          ? { pending_actions: refusal.pendingActions }
           : {}),
         coaching_state: null,
       });
@@ -2406,32 +2632,34 @@ async function dispatchFactorValueEdit(
           request_id: requestId,
           event_kind: event.kind,
           scenario_id: payload.scenario_id,
-          refusal_reason: result.reason,
+          refusal_reason: refusal.reason,
           err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
         },
         'V5 factor_value_edit — refusal commit failed',
       );
-      return { response: result.response, commitPerformed: false, graph: null };
+      return { response: refusal.response, commitPerformed: false, graph: null };
     }
     log.info(
       {
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
-        refusal_reason: result.reason,
-        rescale_pendings_persisted: result.pendingActions.length,
+        refusal_reason: refusal.reason,
+        rescale_pendings_persisted: refusal.pendingActions.length,
       },
       'V5 factor_value_edit refused — committed honestly, no graph written',
     );
-    return { response: result.response, commitPerformed: true, graph: null };
+    return { response: refusal.response, commitPerformed: true, graph: null };
   }
+
+  if (result.kind === 'refused') return commitRefusal(result);
 
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let committedResponse: OlumiResponse = result.response;
   try {
-    const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const mutationPriorPendings = factorPriorPendings;
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions: mutationPriorPendings,
@@ -2444,11 +2672,10 @@ async function dispatchFactorValueEdit(
     const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
-      // A handler ran and produced facts. Claiming `direct_answer` with a
-      // populated `handler_facts` would misreport the turn to every consumer
-      // that keys off turn_class.
-      turn_class: 'handler',
-      handler_id: 'set_factor_value',
+      // Value has a registered D1 handler. Range retains its existing
+      // system-event classification and fact; no new handler is introduced.
+      turn_class: event.kind === 'factor_value_edit' ? 'handler' : 'direct_answer',
+      handler_id: event.kind === 'factor_value_edit' ? 'set_factor_value' : null,
       request_hash: computeRequestHash(payload),
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
@@ -2476,13 +2703,24 @@ async function dispatchFactorValueEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     committedResponse = commitResult.response;
   } catch (err) {
+    if (event.kind === 'factor_value_edit' && err instanceof UntouchedLevelRescaledError) {
+      // Reuse the handler invariant refusal verbatim. The door saved no graph;
+      // the existing refusal path records only that refusal in the transcript.
+      const composed = composeRecoverableHandlerResponse(new HandlerInvocationFailedError(err.message, {
+        cause_kind: 'graph_invariant_violated', retryable: false,
+        details: { handler_id: 'set_factor_value', reason: err.reason }, cause: err,
+      }), { handlerRegistry: HANDLER_VALIDATION_REGISTRY }, payload.stage);
+      return commitRefusal({ response: composed.response, reason: err.reason, pendingActions: [] });
+    }
     // ⭐ ANOTHER WRITER COMMITTED AFTER THIS EDIT'S BASE READ. The atomic CAS
     // refused the write, so nothing of this edit landed. That is a KNOWN
     // outcome, not an unconfirmed one, so it gets the typed conflict the
@@ -2508,6 +2746,7 @@ async function dispatchFactorValueEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read, never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -2577,7 +2816,7 @@ async function dispatchFactorValueEdit(
   // reconciles that authoritative postimage from the top-level `draft_graph`.
   // Without it the edit persists server-side but appears reverted until reload.
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
-  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
+  const graphForReadiness = committedParse.success ? persistedGraphBytes as GraphV3T : result.graph;
 
   const response: OlumiResponse = {
     ...committedResponse,
@@ -2628,16 +2867,16 @@ async function dispatchFactorValueEdit(
    */
   // The shared rule (`deriveWriteReplyFreshness`): absence only in a COMPLETE record.
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
-    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt, analysisInvalidatedAtReadOk },
+    analysisInputs,
     persistedAnalysisGraphHash,
-    persistedGraphBytes,
+    persistedGraphBytes, false, persistedScenarioRevision,
   );
   emitFreshnessTelemetry(
     freshness,
     {
       request_id: requestId,
       scenario_id: payload.scenario_id,
-      dispatch_path: 'system_event.factor_value_edit',
+      dispatch_path: `system_event.${event.kind}`,
     },
   );
   return {
@@ -2765,6 +3004,7 @@ async function dispatchOptionInterventionEdit(
     requestHash: computeRequestHash(payload) }, {
     targets: [{ optionId: event.option_id, factorId: event.factor_id, modelValue: event.value }],
     base_graph_hash: event.base_graph_hash,
+    canvasEdit: true,
   }, requestId);
 }
 
@@ -2774,13 +3014,12 @@ async function dispatchOptionInterventionEdit(
  * the add-risk door (SLICE C2), so the second in-process writer adds no derivation seam (the anti-rederivation pin).
  */
 function preWriteRefereeFreshness(
-  priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>,
+  read: WriteReplyAnalysisInputs,
   baseGraphHash: string,
   currentGraph: unknown,
+  currentScenarioRevision?: number,
 ): FrameFreshness {
-  return priorFactsRead.status === 'ok'
-    ? deriveAnalysisFreshness(priorFactsRead.facts, baseGraphHash, undefined, { currentGraph }).freshness
-    : 'unknown';
+  return deriveWriteReplyFreshness(read, baseGraphHash, currentGraph, true, currentScenarioRevision).freshness;
 }
 
 /**
@@ -2794,10 +3033,12 @@ export async function dispatchOptionLevelsBatch(
   payload: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'> & { readonly requestHash: string },
   batch: {
     readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number;
-      readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number } }[];
+      readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
+        readonly likely_range?: { readonly low: number; readonly high: number } } }[];
     readonly base_graph_hash: string;
     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
     readonly expectedLinks?: readonly string[];
+    readonly optionGaps?: readonly ApprovedOptionGap[];
     /** A compound approval's factor values, in the user's units: written in the SAME commit as the levels. */
     readonly values?: readonly ApprovedFactorValue[];
     /** The ranges it attaches to factors holding a bare amount: the SAME commit too. */
@@ -2806,18 +3047,40 @@ export async function dispatchOptionLevelsBatch(
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
     /** ⭐ One approved user-stated link effect (Canonical #72 5882780438): ONE commit, alone. */
     readonly linkEffect?: ApprovedLinkEffect;
+    /** ⭐ Several approved user-stated link effects: one in-memory postimage and one commit. */
+    readonly linkEffects?: readonly ApprovedLinkEffect[];
     /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** ⭐ S-E GOALS: one approved deadline card (the goal's `goal_horizon` only): ONE commit, alone. */
+    readonly goalHorizon?: ApprovedGoalHorizon;
+    /** ⭐ G: the user's answer to the goal's open question (`goal-reading-write.ts`): ONE commit, alone. */
+    readonly goalReading?: ApprovedGoalReading;
+    /** ⭐ Olumi's occurrence range for a risk root (`risk-occurrence.ts`): ONE commit, alone. */
+    readonly riskOccurrence?: ApprovedRiskOccurrence;
+    readonly goalSteady?: ApprovedGoalSteady;
+    readonly teamTime?: ApprovedTeamTime;
+    /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
+    readonly fenceRefusalReachesCaller?: boolean;
+    /**
+     * ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (SYS3 L4, #94 6115410093; DL #75 5902916137 (3)). Only the wire's single
+     * `option_intervention_edit` sets this: its level is read on the factor's declared range, as the card showed it
+     * (`figureOnFactorRange`). Served 50530b5f stored the card's "2 people" as a bare 0.4 because #2919's batch rule
+     * (no inferred figure) also reached this one-target form. Approval batches still infer nothing.
+     */
+    readonly canvasEdit?: true;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.identityConfirm !== undefined ? 'identity_confirm_edit'
-    : batch.linkEffect !== undefined ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
+  const eventKind = batch.goalSteady !== undefined ? 'goal_steady_edit' : batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
+    : batch.goalReading !== undefined ? 'goal_reading_edit'
+    : batch.riskOccurrence !== undefined ? 'risk_occurrence_edit'
+    : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
+    : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
-  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  let analysisInputs: WriteReplyAnalysisInputs;
   try {
-    priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
+    analysisInputs = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
   } catch (err) {
     // The read itself threw. Refuse before any append: a degraded history gives
     // no trusted freshness, and the prior row stays newest and authoritative.
@@ -2835,9 +3098,10 @@ export async function dispatchOptionLevelsBatch(
 
   // The atomic writer owns the base-graph read; a client hash alone cannot prove
   // a saved Run's goal unit before that read. Snapshot-bearing Runs fail closed.
-  const freshness: FrameFreshness = preWriteRefereeFreshness(priorFactsRead, batch.base_graph_hash, undefined);
-  const hasExistingAnalysis =
-    priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
+  const freshness: FrameFreshness = preWriteRefereeFreshness(analysisInputs, batch.base_graph_hash, undefined);
+  const priorFacts = isScenarioAnalysisReasoningAuthority(analysisInputs.factSet)
+    ? analysisInputs.factSet.facts : analysisInputs.hotWindow.facts;
+  const hasExistingAnalysis = priorFacts.some(isSuccessfulRunAnalysisFact);
 
   /**
    * R3-9 for a set of links: the last Run's use of each declared identity, from the SAME facts the canvas link writer
@@ -2845,12 +3109,9 @@ export async function dispatchOptionLevelsBatch(
    * link the canvas refuses is refused in a set too. A failed read writes nothing.
    */
   let lastRunIdentityUse: IdentityRunUse | null = null;
-  if (linkStrengths.length > 0 || batch.linkEffect !== undefined) {
+  if (linkStrengths.length > 0 || batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0) {
     try {
-      const factsRead = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
-      lastRunIdentityUse = identityRunUseFromFacts(
-        isScenarioAnalysisReasoningAuthority(factsRead.factSet) ? factsRead.factSet.facts : factsRead.hotWindow.facts,
-      );
+      lastRunIdentityUse = identityRunUseFromFacts(priorFacts);
     } catch {
       log.error({ request_id: requestId, event_kind: eventKind, scenario_id: payload.scenario_id },
         'V5 link_strengths_batch — analysis fact read failed; refusing any append');
@@ -2867,23 +3128,32 @@ export async function dispatchOptionLevelsBatch(
     requestHash: payload.requestHash,
     freshness,
     hasExistingAnalysis,
+    ...(batch.fenceRefusalReachesCaller === true ? { fenceRefusalReachesCaller: true } : {}),
   };
   // The single event keeps its own entry (itself the one-target form of the batch core); a batch — or a single
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
-    && batch.identityConfirm === undefined
+    && (batch.linkEffects?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.riskOccurrence === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
-    ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
+    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: batch.canvasEdit === true, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
       getSessionStore())
-    : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
+    : await executeOptionInterventionBatch({ ...common, inferFactorFigure: false, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
+      ...(batch.optionGaps !== undefined ? { optionGaps: batch.optionGaps } : {}),
       ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
       ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
-      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}) }, getSessionStore());
+      ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
+      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
+      ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}),
+      ...(batch.goalReading !== undefined ? { goalReading: batch.goalReading } : {}),
+      ...(batch.riskOccurrence !== undefined ? { riskOccurrence: batch.riskOccurrence } : {}),
+      ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
+      ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -2907,19 +3177,14 @@ export async function dispatchOptionLevelsBatch(
     // ⚠ AND THE HEALTHY-EMPTY / DEGRADED DISTINCTION SURVIVES. A history read
     // that succeeded and found nothing is `none` — a real verdict. A read that
     // degraded is `unknown`. Collapsing them would let a transport failure
-    // masquerade as "this model has never been analysed". No extra I/O: the
-    // prior facts are re-projected against the committed hash.
-    const freshnessAfterCommit: FreshnessDerivation =
-      priorFactsRead.status === 'ok'
-        ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash, undefined, { currentGraph: outcome.graph })
-        : {
-            freshness: 'unknown',
-            reason: 'derivation_failed',
-            selected_fact_index: null,
-            graph_hash_at_run: null,
-            current_graph_hash: outcome.analysisGraphHash,
-            computed_at: null,
-          };
+    // masquerade as "this model has never been analysed". Gap edits reuse the
+    // write-reply reader for durable Runs, visible edit facts and the restore
+    // marker. Append does not set that marker. Gap-free edits retain their
+    // original fact projection; the pre-write referee is unchanged.
+    // Reread after every commit: even byte-identical graphs can have newer edit facts.
+    const freshnessAfterCommit = deriveWriteReplyFreshness(
+      await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph, true, undefined,
+    );
     emitFreshnessTelemetry(
       freshnessAfterCommit,
       {
@@ -2927,7 +3192,7 @@ export async function dispatchOptionLevelsBatch(
         scenario_id: payload.scenario_id,
         dispatch_path: 'system_event.option_intervention_edit',
       },
-      { prior_fact_count: priorFactsRead.status === 'ok' ? priorFactsRead.facts.length : 0 },
+      { prior_fact_count: priorFacts.length },
     );
 
     log.info(
@@ -2997,6 +3262,7 @@ export async function dispatchOptionLevelsBatch(
         mutation_id: outcome.modelVersionReceipt.mutation_id, source_turn_id: outcome.modelVersionReceipt.source_turn_id } } : {}),
       ...('linksResized' in outcome && outcome.linksResized !== undefined && outcome.linksResized.length > 0
         ? { linksResized: outcome.linksResized } : {}),
+      ...('reencodedSiblings' in outcome ? { reencodedSiblings: outcome.reencodedSiblings } : {}),
       // Readiness from the bytes that LANDED. `undefined` only when the
       // committed graph did not parse — an honest absence, not a guess.
       ...(graphForReadiness !== null ? { analysisReady: canonicalReady } : {}),
@@ -3110,6 +3376,8 @@ export type CommitOptionLevelsInput = {
   readonly turn_id: string;
   /** The links the approved proposal declared. They must EQUAL the ones its levels need (`links_mismatch` otherwise). */
   readonly links: readonly { readonly option_id: string; readonly factor_id: string }[];
+  /** Exact gap declarations carried by the approved proposal, committed with its levels. */
+  readonly option_gaps?: readonly { readonly option_id: string; readonly mechanisms: readonly string[]; readonly operands?: Record<string, unknown> }[];
   readonly levels: readonly {
     readonly option_id: string;
     readonly factor_id: string;
@@ -3121,6 +3389,8 @@ export type CommitOptionLevelsInput = {
     readonly raw_value?: number;
     readonly unit?: string;
     readonly cap?: number;
+    /** TEMPORAL: the user's likely range for this level, raw units — kept on the cell beside their figure. */
+    readonly likely_range?: { readonly low: number; readonly high: number };
   }[];
   /**
    * ⭐ A compound approval's factor values (Canonical #70 5849037691), in the user's own units: applied by the canonical
@@ -3168,7 +3438,22 @@ export type CommitOptionLevelsInput = {
      * No reading shown ⇒ no token ⇒ the writer refuses (`link_reading_not_confirmed`); `user_stated` is never stamped.
      */
     readonly reading_token: string;
+    readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
+    readonly reversal?: ApprovedLinkEffect['reversal'];
+    readonly link_selected?: true;
   };
+  /** Several approved natural-effect edits, held together by one approval and one commit. */
+  readonly link_effects?: readonly {
+    readonly from: string;
+    readonly to: string;
+    readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+    readonly edge_token: string;
+    readonly quote: string;
+    readonly reading_token: string;
+    readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
+    readonly reversal?: ApprovedLinkEffect['reversal'];
+    readonly link_selected?: true;
+  }[];
   /**
    * ⭐ ONE PRODUCT CONFIRMATION (DL #72 5887510885; Canonical 5887564539): "MRR = price × subscribers" recorded as the
    * user's own `nonlinear_identity` on `outcome_id` by the canonical writer (`applyIdentityConfirmEdit`), in ONE commit,
@@ -3176,16 +3461,44 @@ export type CommitOptionLevelsInput = {
    * `reason: 'identity_<reason>'`; nothing is written.
    */
   readonly identity_confirm?: {
+    readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
+    readonly choice?: 'one_off';
     readonly outcome_id: string;
     readonly factor_ids: readonly string[];
     /** The card's displayed sentence. */
     readonly words: string;
-    /** `identityConfirmReadingToken({outcome_id, factor_ids, words})` of the reading the approval card SHOWED. */
+    /** The user's just-typed figures for all asked parts, inside this single approval. */
+    readonly part_levels?: readonly import('../agent-lane/identity-proposal.js').IdentityPartLevel[];
+    /** `identityConfirmReadingToken({outcome_id, factor_ids, words, part_levels})` of the reading the approval card SHOWED. */
     readonly reading_token: string;
   };
+  /**
+   * ⭐ S-E GOALS: ONE approved deadline card — the goal's `goal_horizon.deadline` written by `applyGoalHorizonEdit`, in ONE
+   * commit, alone. `expected_deadline` is the date the goal held when the card was made (`null` for none): the field is
+   * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
+   * `reason: 'deadline_<reason>'`; nothing is written.
+   */
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number };
+  /**
+   * #3024: the deadline card's bound goal (`still-applies.ts`) and whether THIS proposal's own write already landed, read by the
+   * store-reading writer. Kept out of the request identity: a retry is the same request.
+   */
+  readonly deadline_card?: { readonly expected_goal: unknown; readonly own_write_landed: boolean };
+  /** ⭐ G: ONE approved answer to the goal's open question — `expected_basis` is the stored reading the card showed. Alone. */
+  readonly goal_reading?: ApprovedGoalReading;
+  /** ⭐ ONE approved card of Olumi's occurrence range for a risk root — `expected_node` is the node the card showed. Alone. */
+  readonly risk_occurrence?: ApprovedRiskOccurrence;
+  readonly goal_steady?: ApprovedGoalSteady;
+  readonly team_time?: ApprovedTeamTime;
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
+      /**
+       * Present only on a `goal_steady` commit: whether the committed bytes the door just wrote read 'steady_attested'
+       * through the one horizon verdict. Every HTTP read strips the basis proof (S5 2b), so no caller can re-verify it
+       * from a read; this is the read-back (P45 #2903 served witness 9 Oct: the public read said "not confirmed").
+       */
+      readonly goal_steady_attested?: boolean;
       readonly receipt: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
       /** A verified no-op: the model already held every level (a retry). Nothing written; `receipt` is null. */
       readonly already_applied: boolean;
@@ -3193,13 +3506,15 @@ export type CommitOptionLevelsResult =
        * Each level exactly as the model holds it after this call: the writer's read-back verified every cell against
        * the persisted bytes (a commit), or the model already held each one exactly (a verified no-op).
        */
-      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[];
+      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number;
+        readonly raw_value?: number; readonly cap?: number; readonly unit?: string }[];
       /**
        * ⭐ P1-a: Olumi's own placeholder links this commit re-sized to fit a new level (ids only; empty on a no-op). The
        * receipt already names them; a consumer quoting its own receipt reads them here, never from a graph diff. The
        * door always sets it; optional only so a port's existing fakes still type-check.
        */
-      readonly links_resized?: readonly { readonly from: string; readonly to: string }[] }
+      readonly links_resized?: readonly { readonly from: string; readonly to: string }[];
+      readonly reencoded_siblings?: readonly ReencodedSibling[] }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string };
       /** The approved value, range or link that was refused (the whole approval is refused with it). */
@@ -3214,9 +3529,18 @@ export type CommitOptionLevelsResult =
  * route's ownership pre-flight); this grants nothing new, and adds no wire member.
  */
 export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
+  const rawGaps: unknown = input.option_gaps;
+  const gapRows = Array.isArray(rawGaps) ? rawGaps.map(row => row !== null && typeof row === 'object' && !Array.isArray(row)
+    ? { optionId: row.option_id, ...(Object.hasOwn(row, 'mechanisms') ? { mechanisms: row.mechanisms } : {}),
+      ...(Object.hasOwn(row, 'operands') ? { operands: row.operands } : {}) } : row) : rawGaps;
+  const gapInput = parseOptionGapDeclarations(gapRows, Object.hasOwn(input, 'option_gaps'));
+  if (gapInput.kind === 'invalid') return { status: 'refused', reason: gapInput.reason };
+
   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
-    ...(l.raw_value !== undefined || l.cap !== undefined
-      ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}) } } : {}) }));
+    ...(l.raw_value !== undefined || l.cap !== undefined || l.likely_range !== undefined
+      ? { figure: { ...(l.raw_value !== undefined ? { raw_value: Number(l.raw_value) } : {}),
+        ...(l.cap !== undefined ? { cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
+        ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
     scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
@@ -3224,51 +3548,112 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   // the idempotency key is (scenario_id, turn_id)).
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'system_event', event: { kind: 'option_levels_batch', links: input.links, levels: input.levels,
+      ...(Object.hasOwn(input, 'option_gaps') ? { option_gaps: input.option_gaps } : {}),
       ...(input.values !== undefined && input.values.length > 0 ? { values: input.values } : {}),
       ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames } : {}),
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
       ...(input.link_effect !== undefined ? { link_effect: input.link_effect } : {}),
+      ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
+      ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
+      ...(input.goal_reading !== undefined ? { goal_reading: input.goal_reading } : {}),
+      ...(input.risk_occurrence !== undefined ? { risk_occurrence: (({ own_write_landed: _own, ...card }) => card)(input.risk_occurrence) } : {}),
+      ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
+      ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+    ...(gapInput.declarations.length > 0 ? { optionGaps: gapInput.declarations } : {}),
+    fenceRefusalReachesCaller: true,
     ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
       ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),
     ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
     ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { linkStrengths: input.link_strengths.map(l => ({
-      from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band, adopted: l.author === 'model_proposed' })) } : {}),
+      from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
+      // L4 (c): a `confirm_current` is a REVIEW, never an adoption — the adoption authority is for a `set` only
+      // (`adopted_estimate_not_a_set`). D1 (DL 12 Oct, Batch D): Olumi's band on a placeholder now arrives as a `set` at the
+      // band's midpoint (a placeholder has no current band), so it is adopted here as Olumi's estimate, never its default.
+      adopted: l.author === 'model_proposed' && l.intent === 'set',
+      // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
+      ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
-      edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
+      edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token,
+      ...(input.link_effect.reversal !== undefined ? { reversal: input.link_effect.reversal } : {}),
+      ...(input.link_effect.link_selected === true ? { link_selected: true as const } : {}),
+      ...(input.link_effect.unit_readings !== undefined ? { unit_readings: input.link_effect.unit_readings } : {}) } } : {}),
+    ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { linkEffects: input.link_effects.map((effect) => ({ from: effect.from, to: effect.to, effect: effect.effect,
+      edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token,
+      ...(effect.reversal !== undefined ? { reversal: effect.reversal } : {}),
+      ...(effect.link_selected === true ? { link_selected: true as const } : {}),
+      ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
+      ceiling_stock: input.identity_confirm.ceiling_stock,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
-      reading_token: input.identity_confirm.reading_token } } : {}),
+      reading_token: input.identity_confirm.reading_token, choice: input.identity_confirm.choice,
+      ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),
+    ...(input.goal_steady !== undefined ? { goalSteady: input.goal_steady } : {}),
+    ...(input.goal_reading !== undefined ? { goalReading: { goal_id: input.goal_reading.goal_id, expected_basis: input.goal_reading.expected_basis,
+      ...(input.goal_reading.answer_words !== undefined ? { answer_words: input.goal_reading.answer_words } : {}),
+      ...(input.goal_reading.expected_goal !== undefined ? { expected_goal: input.goal_reading.expected_goal } : {}) } } : {}),
+    ...(input.risk_occurrence !== undefined ? { riskOccurrence: { risk_id: input.risk_occurrence.risk_id,
+      event_risk: input.risk_occurrence.event_risk, expected_node: input.risk_occurrence.expected_node,
+      goal_id: input.risk_occurrence.goal_id, expected_goal: input.risk_occurrence.expected_goal,
+      own_write_landed: input.risk_occurrence.own_write_landed === true } } : {}),
+    ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
+    ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
+      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,
+      ...(input.deadline_card !== undefined ? { expected_goal: input.deadline_card.expected_goal, own_write_landed: input.deadline_card.own_write_landed } : {}) } } : {}),
   }, requestId));
-  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
   if (r.commitSkippedReason === 'refused_no_write') {
     const at = r.refusal?.index !== undefined ? input.levels[r.refusal.index] : undefined;
     const value = r.refusal?.valueIndex !== undefined ? input.values?.[r.refusal.valueIndex] : undefined;
     const frame = r.refusal?.frameIndex !== undefined ? input.frames?.[r.refusal.frameIndex] : undefined;
     const link = r.refusal?.linkIndex === undefined ? undefined
-      : input.link_effect !== undefined ? input.link_effect : input.link_strengths?.[r.refusal.linkIndex];
+      : input.link_effect !== undefined ? input.link_effect : input.link_effects?.[r.refusal.linkIndex] ?? input.link_strengths?.[r.refusal.linkIndex];
     return { status: 'refused', reason: r.refusal?.reason ?? 'refused',
       ...(at !== undefined ? { pair: { option_id: at.option_id, factor_id: at.factor_id } } : {}),
       ...(value !== undefined ? { value: { factor_id: value.factor_id } } : {}),
       ...(frame !== undefined ? { frame: { factor_id: frame.factor_id } } : {}),
       ...(link !== undefined ? { link: { from: link.from, to: link.to } } : {}) };
   }
-  const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value }));
+  let committedGraph: unknown = r.graph;
+  // A goal_steady no-op (already attested, a2 #2925) reads the stored bytes too, so its read-back is never vacuous.
+  if (r.commitSkippedReason === 'verified_no_op' && (input.levels.length > 0 || input.goal_steady !== undefined)) {
+    try {
+      committedGraph = await getSessionStore().loadGraph(input.scenario_id);
+      if (computeAnalysisAffectingGraphHash(committedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) !== input.base_graph_hash) return { status: 'stale' };
+    } catch { return { status: 'unconfirmed' }; }
+  }
+  const committedLevels = input.levels.map(l => {
+    const node = (committedGraph as { nodes?: Record<string, unknown>[] } | undefined)?.nodes?.find(n => n.id === l.option_id);
+    const cell = (node?.interventions as Record<string, Record<string, unknown>> | undefined)?.[l.factor_id];
+    return { option_id: l.option_id, factor_id: l.factor_id,
+      value: readCommittedOptionEffect(committedGraph, l.option_id, l.factor_id),
+      ...(typeof cell?.raw_value === 'number' && Number.isFinite(cell.raw_value)
+        && typeof cell.cap === 'number' && Number.isFinite(cell.cap) && cell.cap > 0
+        ? { raw_value: cell.raw_value, cap: cell.cap } : {}),
+      ...(typeof cell?.unit === 'string' ? { unit: cell.unit } : {}) };
+  });
+  if (committedLevels.some(l => l.value === undefined)) return { status: 'unconfirmed' };
+  const verifiedLevels = committedLevels.map(l => ({ ...l, value: l.value! }));
+  const steadyReadBack = input.goal_steady === undefined ? {}
+    : { goal_steady_attested: goalHorizonVerdict(committedGraph) === 'steady_attested' };
   if (r.commitSkippedReason === 'verified_no_op') {
-    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: committedLevels,
-      links_resized: [] };
+    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: verifiedLevels,
+      links_resized: [], ...steadyReadBack };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
-  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels,
-    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })) };
+  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: verifiedLevels,
+    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [], ...steadyReadBack };
 }
 
 /**
@@ -3298,6 +3683,10 @@ export type HoldAddRiskInput = {
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
   readonly risk: { readonly id?: string; readonly label: string };
+  /** RC3: server-owned option identity from the widen press or verified chat label lease, never a model-authored stamp. */
+  readonly relies_on?: { readonly option_id: string };
+  /** event_risk.v1 slice 2a: CEE-held user words, outside producer operations. */
+  readonly user_event_risk?: { readonly event_risk: EventRiskV1T; readonly quote: string };
   /** Each link names ONE end: `from_id` (a factor driving the risk) or `to_id` (the goal or an outcome it threatens). */
   readonly links: readonly { readonly from_id?: string; readonly to_id?: string; readonly effect_direction: 'positive' | 'negative' }[];
 };
@@ -3344,13 +3733,15 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash, persistedGraph);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
 
   const outcome = dispatchAddRiskTransaction({
     params: { risk: input.risk, links: input.links },
+    ...(input.relies_on !== undefined ? { reliesOn: input.relies_on } : {}),
+    ...(input.user_event_risk !== undefined ? { userEventRisk: input.user_event_risk } : {}),
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
     freshness,
@@ -3370,7 +3761,9 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     ? outcome.response
     : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
-    kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
+    kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash,
+    ...(input.relies_on !== undefined ? { relies_on: input.relies_on } : {}),
+    ...(input.user_event_risk !== undefined ? { user_event_risk: input.user_event_risk } : {}) })).digest('hex').slice(0, 32)}`;
   try {
     await commitDirectAnswer(response, {
       scenario_id: input.scenario_id,
@@ -3467,7 +3860,7 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
 
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash, persistedGraph);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
@@ -3544,6 +3937,8 @@ export type CommitLimitEditInput = {
   readonly raw_value: number;
   /** A2 follow-up: the comparator the user STATED on this edit (typed), when they stated one (`LimitEditRequest`). */
   readonly stated_operator?: LimitEditRequest['stated_operator'];
+  /** S-E S4: the user's approved re-statement, kept through the existing limit writer. */
+  readonly source_quote?: LimitEditRequest['source_quote'];
 };
 export type CommitLimitEditResult =
   | {
@@ -3555,7 +3950,7 @@ export type CommitLimitEditResult =
        */
       readonly model_version_receipt: unknown;
       /** The row exactly as the committed model holds it. */
-      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string };
+      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string; readonly source_quote?: string };
     }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string }
@@ -3566,7 +3961,8 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
   const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'agent_limit_edit', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
-    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) }))
+    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}),
+    ...(input.source_quote !== undefined ? { source_quote: input.source_quote } : {}) }))
     .digest('hex').slice(0, 32)}`;
   const r = await dispatchAddConstraintEdit(
     {
@@ -3580,17 +3976,81 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
       apply: (persistedGraph, priorFacts) => applyLimitEdit({
         payload: turn,
         request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
-          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) },
+          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}),
+          ...(input.source_quote !== undefined ? { source_quote: input.source_quote } : {}) },
         requestId,
         persistedGraph,
         priorFacts,
       }),
       reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
     },
     requestId,
     Date.now(),
   );
-  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
+  if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
+  const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
+  if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
+  const held = (Array.isArray((r.graph as { goal_constraints?: unknown } | null)?.goal_constraints)
+    ? (r.graph as { goal_constraints: Record<string, unknown>[] }).goal_constraints : [])
+    .filter((c) => c['node_id'] === input.node_id && c['operator'] === input.operator);
+  const row = held.length === 1 ? held[0]! : undefined;
+  if (row === undefined || typeof row['constraint_id'] !== 'string' || typeof row['value'] !== 'number') return { status: 'unconfirmed' };
+  if (input.source_quote !== undefined && row['source_quote'] !== input.source_quote) return { status: 'unconfirmed' };
+  return {
+    status: 'committed',
+    graph_hash: graphHash,
+    model_version_receipt: (r.response as { model_version_receipt?: unknown }).model_version_receipt,
+    row: {
+      constraint_id: row['constraint_id'],
+      value: row['value'],
+      ...(typeof row['unit'] === 'string' ? { unit: row['unit'] } : {}),
+      ...(typeof row['value_frame'] === 'string' ? { value_frame: row['value_frame'] } : {}),
+      ...(typeof row['provenance'] === 'string' ? { provenance: row['provenance'] } : {}),
+      ...(typeof row['source_quote'] === 'string' ? { source_quote: row['source_quote'] } : {}),
+    },
+  };
+}
+
+/** S-E S4: the same fenced CAS commit and persisted-row read-back as limit edits. */
+export type CommitLimitAddInput = Omit<CommitLimitEditInput, 'operator' | 'stated_operator'> & Omit<LimitAddRequest, 'node_id' | 'raw_value' | 'base_graph_hash'>;
+export async function commitLimitAddInProcess(input: CommitLimitAddInput, requestId: string): Promise<CommitLimitEditResult> {
+  const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_limit_add', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+    unit: input.unit, source_quote: input.source_quote, ...(input.value_frame !== undefined ? { value_frame: input.value_frame } : {}) }))
+    .digest('hex').slice(0, 32)}`;
+  const r = await dispatchAddConstraintEdit(
+    {
+      turn,
+      requestHash,
+      eventKind: 'limit_add',
+      logFields: { node_id: input.node_id, operator: input.operator },
+      committedLogFields: { node_id: input.node_id, operator: input.operator },
+      committedMessage: 'V5 limit_add committed — the new limit row appended through add_constraint, hash recomputed',
+      dispatchPath: 'agent_lane.limit_add',
+      apply: (persistedGraph, priorFacts) => applyLimitAdd({
+        payload: turn,
+        request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+          unit: input.unit, source_quote: input.source_quote, ...(input.value_frame !== undefined ? { value_frame: input.value_frame } : {}) },
+        requestId,
+        persistedGraph,
+        priorFacts,
+      }),
+      reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
+    },
+    requestId,
+    Date.now(),
+  );
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
   if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
@@ -3620,6 +4080,7 @@ async function dispatchStructuralRename(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
@@ -3637,11 +4098,19 @@ async function dispatchStructuralRename(
     // a rename moves no hash, so there is no currency verdict to re-derive.
     // Issuing the read anyway would cost a round trip to compute a value that is
     // then discarded.
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -3766,6 +4235,7 @@ async function dispatchStructuralRename(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
@@ -3806,10 +4276,12 @@ async function dispatchStructuralRename(
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
       // "known-absent base" into "no base asserted" and darkens the CAS guard.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -3831,6 +4303,7 @@ async function dispatchStructuralRename(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -3878,6 +4351,7 @@ async function dispatchStructuralRename(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The rename is in the model iff the node carries the new label.
@@ -3955,7 +4429,7 @@ async function dispatchStructuralRename(
     },
     'V5 structural_rename committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -3983,6 +4457,375 @@ async function dispatchStructuralRename(
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForEgress),
     freshness,
   };
+}
+
+/**
+ * `option_status_edit` (0.69.0, MG F1 T6) — commit ONE option's status + its derived participation, verify both in the
+ * committed bytes (`optionStatusHolds`). The same atomic CAS / fence / no-write-replay / receipt path as
+ * `structural_rename` (its doctrine comments are there); unlike a rename it MOVES the analysis hash
+ * (`analysis_participation` is projected), so the freshness derivation below reports the last Run as stale.
+ */
+async function dispatchOptionStatusEdit(
+  payload: SystemEventTurnPayload,
+  event: OptionStatusEditEvent,
+  requestId: string,
+  startedAt: number,
+  // B8 (#2456, DL): the in-process port lets the turn fence's refusal reach `runFencedInProcessWrite` (never swallowed).
+  opts: { readonly fenceRefusalReachesCaller?: boolean } = {},
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  let factsRead: WriteReplyAnalysisInputs;
+  try {
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 option_status_edit — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: OptionStatusEditResult;
+  try {
+    result = applyOptionStatusEdit({ payload, event, requestId, persistedGraph });
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 option_status_edit — adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    if (result.baseHashConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.baseHashConflict.recovery_action,
+          conflict_category: result.baseHashConflict.conflict_category,
+          expected_base_graph_hash: result.baseHashConflict.expected_base_graph_hash,
+        },
+      };
+    }
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions,
+        ...(currentAnalysisHash !== null ? { graph_hash: currentAnalysisHash } : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      if (opts.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 option_status_edit — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 option_status_edit refused — committed honestly, no graph written',
+    );
+    return { response, commitPerformed: true, graph: contentGraph };
+  }
+
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
+  let graphPersisted = false;
+  let thisAttemptWrote: boolean | null = null;
+  // The commit's own typed account of the version mint (`CommitResult.modelVersionReceipt`: null = no version minted).
+  let versionMinted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      appliedOperations: result.appliedOperations,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
+      contentGraph: result.mutatedGraph,
+      ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
+    graphPersisted = commitResult.graphPersisted;
+    thisAttemptWrote = commitResult.thisAttemptWrote;
+    versionMinted = commitResult.modelVersionReceipt !== null;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (opts.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 option_status_edit — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 option_status_edit — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  if (thisAttemptWrote === false) {
+    const replay = replyForAttemptThatWroteNothing({
+      writer: 'option_status_edit',
+      payload,
+      requestId,
+      committedResponse,
+      persistedGraphBytes,
+      persistedScenarioRevision,
+      persistedAnalysisGraphHash,
+      analysisInputs: factsRead,
+      requestedChangeVisibleIn: (snapshot) => optionStatusHolds(snapshot, result.optionId, result.status),
+      logFields: { requested_option_id: result.optionId, requested_status: result.status },
+    });
+    // A replay is THIS operation's write only when the stored receipt names this turn AND the change is still visible —
+    // the replay reply's own attribution rule. Otherwise it attests nothing (a reused-id conflict, another writer).
+    const earlierWriteByThisTurnProven = committedResponse.model_version_receipt?.source_turn_id === payload.turn_id
+      && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+    return {
+      ...replay,
+      writeOutcome: { attempt_wrote: earlierWriteByThisTurnProven, version_minted: versionMinted,
+        model_version_receipt: committedResponse.model_version_receipt },
+    };
+  }
+
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const renameLanded =
+    committedParse.success && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+  if (
+    thisAttemptWrote !== true ||
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !renameLanded
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        this_attempt_wrote: thisAttemptWrote,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        status_landed: renameLanded,
+      },
+      'V5 option_status_edit — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForEgress = committedParse.data;
+
+  const response: OlumiResponse = {
+    ...committedResponse,
+    graph_hash: persistedAnalysisGraphHash,
+    draft_graph: buildAppliedGraphWireField(graphForEgress),
+  };
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      option_id: result.optionId, status: result.status,
+    },
+    'V5 option_status_edit committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
+  );
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.option_status_edit',
+    },
+    {
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
+    },
+  );
+  return {
+    response,
+    commitPerformed: true,
+    graph: graphForEgress,
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForEgress),
+    freshness,
+    // This attempt wrote, and the committed bytes hold the status (verified above). A signed-in write minted a version.
+    writeOutcome: { attempt_wrote: true, version_minted: versionMinted,
+      model_version_receipt: committedResponse.model_version_receipt },
+  };
+}
+
+/** The Agent's option-status door, in-process (MG F1 T6 fix-forward #2471; the `commitLimitEdit` pattern). */
+export interface CommitOptionStatusInput {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly option_node_id: string;
+  readonly expected_status: OptionStatusEditEvent['status'];
+  readonly status: OptionStatusEditEvent['status'];
+  readonly base_graph_hash: string;
+}
+
+/**
+ * What the writer itself says happened — the ONLY evidence the Agent may call "applied" on (CODEX overflow 5937013605 +
+ * DL: never inferred from display bytes, never from a missing receipt).
+ *   · `written`: the writer's `writeOutcome.attempt_wrote` (this turn wrote, or a replay proven to be this turn's own
+ *     write). `version_minted` + the unparsed receipt let the Agent require a receipt naming this turn when one was minted.
+ *   · `stale`: the CAS / expected-status conflict, or the turn fence's superseded/stopped verdict — nothing written.
+ *   · `refused`: the turn fence refused before any write (unclaimed / unavailable; set by the route's wrapper).
+ *   · `unconfirmed`: no typed evidence either way (a refusal reply, an unproven replay, a commit that could not be verified).
+ */
+export type CommitOptionStatusResult =
+  | { readonly status: 'written'; readonly version_minted: boolean; readonly model_version_receipt: unknown }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string }
+  | { readonly status: 'unconfirmed' };
+
+export async function commitOptionStatusInProcess(input: CommitOptionStatusInput, requestId: string): Promise<CommitOptionStatusResult> {
+  const event = {
+    kind: 'option_status_edit' as const, option_node_id: input.option_node_id, expected_status: input.expected_status,
+    status: input.status, base_graph_hash: input.base_graph_hash,
+  } as OptionStatusEditEvent;
+  const payload = { kind: 'system_event', turn_id: input.turn_id, scenario_id: input.scenario_id, stage: 'frame', event } as SystemEventTurnPayload;
+  const r = await dispatchOptionStatusEdit(payload, event, requestId, Date.now(), { fenceRefusalReachesCaller: true });
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
+  if (r.writeOutcome?.attempt_wrote !== true) return { status: 'unconfirmed' };
+  return { status: 'written', version_minted: r.writeOutcome.version_minted, model_version_receipt: r.writeOutcome.model_version_receipt };
 }
 
 /**
@@ -4016,16 +4859,25 @@ async function dispatchStructuralAdd(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4141,6 +4993,7 @@ async function dispatchStructuralAdd(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See the no-write branch below.
   let thisAttemptWrote: boolean | null = null;
@@ -4179,10 +5032,12 @@ async function dispatchStructuralAdd(
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
       // "known-absent base" into "no base asserted" and darkens the CAS guard.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -4204,6 +5059,7 @@ async function dispatchStructuralAdd(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
@@ -4249,6 +5105,7 @@ async function dispatchStructuralAdd(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The add is in the model iff the requested node id is.
@@ -4319,7 +5176,7 @@ async function dispatchStructuralAdd(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4380,16 +5237,25 @@ async function dispatchStructuralAddEdge(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4509,6 +5375,7 @@ async function dispatchStructuralAddEdge(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
@@ -4541,10 +5408,12 @@ async function dispatchStructuralAddEdge(
       // SPREAD, never conditionally omitted — `supabase-store.ts` derives
       // `p_expected_base_known` from key PRESENCE.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -4566,6 +5435,7 @@ async function dispatchStructuralAddEdge(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
@@ -4608,6 +5478,7 @@ async function dispatchStructuralAddEdge(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The connection is in the model iff an edge between the endpoints carries
@@ -4663,7 +5534,7 @@ async function dispatchStructuralAddEdge(
     draft_graph: buildAppliedGraphWireField(graphForReadiness),
   };
 
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4764,6 +5635,11 @@ async function dispatchAddConstraintEdit(
     readonly apply: (persistedGraph: unknown, priorFacts: readonly HandlerFact[]) => Promise<GoalTargetEditResult>;
     /** Carry the adapter's refusal reason on the result (the in-process limit edit only). */
     readonly reportRefusalReason?: boolean;
+    /**
+     * B8 (DL CR 5934735711): let a turn-fence refusal reach the caller (the in-process limit edit only), whose
+     * `runFencedInProcessWrite` maps every verdict. The wire event keeps its existing handling.
+     */
+    readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
   startedAt: number,
@@ -4771,8 +5647,13 @@ async function dispatchAddConstraintEdit(
   const payload = spec.turn;
   const event = { kind: spec.eventKind };
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   try {
-    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    if (useAppendV6()) {
+      ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    } else {
+      persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    }
   } catch (err) {
     // Fail CLOSED: a degraded read gives no trusted base. Retryable 500.
     log.error(
@@ -4849,6 +5730,7 @@ async function dispatchAddConstraintEdit(
   // ── the mutation path: ONE atomic commit, exactly as fve commits ─────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
@@ -4877,13 +5759,17 @@ async function dispatchAddConstraintEdit(
       // SPREAD, never conditionally omitted — see the fve writer's note: the
       // store derives the known-base CAS guard from key PRESENCE.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     committedResponse = commitResult.response;
   } catch (err) {
+    // The store refused before writing: nothing was saved, so this is never "commit failed, may have been saved".
+    if (spec.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
     if (err instanceof GraphStaleWriteError) {
       log.warn(
         {
@@ -4901,6 +5787,7 @@ async function dispatchAddConstraintEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -4941,7 +5828,7 @@ async function dispatchAddConstraintEdit(
       ? { draft_graph: buildAppliedGraphWireField(committedParse.data) }
       : {}),
   };
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(freshness, {
     request_id: requestId,
     scenario_id: payload.scenario_id,

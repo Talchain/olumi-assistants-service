@@ -39,6 +39,7 @@ import { checkPersistedGraphInvariants } from '../../persisted-graph-invariants.
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { framedObservedState, defaultFrameFor } from '../../agent-lane/admit-model.js';
+import { heldFigureOwnerOf, inputOriginOf, provenanceOf, valueAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { _resetConfigCache } from '../../../config/index.js';
 
 type Json = Record<string, any>;
@@ -111,8 +112,10 @@ function canonical(x: unknown): string {
 }
 
 describe('PJ-A1 £49 — the level itself', () => {
-  it('is the framer\'s own stated-baseline shape: raw 49 kept, on 0–100, brief_extraction', () => {
-    expect(STATED).toEqual({ value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP per month', source: 'brief_extraction' });
+  it('is the framer\'s own stated-baseline shape: raw 49 kept, on 0–100, brief_extraction WITH its attestation (`explicit`)', () => {
+    // POSITIVE ATTESTATION (DL 12 Oct): the typed door verified the figure, so it writes `explicit` beside the stamp.
+    expect(STATED).toEqual({ value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP per month', source: 'brief_extraction',
+      extractionType: 'explicit' });
   });
 });
 
@@ -141,7 +144,9 @@ describe('PJ-A1 £49 — the hold names the stated today level; the wire never c
     ['Olumi\'s estimate, not a stated level', [{ label: LABEL, observed_state: { ...STATED, source: 'cee_inference' } }]],
     ['a bare amount with no range', [{ label: LABEL, observed_state: { value: 49, source: 'brief_extraction' } }]],
     ['a frame that does not hold its own figure', [{ label: LABEL, observed_state: { ...STATED, value: 0.5 } }]],
-    ['an extra member riding along', [{ label: LABEL, observed_state: { ...STATED, extractionType: 'explicit' } }]],
+    // `explicit` is now the door's own attestation (DL 12 Oct); the negative keeps an extra member, and any OTHER type.
+    ['an extra member riding along', [{ label: LABEL, observed_state: { ...STATED, reviewed_by_user: { intent: 'confirm' } } }]],
+    ['an extraction type other than the door\'s own attestation', [{ label: LABEL, observed_state: { ...STATED, extractionType: 'inferred' } }]],
   ])('CONTRAST: %s → never recorded', (_name, levels) => {
     const held = hold(GRADED_SPEC(true), levels as never);
     expect(held.kind).toBe('held');
@@ -175,6 +180,29 @@ describe('PJ-A1 £49 — the confirm writes it in the SAME apply as the option',
     for (const e of [`decision_mrr->${OPT}`, `${OPT}->${FAC}`, `${FAC}->mrr`]) expect(edges).toContain(e);
     const projected = projectGraphForPersistence(structuredClone(executed.mutatedGraph)) as Json;
     expect(checkPersistedGraphInvariants(projected, { baseGraph: STORED }).status).not.toBe('violated');
+  });
+
+  it('ONE PROVENANCE AUTHORITY (DL 12 Oct): the confirmed £49 — the typed door\'s brief_extraction WITH its `explicit` attestation — is the person\'s: human origin, verified, counted as theirs', () => {
+    const executed = confirm(hold(GRADED_SPEC(true), [{ label: LABEL, observed_state: STATED }]).pendingActions[0]);
+    expect(executed.status).toBe('executed');
+    const factor = nodeOf(executed.mutatedGraph, FAC)!;
+    // Identity: THIS factor, holding exactly the door's stated shape (source brief_extraction, attested `explicit`).
+    expect(factor.observed_state).toEqual(STATED);
+    expect(factor.observed_state).toHaveProperty('extractionType', 'explicit');
+    // CONTRAST: the same figure WITHOUT the attestation (a hold minted before the door wrote it) is the person's by its stamp
+    // alone — every gate reads it as staging does, and the chance discloses it as unverified (`stampOnly`; LABEL, never withhold).
+    const bare = { ...factor.observed_state }; delete (bare as Record<string, unknown>).extractionType;
+    expect(provenanceOf({ value: bare })).toMatchObject({ origin: 'human', stampOnly: true });
+    expect(inputOriginOf(bare)).toBe('unverified');
+    expect(provenanceOf({ value: factor.observed_state })).not.toHaveProperty('stampOnly');
+    expect(inputOriginOf(factor.observed_state)).toBe('human');
+    const p = provenanceOf({ value: factor.observed_state });
+    expect({ origin: p.origin, role: p.role, accepted: p.accepted }).toEqual({ origin: 'human', role: 'verified', accepted: false });
+    expect(valueAuthorshipOf(factor.observed_state)).toBe('yours');
+    // What the Agent is told: the person's figure, from their brief — never "Not confirmed from your brief".
+    expect(heldFigureOwnerOf(factor.observed_state)).toBe('brief');
+    // CONTRAST, same commit: the switch's today-0 is Olumi's.
+    expect(provenanceOf({ value: nodeOf(executed.mutatedGraph, SWITCH_FAC)!.observed_state }).origin).toBe('ai');
   });
 
   it('CONTRAST: the same hold with no level → the factor lands valueless (never 0), as before', () => {
@@ -301,7 +329,6 @@ vi.mock('../../session/index.js', () => ({
     readFactsWithTurnFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => structuredClone(STORED),
     loadGraphAndBriefText: async () => ({ graph: structuredClone(STORED), briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

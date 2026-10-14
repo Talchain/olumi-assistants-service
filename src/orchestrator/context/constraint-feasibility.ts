@@ -31,23 +31,24 @@
  * dead on the live object wire — this module does not share that limitation.
  */
 
-import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import {
   ConstraintVerdictSchema,
   type ConstraintVerdict as ContractConstraintVerdict,
 } from "@talchain/schemas/orchestrator";
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
-import { readOptionResultSources } from "./option-result-source.js";
+import { GOAL_CHANCE_COMPANION_KEYS, identityBoundWinProbabilities, readOptionResultSources } from "./option-result-source.js";
 import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
   placeholderMovedOptions,
+  limitUnitsOf,
   type PlaceholderPartsReason,
 } from "./placeholder-parts.js";
-import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
+import { earnsAuthorshipCredit, settingClassOf, valueClassOf } from "../../cee/graph-readiness/obligation-provenance.js";
+import { isAssumptionFigure, valueClassOfStateOrStamp } from "../../cee/provenance/provenance-of.js";
 
 export interface WinnerConstraintFeasibility {
   /** True when the WINNING option violates a hard constraint. */
@@ -181,7 +182,16 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     if (Array.isArray(r.constraint_margins)) {
       out.constraint_margins = r.constraint_margins.filter((x) => !drop.includes(readString(readRecord(x)?.constraint_id) ?? ''));
     }
+    // Recovery Batch C: a precision describes the figure it sits beside (its n_informative and standard error ARE that
+    // figure's), so it goes with it — never a precision left standing for a withheld chance.
+    const cpp = readRecord(r.constraint_probabilities_precision);
+    if (cpp !== null) {
+      const next = { ...cpp };
+      for (const cid of drop) delete next[cid];
+      out.constraint_probabilities_precision = next;
+    }
     if ('probability_of_joint_goal' in out) delete out.probability_of_joint_goal;
+    delete out.probability_of_joint_goal_precision;
     return out;
   };
   const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
@@ -206,7 +216,8 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
       const cid = r === null ? null : readString(r.constraint_id);
       if (r === null || id === undefined || cid === null || !dropFor(id).includes(cid) || !('probability' in r)) return entry;
       if (r.probability === 0) withheldBreach = true;
-      const { probability: _withheld, ...rest } = r;
+      // Recovery Batch C (DL contract ruling 1): the entry's `probability_precision` describes that P, so it goes with it.
+      const { probability: _withheld, probability_precision: _itsPrecision, ...rest } = r;
       return rest;
     });
   }
@@ -225,39 +236,125 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
 /** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
 const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
 
+/** A Monte Carlo spread of an outcome: what an interval is drawn from. The centre (`mean`, `p50`) is not one. */
+const OUTCOME_SPREAD_FIGURES = ['std', 'p10', 'p90'] as const;
+/** Every precision block PLoT puts on an option's row (schemas 0.83.0 names, as PLoT sends them). */
+const OPTION_PRECISION_KEYS = ['probability_of_goal_precision', 'probability_of_joint_goal_precision', 'constraint_probabilities_precision'] as const;
+
+/**
+ * ⭐ Recovery Batch C, amendment 1 (DL contract ruling 3, 12 Oct): the status quo is "no change, by assumption" (paired
+ * arithmetic: its level is today's on every draw), so its row never carries a precision or a Monte Carlo interval — its
+ * standard error is 0 by construction, and any interval drawn from it would read "±0". In EVERY option-result carrier
+ * (the `withholdOptionGoalFigures` set) the status quo's row loses its precision blocks and its outcome's spread, and its
+ * top-level `constraint_results[]` entries lose `probability_precision`. Its centre and every other option stay exactly
+ * as PLoT sent them. Applied only where the licence records the status quo as by assumption. Pure.
+ */
+export function withholdStatusQuoIntervals<E>(envelope: E, statusQuoId: string): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const stripEntry = (entry: unknown): unknown => {
+    const r = readRecord(entry);
+    if (r === null || optionIdOf(r) !== statusQuoId) return entry;
+    const out: Record<string, unknown> = { ...r };
+    for (const k of OPTION_PRECISION_KEYS) delete out[k];
+    const outcome = readRecord(r.outcome);
+    if (outcome !== null) {
+      const kept: Record<string, unknown> = { ...outcome };
+      for (const k of OUTCOME_SPREAD_FIGURES) delete kept[k];
+      out.outcome = kept;
+    }
+    return out;
+  };
+  const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
+  const env = envelope as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else {
+    const nested = readRecord(env.results);
+    if (nested !== null) {
+      const n: Record<string, unknown> = { ...nested };
+      for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) n[k] = strip(nested[k]);
+      out.results = n;
+    }
+  }
+  const brief = readRecord(env.decision_brief);
+  if (brief !== null && 'options' in brief) out.decision_brief = { ...brief, options: strip(brief.options) };
+  if (Array.isArray(env.constraint_results)) {
+    out.constraint_results = env.constraint_results.map((entry) => {
+      const r = readRecord(entry);
+      if (r === null || readString(r.option_id) !== statusQuoId || !('probability_precision' in r)) return entry;
+      const { probability_precision: _none, ...rest } = r;
+      return rest;
+    });
+  }
+  return out as E;
+}
+
+/**
+ * ⭐ F1b PER-CLAIM WITHHOLDING (contract §2, programme-docs `s1/f1b-contract`): the claim classes a goal-figure withhold
+ * removes. A withhold that keeps some carries them on its warning as `withheld_claims`, so every reader strips EXACTLY
+ * these for EXACTLY `option_ids`. ABSENT = every class: the record every pre-F1b Run (and every other withhold) carries.
+ */
+export type WithheldGoalClaim = 'goal_probability' | 'joint_probability' | 'outcome' | 'downside' | 'win_share';
+/** Everything but the option's own outcome distribution. `downside` goes: its `expected_regret` compares options. */
+export const OUTCOME_KEPT_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probability', 'joint_probability', 'downside', 'win_share'];
+/**
+ * ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): a target the run cannot TEST withholds only the claims made
+ * AGAINST the target. The ordering (shares, the leader, the brief, the flips and the comparison's robustness) needs no
+ * level today and no unit — the shared offset cancels on each draw — so it keeps exactly the gates a run with no target
+ * applies. The outcome distribution goes too unless the failures leave it in the goal's units (`keepOutcome`).
+ */
+export const TARGET_ONLY_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probability', 'joint_probability'];
+
 /**
  * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
  * which option does best when, how close it is, and what would flip it. Withheld with them.
  */
-const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi'] as const;
+// `robustness_synthesis` is a robustness carrier `compactAnalysis` reads FIRST (Codex #2574 r3 P1): emptying `robustness`
+// alone left a withheld comparison still described as robust.
+const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi', 'robustness_synthesis'] as const;
 const BRIEF_LEADER_KEYS = ['headline', 'headline_banded', 'robustness', 'robustness_caveat', 'what_would_change'] as const;
 const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'robustness_band'] as const;
 
 /**
  * ⛔ (S) THE GOAL FIGURES AN UNSIZED LINK MOVES ARE WITHHELD AT THE SOURCE (DL #75 5902570568; AIQ 5902548598). For each
  * option in `withheld` (`placeholderGoalPaths`), in EVERY option-result carrier (the `withholdOptionLimitScores` set):
- * `probability_of_goal`, `probability_of_joint_goal`, the outcome's centre and spread, and `downside`. An option not in
+ * `probability_of_goal` (with its precision and drivers, `GOAL_CHANCE_COMPANION_KEYS`), `probability_of_joint_goal`, the
+ * outcome's centre and spread, and `downside`. An option not in
  * it keeps its chance (the status quo's earned 0). A share of runs in which an option did best is a comparison with every
  * other option, so EVERY option's `win_probability` (and the brief's `rank`) goes, and with it the leader and every fact
  * built on it: PLoT's brief summary, headline, crown and tipping points, `robustness` to PLoT's own empty shape (its
  * display verdict then reads `not_assessed`). `warning` is appended to `inference_warnings`, the carrier every reader of
  * a withheld run keys on (`GOAL_FIGURES_WITHHELD_CODES`). Returns `envelope` itself when nothing is withheld. Pure.
  */
-export function withholdOptionGoalFigures<E>(envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>): E {
+export function withholdOptionGoalFigures<E>(
+  envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>,
+  /** Keep each withheld option's outcome distribution (F1b [R1]): only the claims AGAINST the target go. */
+  opts: { readonly keepOutcome?: boolean; readonly keepOrdering?: boolean } = {},
+): E {
   if (withheld.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const stripEntry = (entry: unknown): unknown => {
     const r = readRecord(entry);
     if (r === null) return entry;
     const out: Record<string, unknown> = { ...r };
-    delete out.win_probability;
-    delete out.rank;
+    if (opts.keepOrdering !== true) {
+      delete out.win_probability;
+      delete out.rank;
+      // A per-row robustness reading is the same comparison claim as the top-level one emptied below.
+      delete out.robustness;
+    }
     const id = optionIdOf(r);
     if (id !== undefined && withheld.has(id)) {
       delete out.probability_of_goal;
+      for (const k of GOAL_CHANCE_COMPANION_KEYS) delete out[k];
       delete out.probability_of_joint_goal;
+      // Recovery Batch C: the joint's precision goes with the joint it describes.
+      delete out.probability_of_joint_goal_precision;
+      // The downside figures (p05, cvar_10, regret) are in the goal's outcome units: they go with the target claims, as
+      // before R2 (Codex r1 #2606: kept under P1/P5 they reached the Agent while the outcome was withheld).
       delete out.downside;
       const outcome = readRecord(r.outcome);
-      if (outcome !== null) {
+      if (outcome !== null && opts.keepOutcome !== true) {
         const kept: Record<string, unknown> = { ...outcome };
         for (const k of GOAL_OUTCOME_FIGURES) delete kept[k];
         out.outcome = kept;
@@ -282,18 +379,34 @@ export function withholdOptionGoalFigures<E>(envelope: E, withheld: ReadonlySet<
   if (brief !== null) {
     const b: Record<string, unknown> = { ...brief };
     if ('options' in brief) b.options = strip(brief.options);
-    for (const k of BRIEF_LEADER_KEYS) delete b[k];
+    if (opts.keepOrdering !== true) for (const k of BRIEF_LEADER_KEYS) delete b[k];
     const summary = readRecord(brief.analysis_summary);
     if (summary !== null) {
       const s: Record<string, unknown> = { ...summary };
-      for (const k of SUMMARY_LEADER_KEYS) delete s[k];
+      // `goal_fit` is the leader's fit to the TARGET: a target claim, withheld even when the ordering stays.
+      for (const k of SUMMARY_LEADER_KEYS) if (opts.keepOrdering !== true || k === 'goal_fit') delete s[k];
       b.analysis_summary = s;
     }
     out.decision_brief = b;
   }
-  for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
-  if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
-  out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), warning];
+  if (opts.keepOrdering !== true) {
+    for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
+    if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
+  }
+  // `win_shares_withheld`: this withhold REMOVED identity-bound usable shares (the run-delta producer's own rule, read
+  // off the envelope BEFORE the strip). Every entry's share goes above, so a later reader sees none and cannot tell a
+  // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
+  const sharesRemoved = opts.keepOrdering !== true && identityBoundWinProbabilities(env).size > 0;
+  const withheldClaims: readonly WithheldGoalClaim[] | undefined = opts.keepOrdering === true
+    // `downside` goes with them as before R2 (in the goal's outcome units; its `expected_regret` compares options).
+    ? [...TARGET_ONLY_CLAIMS, ...(opts.keepOutcome === true ? [] : ['outcome' as const]), 'downside' as const]
+    : opts.keepOutcome === true ? OUTCOME_KEPT_CLAIMS : undefined;
+  const recorded = {
+    ...warning,
+    ...(withheldClaims !== undefined ? { withheld_claims: [...withheldClaims] } : {}),
+    ...(sharesRemoved ? { win_shares_withheld: true } : {}),
+  };
+  out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), recorded];
   return out as E;
 }
 
@@ -964,10 +1077,13 @@ export function collectLeaderEstimatedTargetIds(
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
     if (!Object.prototype.hasOwnProperty.call(setBy, c.node_id)) continue;
-    const stamp = heldFactors.has(c.node_id)
-      ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
-      : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
-    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
+    // ONE PROVENANCE AUTHORITY: a held factor's value, else the leader's setting (the wire's cell when it carries a stamp,
+    // else the stored cell), each by `provenanceOf`.
+    const cell = sourceOf(setBy[c.node_id]) !== undefined ? setBy[c.node_id] : graphInterventions?.[c.node_id];
+    const owned = heldFactors.has(c.node_id)
+      ? valueClassOf(asObject(nodeById(c.node_id))?.observed_state)
+      : settingClassOf(cell, nodeById(c.node_id));
+    if (earnsAuthorshipCredit(owned)) continue;
     out.add(c.constraint_id);
   }
   return out;
@@ -986,8 +1102,6 @@ export function collectLeaderEstimatedTargetIds(
  */
 export type EstimateOnlyReason = 'level_user_assumption' | 'level_olumi_estimate';
 
-/** The contract literal for a figure the user accepted as an assumption — their own or Olumi's (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
-const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
 
 /**
  * The owner of one level stamp, from the ONE authority: `classifyValueSource`. `null` = the user's own figure
@@ -997,10 +1111,11 @@ const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption
  * authorship. They differ in whose NUMBER it is, which is the question here, so that class alone is split by its
  * stamp. Every other class decides the owner by itself. Pure.
  */
-export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null {
-  const provenance = classifyValueSource(stamp);
+export function limitLevelOwnerReason(level: unknown): EstimateOnlyReason | null {
+  // ONE PROVENANCE AUTHORITY: the level's whole `observed_state` (a bare stamp is read as a state with no extraction type).
+  const provenance = valueClassOfStateOrStamp(level);
   if (earnsAuthorshipCredit(provenance)) return null;
-  return provenance === 'user_ratified' && stamp === USER_ASSUMPTION_SOURCE ? 'level_user_assumption' : 'level_olumi_estimate';
+  return provenance === 'user_ratified' && isAssumptionFigure(level) ? 'level_user_assumption' : 'level_olumi_estimate';
 }
 
 /**
@@ -1014,6 +1129,8 @@ export function collectLimitLevelOwners(
   ratified: readonly RatifiedConstraint[],
   /** The options PLoT scores (run_analysis's final wire options). Omitted = no limit is withheld for its parts. */
   options?: ReadonlyArray<Record<string, unknown>>,
+  /** Only identities evaluated by this response may exempt operand links in the limit walk. */
+  identityEvaluations?: readonly unknown[],
 ): {
   userBaselineIds: Set<string>;
   userAssumptionIds: Set<string>;
@@ -1053,10 +1170,12 @@ export function collectLimitLevelOwners(
   if (options !== undefined) {
     const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
     const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
+    // A unit-less node is read in its own level limit's unit (the stored rows: `RatifiedConstraint` carries no frame).
+    const limitUnits = limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints);
     for (const c of ratified) {
       if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
       if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
-      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options);
+      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits, identityEvaluations);
       if (moved.size === 0) continue;
       out.placeholderMovedOptionIds.set(c.constraint_id, new Set(moved.keys()));
       const scored = options.map((o) => optionIdOf(o)).filter((id): id is string => id !== undefined);
@@ -1068,7 +1187,7 @@ export function collectLimitLevelOwners(
     const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
     const level = readRecord(readRecord(node)?.observed_state);
     if (level === null) continue;
-    const owner = limitLevelOwnerReason(level.source);
+    const owner = limitLevelOwnerReason(level);
     if (owner === null) out.userBaselineIds.add(c.constraint_id);
     else if (owner === 'level_user_assumption') out.userAssumptionIds.add(c.constraint_id);
   }
@@ -1262,7 +1381,7 @@ function collectLeaderScoredConstraintIds(
  *
  * Pure.
  */
-function collectProducerNotDecisionGradeConstraintIds(
+export function collectProducerNotDecisionGradeConstraintIds(
   envelope: Record<string, unknown>,
 ): Set<string> {
   const out = new Set<string>();
@@ -2135,7 +2254,7 @@ export function readLeaderLimitRisksFromResult(
  * {@link collectProducerNotDecisionGradeConstraintIds} — same parse, same rule — for a caller that needs PROOF of
  * certification rather than proof of its absence (a ratified id with no entry at all is in neither set). Pure.
  */
-function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
+export function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
   const out = new Set<string>();
   const results = envelope.constraint_results;
   if (!Array.isArray(results)) return out;

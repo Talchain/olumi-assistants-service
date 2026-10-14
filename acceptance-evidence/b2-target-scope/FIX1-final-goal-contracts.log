@@ -1,0 +1,14 @@
+Load gate exit: 0
+{"load":20.25390625,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/actions/__tests__/goal-reach-class-guard.test.ts src/orchestrator-v5/tools/handlers/__tests__/bprime-target-keeps-ordering.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+{"level":"info","time":1791478501160,"pid":54626,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_cancellations","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478501175,"pid":54626,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_cancellations","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  17:54:46
+   Duration  14.52s (transform 9.33s, setup 271ms, import 13.50s, tests 372ms, environment 0ms)
+

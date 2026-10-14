@@ -1,3 +1,4 @@
+// Science 393023 LICENCE (a)/(b), 7 Oct: goal_path_unsized → goal_path_placeholder; endpoint questions stay pinned.
 /**
  * ⭐ DECISION-REPRESENTATION row 4 — "not target-testable" is said BEFORE any Run, on the one carrier (PTL A #77
  * 5912737934; AIQ words #77 5912882031 + rules #75 5913502854; R3 P1–P6 #77 5912916965; P0 PARTNER row 9 5913561360).
@@ -17,6 +18,7 @@ import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
 import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { olumiGuessedGoalLink, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Json = Record<string, any>;
 const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json; cc: Json };
@@ -37,23 +39,49 @@ const FIX = { paul: RAW.paul, n1: RAW.n1, cc: RAW.cc, mrr: userSized(confirmed(R
 const reasonOf = (a: { reasons: readonly { field: string; code: string; message: string }[] }) => a.reasons.find((r) => r.field === 'permitted_analysis_mode')!;
 /** An entitled, SEPARATED run: the population Paul's "caveat, not withhold" ruling permits under `quantified_provisional`. */
 const separatedClaim = { leader_claim: { permitted: true, separation: 'separated' } };
+/**
+ * RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED) RETIRED the target's mode cap: the same graph with its target
+ * removed (the node's target fields and its own non-deadline rows) is the spec's comparison — a target never LOWERS the
+ * mode. Measured equal-mode controls on this file's graphs: Paul, MRR and m1 (N1 and CC acquire a blocker without one).
+ */
+const withoutTarget = (g: Json): Json => {
+  const c = structuredClone(g);
+  for (const n of c.nodes) if (n.kind === 'goal') for (const k of ['goal_threshold_raw', 'goal_threshold', 'success_threshold', 'threshold_source']) delete n[k];
+  c.goal_constraints = (c.goal_constraints ?? []).filter((r: Json) => r.deadline_metadata !== undefined);
+  return c;
+};
 
 describe('the verdict (0 LLM)', () => {
   it('Paul: no today\'s level (a) AND his goal is reached only through links nobody sized (c)', () => {
     expect(targetTestabilityOf(FIX.paul)).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [
       { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
-      { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings' },
+      { precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Investment firm meetings', link_to: 'securing funding',
+        link: { from: 'investment_firm_meetings', to: 'securing_funding' }, links: [
+        { from: 'investment_firm_meetings', to: 'securing_funding' },
+        { from: 'angel_investor_meetings', to: 'securing_funding' },
+        { from: 'runway_exhaustion', to: 'securing_funding' },
+        { from: 'fac_existing_supporter_outreach', to: 'securing_funding' },
+        { from: 'fundraising_overhead', to: 'securing_funding' },
+        { from: 'investment_firm_outreach', to: 'investment_firm_meetings' },
+        { from: 'warm_connections_pursued', to: 'investment_firm_meetings' },
+        { from: 'warm_connections_pursued', to: 'angel_investor_meetings' },
+        { from: 'angel_investor_outreach', to: 'angel_investor_meetings' },
+        { from: 'fundraising_overhead', to: 'runway_exhaustion' },
+        { from: 'fundraising_overhead', to: 'investment_firm_outreach' },
+      ] },
     ] });
   });
 
   it('Paul: AIQ\'s words — the target in his terms, EVERY failing reason, then the first question there is', () => {
     expect(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))).toBe(
-      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and the model doesn't yet say how Investment firm meetings turns into securing funding. What is securing funding today?");
+      // RE-PINNED, RT-10 B′ (Science's template edits, #87 5999608477): (c) names the canvas object, and the level
+      // question is "What's today's level of {goal}?". The target words and every failing reason are unchanged.
+      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 8 more. What's today's level of securing funding?");
   });
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
     const v = targetTestabilityOf(withToday(FIX.paul));
-    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_placeholder']);
   });
 
   it('CONTROL: £0 today AND every link into the goal sized IN £ by the user → testable', () => {
@@ -65,12 +93,16 @@ describe('the verdict (0 LLM)', () => {
     expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
   });
 
-  it('N1: (a), (b) and (c) all named; the question is (a)\'s ((b) is never asked)', () => {
+  it('N1: (a) and (c) named; the question is (a)\'s — (b) no longer fails: its held "<" is scored strictly (D3 step 1)', () => {
     const v = targetTestabilityOf(FIX.n1);
-    expect(v.kind === 'not_testable' && v.failures.map((f) => f.case)).toEqual(['a', 'b', 'c']);
+    // ⭐ RE-PINNED, D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): N1 holds "<" beside its threshold
+    // and the run minimises, so the wire sends `goal_threshold_strict` and ISL scores "below" exactly — P3 (b) passes.
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.case)).toEqual(['a', 'c']);
     const said = notTargetTestableSentence(FIX.n1, v)!;
-    expect(said).toContain("because it needs today's level of median first-response time, it can't yet test a '<");
-    expect(said.endsWith('What is median first-response time today?')).toBe(true);
+    expect(said).toContain("because it needs today's level of median first-response time and a size for the link");
+    expect(said).not.toContain("can't yet test a '<"); // the comparator clause went with (b)
+    // RE-PINNED, RT-10 B′ (Science's question edit): the question is still (a)'s.
+    expect(said.endsWith("What's today's level of median first-response time?")).toBe(true);
   });
 
   it('MRR before the identity card: an unconfirmed product → (c), and no second question (the card is the way on)', () => {
@@ -146,10 +178,15 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
       expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(guardAnalysisParticipation(g, { goalNodeId: 'mrr' }).graph));
     }
   });
-  it('RED: m1 as served → not testable, (c), naming the price', () => {
+  it('§(i): m1 as served keeps its churn placeholder; the converting price estimate clears (c)', () => {
     const v = targetTestabilityOf(M1);
-    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: expect.stringMatching(/price/i) }]);
-    expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe('exploratory');
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
+      link: { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' }, links: [
+      { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' },
+    ] }]);
+    // RE-PINNED, RT-10 B′ R2: the verdict no longer caps the mode — m1 is admitted as it is without its target.
+    expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(M1)).permitted_analysis_mode);
+    expect(reasonOf(resolveAnalysisAdmission(M1)).code).not.toBe('TARGET_NOT_TESTABLE');
   });
 
   it('RED (R3 5914745577): price → churn user-sized ALONE still counts churn once — churn → subscribers-at-12-months is Olumi\'s default', () => {
@@ -168,12 +205,14 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
 });
 
 describe('the admission says it before any Run, on the one carrier', () => {
-  it('RED: Paul — the run may proceed, but the mode is capped at `exploratory` with the reason in AIQ\'s words', () => {
+  // RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the mode is no longer capped; AIQ's words still
+  // reach the user before any Run, on the readiness view (`target_not_testable`, pinned below).
+  it('Paul — the run may proceed at the mode it has without the target, and the sentence still rides the readiness view', () => {
     const a = resolveAnalysisAdmission(FIX.paul);
     expect(a.structurally_analysable).toBe(true);
-    expect(a.permitted_analysis_mode).toBe('exploratory');
-    expect(reasonOf(a)).toEqual({ field: 'permitted_analysis_mode', code: 'TARGET_NOT_TESTABLE',
-      message: notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul)) });
+    expect(a.permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(FIX.paul)).permitted_analysis_mode);
+    expect(reasonOf(a).code).not.toBe('TARGET_NOT_TESTABLE');
+    expect(readinessViewOf(FIX.paul).target_not_testable).toBe(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul)));
   });
 
   it('CONTROL: MRR (today\'s level stated) keeps its mode and its own reason', () => {
@@ -191,21 +230,30 @@ describe('the admission says it before any Run, on the one carrier', () => {
   });
 });
 
-describe('every leader rail reads the capped mode (P0 PARTNER 5913561360), by execution', () => {
+/**
+ * RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the target no longer caps the mode, so every leader
+ * rail reads on Paul's graph exactly what it reads on the same graph without his target (the P0 PARTNER rails are
+ * unchanged; what they read moved). Each row binds the rail to the target-free graph's answer, by execution.
+ */
+describe('every leader rail reads the same mode with the target as without it (B′ R2), by execution', () => {
   const paul = buildCanonicalAnalysisReadyFromGraph(FIX.paul);
+  const paulNoTarget = buildCanonicalAnalysisReadyFromGraph(withoutTarget(FIX.paul));
   const mrr = buildCanonicalAnalysisReadyFromGraph(FIX.mrr);
 
-  it('the wire carries it: `analysis_ready.analysis_admission.permitted_analysis_mode` = exploratory', () => {
-    expect(permittedAnalysisModeFromAnalysisReady(paul)).toBe('exploratory');
+  it('the wire carries the target-free mode: `analysis_ready.analysis_admission.permitted_analysis_mode`', () => {
+    expect(permittedAnalysisModeFromAnalysisReady(paul)).toBe(permittedAnalysisModeFromAnalysisReady(paulNoTarget));
+    expect(permittedAnalysisModeFromAnalysisReady(paul)).not.toBe('exploratory');
   });
 
-  it('RED: the prose rail withholds naming a leader (it stood down only when the run itself was refused)', () => {
-    expect(analysisReadyPermitsLeaderNaming(paul)).toBe(false);
+  it('the prose rail answers as on the target-free graph', () => {
+    expect(analysisReadyPermitsLeaderNaming(paul)).toBe(analysisReadyPermitsLeaderNaming(paulNoTarget));
   });
 
-  it('RED: the agent lane withholds even a SEPARATED, entitled leader (the caveat arm is `quantified_provisional` only)', () => {
-    expect(agentLaneLeaderWithheld({ mayNameLeadingOption: true, analysisReady: paul, separationEstablished: true })).toBe(true);
-    expect(claimPermissionsFrom(separatedClaim, paul, { requested: true })).toMatchObject({ leader_may_be_named: false, permitted_analysis_mode: 'exploratory' });
+  it('the agent lane answers a SEPARATED, entitled leader as on the target-free graph', () => {
+    expect(agentLaneLeaderWithheld({ mayNameLeadingOption: true, analysisReady: paul, separationEstablished: true }))
+      .toBe(agentLaneLeaderWithheld({ mayNameLeadingOption: true, analysisReady: paulNoTarget, separationEstablished: true }));
+    expect(claimPermissionsFrom(separatedClaim, paul, { requested: true }).leader_may_be_named)
+      .toBe(claimPermissionsFrom(separatedClaim, paulNoTarget, { requested: true }).leader_may_be_named);
   });
 
   it('CONTROL: MRR\'s separated, entitled leader keeps today\'s caveated permission', () => {
@@ -322,3 +370,81 @@ describe('row 3: a size construction credits to the user is no Olumi guess, even
   });
 });
 
+
+/**
+ * ⭐ L4 / DL ruling 5929790081 (i) AT THE GOAL TARGET READER (CODEX CR #2446 5930402198): Olumi's estimate the user
+ * ACCEPTED sizes a link for goal figures, so R3's m1 is testable once the user approves Olumi's sizes, with Olumi's origin
+ * kept. Controls: unapproved Olumi sizes and a reviewed legacy placeholder still cap it, and the user's own size lifts it.
+ * Batch A ruling 6: the accepted fixture starts from genuinely sized estimates plus the review approval records.
+ */
+describe('L4 (i): an ACCEPTED Olumi size licenses the goal target; unapproved Olumi sizes still cap it', () => {
+  const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
+  const review = { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' };
+  // Batch A ruling 6: start with genuine estimates; approval never sizes a placeholder.
+  const accepted = (g: Json): Json => {
+    const c = structuredClone(g);
+    for (const e of c.edges) if (olumiSized(e) && e.provenance) {
+      const { mean_projected: _projection, ...origin } = e.provenance;
+      e.provenance = { ...origin, magnitude: 'olumi_estimate', reviewed_by_user: review };
+    }
+    return c;
+  };
+
+  it('PRECONDITION: m1 rests on Olumi’s unapproved size → not testable (P5)', () => {
+    const v = targetTestabilityOf(M1);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toContain('P5');
+  });
+
+  it('RED (i): every Olumi size on the path ACCEPTED → the target is no longer capped by them, and stays Olumi’s', () => {
+    const g = accepted(M1);
+    expect(g.edges.filter((e: Json) => olumiSized(e)).every((e: Json) => e.provenance.source !== 'user_specified'), 'origin kept (R11)').toBe(true);
+    expect(targetTestabilityOf(g).kind).not.toBe('not_testable');
+    expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(userSized(M1)));
+  });
+
+  it('CONTROL: a REVIEWED legacy placeholder (Paul’s 09:25 links before L4) is still unsized → still capped', () => {
+    const g = structuredClone(M1);
+    for (const e of g.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...e.provenance, magnitude: 'olumi_placeholder', reviewed_by_user: review };
+    expect(targetTestabilityOf(g).kind).toBe('not_testable');
+  });
+
+  it('CONTROL (ii): the limit rule keeps the whole test — an accepted Olumi size is still Olumi’s guess for a limit', () => {
+    const e = accepted(M1).edges.find((x: Json) => olumiSized(x))!;
+    expect(olumiGuessedLink(e, () => undefined)).toBe(true);
+    expect(olumiGuessedGoalLink(e, () => undefined)).toBe(false);
+  });
+});
+
+/**
+ * ⭐ DL condition (1) on #2446 (5930770727): a link that HOLDS BY DEFINITION on a goal path never caps target
+ * testability, even when the size is Olumi's — the goal reader keeps `holdsByDefinition` (the ONE structural test, #2445).
+ * Built on Paul's testable graph (today's level + £-sized links): one link into the goal becomes Olumi's, definitional,
+ * exactly +1 £ per £. CONTROL: the same link without the definitional mark is Olumi's guess and caps the target.
+ */
+describe('L4 × #2445: a definitional Olumi link on the goal path never caps the target', () => {
+  const definitionalInto = (definitional: boolean): Json => {
+    const g = poundsInto(withToday(FIX.paul));
+    const goal = g.nodes.find((n: Json) => n.kind === 'goal');
+    const unit = goal.goal_threshold_unit as string;
+    const e = g.edges.find((x: Json) => x.to === goal.id && g.nodes.find((n: Json) => n.id === x.from)?.kind !== 'option')!;
+    for (const n of g.nodes) if (n.id === e.from) { delete n.unit; if (n.observed_state) delete n.observed_state.unit; }
+    e.strength = { mean: 1, std: 0.01 };
+    e.defaulted = true;
+    e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate', ...(definitional ? { definitional: true } : {}),
+      natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit, strength_mean: 1 } };
+    return g;
+  };
+
+  it('PRECONDITION: Paul’s graph with today’s level and £-sized links is testable', () => {
+    expect(targetTestabilityOf(poundsInto(withToday(FIX.paul)))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('RED: Olumi’s definitional +1 £ per £ link into the goal → still testable', () => {
+    expect(targetTestabilityOf(definitionalInto(true))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('CONTROL: the same Olumi link WITHOUT the definitional mark is a guess → not testable (P5)', () => {
+    const v = targetTestabilityOf(definitionalInto(false));
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toEqual(['P5']);
+  });
+});

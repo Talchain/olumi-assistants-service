@@ -292,7 +292,7 @@ describe('F1 — the target may BE the option that has already won', () => {
       mayNameLeadingOption: true,
     });
     expect(a!.kind).toBe('already_leading');
-    expect(a!.text).toContain('Hire Two Senior Engineers Locally is already the leading option');
+    expect(a!.text).toContain('Hire Two Senior Engineers Locally is already the most-supported option in this model');
     expect(a!.text).not.toContain('none of the single-factor changes');
     expect(a!.text).not.toContain('in favour of');
   });
@@ -323,7 +323,7 @@ describe('F1 — the target may BE the option that has already won', () => {
     expect(a!.text).not.toContain('in favour of');
     expect(a!.text).not.toContain('none of the single-factor changes');
     // … and does not confirm it leads.
-    expect(a!.text).not.toMatch(/already the leading option|leads/i);
+    expect(a!.text).not.toMatch(/already the (?:leading|most-supported) option|leads/i);
     expect(a!.text).toContain('cannot say where Hire Two Senior Engineers Locally stands');
   });
 

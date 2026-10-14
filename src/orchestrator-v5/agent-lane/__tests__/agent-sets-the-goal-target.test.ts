@@ -24,7 +24,8 @@ import { SystemEventTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { authorisationTurnId, createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { AGENT_TOOLS, MUTATION_TOOLS, dispatchTool, toolsFor } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
-import { comparatorTheUserWrote, userWordsOf } from '../stated-by-user.js';
+import { comparatorTheUserWrote, comparatorTheUserWroteFor, userWordsOf } from '../stated-by-user.js';
+import { statedGoalOperatorFor } from '../stated-goal-operator-context.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -60,7 +61,8 @@ function world(initial: Graph) {
   const sent: Record<string, unknown>[] = [];
   const d: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph')) return { status: 200, json: { graph: g, graph_hash: `h${rev}` } };
-    sent.push(body as Record<string, unknown>);
+    const bodyRecord = body as Record<string, unknown>;
+    sent.push(bodyRecord);
     const ev = (body as { event?: Record<string, unknown> }).event ?? {};
     if (ev['kind'] === 'goal_target_edit') {
       if (ev['base_graph_hash'] !== `h${rev}`) return { status: 409, json: { error: 'GRAPH_DIVERGED', details: { reason: 'graph_write_conflict' } } };
@@ -68,7 +70,10 @@ function world(initial: Graph) {
         return { status: 422, json: { error: 'INGRESS_CONTRACT_VIOLATION', details: { reason: 'system_event_refused_no_write', event_kind: 'goal_target_edit' } } };
       }
       const operator = ev['constraint_type'] === 'at_least' ? '>=' : '<=';
-      const row = { constraint_id: 'gc-1', node_id: ev['goal_node_id'], operator, value: ev['raw_value'], unit: ev['unit'], provenance: 'explicit', value_frame: 'level' };
+      // This writer is a model only: mirror the real handler's approved in-process comparator sideband.
+      const statedOperator = statedGoalOperatorFor(String(bodyRecord['scenario_id']), String(ev['goal_node_id']), String(bodyRecord['turn_id']));
+      const row = { constraint_id: 'gc-1', node_id: ev['goal_node_id'], operator,
+        ...(statedOperator === '<' || statedOperator === '>' ? { operator_as_stated: statedOperator } : {}), value: ev['raw_value'], unit: ev['unit'], provenance: 'explicit', value_frame: 'level' };
       g = {
         ...g,
         goal_constraints: [...(g.goal_constraints ?? []).filter((c) => !(c['node_id'] === ev['goal_node_id'] && c['operator'] === operator)), row],
@@ -125,16 +130,17 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     expect(w.sent).toHaveLength(1);
   });
 
-  it('RED: "keep churn under 5%" → at most, read back from the goal\'s <= row', async () => {
+  it('R1b: "keep churn under 5%" → below, read back from the goal\'s <= row plus stated <', async () => {
     const turn = 'Keep monthly churn under 5%, please.';
     const w = world(graphWith([{ id: 'churn', kind: 'goal', label: 'Monthly churn', goal_threshold_unit: '%' }]));
     const store = new ProposalStore();
     const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn), { constraint_type: 'at_most', value: 5, unit: '%', rationale: 'x' });
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, public_label: 'Set the goal "Monthly churn" to at most 5%' }));
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, public_label: 'Set the goal "Monthly churn" to below 5%' }));
     const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [turn]), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, applied: true }));
     parsesOnTheWire(w.sent[0]!);
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ goal_node_id: 'churn', constraint_type: 'at_most', raw_value: 5, unit: '%' }));
+    expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ operator: '<=', operator_as_stated: '<', value: 5 })]);
   });
 
   // DL #72 5862394804: a bare count grounded any unit. With subscribers in the model, "300 Pro paying subscribers" is
@@ -226,24 +232,40 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     expect(p.refusal).toBe('target_not_stated');
   });
 
-  it('RED: the direction must be the user\'s own, said THIS turn — absent, contradictory, negated, asked, or different from the Agent\'s → refused, nothing prepared', async () => {
-    const cases: [string, 'at_least' | 'at_most', string?][] = [
-      ['MRR should be £60k by December.', 'at_least'],
-      ['We need at least £60k MRR, and keep it under £60k of spend.', 'at_least'],
-      ['It is not at least £60k we need.', 'at_least'],
-      ['Is at least £60k realistic?', 'at_least'],
-      ['We need at most £60k MRR.', 'at_least'],
-      ['Yes.', 'at_least', SAID],
-    ];
-    for (const [turn, type, earlier] of cases) {
+  it('⭐ DL 380e54 (#2447): words SILENT on the direction → the Agent\'s reading is offered as a DECISION (no refusal)', async () => {
+    for (const [turn, earlier] of [['MRR should be £60k by December.', undefined], ['Yes.', SAID]] as const) {
       const w = world(graphWith());
-      const store = new ProposalStore();
-      const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn, earlier !== undefined ? [earlier] : []), { constraint_type: type, value: 60000, unit: '£', rationale: 'x' });
-      expect(p, turn).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'direction_not_stated' }));
-      expect(String(p.detail)).toMatch(/at least or at most/);
-      expect(store.outstanding(SCENARIO, null)).toEqual([]);
+      const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(turn, earlier !== undefined ? [earlier] : []), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+      expect(p, turn).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
       expect(w.sent).toEqual([]);
     }
+  });
+
+  it('⭐ DL 380e54 (#2447 follow-up 5931593767): NO REFUSAL ON DIRECTION — contradictory, negated, asked or both ways → a DECISION; the literal reading primary when there is one', async () => {
+    const cases: [string, 'at_least' | 'at_most', 'at_least' | 'at_most'][] = [
+      ['We need at least £60k MRR, and keep it under £60k of spend.', 'at_least', 'at_least'],
+      ['It is not at least £60k we need.', 'at_least', 'at_least'],
+      ['Is at least £60k realistic?', 'at_least', 'at_least'],
+      ['We need at most £60k MRR.', 'at_least', 'at_most'],
+    ];
+    for (const [turn, agentReading, chosen] of cases) {
+      const w = world(graphWith());
+      const store = new ProposalStore();
+      const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn), { constraint_type: agentReading, value: 60000, unit: '£', rationale: 'x' });
+      const alternative = chosen === 'at_least' ? 'at_most' : 'at_least';
+      expect(p, turn).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen, alternative } }));
+      const stored = store.get(String(p.proposal_id));
+      expect(stored?.operations[0]?.value, turn).toEqual(expect.objectContaining({ constraint_type: chosen }));
+      expect(String(p.public_label), turn).toContain(chosen === 'at_least' ? 'at least £60' : 'at most £60');
+      expect(w.sent).toEqual([]);
+    }
+  });
+
+  it('CONTROL: the user\'s literal words AGREE with the Agent\'s reading → the card is theirs, no decision', async () => {
+    const w = world(graphWith());
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('We need at least £60k MRR.'), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    expect(p).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(p).not.toHaveProperty('direction_choice');
   });
 
   it('the goal must resolve to exactly one: none, or two → refused, nothing prepared, and the Agent asks', async () => {
@@ -428,12 +450,136 @@ describe('the tool is declared, dispatched, withheld in preview, and named in th
 
 describe('comparatorTheUserWrote — the direction is the user\'s own words, affirmed, this turn', () => {
   it('reads each phrase, and "no less/more than" as a whole', () => {
-    for (const t of ['We need at least £60k.', 'A minimum of £60k.', 'No less than £60k.', 'More than £60k.', 'Over £60k.', 'Above £60k MRR.']) {
+    for (const t of ['We need at least £60k.', 'A minimum of £60k.', 'No less than £60k.']) {
       expect(comparatorTheUserWrote(t), t).toBe('at_least');
     }
-    for (const t of ['At most 5%.', 'No more than 5%.', 'Under 5%.', 'Below 5%.', 'Less than 5%.', 'A maximum of 5%.', 'Cap it at 5%.']) {
+    for (const t of ['At most 5%.', 'No more than 5%.', 'A maximum of 5%.', 'Cap it at 5%.']) {
       expect(comparatorTheUserWrote(t), t).toBe('at_most');
     }
+  });
+
+  it('R1b: keeps the strict direction in the user’s words, including Paul’s churn wording', () => {
+    for (const words of ['keep churn under 4%', 'keeping monthly churn UNDER 4%', 'Below 4%.', 'Less than 4%.']) {
+      expect(comparatorTheUserWrote(words), words).toBe('below');
+    }
+    for (const words of ['Above 4%.', 'Over 4%.', 'More than 4%.']) {
+      expect(comparatorTheUserWrote(words), words).toBe('above');
+    }
+    // Equivalent phrases remain one stated comparator; different strictness asks for clarification.
+    expect(comparatorTheUserWrote('Under 4%, below that limit.')).toBe('below');
+    expect(comparatorTheUserWrote('At most 4%, under 4%.')).toBeNull();
+  });
+
+  it.each([
+    ['less than or equal to 4%', 'at_most'],
+    ['less or equal to 4%', 'at_most'],
+    ['under or equal to 4%', 'at_most'],
+    ['below or equal to 4%', 'at_most'],
+    ['more than or equal to 4%', 'at_least'],
+    ['more or equal to 4%', 'at_least'],
+    ['above or equal to 4%', 'at_least'],
+    ['over or equal to 4%', 'at_least'],
+    ...['less', 'fewer', 'lower', 'below', 'under'].map((word) => [`4% or ${word}`, 'at_most'] as const),
+    ...['more', 'higher', 'above', 'over'].map((word) => [`4% or ${word}`, 'at_least'] as const),
+    ['£4,000 or less', 'at_most'],
+    ['4k or more', 'at_least'],
+    ['under 4%', 'below'],
+    ['no less than 4%', 'at_least'],
+  ] as const)('R1 inclusive completion: %s → %s', (words, expected) => {
+    expect(comparatorTheUserWrote(`Keep churn ${words}.`), words).toBe(expected);
+  });
+
+  it('R1 inclusive suffix requires a stated figure', () => {
+    expect(comparatorTheUserWrote('Keep churn or less.')).toBeNull();
+    expect(comparatorTheUserWrote('Keep churn or above.')).toBeNull();
+  });
+
+  it('R2 P2: a same-value inclusive suffix in another clause does not change the strict target', () => {
+    const words = 'Keep monthly churn under 4%. Last year, 4% or more of cancellations were involuntary';
+    expect(comparatorTheUserWrote(words), 'the suffix belongs to last year’s cancellations, not the monthly-churn target').toBe('below');
+  });
+
+  it('R2 P2 writer: preserves the strict target beside a same-value historical suffix decoy', async () => {
+    const words = 'Keep monthly churn under 4%. Last year, 4% or more of cancellations were involuntary';
+    const w = world(graphWith([{ id: 'churn', kind: 'goal', label: 'Monthly churn', goal_threshold_unit: '%' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(words), {
+      constraint_type: 'at_most', value: 4, unit: '%', rationale: 'The user stated their churn target.',
+    });
+    expect(p.public_label, 'the approval card binds to churn’s strict target, not the historical 4%').toBe('Set the goal "Monthly churn" to below 4%');
+    expect(p).not.toHaveProperty('direction_choice');
+    expect(store.get(String(p.proposal_id))?.operations).toEqual([{ op: 'set_goal_target', path: 'churn',
+      value: { constraint_type: 'below', raw_value: 4, unit: '%' } }]);
+    const approved = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [words]), {
+      proposal_id: String(p.proposal_id),
+    });
+    expect(approved).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
+    const row = w.graph().goal_constraints?.find((limit) => limit['node_id'] === 'churn');
+    expect(row, 'the strict comparator is stored on this goal’s own row').toEqual(expect.objectContaining({
+      node_id: 'churn', operator: '<=', operator_as_stated: '<', value: 4, unit: '%',
+    }));
+  });
+
+  it.each([
+    ['keep churn under 4%', 'at_most', 'below'],
+    ['keep churn below 4%', 'at_most', 'below'],
+    ['keep churn less than 4%', 'at_most', 'below'],
+    ['keep churn above 4%', 'at_least', 'above'],
+    ['keep churn over 4%', 'at_least', 'above'],
+    ['keep churn more than 4%', 'at_least', 'above'],
+    ['keep churn at most 4%', 'at_most', 'at most'],
+    ['keep churn at least 4%', 'at_least', 'at least'],
+  ] as const)('R1b writer: %s preserves %s → %s on the goal-target approval card', async (words, typed, shown) => {
+    const w = world(graphWith([{ id: 'churn', kind: 'goal', label: 'Monthly churn', goal_threshold_unit: '%' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(words), {
+      constraint_type: typed, value: 4, unit: '%', rationale: 'The user stated their churn target.',
+    });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(p.public_label).toBe(`Set the goal "Monthly churn" to ${shown} 4%`);
+    expect(p).not.toHaveProperty('direction_choice');
+    expect(store.get(String(p.proposal_id))?.operations).toEqual([{ op: 'set_goal_target', path: 'churn',
+      value: { constraint_type: shown.replace(' ', '_'), raw_value: 4, unit: '%' } }]);
+    expect(w.sent, 'preparing the exact approval card writes nothing').toEqual([]);
+    const approved = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [words]), {
+      proposal_id: String(p.proposal_id),
+    });
+    expect(approved, JSON.stringify(approved)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
+    expect(w.sent).toHaveLength(1);
+    parsesOnTheWire(w.sent[0]!);
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ constraint_type: typed }));
+    const row = w.graph().goal_constraints?.find((limit) => limit['node_id'] === 'churn');
+    expect(row).toEqual(expect.objectContaining({ operator: typed === 'at_most' ? '<=' : '>=', value: 4 }));
+    if (shown === 'below' || shown === 'above') {
+      expect(row).toHaveProperty('operator_as_stated', shown === 'below' ? '<' : '>');
+    } else {
+      expect(row).not.toHaveProperty('operator_as_stated');
+    }
+  });
+
+  it('R1b: the approval choice names below when the Agent’s inclusive reading contradicts strict user words', async () => {
+    const { approvalChipsFor } = await import('../approval-chips.js');
+    const words = 'keep churn under 4%';
+    const w = world(graphWith([{ id: 'churn', kind: 'goal', label: 'Monthly churn', goal_threshold_unit: '%' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(words), {
+      constraint_type: 'at_least', value: 4, unit: '%', rationale: 'The user stated their target.',
+    });
+    expect(p).toEqual(expect.objectContaining({ ok: true, public_label: 'Set the goal "Monthly churn" to below 4%',
+      direction_choice: { chosen: 'below', alternative: 'at_least' } }));
+    const chips = approvalChipsFor([{ name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(p.proposal_id) }],
+      (id) => ({ proposal: store.get(id), result: p }));
+    expect(chips.map((chip) => chip.label)).toEqual(['Yes, below', 'At least instead', 'Change something first']);
+    expect(chips[0]).toEqual(expect.objectContaining({ detail: p.public_label }));
+    expect(store.get(String(p.proposal_id))?.operations).toEqual([{ op: 'set_goal_target', path: 'churn',
+      value: { constraint_type: 'below', raw_value: 4, unit: '%' } }]);
+    const approved = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [words]), {
+      proposal_id: String(p.proposal_id),
+    });
+    expect(approved).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    parsesOnTheWire(w.sent[0]!);
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ constraint_type: 'at_most' }));
+    expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ operator: '<=', operator_as_stated: '<', value: 4 })]);
   });
 
   it('absent, contradictory, negated or asked → null (the Agent asks)', () => {
@@ -455,5 +601,55 @@ describe('comparatorTheUserWrote — the direction is the user\'s own words, aff
     // A request to act names it, even as a question; words are whole words ("capacity" is not "cap").
     expect(comparatorTheUserWrote('Can you set the target to at least £60k?')).toBe('at_least');
     expect(comparatorTheUserWrote('We have capacity for £60k.')).toBeNull();
+  });
+});
+
+/**
+ * ⭐ ONE COMPARATOR PER FIGURE (Batch B, DL 12 Oct). Paul's marketing L20, verbatim from the served run (020148Z turn 02),
+ * states two targets in one turn with ONE comparator word. The whole-turn reader gave that "over" to every figure, so
+ * "20 new customers" became the user's own strict "above 20". A comparator now belongs only to the figure it is bound to.
+ */
+const L20 = 'I have two goals: For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months.';
+describe('comparatorTheUserWroteFor — the comparator the user wrote for THIS figure', () => {
+  it('RED (Paul L20): "over" is 15%\'s, never 20\'s; the whole-turn reader gave it to both', () => {
+    expect(comparatorTheUserWrote(L20), 'the defect: the whole turn reads one strict comparator').toBe('above');
+    expect(comparatorTheUserWroteFor(L20, 15)).toBe('above');
+    expect(comparatorTheUserWroteFor(L20, 20)).toBeNull();
+    expect(comparatorTheUserWroteFor(L20, 3)).toBeNull();
+  });
+
+  it('each of two targets keeps its own comparator', () => {
+    const turn = 'Conversion above 15% and at least 20 new customers.';
+    expect(comparatorTheUserWroteFor(turn, 15)).toBe('above');
+    expect(comparatorTheUserWroteFor(turn, 20)).toBe('at_least');
+  });
+
+  it('PARITY with the whole-turn reader on one figure: prefixes, suffixes, strictness, asked and denied', () => {
+    expect(comparatorTheUserWroteFor('We need at least £60k.', 60000)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('A minimum of 20 new customers.', 20)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('Keep churn under 4%.', 4)).toBe('below');
+    expect(comparatorTheUserWroteFor('20 or more new customers.', 20)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('less than or equal to 4%', 4)).toBe('at_most');
+    expect(comparatorTheUserWroteFor('Under 4%. Last year, 4% or more of cancellations came from one plan.', 4)).toBe('below');
+    expect(comparatorTheUserWroteFor('At most 4%, under 4%.', 4)).toBeNull();
+    expect(comparatorTheUserWroteFor('Is at least £60k realistic?', 60000)).toBeNull();
+    expect(comparatorTheUserWroteFor('It must not fall below 4%.', 4)).toBeNull();
+    expect(comparatorTheUserWroteFor('We need £60k.', 60000)).toBeNull();
+  });
+
+  it('RED (capability, Paul L20): 20 new customers is never recorded as the user\'s strict "above 20" — the direction is a DECISION', async () => {
+    const w = world(graphWith([{ id: 'customers', kind: 'goal', label: 'New customers', goal_threshold_unit: 'customers' }]));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(L20), { constraint_type: 'at_least', value: 20, unit: 'customers', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
+    expect(String(p.public_label)).not.toMatch(/above 20/);
+    expect(w.sent).toEqual([]);
+  });
+
+  it('CONTROL (capability, Paul L20): 15% conversion keeps the strict "above" the user wrote, as theirs', async () => {
+    const w = world(graphWith([{ id: 'conversion', kind: 'goal', label: 'Conversion rate', goal_threshold_unit: '%' }]));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(L20), { constraint_type: 'at_least', value: 15, unit: '%', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(p).not.toHaveProperty('direction_choice');
+    expect(String(p.public_label)).toContain('above 15%');
   });
 });

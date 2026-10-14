@@ -17,16 +17,12 @@ import { assessConstructionSize } from '../construction-size-gate.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema } from '../runtime/build-model.js';
 import { budgetFor } from '../model-budgets.js';
+import { COMPACT_MARKER, servedControlInstructions } from './compact-benchmark-control.js';
 
 const BRIEF = 'Should I hire a Tech lead or two developers to increase velocity?';
 const OUT = '/Users/paulslee/Documents/GitHub/output/compact-first-model-20260923/BENCHMARK.md';
 
 /** The clause that was served before this lane, restored verbatim for the control arm. */
-const SERVED_WIDEN_CLAUSE =
-  'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.';
-
-/** The compact clause this lane installed, as it appears in BUILD_INSTRUCTIONS. */
-const COMPACT_MARKER = 'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE';
 
 function key(): string {
   for (const f of ['/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env']) {
@@ -182,10 +178,7 @@ const live = process.env['RUN_LIVE_BENCH'] === '1';
 describe.skipIf(!live)('LIVE — served vs compact on Paul’s exact brief', () => {
   it('measures both arms and writes the table', async () => {
     // Control arm: swap the compact clause back to the clause that was served.
-    const servedInstructions = BUILD_INSTRUCTIONS.replace(
-      new RegExp(`${COMPACT_MARKER}[\\s\\S]*?refused before it reaches the canvas\\.`),
-      SERVED_WIDEN_CLAUSE,
-    );
+    const servedInstructions = servedControlInstructions(BUILD_INSTRUCTIONS);
     expect(servedInstructions).toContain('Then widen'); // the control really is the control
     expect(servedInstructions).not.toContain(COMPACT_MARKER);
 

@@ -5,6 +5,8 @@ import type { ModelBuildingNoticeKind, ModelBuildingNotices } from '@talchain/sc
 const DESCRIPTION: Record<ModelBuildingNoticeKind, readonly [string, string]> = {
   detail_not_connected: ['detail not connected', 'details not connected'],
   relationship_not_used: ['relationship not used', 'relationships not used'],
+  // schemas 0.77.0 (SPINE X8): a relationship the USER stated is theirs, never "Olumi proposed".
+  stated_relationship_not_used: ['relationship you described not used', 'relationships you described not used'],
   alternative_consolidated: ['alternative consolidated', 'alternatives consolidated'],
   conflict_resolved_conservatively: ['conflict resolved conservatively', 'conflicts resolved conservatively'],
   target_not_modelled_as_threshold: ['target not modelled as a threshold', 'targets not modelled as thresholds'],

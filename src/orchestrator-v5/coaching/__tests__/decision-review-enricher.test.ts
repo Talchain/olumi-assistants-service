@@ -13,6 +13,10 @@ import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
 import { config, _resetConfigCache } from '../../../config/index.js';
 
+import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+
 /**
  * Fixture resolution returned alongside the mocked invoke result. Matches
  * what `getAdapterWithResolution('decision_review')` would produce when
@@ -42,6 +46,25 @@ function runAnalysisFact(overrides: {
       ...(overrides.enrichment !== undefined ? { enrichment: overrides.enrichment } : {}),
     },
   };
+}
+
+/** Source-precedence positives have an explicitly licensed, graph-bound synthetic Run. */
+function licensedSourceFact(overrides: Parameters<typeof runAnalysisFact>[0]): Extract<HandlerFact, { fact_type: 'run_analysis' }> {
+  const enrichment = overrides?.enrichment ?? {};
+  const nodes = new Map<string, { id: string; kind: 'option'; label: string }>();
+  for (const row of readOptionResultSources(enrichment).flat()) {
+    const id = typeof row.option_id === 'string' ? row.option_id : row.id;
+    if (typeof id !== 'string') continue;
+    const label = row.option_label ?? row.label;
+    nodes.set(id, { id, kind: 'option', label: typeof label === 'string' ? label : id });
+  }
+  const graph = GraphStateIngressSchema.parse({ nodes: [...nodes.values()], edges: [] });
+  const hash = computeAnalysisAffectingGraphHash(graph);
+  if (hash === null) throw new Error('Source-precedence fixture needs a bound graph');
+  const fact = runAnalysisFact({ ...overrides, enrichment: { ...enrichment, graph } });
+  if (fact.fact_type !== 'run_analysis') throw new Error('Run fixture required');
+  return { ...fact, result: { ...fact.result, graph_hash_at_run: hash,
+    constraint_verdict: { constraint_verdict_state: 'not_applicable', may_name_leading_option: true } } };
 }
 
 function minimalEnrichment(): Record<string, unknown> {
@@ -469,14 +492,17 @@ describe('Defect B mutual-exclusion: brief present ⇒ no `no_brief` skip', () =
     // path (not no_winner skip). The headline assertion is on the absence
     // of the `no_brief` skip event for this request_id.
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
-    spy.mockResolvedValue({
+    const invokeFixture = {
       output: {
         winner: { option_id: 'opt-1', option_label: 'Option A' },
         rationale: 'because',
       },
       meta: { duration_ms: 5, brief_hash: 'h', model: 'gpt-4.1', kept_node_count: 0, kept_edge_count: 0 },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 5,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: undefined, prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
-    });
+    };
+    spy.mockResolvedValue(invokeFixture);
 
     const facts: readonly HandlerFact[] = [
       runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' }),
@@ -647,7 +673,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
-    const fact = runAnalysisFact({
+    const fact = licensedSourceFact({
       leading_option_id: 'opt-2',
       enrichment: {
         results: [
@@ -663,6 +689,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
+      runGraph: fact.result.enrichment?.graph,
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -678,7 +705,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
-    const fact = runAnalysisFact({
+    const fact = licensedSourceFact({
       leading_option_id: 'opt_offshore',
       enrichment: {
         // NO enrichment.results — pure option_comparison source.
@@ -692,6 +719,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
+      runGraph: fact.result.enrichment?.graph,
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -711,7 +739,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
-    const fact = runAnalysisFact({
+    const fact = licensedSourceFact({
       leading_option_id: 'opt_offshore',
       enrichment: {
         // NO results, NO option_comparison — last-fallback source only.
@@ -725,6 +753,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
+      runGraph: fact.result.enrichment?.graph,
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -795,7 +824,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
-    const fact = runAnalysisFact({
+    const fact = licensedSourceFact({
       leading_option_id: 'opt_offshore',
       enrichment: {
         // results is non-empty but does NOT contain the declared leader.
@@ -814,6 +843,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
+      runGraph: fact.result.enrichment?.graph,
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -836,7 +866,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
-    const fact = runAnalysisFact({
+    const fact = licensedSourceFact({
       leading_option_id: 'opt_offshore',
       enrichment: {
         // Neither results nor option_comparison contain the declared leader.
@@ -861,6 +891,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
+      runGraph: fact.result.enrichment?.graph,
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -879,7 +910,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
-    const fact = runAnalysisFact({
+    const fact = licensedSourceFact({
       leading_option_id: 'opt_current_match',
       enrichment: {
         option_comparison: [
@@ -908,6 +939,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
+      runGraph: fact.result.enrichment?.graph,
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];

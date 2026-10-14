@@ -64,8 +64,10 @@ import { extractPersistedGoalTarget } from '../compose/goal-target-receipt-guard
  *     UNKNOWN REMAINS UNKNOWN; never downgraded to a reassuring "unset". Same
  *     discipline `readiness` already uses.
  */
+/** The held comparator a target is stated with ("at most 400" is `<=`), RT-10 B′ R3. */
+export type ContextPackGoalTargetOperator = '<=' | '<' | '>=' | '>';
 export type ContextPackGoalTarget =
-  | { readonly status: 'set'; readonly value: number; readonly unit?: string }
+  | { readonly status: 'set'; readonly value: number; readonly unit?: string; readonly operator?: ContextPackGoalTargetOperator }
   | { readonly status: 'unset' };
 
 /**
@@ -95,6 +97,8 @@ export type ContextPackGoalTarget =
  *      makes unreachable in practice, and the emitted block names no node id,
  *      so it cannot mis-attribute. Bounded, not fixed here.
  */
+const TARGET_OPERATORS: ReadonlySet<string> = new Set(['<=', '<', '>=', '>']);
+
 export function projectGoalTargetRecord(
   recordGraph: unknown,
 ): ContextPackGoalTarget | undefined {
@@ -105,5 +109,7 @@ export function projectGoalTargetRecord(
     status: 'set',
     value: found.value,
     ...(found.unit === undefined ? {} : { unit: found.unit }),
+    // RT-10 B′ R3: "at most 400" is said WITH its comparator, never as a bare 400.
+    ...(found.held !== undefined && TARGET_OPERATORS.has(found.held) ? { operator: found.held as ContextPackGoalTargetOperator } : {}),
   };
 }

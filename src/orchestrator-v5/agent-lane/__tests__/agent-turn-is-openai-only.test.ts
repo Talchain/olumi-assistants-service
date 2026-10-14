@@ -108,8 +108,20 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     // ⭐ PTL row 4 (#72 5871228357): the rest of the request identity is INTENDED too, added to the exact key set the
     // same way; each field's binding to the body actually sent is proved in `provider-ledger-request-identity.test.ts`.
     const REQUEST_IDENTITY = ['tools_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source'];
+    // ⭐ T1 (b): the instructions' CARRIER is intended too (#2492's ledger counts every request made), pinned by value:
+    // a converse call carries them as the developer block with the explicit breakpoint (`instructions-breakpoint-refusal`).
+    // ⭐ S1 harness (#2958): the migrated Responses site's host-attributed ATTEMPT RECEIPT is INTENDED on these same rows
+    // (SYS1's `route records every retry, settings, usage and result under request identity` requires them on this very
+    // `_provider_calls[]` entry). Added to the exact key set and pinned by value below, never tolerated by a looser matcher.
+    const HOST_RECEIPT = ['attempt', 'settings', 'request_id', 'scenario_id'];
     for (const c of calls) {
-      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256', ...REQUEST_IDENTITY].sort());
+      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256', 'instructions_carrier', ...REQUEST_IDENTITY, ...HOST_RECEIPT].sort());
+      const receipt = c as unknown as { attempt: { outcome: string; retry: boolean }; settings: { max_output_tokens?: number }; request_id: string; scenario_id: string; max_output_tokens: number };
+      expect(receipt.scenario_id).toBe(SCENARIO);
+      expect(typeof receipt.request_id).toBe('string'); expect(receipt.request_id.length).toBeGreaterThan(0);
+      expect(typeof receipt.attempt.outcome).toBe('string'); expect(typeof receipt.attempt.retry).toBe('boolean');
+      expect(receipt.settings.max_output_tokens).toBe(receipt.max_output_tokens);
+      expect((c as { instructions_carrier?: string }).instructions_carrier).toBe('developer_breakpoint');
       expect((c as { prompt_alias?: string }).prompt_alias).toBe('agent.converse');
       expect((c as { prompt_sha256?: string }).prompt_sha256).toMatch(/^[0-9a-f]{64}$/);
     }

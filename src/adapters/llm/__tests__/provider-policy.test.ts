@@ -123,3 +123,31 @@ describe('the backstops the review found unpinned', () => {
   });
 });
 
+
+describe('providerCallsMade — the calls a request actually SENT (llm_calls_used, DL follow-up on #2480)', () => {
+  it('counts allowed attempts only: a refusal before network is not a call made', async () => {
+    const { runWithProviderPolicy, OPENAI_ONLY, assertProviderAllowed, providerCallsMade } = await import('../provider-policy.js');
+    const n = runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      assertProviderAllowed('openai', 'a');
+      try { assertProviderAllowed('anthropic', 'b'); } catch { /* refused before network, as designed */ }
+      assertProviderAllowed('openai', 'c');
+      return providerCallsMade();
+    });
+    expect(n).toBe(2);
+  });
+  it('unknown, never a guess: outside a policy, and once the ledger truncated at its cap', async () => {
+    const { runWithProviderPolicy, OPENAI_ONLY, assertProviderAllowed, providerCallsMade, MAX_RECORDED_CALLS } = await import('../provider-policy.js');
+    expect(providerCallsMade()).toBeUndefined();
+    const full = runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      for (let i = 0; i <= MAX_RECORDED_CALLS; i += 1) assertProviderAllowed('openai', 'x');
+      return providerCallsMade();
+    });
+    expect(full).toBeUndefined();
+    // Control: at the cap exactly, nothing dropped, the count is known.
+    const atCap = runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      for (let i = 0; i < MAX_RECORDED_CALLS; i += 1) assertProviderAllowed('openai', 'x');
+      return providerCallsMade();
+    });
+    expect(atCap).toBe(MAX_RECORDED_CALLS);
+  });
+});

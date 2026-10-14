@@ -68,7 +68,7 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
 export default async function route(app: FastifyInstance) {
   const FEATURE_VERSION = "stream-1.0.0";
 
-  app.post("/assist/v1/draft-graph/stream", async (req, reply) => {
+  app.post("/assist/v1/draft-graph/stream", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req) ?? randomUUID();
     const keyId = getRequestKeyId(req);

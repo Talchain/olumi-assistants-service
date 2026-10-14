@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ROADMAP 2.312 track 2 (2) — THE SCENARIO-ADDRESSED GRAPH READ.
  *
@@ -97,8 +98,11 @@ const scenarioExists = vi.fn();
 const loadGraphAndBriefText = vi.fn();
 const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
+const readExistingScenario = vi.fn();
 
 const store = {
+  readMostRecentPendingActions: async () => [],
+  readExistingScenario: undefined as typeof readExistingScenario | undefined,
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -160,6 +164,7 @@ const GRAPH_WITH_LAYOUT = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
   return app;
@@ -183,6 +188,7 @@ async function read(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  store.readExistingScenario = undefined;
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
   // The signed-in owner is the default caller. Cases about a DIFFERENT user
@@ -385,6 +391,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
 
     scenarioExists.mockResolvedValue(true);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const notMine = await read(app, SCENARIO, { user_id: OTHER_USER });
 
     expect(notMine.statusCode).toBe(absent.statusCode);
@@ -397,6 +404,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
   it("never leaks the graph of a scenario owned by someone else", async () => {
     resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
 
     const app = await buildApp();
     const res = await read(app, SCENARIO, { user_id: OTHER_USER });
@@ -411,6 +419,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
     // Without this, the refusal pins above could all pass on a route that
     // refuses everything. This is what makes them mean something.
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
 
     const app = await buildApp();
     const res = await read(app, SCENARIO, { user_id: OWNER });
@@ -458,14 +467,17 @@ describe("THE UPSERT FENCE — a read must never create the row, pin (1)", () =>
     }
   });
 
-  it("POSITIVE CONTROL — the upsert IS reached on an existing scenario", async () => {
+  it("POSITIVE CONTROL — the read-only owner oracle IS reached on an existing scenario", async () => {
     // Trap 13: proves the spy can SEE the call it asserts the absence of
     // above. Without this, `not.toHaveBeenCalled()` would pass on a route that
     // never wired the ownership check at all — i.e. on the IDOR.
     const app = await buildApp();
-    await read(app, SCENARIO, { user_id: OWNER });
+    const res = await read(app, SCENARIO, { user_id: OWNER });
 
-    expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, OWNER);
+    expect(getScenarioOwner).toHaveBeenCalledWith(SCENARIO);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["x-ownership-caller"]).toBe(OWNER);
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
     await app.close();
   });
 });
@@ -504,6 +516,7 @@ describe("THE ASSIST-KEY GATE — the same one every other route uses", () => {
 
     const app = Fastify();
     await app.register(authPlugin);
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioGraphRoute(app);
     await app.ready();
 
@@ -530,6 +543,7 @@ describe("THE ASSIST-KEY GATE — the same one every other route uses", () => {
 
     const app = Fastify();
     await app.register(authPlugin);
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioGraphRoute(app);
     await app.ready();
 
@@ -568,6 +582,7 @@ describe("RATE LIMITING — CodeQL js/missing-rate-limiting, and it was right", 
     // `global: false` so ONLY this route's own config is in play — the
     // assertions below are then about THIS route's limit, not an ambient one.
     await app.register(rateLimit, { global: false });
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioGraphRoute(app);
     await app.ready();
     return app;
@@ -664,3 +679,53 @@ describe("READ FAILURES ARE UNKNOWNS, NOT ABSENCES", () => {
     await app.close();
   });
 });
+
+
+describe("coalesced existing-scenario read", () => {
+  const snapshot = () => ({ userId: OWNER, graph: GRAPH_NO_LAYOUT, briefText: "Should I take the job?", analysisInvalidatedAt: null });
+  it("reads presence, owner, graph and restore marker once without an upsert", async () => {
+    store.readExistingScenario = readExistingScenario;
+    readExistingScenario.mockResolvedValue(snapshot());
+    const app = await buildApp();
+    const res = await read(app, SCENARIO);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().graph).toEqual(GRAPH_NO_LAYOUT);
+    expect(readExistingScenario).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+    expect(scenarioExists).not.toHaveBeenCalled();
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(loadGraphAndBriefText).not.toHaveBeenCalled();
+    await app.close();
+  });
+  it("absence and a different owner have the same refusal and neither creates a row", async () => {
+    store.readExistingScenario = readExistingScenario;
+    const app = await buildApp();
+    readExistingScenario.mockResolvedValue(null);
+    const absent = await read(app, SCENARIO);
+    readExistingScenario.mockResolvedValue({ ...snapshot(), userId: OTHER_USER });
+    const wrongOwner = await read(app, SCENARIO);
+    expect(absent.statusCode).toBe(404);
+    expect(wrongOwner.statusCode).toBe(404);
+    const strip = (response: typeof absent) => ({ ...response.json(), request_id: undefined });
+    expect(strip(wrongOwner)).toEqual(strip(absent));
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(loadGraphAndBriefText).not.toHaveBeenCalled();
+    await app.close();
+  });
+  it("a guest row still reads, while an unreadable snapshot fails closed", async () => {
+    store.readExistingScenario = readExistingScenario;
+    const app = await buildApp();
+    readExistingScenario.mockResolvedValue({ ...snapshot(), userId: null, graph: null });
+    const guest = await read(app, SCENARIO);
+    expect(guest.statusCode).toBe(200);
+    expect(guest.json().graph_present).toBe(false);
+    readExistingScenario.mockRejectedValue(new Error("read unavailable"));
+    expect((await read(app, SCENARIO)).statusCode).toBe(503);
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

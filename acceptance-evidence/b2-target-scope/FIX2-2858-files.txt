@@ -1,0 +1,17 @@
+A	src/orchestrator-v5/admission/__tests__/accumulation-chance-credit.test.ts
+M	src/orchestrator-v5/admission/identity-evaluations.ts
+M	src/orchestrator-v5/admission/target-testability.ts
+A	src/orchestrator-v5/agent-lane/__tests__/accumulation-identity-build.test.ts
+A	src/orchestrator-v5/agent-lane/__tests__/accumulation-product-reconciliation.test.ts
+A	src/orchestrator-v5/agent-lane/__tests__/fixtures/accumulation-live2-head.json
+A	src/orchestrator-v5/agent-lane/__tests__/fixtures/accumulation-pilot-head.json
+A	src/orchestrator-v5/agent-lane/__tests__/zero-spread-certainty.test.ts
+A	src/orchestrator-v5/agent-lane/accumulation-identity.ts
+M	src/orchestrator-v5/agent-lane/admit-model.ts
+M	src/orchestrator-v5/agent-lane/goal-certainty.ts
+M	src/orchestrator-v5/agent-lane/goal-coherence.ts
+M	src/orchestrator-v5/agent-lane/identity-proposal.ts
+M	src/orchestrator-v5/agent-lane/reconciling-product.ts
+M	src/orchestrator-v5/agent-lane/runtime/build-model.ts
+M	src/orchestrator-v5/goal-target/goal-chance-licence.ts
+A	tests/unit/agent-lane/accumulation-identity.test.ts

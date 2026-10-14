@@ -29,7 +29,6 @@ function explodingStore(): ModelVersionStorePort {
     saveVersion: vi.fn(boom),
     listVersions: vi.fn(boom),
     getVersion: vi.fn(boom),
-    restoreVersion: vi.fn(boom),
     getCurrentVersionId: vi.fn(boom),
     getVersionForCommittedTurn: vi.fn(boom),
   };
@@ -49,7 +48,7 @@ const GRAPH = {
 };
 
 describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EVERY entry point', () => {
-  it('saveVersion / restoreVersion / listVersions / getVersion / committed-turn read / getCurrentVersion / compareVersions all return disabled', async () => {
+  it('saveVersion / listVersions / getVersion / committed-turn read / getCurrentVersion / compareVersions all return disabled', async () => {
     const store = explodingStore();
     const sink = explodingSink();
     const service = new ModelManagementService({
@@ -59,8 +58,7 @@ describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EV
     });
 
     const results = [
-      await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH }),
-      await service.restoreVersion({ scenario_id: SCENARIO, version_id: VERSION_A }),
+      await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH }),
       await service.listVersions(SCENARIO),
       await service.getVersion(SCENARIO, VERSION_A),
       await service.getVersionForCommittedTurn(SCENARIO, 'source-turn', 'mutation-id'),
@@ -118,7 +116,6 @@ describe('ModelManagementService — committed-turn reads fail weak without othe
     expect(store.getCurrentVersionId).not.toHaveBeenCalled();
     expect(store.getVersion).not.toHaveBeenCalled();
     expect(store.saveVersion).not.toHaveBeenCalled();
-    expect(store.restoreVersion).not.toHaveBeenCalled();
     expect(sink.emit).not.toHaveBeenCalled();
   });
 
@@ -160,6 +157,19 @@ describe('ModelManagementService — committed-turn reads fail weak without othe
 });
 
 describe('ModelManagementService — default flag wiring', () => {
+  it('forwards strict evidence and cancellation options only when explicitly requested', async () => {
+    const store = explodingStore();
+    (store.listVersions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (store.getVersion as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const service = new ModelManagementService({ store, isEnabled: () => true });
+    const signal = new AbortController().signal;
+    const options = { requirePayload: true, signal };
+    expect(await service.listVersions(SCENARIO, 50, 3, options)).toEqual({ status: 'ok', value: [] });
+    expect(store.listVersions).toHaveBeenCalledExactlyOnceWith(SCENARIO, 50, 3, options);
+    await service.getVersion(SCENARIO, VERSION_A, { signal });
+    expect(store.getVersion).toHaveBeenCalledExactlyOnceWith(SCENARIO, VERSION_A, { signal });
+  });
+
   // The repo-wide vitest.setup.ts calls _resetConfigCache() before EACH test,
   // so config.cee must be re-accessed at call time — a module-scope capture
   // would mutate a stale, discarded parse.

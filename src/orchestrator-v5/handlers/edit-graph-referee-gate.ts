@@ -42,6 +42,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import type { PatchOperation } from '../../orchestrator/types.js';
+import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import {
@@ -184,6 +186,14 @@ export const GM_HELD_APPLY_WIRING_DECLINE = 'decline_with_clarify_v0';
  * this bound is generous.
  */
 export const GM_HELD_OPERATIONS_MAX_JSON_CHARS = 16_000;
+
+/**
+ * ⭐ S-D (lane EDIT-PANEL, Paul 7 Oct): stamped on a GM hold's `inline_patch` by the Agent lane's lifecycle when it
+ * keeps the hold until the user approves or declines it (`agent-lane/proposal-object/lifecycle.ts`), so its stored
+ * lifetime runs past the default offer window. The conventional bare-confirm reads it to keep CONSENT eligibility at
+ * the original window (`deterministic-short-confirm.ts` `bareConfirmEligible`): durable retention is not consent.
+ */
+export const GM_HELD_UNTIL_DECIDED_KEY = 'held_until_decided';
 
 /**
  * F-HELD fix 2a (wire finding 2026-07-11) — GM holds get their OWN turn-TTL,
@@ -873,11 +883,14 @@ export function assessHeldBatchAgainstGraph(input: {
   readonly requestId: string;
 }): HeldBatchAssessment {
   try {
+    // The server stamp must remain executable when an unrelated edit re-pins this held batch.
+    const operations = reliesOnRefereeOperations(input.operations as readonly PatchOperation[], input.currentGraph);
+    if (operations === undefined) return { valid: false, governing: 'rejected' };
     const { verdicts } = refereeBatch({
       // mode/requestId are type-required by EditGmEvaluationInput but unused
       // by refereeBatch (no telemetry, no routing on this pure path).
       mode: 'shadow',
-      operations: input.operations,
+      operations,
       ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
       currentGraph: input.currentGraph,
       currentGraphHash: input.currentGraphHash,

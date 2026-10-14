@@ -92,6 +92,9 @@ export interface AnalysisAdmissionProjection {
   readonly inputs_waived_by_exclusion: number;
   /** The 64-hex subject this verdict is about; `null` when it could not be read. */
   readonly graph_hash: string | null;
+  /** Existing bounded factor census, for disclosure only; not a Run licence. */
+  readonly semantic_signals: Pick<ReturnType<typeof resolveAnalysisAdmission>['semantic_signals'],
+    'material_parameters_awaiting_user_node_ids'>;
 }
 
 /**
@@ -153,5 +156,8 @@ export function projectAnalysisAdmission(
     inputs_demanded_of_user,
     inputs_waived_by_exclusion,
     graph_hash: a.graph_hash,
+    semantic_signals: {
+      material_parameters_awaiting_user_node_ids: a.semantic_signals.material_parameters_awaiting_user_node_ids,
+    },
   };
 }

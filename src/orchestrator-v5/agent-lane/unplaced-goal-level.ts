@@ -33,12 +33,13 @@
  */
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import type { CandidateModel } from './admit-model.js';
+import { isRelativeChangePercentUnit } from './same-unit.js';
 import { periodIn, readMoneyTotal } from './reconciling-product.js';
-import { unitPhraseFamily } from './unit-conflict.js';
 
 export type BriefGoalLevel =
   | {
       readonly kind: 'adopt';
+      readonly span?: { readonly start: number; readonly end: number };
       /** The figure in the GOAL'S OWN unit (its scale applied: "£45k" is 45 on a "£k/month" goal). */
       readonly value: number;
       /** The amount exactly as the brief writes it ("£45k"). */
@@ -110,7 +111,8 @@ function phraseNamesOnlyTheGoal(brief: string, a: { index: number; matchedText: 
   return phrase.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '')
     .every((w) => PLAIN_WORDS.has(w) || own.has(singular(w)));
 }
-const sentenceAround = (text: string, start: number, end: number): string => spanAround(text, start, end, /[.!?\n]/g);
+/** The sentence of `text` around [start, end), verbatim (a decimal point inside a figure is not a break). */
+export const sentenceAround = (text: string, start: number, end: number): string => spanAround(text, start, end, /[.!?\n]/g);
 
 export function briefGoalLevel(candidate: CandidateModel, brief: string | null | undefined): BriefGoalLevel | null {
   const goal = candidate.goal;
@@ -126,7 +128,7 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   // ⛔ AIQ 5897443539 (served run 0): a percentage change typed in "%" names the CHANGE's unit, not the level's. The
   // level's money terms are then read from the brief's ONE money figure (its currency, its own clause's period).
   let goalUnit = typeof goal.unit === 'string' ? goal.unit : '';
-  if (goal.frame === 'change_rel' && unitPhraseFamily(goalUnit) === 'percent' && distinct.length === 1) {
+  if (goal.frame === 'change_rel' && isRelativeChangePercentUnit(goalUnit, goal.value) && distinct.length === 1) {
     const only = distinct[0]!;
     const period = periodIn(clauseAround(brief, only.index, only.index + only.matchedText.length));
     // ⛔ PR Review CR on #2313 @ 729afc91: a period the goal's own name states must be the figure's ("Annual spend is £45k"
@@ -159,11 +161,14 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   // (AIQ 5897443539) held "Monthly spend is £45k" on a factor ("AWS-equivalent monthly cloud spend") as well, and the
   // goal "Monthly spend" had no level. A figure whose phrase names another quantity is refused above, wherever it sits.
   if (!phraseNamesOnlyTheGoal(brief, a, metric)) return refused;
-  return {
+  const reading: BriefGoalLevel = {
     kind: 'adopt',
     value: a.magnitude / scale,
     written: a.matchedText,
     quote: clause.length <= QUOTE_MAX ? clause : `${clause.slice(0, QUOTE_MAX - 1)}…`,
     ...(goalUnit !== goal.unit ? { unit: goalUnit } : {}),
   };
+  // Internal receipt of the located occurrence; the established reading's enumerable/wire shape is unchanged.
+  Object.defineProperty(reading, 'span', { value: { start: a.index, end: a.index + a.matchedText.length } });
+  return reading;
 }

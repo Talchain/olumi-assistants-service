@@ -154,6 +154,9 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // (`tests/integration/orchestrator/route-v2-goal-target-edit.test.ts`).
     expect(mutating).toEqual([
       'factor_value_edit',
+      // Manual range now reaches the same checked writer; the shared spine contract
+      // proves one canonical append and the hash/freshness/reload transition.
+      'prior_range_edit',
       'edge_strength_edit',
       'structural_delete',
       'structural_add',
@@ -161,6 +164,11 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
       'structural_rename',
       'option_intervention_edit',
       'goal_target_edit',
+      // 2026-10-01 (schemas 0.69.0, MG F1 T6, writer lands WITH its reader) — `option_status_edit` writes the option's
+      // `option_status` and the `analysis_participation` it means (inside the analysis hash) in one atomic CAS commit,
+      // with the analysis-space stale gate AND `expected_status` (infeasible ↔ removed moves no hash; CODEX #78).
+      // `'ack_and_commit'` would drop the user's exclusion on reload (`option-status-edit.test.ts`).
+      'option_status_edit',
     ]);
   });
 

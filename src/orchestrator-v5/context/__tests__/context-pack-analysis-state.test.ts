@@ -78,6 +78,20 @@ describe('ContextPack analysis_state — derivation', () => {
     expect(pack.analysis_state!.requires_rerun).toBe(false);
   });
 
+  it('existing restore marker disables chips when the old clean hash returns', () => {
+    const pack = assembleContextPack({
+      payload: PAYLOAD,
+      priorTurns: [],
+      priorFacts: [runAnalysisFact(HASH)], // legacy Run, no admission snapshot
+      graph,
+      analysisInvalidatedAt: '2026-10-04T01:00:00.000Z',
+    });
+    expect(pack.analysis_state!.freshness).toBe('stale');
+    expect(pack.analysis_state!.freshness_reason).toBe('model_restored_after_analysis');
+    expect(pack.analysis_state!.requires_rerun).toBe(true);
+    expect(pack.analysis_state!.usable_for_chips).toBe(false);
+  });
+
   it('priorFacts + edited graph (hash mismatch) → stale, requires rerun, chips off', () => {
     const pack = assembleContextPack({
       payload: PAYLOAD,

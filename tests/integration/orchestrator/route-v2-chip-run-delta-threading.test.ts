@@ -45,6 +45,7 @@ vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', () => ({
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [],
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readFactsFor: async () => [],

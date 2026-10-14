@@ -216,8 +216,57 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP).toContain("run_provenance");
   });
 
-  it("keep-list is exactly the CEE compose.ts P0B list (19 keys)", () => {
-    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(19);
+  it("keep-list is exactly the CEE compose.ts P0B list (22 keys)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(22);
+  });
+});
+
+// ============================================================================
+// schemas 0.80.0 — PLoT's dominant factor and its tipping-point status reach
+// the browser (science census 6 Oct 2026, §2d C3/C5, §4 rank 4).
+//
+// PLoT emits all three top-level on every /v2/run; the run-analysis handler
+// persists the body byte-for-byte; and this keep-list stripped them one hop
+// before the browser, so DGAI's existing readers (the Reasoning "<factor>
+// dominates the model" insight, the tornado status note, the tipping-point
+// gate) never fired on the V5 path. Bound by identity: the key, the factor id,
+// the status word — through the REAL projection, permitted AND withheld.
+// ============================================================================
+describe("CEE→UI: dominant_factor + flip_thresholds_status(_reason) transport (schemas 0.80.0)", () => {
+  const PLOT_OVERLAY = {
+    dominant_factor: { factor_id: "fac_customer_demand", factor_label: "Customer demand" },
+    flip_thresholds_status: "partial_no_effect",
+    flip_thresholds_status_reason: "timeout",
+    // CONTROL: a PLoT top-level key this release does NOT transport.
+    driver_order: { basis: "graph", ranked_factor_ids: ["fac_customer_demand"] },
+  } as const;
+
+  it("the real projection ships all three verbatim on a permitted turn", () => {
+    const shipped = toSafeTransportEnrichment({ ...persisted, ...PLOT_OVERLAY }) ?? {};
+    expect(shipped.dominant_factor).toEqual(PLOT_OVERLAY.dominant_factor);
+    expect(shipped.flip_thresholds_status).toBe("partial_no_effect");
+    expect(shipped.flip_thresholds_status_reason).toBe("timeout");
+  });
+
+  it("CONTROL: driver_order is still dropped — the projection is a keep-list, not a passthrough", () => {
+    const shipped = toSafeTransportEnrichment({ ...persisted, ...PLOT_OVERLAY }) ?? {};
+    expect(shipped).not.toHaveProperty("driver_order");
+  });
+
+  it("a withheld turn passes all three through unchanged (none names an option)", () => {
+    const withheld =
+      projectTransportEnrichmentForWithheldClaim(
+        toSafeTransportEnrichment({ ...persisted, ...PLOT_OVERLAY }, true) ?? {},
+      ) ?? {};
+    expect(withheld.dominant_factor).toEqual(PLOT_OVERLAY.dominant_factor);
+    expect(withheld.flip_thresholds_status).toBe("partial_no_effect");
+    expect(withheld.flip_thresholds_status_reason).toBe("timeout");
+  });
+
+  it("the shipped envelope parses against AnalysisEnrichmentSchema", () => {
+    const shipped = toSafeTransportEnrichment({ ...persisted, ...PLOT_OVERLAY }) ?? {};
+    const parsed = AnalysisEnrichmentSchema.safeParse(shipped);
+    if (!parsed.success) throw new Error(parsed.error.message);
   });
 });
 
@@ -578,6 +627,16 @@ const WITHHELD_RULING_BY_TRANSPORT_KEY: ReadonlyMap<string, WithheldRuling> =
     // the disclosure a withheld-leader turn most needs to keep, not a claim to
     // withhold.
     ["run_provenance", "pass_through"],
+    // schemas 0.80.0 — PLoT's dominant factor and its tipping-point status.
+    // `pass_through`, DERIVED: `dominant_factor` is { factor_id, factor_label }
+    // (a claim about the MODEL), the status is one closed-vocabulary word and the
+    // reason is a flip_reason token ('timeout', 'error', …). No member names an
+    // option, so the leading-option guard has nothing to catch; and "no single
+    // tested factor changed the comparison" is exactly what a withheld turn
+    // should still be able to say.
+    ["dominant_factor", "pass_through"],
+    ["flip_thresholds_status", "pass_through"],
+    ["flip_thresholds_status_reason", "pass_through"],
   ]);
 
 describe("CEE→UI: every transport key has an explicit withheld ruling", () => {

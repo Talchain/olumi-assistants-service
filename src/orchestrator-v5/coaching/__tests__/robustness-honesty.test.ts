@@ -175,7 +175,7 @@ describe('closenessLead', () => {
       marginPp: 5.15,
     });
     expect(out).toBe(
-      "This is a close call: 'Hire One Tech Lead' is narrowly ahead of 'Hire One Tech Lead and One Developer' by about 5 percentage points.",
+      "This is a close call: in this model, 'Hire One Tech Lead' was supported by about 5 percentage points more of the runs than 'Hire One Tech Lead and One Developer'.",
     );
   });
 

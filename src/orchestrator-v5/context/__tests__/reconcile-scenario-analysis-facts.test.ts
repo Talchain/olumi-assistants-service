@@ -1,3 +1,4 @@
+import { readRunAnalysisOccurrence } from '../../types/handler-fact.js';
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type {
@@ -818,4 +819,20 @@ describe('reconcileScenarioAnalysisFacts', () => {
 
     expect(selectRunAnalysisFact(result.facts)?.fact).toEqual(firstEqual);
   });
+});
+
+
+it('C2 binds byte-identical payloads to their own row through sorting and frozen clones', () => {
+  const fact = analysisFact('identical');
+  const result = reconcile({ durableRead: durable([], 2, { facts: [
+    identified(fact, 1, { evaluated_scenario_revision: 9 }),
+    identified(fact, 0, { evaluated_scenario_revision: 7 }),
+  ] }) });
+  expect(result.status).toBe('complete');
+  expect(result.facts).toEqual([fact, fact]);
+  expect(result.facts[0]).not.toBe(result.facts[1]);
+  expect(result.facts.map(readRunAnalysisOccurrence)).toMatchObject([
+    { fact_row_id: 'analysis-row-0', evaluated_scenario_revision: 7 },
+    { fact_row_id: 'analysis-row-1', evaluated_scenario_revision: 9 },
+  ]);
 });

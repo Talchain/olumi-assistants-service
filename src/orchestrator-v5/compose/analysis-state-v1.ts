@@ -1,3 +1,7 @@
+import { readRunAnalysisOccurrence } from '../types/handler-fact.js';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { GOAL_SCOPE_UNRESOLVED_REASON } from '../../schemas/goal-scope.js';
+import type { GoalScopeClaimInput } from './goal-scope-claim-input.js';
 /**
  * ANALYSIS-STATE AUTHORITY, STEP 3 — compose `AnalysisStateV1` (schemas 0.46.0).
  *
@@ -174,7 +178,7 @@ import type {
 
 import { blockerIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { CanonicalAnalysisState } from '../context/canonical-analysis-state.js';
-import type { FreshnessDerivation, FreshnessReason } from '../context/freshness.js';
+import { isGoalSnapshotStaleReason, type FreshnessDerivation, type FreshnessReason } from '../context/freshness.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
@@ -199,6 +203,7 @@ export const BLOCKED_REASON_UNSPECIFIED = 'analysis_blocked_unspecified';
 export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
 
 /** `withheld_reason` codes. Producer-owned; a consumer maps them to its copy. */
+export const WITHHELD_GOAL_SCOPE_UNRESOLVED = GOAL_SCOPE_UNRESOLVED_REASON;
 export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
 /** A selected Run withheld its leader while its constraint verdict was not applicable. No cause is asserted. */
 export const WITHHELD_LEADER_CAUSE_UNRECORDED = 'analysis_leader_withheld';
@@ -232,6 +237,16 @@ export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
  * takes the field only when the constraint verdict permits and the run was requested.
  */
 export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sign_unproven';
+/** The Run withheld comparison through a caller-identified goal link nobody sized. */
+export const WITHHELD_GOAL_PATH_UNSIZED = 'goal_path_unsized';
+/**
+ * ⭐ MC D1 (DL 6 Oct; Acceptance rehearsal 9 on CEE 1c88f3c): NO RUN PRODUCED A RESULT (`never_run`, `running`, `refused`,
+ * `blocked`), so nothing was checked. The chain's default used to name it `constraint_verdict_withheld` — a limit verdict
+ * on a brief with no limit, for a Run that had returned a question. WE DID NOT LOOK — so it classifies `not_evaluated`.
+ */
+export const WITHHELD_NO_RESULT = 'analysis_no_result';
+/** The run states that hold no result: ONE definition, read by the claim here and by the reply's closing. */
+export const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
 
 /**
  * ⛔ P1-d (AI Quality #70 5850056041, DL 5850069309) — THE RUN IS OUT OF DATE, and no caller stated why its leader
@@ -325,6 +340,8 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
+  [WITHHELD_GOAL_PATH_UNSIZED]: 'withheld',
+  [WITHHELD_GOAL_SCOPE_UNRESOLVED]: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
   [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
@@ -332,6 +349,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
   [WITHHELD_RUN_OUT_OF_DATE]: 'not_evaluated',
+  [WITHHELD_NO_RESULT]: 'not_evaluated',
 };
 
 /**
@@ -476,6 +494,8 @@ export const NO_ANALYSIS_CONTEXT_DERIVATION: FreshnessDerivation = Object.freeze
 });
 
 export interface AnalysisStateComposeInput {
+  /** Same canonical scope input for Run, callback, model view and cold read. */
+  readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /**
    * Optional adoption seam: a caller that has read a scenario's facts supplies
    * the selected fact's original result fields. Scenario scope comes from the
@@ -486,6 +506,7 @@ export interface AnalysisStateComposeInput {
   readonly runFactBinding?: {
     readonly scenarioId: string | undefined;
     readonly selectedResult: unknown;
+    readonly selectedFact?: HandlerFact;
   };
   /**
    * The turn's canonical analysis verdict. `null` ⇒ this producer has no
@@ -540,6 +561,8 @@ export interface AnalysisStateComposeInput {
    * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
    */
   readonly withheldBecauseNonlinearIdentity?: boolean;
+  /** Stated by the Run licence caller, including the first failing link's ids and labels. Never re-derived here. */
+  readonly withheldBecauseUnsizedPath?: import('../agent-lane/unsized-path-cause.js').UnsizedPathLeaderCause;
   /** The selected Run withheld its leader with no applicable constraint verdict; the cause remains unrecorded. */
   readonly withheldWithoutConstraintCause?: boolean;
   /**
@@ -940,17 +963,25 @@ export function separationWithholdFromRobustness(
   return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
 }
 
-function composeLeaderClaim(
+export function composeLeaderClaim(
   input: AnalysisStateComposeInput,
   runState: AnalysisRunState,
   newerDegradedRun: boolean,
 ): AnalysisLeaderClaim {
+  if (input.goalScopeClaimInput !== undefined && input.goalScopeClaimInput.status !== 'clear') {
+    // Scope restricts total-goal claims even when a newer degraded Run also
+    // withholds the leader. That Run's state and contradictions remain intact.
+    // An unavailable read cannot establish an attested empty scope issue list.
+    return { permitted: false, withheld_reason: WITHHELD_GOAL_SCOPE_UNRESOLVED };
+  }
   // A newer partial/refused Run supersedes the older success's claim, but
   // supplies no usable robustness verdict for the displayed older figures.
   // This is a known withhold, not an unperformed separation check.
-  if (newerDegradedRun) {
+  if (newerDegradedRun && input.withheldBecauseUnsizedPath === undefined) {
     return { permitted: false, withheld_reason: WITHHELD_LEADER_CAUSE_UNRECORDED };
   }
+  // R7: a caller-stated path cause is known even on this superseding Run; it follows the reason chain below.
+  // The displayed older Run's robustness cannot license or describe separation on that newer Run.
   /**
    * ⛔ F-LIMIT × BF9 (DL #72 5863859943; owner Canonical 5863888216) — AN F-LIMIT TIER REFUSES THE CLAIM, not only names
    * the reason. The persisted leader verdict entitles any leader above rule 4's infeasibility floor (P ≤ 0.05), so on
@@ -967,8 +998,8 @@ function composeLeaderClaim(
   // stale turn ships no result block (prose-grounding-block.ts), and `rawRobustness: null` used to publish
   // `separation_unavailable` here while the read route, judging the same Run, published `analysis_out_of_date`.
   const entitled = input.mayNameLeadingOption === true && !everyOptionBreaksLimit
-    && runState.kind !== 'complete_stale';
-  const raw: RawRobustnessSignals | null = input.rawRobustness;
+    && runState.kind !== 'complete_stale' && !newerDegradedRun;
+  const raw: RawRobustnessSignals | null = newerDegradedRun ? null : input.rawRobustness;
   const separationKnown = raw !== null;
   const separates = separationEstablishedFromRobustness(raw);
 
@@ -991,7 +1022,10 @@ function composeLeaderClaim(
     // supplied only when the constraint verdict itself permitted — so `constraint_verdict_withheld`
     // keeps the field while a limit withholds (AI Quality option (i), #70 5842615260).
     claim.withheld_reason = !entitled
-      ? input.withheldBecauseUnrequested === true
+      // MC D1: no result → nothing was checked, never a limit verdict (and no cause read off a run that did not run).
+      ? NO_RESULT_RUN_KINDS.has(runState.kind)
+        ? WITHHELD_NO_RESULT
+      : input.withheldBecauseUnrequested === true
         ? WITHHELD_UNREQUESTED_ANALYSIS
         // F-LIMIT: what every option does against a limit holds whatever the ranking — but only of the revision the
         // run analysed, so never on an out-of-date run.
@@ -999,11 +1033,17 @@ function composeLeaderClaim(
           ? WITHHELD_NO_OPTION_MEETS_LIMIT
         : input.everyOptionLimit === 'likely_breaks' && runState.kind !== 'complete_stale'
           ? WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT
+        // P1-d + DL 7 Oct (W1c, served 15:03Z: a stale Run read `goal_path_unsized` after the user's own link edit):
+        // when the Run is out of date, the out-of-date reason LEADS. Like the limit verdicts above, the identity and
+        // unsized-path causes describe the revision the Run analysed, which the user has since changed. The policy
+        // causes (no result, an unrequested first pass) still outrank it.
+        : runState.kind === 'complete_stale'
+          ? WITHHELD_RUN_OUT_OF_DATE
         : input.withheldBecauseNonlinearIdentity === true
           ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
-          // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
-          : runState.kind === 'complete_stale'
-            ? WITHHELD_RUN_OUT_OF_DATE
+          // The Run caller attests its unsized link.
+          : input.withheldBecauseUnsizedPath !== undefined
+            ? WITHHELD_GOAL_PATH_UNSIZED
             : input.withheldWithoutConstraintCause === true
               ? WITHHELD_LEADER_CAUSE_UNRECORDED
             : WITHHELD_CONSTRAINT_VERDICT
@@ -1047,7 +1087,18 @@ export function composeAnalysisStateV1(
       computed_at: canonical.computed_at,
     },
   );
-  if (binding !== undefined && binding.status !== 'match') {
+  const occurrenceFact = input.runFactBinding?.selectedFact;
+  const occurrence = occurrenceFact === undefined ? undefined : readRunAnalysisOccurrence(occurrenceFact);
+  const recordedOccurrenceMatches = canonical.basis === 'recorded_run_revision'
+    && canonical.graph_hash_at_run === null
+    && occurrence !== undefined && occurrence.fact_row_id === canonical.selected_fact_row_id
+    && occurrence.evaluated_scenario_revision !== null
+    && occurrence.evaluated_scenario_revision === canonical.run_revision?.value
+    && occurrenceFact?.fact_type === 'run_analysis'
+    && occurrenceFact.result === input.runFactBinding?.selectedResult
+    && occurrenceFact.result.scenario_id === input.runFactBinding?.scenarioId
+    && occurrenceFact.result.computed_at === canonical.computed_at;
+  if (binding !== undefined && binding.status !== 'match' && !recordedOccurrenceMatches) {
     const reason = binding.status === 'mismatch'
       ? WITHHELD_RUN_IDENTITY_CONFLICT
       : WITHHELD_RUN_IDENTITY_UNCONFIRMED;
@@ -1119,7 +1170,7 @@ export function projectAnalysisBlocksForRunBinding(
   freshnessReason?: FreshnessReason,
 ): OlumiResponse['blocks'] {
   const reason = state.leader_claim.withheld_reason;
-  if (freshnessReason === 'goal_unit_changed' || freshnessReason === 'goal_snapshot_unverified'
+  if (isGoalSnapshotStaleReason(freshnessReason)
     || reason === WITHHELD_RUN_IDENTITY_CONFLICT
     || state.contradictions.includes('fact_status_success_but_degraded_newer')) {
     return blocks.filter((block) => block.type !== 'analysis_result');

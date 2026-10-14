@@ -1,0 +1,252 @@
+{
+  "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+  "source_state": "uncommitted FIX4 working tree",
+  "working_source_sha256": {
+    "src/orchestrator-v5/routing/stated-event-risk.ts": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70",
+    "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e"
+  },
+  "test_policy": {
+    "gate": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\"",
+    "max_files_per_run": 2,
+    "max_workers": 1,
+    "file_parallelism": false,
+    "stdin": "/dev/null",
+    "serial": true,
+    "vite_config_loader": "runner",
+    "vitest_cache": false
+  },
+  "red": {
+    "passed": 35,
+    "failed": 22,
+    "total": 57,
+    "evidence": "red-summary-fix4.json"
+  },
+  "green_total": 510,
+  "green_failed": 0,
+  "runs": [
+    {
+      "name": "green-reader",
+      "files": [
+        "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+        "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts"
+      ],
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/impact-pct-fix4-green-reader.json < /dev/null",
+      "gate_command": "node -e 'process.exit(require('\"'\"'os'\"'\"').loadavg()[0] < 25 ? 0 : 1)'",
+      "gate_rejections": 0,
+      "starting_load": 9.8916015625,
+      "exit_code": 0,
+      "raw_json": "/private/tmp/impact-pct-fix4-green-reader.json",
+      "raw_log": "/private/tmp/impact-pct-fix4-green-reader.log",
+      "numTotalTests": 408,
+      "numPassedTests": 408,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "raw_json_sha256": "7c6072f0e3eede5cd7b7990842513245f8a79c51f0dbcd4a979e5253409a463c",
+      "file_counts": [
+        {
+          "path": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+          "passed": 57,
+          "failed": 0
+        },
+        {
+          "path": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+          "passed": 351,
+          "failed": 0
+        }
+      ]
+    },
+    {
+      "name": "neighbours-draft-door",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts"
+      ],
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/impact-pct-fix4-neighbours-draft-door.json < /dev/null",
+      "gate_command": "node -e 'process.exit(require('\"'\"'os'\"'\"').loadavg()[0] < 25 ? 0 : 1)'",
+      "gate_rejections": 0,
+      "starting_load": 9.2861328125,
+      "exit_code": 0,
+      "raw_json": "/private/tmp/impact-pct-fix4-neighbours-draft-door.json",
+      "raw_log": "/private/tmp/impact-pct-fix4-neighbours-draft-door.log",
+      "numTotalTests": 61,
+      "numPassedTests": 61,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "raw_json_sha256": "f4771a835846a5f71305b3865df8fade40c6fb1d61a46a25a1cc25b508b0c62f",
+      "file_counts": [
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts",
+          "passed": 22,
+          "failed": 0
+        },
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+          "passed": 39,
+          "failed": 0
+        }
+      ]
+    },
+    {
+      "name": "neighbours-copy-zero",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/event-risk-card-copy.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/event-risk-zero-treatment.test.ts"
+      ],
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/event-risk-card-copy.test.ts src/orchestrator-v5/agent-lane/__tests__/event-risk-zero-treatment.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/impact-pct-fix4-neighbours-copy-zero.json < /dev/null",
+      "gate_command": "node -e 'process.exit(require('\"'\"'os'\"'\"').loadavg()[0] < 25 ? 0 : 1)'",
+      "gate_rejections": 0,
+      "starting_load": 14.064453125,
+      "exit_code": 0,
+      "raw_json": "/private/tmp/impact-pct-fix4-neighbours-copy-zero.json",
+      "raw_log": "/private/tmp/impact-pct-fix4-neighbours-copy-zero.log",
+      "numTotalTests": 7,
+      "numPassedTests": 7,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "raw_json_sha256": "1edcaa1dff62e920014a0ad3e99d76f3d830ea708850cc9dc09a272df1d7ee57",
+      "file_counts": [
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/event-risk-card-copy.test.ts",
+          "passed": 4,
+          "failed": 0
+        },
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/event-risk-zero-treatment.test.ts",
+          "passed": 3,
+          "failed": 0
+        }
+      ]
+    },
+    {
+      "name": "neighbours-held-build",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/held-proposal-user-in-control-seam.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/event-risk-build-reply.route.test.ts"
+      ],
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/held-proposal-user-in-control-seam.test.ts src/orchestrator-v5/agent-lane/__tests__/event-risk-build-reply.route.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/impact-pct-fix4-neighbours-held-build.json < /dev/null",
+      "gate_command": "node -e 'process.exit(require('\"'\"'os'\"'\"').loadavg()[0] < 25 ? 0 : 1)'",
+      "gate_rejections": 0,
+      "starting_load": 14.45947265625,
+      "exit_code": 0,
+      "raw_json": "/private/tmp/impact-pct-fix4-neighbours-held-build.json",
+      "raw_log": "/private/tmp/impact-pct-fix4-neighbours-held-build.log",
+      "numTotalTests": 31,
+      "numPassedTests": 31,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "raw_json_sha256": "7c25ed5be0ab51ef6100452056a2fccaad05ee1cba75a2db887dc6eb0687c1f6",
+      "file_counts": [
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/event-risk-build-reply.route.test.ts",
+          "passed": 6,
+          "failed": 0
+        },
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/held-proposal-user-in-control-seam.test.ts",
+          "passed": 25,
+          "failed": 0
+        }
+      ]
+    },
+    {
+      "name": "neighbours-route-once",
+      "files": [
+        "src/orchestrator-v5/routing/__tests__/event-risk-route-once-join.test.ts"
+      ],
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/routing/__tests__/event-risk-route-once-join.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/impact-pct-fix4-neighbours-route-once.json < /dev/null",
+      "gate_command": "node -e 'process.exit(require('\"'\"'os'\"'\"').loadavg()[0] < 25 ? 0 : 1)'",
+      "gate_rejections": 0,
+      "starting_load": 13.10791015625,
+      "exit_code": 0,
+      "raw_json": "/private/tmp/impact-pct-fix4-neighbours-route-once.json",
+      "raw_log": "/private/tmp/impact-pct-fix4-neighbours-route-once.log",
+      "numTotalTests": 3,
+      "numPassedTests": 3,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "raw_json_sha256": "bb3fa4825b86ebb02eda5ebd57d2a7fda11061f26613be9d314bf0bf8cc9bcf3",
+      "file_counts": [
+        {
+          "path": "src/orchestrator-v5/routing/__tests__/event-risk-route-once-join.test.ts",
+          "passed": 3,
+          "failed": 0
+        }
+      ]
+    }
+  ],
+  "committed_corpus_rows": 76,
+  "all_committed_corpus_rows_passed": true,
+  "checks": [
+    {
+      "kind": "eslint",
+      "files": [
+        "src/orchestrator-v5/routing/stated-event-risk.ts",
+        "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts"
+      ],
+      "command": "node_modules/.bin/eslint src/orchestrator-v5/routing/stated-event-risk.ts src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts < /dev/null",
+      "exit_code": 0,
+      "log": "/private/tmp/impact-pct-fix4-eslint-1.log"
+    },
+    {
+      "kind": "eslint",
+      "files": [
+        "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts"
+      ],
+      "command": "node_modules/.bin/eslint src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts < /dev/null",
+      "exit_code": 0,
+      "log": "/private/tmp/impact-pct-fix4-eslint-2.log"
+    },
+    {
+      "kind": "eslint",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/event-risk-card-copy.test.ts"
+      ],
+      "command": "node_modules/.bin/eslint src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts src/orchestrator-v5/agent-lane/__tests__/event-risk-card-copy.test.ts < /dev/null",
+      "exit_code": 0,
+      "log": "/private/tmp/impact-pct-fix4-eslint-3.log"
+    },
+    {
+      "kind": "eslint",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/event-risk-zero-treatment.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/held-proposal-user-in-control-seam.test.ts"
+      ],
+      "command": "node_modules/.bin/eslint src/orchestrator-v5/agent-lane/__tests__/event-risk-zero-treatment.test.ts src/orchestrator-v5/agent-lane/__tests__/held-proposal-user-in-control-seam.test.ts < /dev/null",
+      "exit_code": 0,
+      "log": "/private/tmp/impact-pct-fix4-eslint-4.log"
+    },
+    {
+      "kind": "eslint",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/event-risk-build-reply.route.test.ts",
+        "src/orchestrator-v5/routing/__tests__/event-risk-route-once-join.test.ts"
+      ],
+      "command": "node_modules/.bin/eslint src/orchestrator-v5/agent-lane/__tests__/event-risk-build-reply.route.test.ts src/orchestrator-v5/routing/__tests__/event-risk-route-once-join.test.ts < /dev/null",
+      "exit_code": 0,
+      "log": "/private/tmp/impact-pct-fix4-eslint-5.log"
+    },
+    {
+      "kind": "typecheck",
+      "command": "node_modules/.bin/tsc -p tsconfig.build.json --noEmit --incremental false < /dev/null",
+      "exit_code": 0,
+      "log": "/private/tmp/impact-pct-fix4-typecheck.log"
+    },
+    {
+      "kind": "diff-check",
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "independent_source_review": "No open findings on final reader e0aa8d4b; read-only review, no test execution",
+  "known_residual": {
+    "id": "D1",
+    "issue": "Single-fragment other-event binding from r3 P2-c remains unchanged; outside bounded FIX4 class brief"
+  },
+  "no_commit_no_push": true,
+  "no_supabase_edits": true,
+  "completed_at": "2026-10-08T10:52:43.894840+00:00",
+  "deadline": "2026-10-08T12:15:00Z",
+  "independent_final_evidence_audit": "Passed: report counts, hashes, digests, corpus privacy and F3 classification; read-only, no runtime"
+}

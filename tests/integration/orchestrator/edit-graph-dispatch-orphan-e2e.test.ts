@@ -227,3 +227,9 @@ describe('dispatchEditGraph e2e — orphan-option replay', () => {
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../../src/orchestrator-v5/build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../src/orchestrator-v5/build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

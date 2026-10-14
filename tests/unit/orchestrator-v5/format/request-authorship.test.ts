@@ -388,10 +388,10 @@ describe('the adapter-bound request carries the authorship axis all the way to t
   it('⚠ the compactor\'s ai_inferred DEFAULT is not broadcast — a brief-stated goal is not called the model\'s own', async () => {
     const authored = await capture(fixture('user_override'));
 
-    // Precondition, pinned in-test: the compactor really does default this
-    // brief-stated goal to `ai_inferred`. Without this the guard below could
-    // pass because nothing was there to leak.
-    expect(compactNode(authored, GOAL).provenance).toBe('ai_inferred');
+    // Precondition, pinned in-test: the compactor carries a label on both nodes, so the guard below cannot pass because
+    // nothing was there to leak. ONE PROVENANCE AUTHORITY (Batch C): the brief-stated goal (brief_extraction, no
+    // extraction type) is now labelled the brief's — the old `ai_inferred` default no longer calls it the model's own.
+    expect(compactNode(authored, GOAL).provenance).toBe('from_brief');
     expect(compactNode(authored, DECOY).provenance).toBe('ai_inferred');
 
     // …and none of it reaches the model. Scoped to NODES for the reason given

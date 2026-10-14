@@ -17,8 +17,11 @@
  * (a question in the same message must be answered; served A08). Nothing is said that the tool did not return.
  */
 import { formatFactorValue } from '../compose/format-factor-value.js';
-import { sayFigureExactly } from './say-figure.js';
+import { sayFigureExactly, twoStateLevelWords } from './say-figure.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
+import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from './held-risk-notes.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -37,7 +40,7 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 ]);
 /** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
-  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'note',
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'likelihood', 'note', 'dropped_drivers',
 ]);
 /**
  * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,
@@ -69,9 +72,19 @@ const LINK_SET_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_i
 
 const q = (label: string): string => `‘${label}’`;
 /** A level as the user writes it ("£15,000 over 6 months"): the lane's one figure formatter, as the consent subject says it. */
-const shown = (value: number, unit: unknown): string => {
+export const proposalFigure = (value: number, unit: unknown): string => {
   const u = nonEmpty(unit) ? unit.trim() : null;
   return sayFigureExactly(value, u ?? '') ?? formatFactorValue(value, u)?.display ?? (u === null ? String(value) : `${value} ${u}`);
+};
+/** Adapt returned option levels to the existing classifier's option/intervention shape. */
+const levelSources = (levels: readonly unknown[]): unknown[] => levels.flatMap((raw) => {
+  const l = recordOf(raw);
+  return l !== undefined && nonEmpty(l.factor)
+    ? [{ kind: 'option', interventions: { [l.factor]: l.value } }] : [];
+});
+const setting = (value: number, unit: unknown, nodes: readonly unknown[], factor: string): string => {
+  const state = twoStateLevelWords(value, unit, nodes, factor);
+  return state === null ? `set to ${proposalFigure(value, unit)}` : `switched ${state}`;
 };
 const question = (publicLabel: unknown): string => {
   const n = typeof publicLabel === 'string' ? /^Approve (\d+) changes$/.exec(publicLabel.trim())?.[1] : undefined;
@@ -85,6 +98,7 @@ function newOptionReply(r: Rec): string | null {
   if (subject === undefined || subject.trim() === '') return null;
   const options = Array.isArray(r.options) ? r.options.map(recordOf) : [{ levels: r.levels }];
   if (options.some((o) => o === undefined)) return null;
+  const sources = levelSources(options.flatMap((o) => Array.isArray(o?.levels) ? o.levels : []));
   const lines: string[] = [];
   const notSet: string[] = [];
   const addNotSet = (factor: string): void => {
@@ -103,7 +117,7 @@ function newOptionReply(r: Rec): string | null {
       if (typeof l.value !== 'number' || !Number.isFinite(l.value)) return null;
       if (l.stated_by === 'user') continue; // the consent subject states it
       if (l.stated_by !== 'olumi_estimate' || !nonEmpty(l.basis)) return null;
-      lines.push(`${q(l.factor)} is set to ${shown(l.value, l.unit)}, Olumi’s estimate (${l.basis.trim()}), for you to correct.`);
+      lines.push(`${q(l.factor)} is ${setting(l.value, l.unit, sources, l.factor)}, Olumi’s estimate (${l.basis.trim()}), for you to correct.`);
     }
   }
   // A figure the tool REFUSED to set carries a reason the user needs (a name conflict, no range, another unit) —
@@ -142,8 +156,36 @@ function newRiskReply(r: Rec): string | null {
   if (subject === undefined || risk === undefined || !nonEmpty(risk.label)) return null;
   const threatens = phrases(risk.threatens);
   const drivenBy = phrases(risk.driven_by ?? []);
+  // Validate before either branch: a precondition may retain the same host-grounded user occurrence as an ordinary risk.
+  const likelihood = recordOf(risk.likelihood);
+  if (risk.likelihood !== undefined && (likelihood === undefined || likelihood.basis !== 'user'
+    || typeof likelihood.p_low_pct !== 'number' || typeof likelihood.p_high_pct !== 'number'
+    || typeof likelihood.horizon_months !== 'number' || !nonEmpty(likelihood.quote))) return null;
+  const likelihoodLines = likelihood === undefined ? []
+    : [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`];
+  const precondition = recordOf(risk.relies_on);
+  if (risk.relies_on !== undefined) {
+    if (precondition === undefined || !nonEmpty(precondition.option_id) || !nonEmpty(precondition.option_label)
+      || threatens === null || threatens.length !== 0 || drivenBy === null || drivenBy.length !== 0
+      || (risk.links_dropped !== undefined && risk.links_dropped !== true) || risk.likelihood !== undefined) return null;
+    return reply(subject, [
+      reliesOnRiskLine(risk.label, precondition.option_label),
+      ...(risk.links_dropped === true ? [`It is kept without links because it is a precondition of ${q(precondition.option_label)}.`] : []),
+    ], question(r.public_label));
+  }
   if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
+  // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
+  const causeNote = HELD_RISK_CAUSE_NOTE;
+  const droppedDrivers = r.dropped_drivers === undefined ? []
+    : Array.isArray(r.dropped_drivers) && r.dropped_drivers.every(nonEmpty) ? r.dropped_drivers as string[] : null;
+  if (droppedDrivers === null) return null;
+  const droppedNote = `I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.`;
+  const windowNote = HELD_RISK_WINDOW_NOTE;
   return reply(subject, [
+    ...likelihoodLines,
+    ...(typeof r.note === 'string' && r.note.includes(causeNote) ? [causeNote] : []),
+    ...(droppedDrivers.length > 0 && typeof r.note === 'string' && r.note.includes(droppedNote) ? [droppedNote] : []),
+    ...(typeof r.note === 'string' && r.note.includes(windowNote) ? [windowNote] : []),
     `It threatens ${threatens.join(' and ')}.`,
     ...(drivenBy.length > 0 ? [`It is driven by ${drivenBy.join(' and ')}.`] : []),
     'How strongly it acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
@@ -151,7 +193,7 @@ function newRiskReply(r: Rec): string | null {
 }
 
 /**
- * ⭐ NEW FACTORS WITH THE USER'S FIGURES (PJ-E-FIG): each figure is the user's (`stated_by: 'user'`), what it affects is the
+ * NEW FACTORS: each figure keeps the source returned by the capability; what it affects is the
  * capability's own typed phrase, and how strongly is its one fixed disclosure. The figures are named here because the
  * consent subject is minted from the ops, which never carry them. Anything else keeps the second call.
  */
@@ -165,12 +207,19 @@ function newFactorReply(r: Rec): string | null {
     const cv = recordOf(f?.current_value);
     if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects)
       || typeof cv.value !== 'number' || !Number.isFinite(cv.value) || f.how_strongly !== FACTOR_PLACEHOLDER_STRENGTH) return null;
+    // Recovery Batch B (SYS3 TRACE L6): the range the user gave, beside the figure they chose, in their own sentence.
+    const range = recordOf(cv.range);
+    if (cv.range !== undefined && (range === undefined || typeof range.low !== 'number' || typeof range.high !== 'number' || !nonEmpty(range.quote))) return null;
+    const within = range === undefined ? ''
+      : `, within your range of ${proposalFigure(range.low as number, cv.unit)} to ${proposalFigure(range.high as number, cv.unit)} (“${(range.quote as string).trim()}”)`;
     if (cv.stated_by === 'user') {
-      lines.push(`${q(f.label)} is ${shown(cv.value, cv.unit)}, the figure you gave, and affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)} is ${twoStateLevelWords(cv.value, cv.unit) === null ? proposalFigure(cv.value, cv.unit) : `switched ${twoStateLevelWords(cv.value, cv.unit)}`}, the figure you gave${within}, and affects ${f.affects.trim()}.`);
     } else if (cv.stated_by === 'user_to_confirm' && nonEmpty(cv.quote)) {
       // ⛔ DL ruling on #2235: the PAIRING is Olumi's until the user approves it, so the card shows it with their own words.
       toConfirm = true;
-      lines.push(`${q(f.label)}: ${shown(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”; it affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”${within}; it affects ${f.affects.trim()}.`);
+    } else if (cv.stated_by === 'olumi_estimate') {
+      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, Olumi’s estimate${within}; it affects ${f.affects.trim()}.`);
     } else {
       return null;
     }
@@ -193,7 +242,7 @@ function optionLevelsReply(r: Rec): string | null {
     if (iv === undefined || !nonEmpty(iv.option) || !nonEmpty(iv.factor) || typeof iv.value !== 'number' || !Number.isFinite(iv.value)) return null;
     if (iv.stated_by === 'user') continue; // the consent subject states it
     if (iv.stated_by !== 'olumi_estimate' || !nonEmpty(iv.basis)) return null;
-    lines.push(`${q(iv.factor)} under ${q(iv.option)} is set to ${shown(iv.value, iv.unit)}, Olumi’s estimate (${iv.basis.trim().replace(/\.$/, '')}), for you to correct.`);
+    lines.push(`${q(iv.factor)} under ${q(iv.option)} is ${setting(iv.value, iv.unit, levelSources(r.interventions), iv.factor)}, Olumi’s estimate (${iv.basis.trim().replace(/\.$/, '')}), for you to correct.`);
   }
   return reply(r.public_label.trim().replace(/\.$/, ''), lines, question(undefined));
 }
@@ -208,12 +257,58 @@ function linkStrengthReply(r: Rec): string | null {
  * ⭐ A SET OF LINK STRENGTHS (DL #72 5871594233): the label names every link, its band, its figure and whose estimate it
  * is; when any is Olumi's, one line says how it is stored. Its words are the capability's own, so nothing is re-derived.
  */
+/** F1b's sizing classes (`LinkSizing`, link-sizing.ts): what a link's `was.sizing` may hold. */
+const LINK_SIZINGS: ReadonlySet<string> = new Set<LinkSizing>(['user', 'placeholder', 'olumi_accepted', 'olumi_estimate', 'unmarked']);
+/** `proposeLinkStrengths`' own literals for whose a strength is; a first estimate never implies a prior size. */
+const REVIEW_ONLY_LINK = 'review only; nobody has sized this link';
+const UNSIZED_LINK_CHANGE = 'placeholder prior changed; nobody has sized this link';
+const LINK_WHOSE: ReadonlySet<string> = new Set(['yours', 'Olumi\u2019s estimate', 'Olumi\u2019s first estimate for a link nobody had sized', REVIEW_ONLY_LINK, UNSIZED_LINK_CHANGE]);
+
 function linkSetReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
-  const olumis = r.links.filter((l) => recordOf(l)?.whose !== 'yours').length;
-  return reply(subjectOf(r.public_label),
-    olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : [],
-    question(undefined));
+  const links = r.links.map(recordOf);
+  // Whose each strength is, as the capability types it: anything else is untyped and keeps the second call (DL on #2475).
+  if (links.some((l) => l === undefined || !LINK_WHOSE.has(l.whose as string))) return null;
+  const olumis = links.filter((l) => l!.whose === 'Olumi\u2019s estimate').length;
+  const firstEstimates = links.filter((l) => l!.whose === 'Olumi\u2019s first estimate for a link nobody had sized');
+  const reviewOnly = links.filter((l) => l!.whose === REVIEW_ONLY_LINK);
+  const unsizedChanges = links.filter((l) => l!.whose === UNSIZED_LINK_CHANGE);
+  /**
+   * ⭐ A LINK OLUMI HAD ALREADY ESTIMATED IS RE-SIZED, NOT SIZED (AI HARNESS #2475; CODEX_CLI_OVERFLOW + DL CR 5937945418 on
+   * R3 DEFECT 2): read from the capability's typed `whose`, `keeps_current_strength` and `was.sizing` (F1b's `linkSizing`),
+   * never from its note. A link whose sizing before is not typed keeps the second call.
+   */
+  const replaced: string[] = [];
+  for (const l of links) {
+    const was = recordOf(l!.was);
+    if (was === undefined || !LINK_SIZINGS.has(was.sizing as string) || typeof l!.keeps_current_strength !== 'boolean') return null;
+    // B1: the capability previewed the canonical review writer and read its class with linkSizing. Only a retained
+    // placeholder can carry the bounded review literal; it neither offers a size nor earns authorship on approval.
+    if (l!.whose === REVIEW_ONLY_LINK) {
+      if (was.sizing !== 'placeholder' || l!.keeps_current_strength !== true || l!.sizing_after_approval !== 'placeholder') return null;
+      continue;
+    }
+    if (l!.whose === UNSIZED_LINK_CHANGE) {
+      if (was.sizing !== 'placeholder' || l!.keeps_current_strength !== false || l!.sizing_after_approval !== 'placeholder') return null;
+      continue;
+    }
+    if (l!.sizing_after_approval === 'placeholder') return null;
+    // Science 393023 LICENCE ruling 3: a first-estimate attribution is valid only for an unsized prior, and vice versa.
+    if ((l!.whose === 'Olumi\u2019s first estimate for a link nobody had sized')
+      !== (l!.whose !== 'yours' && was.sizing === 'placeholder')) return null;
+    if (l!.whose === 'yours' || l!.keeps_current_strength || (was.sizing !== 'olumi_estimate' && was.sizing !== 'olumi_accepted')) continue;
+    if (!nonEmpty(l!.from) || !nonEmpty(l!.to) || !nonEmpty(was.band)) return null;
+    replaced.push(`${q(l!.from.trim())} \u2192 ${q(l!.to.trim())} (${was.band.trim()})`);
+  }
+  return reply(subjectOf(r.public_label), [
+    ...(olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : []),
+    ...(firstEstimates.length > 0 ? ['For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as your own.'] : []),
+    ...(firstEstimates.some((l) => l!.keeps_current_strength) ? ['Where the strength is kept as it is, approving records only your review, never authorship.'] : []),
+    ...(reviewOnly.length > 0 ? ['These links aren\u2019t sized in the model yet: approving records only your review and keeps their strength as it is.'] : []),
+    ...(unsizedChanges.length > 0 ? ['These links aren\u2019t sized in the model yet: approving changes the stored placeholder strength and records your review.'] : []),
+    ...(replaced.length === 1 ? [`${replaced[0]} already held Olumi\u2019s estimate: this replaces that estimate.`]
+      : replaced.length > 1 ? [`These links already held Olumi\u2019s estimate, which this replaces: ${replaced.join('; ')}.`] : []),
+  ], question(undefined));
 }
 
 /** A verb-led consent label ("Record…", "Change…") read after "I’ve prepared this change:". */
@@ -344,9 +439,36 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
 
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
-  if (recordOf(args)?.whole_request !== true) return null;
+  // RC3 (a′): a precondition composes unless the model said the call is NOT the whole request (Codex #2823 r1/r2).
+  const precondition = tool === 'propose_new_risk' && recordOf(recordOf(recordOf(result)?.risk)?.relies_on) !== undefined;
+  const whole = recordOf(args)?.whole_request;
+  if (precondition ? whole === false : whole !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
-  if (userFiguresTheCallLeaves(args, userMessage).length > 0) return null;
+  return composeRecoveredProposalReply(tool, args, result, userMessage);
+}
+
+/** Recovery drops conversational gates, but must not ignore or re-ask a figure the user already gave. */
+export function composeRecoveredProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
+  const r = recordOf(result);
+  // event_risk.v1 slice 2a: this door deterministically carries these user words outside the LLM arguments.
+  const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
+  // RC3 (a′): a precondition press names its option by label ("Raise Pro price to £59"); the stamp carries that label.
+  const precondition = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.relies_on) : undefined;
+  const hasLikelihood = likelihood?.basis === 'user' && nonEmpty(likelihood.quote);
+  const hasPrecondition = precondition !== undefined && nonEmpty(precondition.option_label);
+  // A precondition's links were discarded by the host: their words can't count as carrying the user's figures (Codex #2823 r2).
+  const kept = hasPrecondition ? { ...(recordOf(args) ?? {}), affects: [], caused_by: [] } : args;
+  const carried = hasLikelihood || hasPrecondition ? {
+    args: kept,
+    ...(hasLikelihood ? { event_risk_statement: likelihood!.quote } : {}),
+    ...(hasPrecondition ? { relies_on_option: precondition!.option_label } : {}),
+  } : args;
+  if (userFiguresTheCallLeaves(carried, userMessage).length > 0) return null;
+  return composeHeldResultReply(tool, result);
+}
+
+/** ⭐ P44 (a) / Codex #2781 r5: typed held-result disclosures, independent of conversational gates. */
+export function composeHeldResultReply(tool: string, result: unknown): string | null {
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS

@@ -1,0 +1,32 @@
+[
+  {
+    "original": "/Users/paulslee/olumi-work/acceptance-pd/output/waveA2-20261007/w9b-2/wire/read-PM-pre-1791344572418.json",
+    "fixture": "src/orchestrator-v5/agent-lane/method-turn/__tests__/fixtures/w9c/w9b-2-read.json",
+    "sha256": "f97f14c49025634e5b5c5954fb15798c10b6edf2b0ca683875838820159fff77"
+  },
+  {
+    "original": "/Users/paulslee/olumi-work/acceptance-pd/output/waveA2-20261007/w9b-2/wire/turn-004-PM-1791344589516.req.json",
+    "fixture": "src/orchestrator-v5/agent-lane/method-turn/__tests__/fixtures/w9c/w9b-2-request.json",
+    "sha256": "a2e7355f5cfafe7e12e08f59acec6a868f88297b0814c4c8f5f0d2fcbd8f02ac"
+  },
+  {
+    "original": "/Users/paulslee/olumi-work/acceptance-pd/output/waveA2-20261007/w9b-2/wire/turn-004-PM-1791344589516.json",
+    "fixture": "src/orchestrator-v5/agent-lane/method-turn/__tests__/fixtures/w9c/w9b-2-response.json",
+    "sha256": "94228d86b8a2dbc7139a3ab7689b56cb9ce5be498c9151cce653b786f722316b"
+  },
+  {
+    "original": "/Users/paulslee/olumi-work/acceptance-pd/output/waveA2-20261007/w9b-3/wire/read-PM-pre-1791344746835.json",
+    "fixture": "src/orchestrator-v5/agent-lane/method-turn/__tests__/fixtures/w9c/w9b-3-read.json",
+    "sha256": "2d75e0c5a78e631a57999ebd6ae549f3068c7515ee1d5477a841d1162ef410a0"
+  },
+  {
+    "original": "/Users/paulslee/olumi-work/acceptance-pd/output/waveA2-20261007/w9b-3/wire/turn-004-PM-1791344763944.req.json",
+    "fixture": "src/orchestrator-v5/agent-lane/method-turn/__tests__/fixtures/w9c/w9b-3-request.json",
+    "sha256": "1521d91572f75bd8c3e06e4e49f076720eea50beb260e4f7ded16762438347d5"
+  },
+  {
+    "original": "/Users/paulslee/olumi-work/acceptance-pd/output/waveA2-20261007/w9b-3/wire/turn-004-PM-1791344763944.json",
+    "fixture": "src/orchestrator-v5/agent-lane/method-turn/__tests__/fixtures/w9c/w9b-3-response.json",
+    "sha256": "7bf0dfe8af4b7988d2583693061abaeaee6c416e6e0c04c5f4b2a916e33437a2"
+  }
+]

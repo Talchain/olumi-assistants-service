@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   getRuntimeEnv,
   getRuntimeEnvResolution,
+  isProductionDeployment,
   type RuntimeEnv,
   type RuntimeEnvSource,
 } from "./env-resolver.js";
@@ -130,6 +131,14 @@ const booleanString = z
  * @param settingName - Name of the setting for logging
  * @param allowStaging - Whether to allow true in staging environment (default: true)
  */
+/**
+ * Settings the production-DEPLOYMENT lockdown (`isProductionDeployment`) leaves alone.
+ * The production LABEL (`getRuntimeEnv() === "prod"`) still locks every setting, these included.
+ * - CEE_MODEL_VERSIONS_ENABLED: versions are on in every deployment by ruling; an explicit
+ *   false remains the deploy-free off switch.
+ */
+const DEPLOYMENT_LOCKDOWN_EXEMPT: ReadonlySet<string> = new Set(["CEE_MODEL_VERSIONS_ENABLED"]);
+
 function createEnvEnforcedBoolean(
   defaultValue: boolean,
   settingName: string,
@@ -154,8 +163,9 @@ function createEnvEnforcedBoolean(
         requestedValue = parsed;
       }
 
-      // Prod: always false, warn if override attempted
-      if (env === "prod") {
+      // Prod: always false, warn if override attempted. "Prod" is the production label OR the
+      // declared production deployment (`isProductionDeployment`), unless the setting is exempt.
+      if (env === "prod" || (!DEPLOYMENT_LOCKDOWN_EXEMPT.has(settingName) && isProductionDeployment())) {
         if (requestedValue === true) {
           console.warn(`[SECURITY] ${settingName} cannot be enabled in production (forced to false)`);
           configOverrideEvents.push({
@@ -635,6 +645,7 @@ const ConfigSchema = z.object({
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
     draftSubstageDetail: booleanString.default(false), // CEE_DRAFT_SUBSTAGE_DETAIL — emit the COMPLETE draft substage timing set on _diagnostic_trace (ROADMAP 1.77 F1); OFF = the historical 4-key subset, byte-identical
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
+    whatChangesMeasuredEnabled: booleanString.default(true), // CEE_WHAT_CHANGES_MEASURED_ENABLED — "What would change the result?" answered from ISL's measured link tipping points (0 LLM); false = today's ordinary Agent turn
     replacementCoachEnabled: booleanString.default(false), // CEE_REPLACEMENT_COACH_ENABLED — route conversational turns to the replacement agent controller instead of the V5 routing classifier. Requires a durable replacement-state store; the branch refuses loudly without one rather than half-working.
     v6DualDraftEnabled: booleanString.default(false), // CEE_V6_DUAL_DRAFT_ENABLED — V6 dual-model draft: M2 review + deterministic merge after M1 draft, before commit (default OFF; producer-agnostic enrichment stage in draft-graph-dispatch)
     // CEE_PIPELINE_V4_ENABLED — V1 route-registration flag only.
@@ -1595,6 +1606,7 @@ function parseConfig(): Config {
       diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
       draftSubstageDetail: env.CEE_DRAFT_SUBSTAGE_DETAIL,
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
+      whatChangesMeasuredEnabled: env.CEE_WHAT_CHANGES_MEASURED_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       replacementCoachEnabled: env.CEE_REPLACEMENT_COACH_ENABLED,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,

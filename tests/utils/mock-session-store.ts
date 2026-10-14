@@ -51,7 +51,13 @@ export function createMockSessionStore(
 ): SessionStore {
   const complete: Required<SessionStore> = {
     append: async () => ({ id: 'mock-row-id' }),
+    // S-D.1b: the conditional answer append; by default it IS the (possibly overridden) `append` (see below), so a test
+    // capturing writes through `append` still sees the Agent answer row, unconditionally, as before.
+    appendIfLatest: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
+    readGuidanceHistory: async () => ({}),
+    // X4: the latest Agent answer's stored offers. Benign default = none stored.
+    readLatestAnswerOffers: async () => null,
     // Consistent with the empty `readRecent` above: no turns read, none
     // stored. Tests probing the beyond-window disclosure override it.
     countTurns: async () => 0,
@@ -115,6 +121,9 @@ export function createMockSessionStore(
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readRecentAppliedMutationFactsFor: async () => [],
+    readStatedObjectionFactsFor: async () => [],
+    // B restated goal: an empty ledger. The revised-draft gates read it as "no record of the construction" and refuse.
+    readCommittedTurnLedger: async () => ({ write_turn_ids: [], user_message_turn_ids: [], first_user_message: null, complete: true }),
     // Consistent with the empty fact reads above: this scenario has no
     // analysis. The read SUCCEEDS and reports none — which is the honest
     // default and NOT the same as the read failing. A default that threw would
@@ -128,6 +137,7 @@ export function createMockSessionStore(
     // rather than as a degraded read, which is a different product state.
     readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     readNewestAnalysisFactFor: async () => null,
+    readNewestRunDeliveryFor: async () => null,
     invalidateScoped: async (_scenarioId, scope) => ({
       scope,
       entries_invalidated: [],
@@ -136,9 +146,26 @@ export function createMockSessionStore(
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId) => ({
+      graph: await store.loadGraph(scenarioId), briefText: null, revision: 7,
+    }),
+    // T1(d)'s optional snapshot reads still participate in the exhaustive
+    // Required<SessionStore> alarm. The default scenario exists (above), is
+    // unowned and has no graph/brief/restore marker; the empty fact reads
+    // likewise mean there is no saved Run to attest. Tests seed snapshots
+    // explicitly when they need a different state.
+    readExistingScenario: async () => ({
+      userId: null, graph: null, briefText: null, analysisInvalidatedAt: null,
+    }),
+    readRunCurrentness: async () => null,
+    // Same unowned, empty scenario as readExistingScenario; no fabricated capture success.
+    readRunRecordingRows: async () => ({
+      brief: null, analysisProvenance: null, guest: true, decisionRecordPresent: false,
+    }),
+    // ACCOUNTS "Invite a colleague" (#2514): the drift alarm fired here, as designed. Benign default = nobody is a
+    // viewer member, so every existing suite keeps its owner-or-guest access exactly as before.
+    isScenarioMember: async () => false,
     // C8-A (atomic model-version restore) — the drift alarm fired again here,
     // as designed: `readAnalysisInvalidatedAt` was added to `SessionStore` and
     // this helper was not updated. Benign default = the DB-stamped restore
@@ -164,7 +191,8 @@ export function createMockSessionStore(
     // above returning `false`: no outstanding loss, so resolving is a no-op.
     resolveScenarioDraftLoss: async () => undefined,
   };
-  return { ...complete, ...overrides };
+  const store: Required<SessionStore> = { ...complete, ...overrides } as Required<SessionStore>;
+  return overrides.appendIfLatest !== undefined ? store : { ...store, appendIfLatest: (write) => store.append(write) };
 }
 
 /**

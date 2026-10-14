@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 /**
  * CONTEXT/MEMORY V5 — defect 4: A FACT-STORE FAILURE READS AS "NEVER ANALYSED".
  *
@@ -57,6 +58,7 @@ function runAnalysisFact(graphHash: string): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
+      enrichment: stampRunAnalysisProjection({}),
       graph_hash_at_run: graphHash,
       computed_at: '2026-08-15T00:00:00.000Z',
     },

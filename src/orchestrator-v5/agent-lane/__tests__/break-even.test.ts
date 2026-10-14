@@ -45,10 +45,10 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('RED (served F8): the paragraph the user reads answers the question, with the figures and whose they are', () => {
     const said = breakEvenLine(breakEvenFor(graph())!);
     expect(said).toContain('If MRR is Pro plan price × Pro paying subscribers (Olumi’s reading of your goal)');
-    expect(said).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
-    expect(said).toContain('At £59/month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
-    expect(said).toContain('At £54/month (Olumi’s estimate), MRR stays at least that while 273 or more');
-    expect(said).toContain('£20,000/month needs 339 at £59/month, 371 at £54/month or 409 at £49/month.');
+    expect(said).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
+    expect(said).toContain('At £59 a month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
+    expect(said).toContain('At £54 a month (Olumi’s estimate), MRR stays at least that while 273 or more');
+    expect(said).toContain('£20,000 a month needs 339 at £59 a month, 371 at £54 a month or 409 at £49 a month.');
     expect(said).toContain('not the analysis ranking the options');
   });
 
@@ -56,45 +56,51 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     const be = breakEvenFor(graph((ns) => { (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP/subscriber/month'; }))!;
     expect(be.target, 'a "GBP/month" target meets a per-subscriber price').toBeDefined();
     const said = breakEvenLine(be);
-    expect(said).toContain('at £49/subscriber/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
-    expect(said).toContain('At £59/subscriber/month, MRR stays at least that while 250 or more of the 300 stay');
-    expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month, 371 at £54/subscriber/month or 409 at £49/subscriber/month.');
+    expect(said).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
+    expect(said).toContain('At £59 a month, MRR stays at least that while 250 or more of the 300 stay');
+    expect(said).toContain('£20,000 a month needs 339 at £59 a month, 371 at £54 a month or 409 at £49 a month.');
     expect(said).not.toMatch(/£[\d,]+\/subscriber\/month (?:today|needs)/);
   });
 
   it('RED (the served graph itself, 053159Z/01): the break-even the wire carried, now with totals per month and the target line', () => {
-    const wire = JSON.parse(readFileSync(new URL('./fixtures/served-per-subscriber-price-263dbd5.json', import.meta.url), 'utf8')) as { nodes: unknown[]; edges: unknown[] };
+    const wire = JSON.parse(readFileSync(new URL('./fixtures/served-per-subscriber-price-263dbd5.json', import.meta.url), 'utf8')) as { nodes: Record<string, any>[]; edges: unknown[] };
+    // #2851 RE-PIN (class: the served count 200 was Olumi's, `cee_inference`): Olumi's part figure gives no break-even
+    // (DL ruling 2), so this row's purpose (units and the target line) is kept on the USER's 200.
+    expect(breakEvenFor(wire)).toBeNull();
+    wire.nodes.find((n) => n.id === 'pro_paying_subscribers')!.observed_state.source = 'user_override';
     const be = breakEvenFor(wire)!;
     // PRECONDITION: this is the served shape — the wire's `_agent.break_even` carried this unit and today's figure.
     expect(be).toMatchObject({ unit: 'GBP/subscriber/month', baseline_price: 49, baseline_volume: 200, baseline_goal: 9_800 });
     const said = breakEvenLine(be);
-    expect(said).toContain('MRR is £9,800/month today.');
+    expect(said).toContain('MRR is £9,800 a month today.');
     expect(said).not.toContain('£9,800/subscriber/month');
-    expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month');
+    expect(said).toContain('£20,000 a month needs 339 at £59 a month');
   });
 
-  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): the paragraph is byte-identical to what the wire carried', () => {
+  // #2851 RE-PIN (class: the served paragraph was arithmetic on Olumi's basis-less 250, `cee_inference`): exactly what
+  // DL ruling 2 forbids, so the served shape now says no break-even at all.
+  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): on Olumi\'s 250 there is no break-even paragraph at all', () => {
     const f = JSON.parse(readFileSync(new URL('./fixtures/served-per-month-price-263dbd5.json', import.meta.url), 'utf8')) as { served_paragraph: string; nodes: unknown[]; edges: unknown[] };
-    expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
+    expect(breakEvenFor(f)).toBeNull();
   });
 
   it('RED (MG B1): a numbered period stays — "GBP per subscriber per 12 months" gives a readable total, not "GBP months"', () => {
     const said = breakEvenLine(breakEvenFor(graph((ns) => {
       (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per subscriber per 12 months';
     }))!);
-    expect(said).toContain('MRR is £14,700/12 months today.');
+    expect(said).toContain('MRR is £14,700 per 12 months today.');
     expect(said).not.toContain('GBP months');
   });
 
-  it('CONTRAST: "GBP per seat per month" drops only the seat; a price with no per-unit word is unchanged', () => {
+  it('CONTRAST: "GBP per seat per month" and the plain monthly price both say money a month', () => {
     const perSeat = breakEvenLine(breakEvenFor(graph((ns) => {
       (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per seat per month';
       node(ns, 'mrr').goal_threshold_unit = 'GBP per month';
     }))!);
-    expect(perSeat).toContain('at £49/seat/month and 300');
-    expect(perSeat).toContain('MRR is £14,700/month today.');
-    expect(perSeat).toContain('£20,000/month needs 339');
-    expect(breakEvenLine(breakEvenFor(graph())!)).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
+    expect(perSeat).toContain('at £49 a month and 300');
+    expect(perSeat).toContain('MRR is £14,700 a month today.');
+    expect(perSeat).toContain('£20,000 a month needs 339');
+    expect(breakEvenLine(breakEvenFor(graph())!)).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
   });
 
   it('CONTRAST: no product identity on the goal → nothing (an additive goal is the analysis\'s to answer)', () => {
@@ -153,9 +159,9 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   // that HOLDS a ceiling is a goal to reduce here too — whatever its label says (the run minimises it).
   it('RED (held ceiling): a goal holding `<=` gets no "stays at least that" / "needs" answer, label unchanged', () => {
     const g = graph((ns) => { node(ns, 'mrr').goal_direction = '<='; });
-    // R1 S1 (AIQ 5871459631): with no stated level the wire cannot prove the ceiling a level, so nothing is SENT —
-    // yet break-even stays silent on the held ceiling itself (its floor words would read backwards).
-    expect(deriveEmittedGoalDirection(g, 'mrr')).toBeUndefined();
+    // RT-10 (Science 5 Oct (1)): a held ceiling on a target typed a level is SENT as minimise with no stated level, and
+    // break-even stays silent on the held ceiling itself (its floor words would read backwards).
+    expect(deriveEmittedGoalDirection(g, 'mrr')).toBe('minimise');
     expect(breakEvenFor(g)).toBeNull();
     // CONTROL: a held floor keeps the served answer.
     expect(breakEvenFor(graph((ns) => { node(ns, 'mrr').goal_direction = '>='; }))).not.toBeNull();
@@ -174,9 +180,12 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   /** The served build-turn reply on `6ff7bc9` (#70 5851078813), verbatim up to the parked questions. */
   const SERVED_FIRST = 'Not yet\u2014the provisional first pass cannot establish which choice improves MRR.\n\n- I modelled your target as **\u00a320k Pro-plan MRR** and churn at **10% or less**; confirm if \u00a320k means all-plan MRR instead.\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Which did you mean? Ask me for the other 11. The analysis can run now.';
 
-  it('RED (served 6ff7bc9): the arithmetic follows the model\'s lead, before the bullets, the save line and the questions', () => {
+  it('RED (served 6ff7bc9, P50 copy): the arithmetic follows the model\'s lead, before the bullets and the questions', () => {
     const para = breakEvenLine(breakEvenFor(graph())!);
-    const said = withBreakEvenAnswer(SERVED_FIRST, breakEvenFor(graph())!);
+    const currentFirst = SERVED_FIRST.replace('I saved the model I drafted. ', '');
+    const said = withBreakEvenAnswer(currentFirst, breakEvenFor(graph())!);
+    expect(said).not.toMatch(/model was saved|I saved the model/i);
+    expect(said).toContain('Questions this model does not answer yet:');
     expect(said.startsWith(`Not yet\u2014the provisional first pass cannot establish which choice improves MRR.\n\n${para}\n\n- I modelled`)).toBe(true);
     expect(said.indexOf(para)).toBeLessThan(said.indexOf('Questions this model does not answer yet'));
   });
@@ -193,18 +202,18 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
 
   it('RED (F3, served 013636Z): an unscored goal target is named, with why, from the typed reason and the stored target', () => {
     expect(goalNotCheckedLine(graph(), NOT_CONVERTIBLE))
-      .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
+      .toBe('Your MRR target of \u00a320,000 a month is not checked yet: the model has no current MRR figure to measure it against.');
   });
 
   it('CONTRAST (F3, R&C B1): a goal that HAS a current figure is named with no cause — the code has seven reasons', () => {
     const said = goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').observed_state = { baseline: 0.49, raw_value: 9800, unit: 'GBP/month' }; }), NOT_CONVERTIBLE);
-    expect(said).toBe('Your MRR target of \u00a320,000/month was not checked in this analysis.');
+    expect(said).toBe('Your MRR target of \u00a320,000 a month was not checked in this analysis.');
     expect(said).not.toContain('no current');
   });
 
   it('RED (served 0592c43): a target stored as "GBP per month" reads as the reply\'s own money, not "20,000 GBP per month"', () => {
     expect(goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').goal_threshold_unit = 'GBP per month'; }), NOT_CONVERTIBLE))
-      .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
+      .toBe('Your MRR target of \u00a320,000 a month is not checked yet: the model has no current MRR figure to measure it against.');
   });
 
   it('CONTRAST: a unit that is not a known currency is written as stored, "per" and all', () => {

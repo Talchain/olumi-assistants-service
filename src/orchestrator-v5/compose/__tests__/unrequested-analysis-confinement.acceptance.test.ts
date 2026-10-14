@@ -549,6 +549,9 @@ describe('every surface reads the ONE shared admission (call-site pin)', () => {
         'src/orchestrator-v5/compose.ts',
         'src/orchestrator-v5/compose/phase3-blocks.ts',
         'src/orchestrator-v5/compose/ui-directive.ts',
+        // VERSION RESULT-DIFF (#2525): judges each bound saved Run through this
+        // same admission before Compare v2 may show leader ids.
+        'src/orchestrator-v5/model-management/version-result-binding.ts',
         // The auto-run's own delivery path — the one that mattered most.
         'src/routes/scenario-graph-analysis-read.ts',
       ].sort(),

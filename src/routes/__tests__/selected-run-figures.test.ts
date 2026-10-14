@@ -9,7 +9,7 @@ import { claimPermissionsFrom } from '../../orchestrator-v5/agent-lane/first-ana
 import type { PermittedAnalysisMode } from '../../orchestrator-v5/admission/analysis-admission.js';
 
 const permissions = (mode: PermittedAnalysisMode, leaderClaim = { permitted: true, separation: 'separated' }) =>
-  claimPermissionsFrom({ leader_claim: leaderClaim }, { analysis_admission: { permitted_analysis_mode: mode } }, { requested: true });
+  claimPermissionsFrom({ leader_claim: leaderClaim }, { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } }, { requested: true });
 
 const input = (): SelectedRunFiguresInput => ({
   scenarioId: served.scenario_id,

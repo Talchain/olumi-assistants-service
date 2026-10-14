@@ -4,7 +4,8 @@
  * The Agent owns conversation, reasoning, context and tool choice. This module
  * owns none of those: it carries messages, executes the tools the Agent chooses
  * inside the request's authenticated context, and returns the text the Agent
- * produced. It never composes an answer of its own.
+ * produced, or the caller's composed reply. If narration fails after a hold,
+ * it answers from that known held result so the user can still review it.
  *
  * ⭐ MEASURED PROTOCOL FACTS, not assumptions:
  *   · A reasoning model's `function_call` must be replayed WITH its preceding
@@ -17,10 +18,14 @@
  *     sessions unchanged if they recover.
  */
 
-import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
-import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
+import { randomUUID } from 'node:crypto';
+import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { modelFacingToolResult } from '../licensed-run-view.js';
+import { composeRecoveredProposalReply } from '../proposal-reply.js';
+import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
+import { emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import {
   eligibleTools,
   type CanonicalContextPacket,
@@ -34,6 +39,16 @@ export interface ModelCallRequest {
   readonly max_output_tokens: number;
   /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
   readonly tool_choice?: { readonly type: 'function'; readonly name: string };
+  /** A caller-set deadline: the call aborts at it and is never retried (`withTransportRetry`). */
+  readonly deadline_ms?: number;
+  /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
+  readonly purpose?: 'prewarm';
+  /**
+   * P44 S1: this call only states a proposal the previous hop already held (`hopOnlyHeldProposals`), so the route may
+   * send it at the model's banked `narrate` effort (`narrateEffortFor`), with `NARRATE_LABEL_LINE` last in its input. Never sent to
+   * the provider; absent ⇒ as before.
+   */
+  readonly reasoning_role?: 'narrate';
 }
 
 export interface ModelCallResponse {
@@ -51,6 +66,17 @@ export interface ModelCallResponse {
  * ⛔ AN UNFINISHED ANSWER IS NOT AN ANSWER (AIX-001): the envelope, or any message in it, says `incomplete` — the
  * visible text may stop before its closing caveat. Absent status is read as finished, as the API did before it had one.
  */
+/**
+ * ⭐ ONE WORDING FOR "A CHANGE IS WAITING FOR YOUR APPROVAL" when no typed reply exists: narration recovery here, and the
+ * route's hop-limit / cut-short answers (DL 58e392, 8 Oct; EDIT-UX be7a896f turn 3a5a1258: "I could not settle that within
+ * this turn, and nothing in your model was changed" shipped over a held card the user then saved).
+ */
+export function heldChangeSentence(label: unknown): string {
+  return typeof label === 'string' && label.trim() !== ''
+    ? `I have prepared this change: ${label.trim()}. Nothing is changed until you approve it.`
+    : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+}
+
 export function answerIsIncomplete(resp: ModelCallResponse): boolean {
   if (resp.status === 'incomplete') return true;
   return (resp.output ?? []).some((o) => o['type'] === 'message' && o['status'] === 'incomplete');
@@ -111,6 +137,8 @@ export interface AgentTurnInput {
    * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
    */
   readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
+  /** A Run press returns its saved result before optional narration. Other turns keep the ordinary loop. */
+  readonly stopAfterSuccessfulRun?: () => string;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
   /**
@@ -121,7 +149,40 @@ export interface AgentTurnInput {
    * Absent ⇒ exactly as before.
    */
   readonly firstCallTool?: string;
+  /**
+   * ⭐ T1 (a): THE HOST MAKES THE FIRST CALL ITSELF (DL 5942371176). On a first brief the first model call only ever decided
+   * to call `build_model_from_brief` with the user's words: a whole call (13.6–14k input tokens, ~4 s served) to name a
+   * tool the host already knows. When set, hop 0 makes NO model call: this call is put in the conversation exactly as a
+   * model-made call would be and goes through the SAME dispatch (withheld check, one-change rule, bookkeeping, licensed
+   * output), then the next hop's call answers from its result. Applied only when that tool is offered on this turn;
+   * otherwise hop 0 calls the model as before. Absent ⇒ exactly as before.
+   */
+  readonly hostFirstCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
+  /**
+   * ⭐ RT-1: WHAT THE USER HAD SELECTED ON THE CANVAS, as one developer note for THIS turn (`selection-context.ts`).
+   * Placed after the model state it is resolved against, and like that state never handed on into the history: the
+   * next turn carries its own selection. Context only: it adds no tool and no authority. Absent ⇒ exactly as before.
+   */
+  readonly selectionNote?: string;
 }
+
+/**
+ * ⭐ T1 (b): THE CALL THE HOST REPLACED STILL WARMS THE CACHE. When the host makes the first call (`hostFirstCall`), the
+ * model call it replaces is still SENT, capped and never awaited: its prompt (instructions + tools + this turn's items)
+ * is the exact prefix of the next hop's call, so that call reads it from the provider's cache as it did when the model
+ * made the first call (~14k cached tokens served). No `prompt_cache_key`: the static prefix is already shared ACROSS
+ * scenarios by prefix routing (served 2 Oct: a new scenario's first call read 14,116 cached tokens another scenario
+ * wrote), and a per-scenario key would route each scenario apart. Nothing reads its output; a failure costs nothing. It is a real
+ * provider call, so it is on the turn's ledger under its own purpose (`prewarm`) and counts in `llm_calls_used` (DL).
+ */
+export const PREWARM_OUTPUT_TOKENS = 16;
+export const PREWARM_DEADLINE_MS = 15_000;
+
+/** The prefix of the call id a host-made first call carries in the conversation (never a model's id; unique per turn). */
+export const HOST_FIRST_CALL_ID = 'host_first_call';
+
+/** One harness instruction; actual tool/reason/detail are supplied by the refusal result. */
+export const REPEATED_REFUSAL_NARRATION = '{tool} was refused twice for the same reason ({refusal}: {detail}); do not call it again this turn; tell the user in plain words what is missing.';
 
 /**
  * Where a turn's wall time actually went.
@@ -182,11 +243,86 @@ export interface AgentTurnResult {
   readonly mutated: boolean;
   readonly hops: number;
   readonly stopped_reason: 'answered' | 'hop_limit' | 'incomplete';
+  /**
+   * ⭐ BYPASS1 (DL, 14 Oct): who wrote `assistant_text`. `ai` only where the model's own final answer is returned; `host`
+   * at every exit Olumi composes (the Run press's ready text, a single call answered from its own result, a narration
+   * recovered from a held proposal, an unfinished answer, the hop limit). The route stops restating, in prose, facts the
+   * AI was given ONLY when the AI wrote the reply; a host-written reply keeps every host line.
+   */
+  readonly reply_author?: 'ai' | 'host';
   /** Where this turn's wall time went. Always present. */
   readonly timing: TurnTiming;
 }
 
 const DEFAULT_MAX_HOPS = 6;
+
+/**
+ * ⭐ P44 S1 — THE CALL AFTER A HELD PROPOSAL ONLY SAYS WHAT THE RESULT HOLDS (DL 58e392 GO, 7 Oct). True when every call of
+ * the hop just made was a proposing tool that held its change (`ok`, not `mutated`, with a `proposal_id`). The next call
+ * then states it and asks for the yes; its decision was the hop before. Measured on the served narration bytes
+ * (prompt 8c743f05, tools ae038f5f), 2 cases × 2 reps per arm: Sol high median 6.7 s vs low 3.1 s, truth rows 8/8 both
+ * (not claimed added, what it threatens, drivers, placeholder, asks, no id; the double-count warning kept 2/2 at low).
+ */
+/**
+ * The one line a narrating call adds at the END of its input (after the cached prefix), never handed on into history.
+ * Without it, low and medium effort named the held risk by paraphrase ("the onboarding-delay risk") 0/2 each; with it, the
+ * exact quoted label 4/4 at low, every other truth row held (DL 58e392 ruling: the user's model labels are quoted exactly).
+ */
+export const NARRATE_LABEL_LINE = 'Name the change you proposed by its exact label, in quotes.';
+const NARRATE_ITEM = { role: 'developer', content: [{ type: 'input_text', text: NARRATE_LABEL_LINE }] } as const;
+
+/**
+ * The refusal an approval gets on a narrating call (Codex buddy r1 P1 / r2 P2 on #2781; DL 58e392 ruling B). The lowered
+ * call keeps its tools (same cached prefix) so it can still withdraw and correct what it just held (measured at low: the
+ * wrong "very strong" withdrawn 2/2, and the next hop, at the budget's own effort, re-proposed "strong" 2/2). It may not
+ * approve: an approval is the user's, and is never decided at the lowered effort.
+ */
+export { NOT_ON_NARRATION };
+const AUTHORISE_TOOL = 'authorise_change';
+
+export function hopOnlyHeldProposals(calls: readonly { name: string }[], results: readonly ToolResult[]): boolean {
+  return calls.length > 0 && calls.length === results.length && calls.every((c, i) => {
+    const r = results[i] as { ok?: unknown; mutated?: unknown; proposal_id?: unknown } | undefined;
+    return isProposingTool(c.name) && r?.ok === true && r.mutated === false && typeof r.proposal_id === 'string' && r.proposal_id !== '';
+  });
+}
+
+// Diagnostic content is deliberately narrower than the tool schema: never
+// copy basis, rationale, quotes, messages, credentials or arbitrary properties.
+const REFUSAL_SCALARS = [
+  'value', 'unit', 'label', 'goal_label', 'factor_label', 'option_label',
+  'from_label', 'to_label', 'goal_id', 'factor_id', 'option_id', 'proposal_id',
+  'direction', 'strength', 'goal_is', 'user_stated', 'estimate', 'revise', 'keep',
+] as const;
+
+const credentialLike = /(?:\b(?:bearer|password|secret|credential|authorization|token|api[_ -]?key|private[_ -]?key)\b|\bsk-[\w-]+|\bAKIA[\w]+|[A-Za-z0-9_+/=-]{32,}|https?:\/\/\S+|[^\s@]+@[^\s@]+)/i;
+const quotedSpans = /"[^"]*"|“[^”]*”|‘[^’]*’|'[^']*'|`[^`]*`/g;
+
+const refusalDetail = (detail: unknown): string | undefined => {
+  if (typeof detail !== 'string') return undefined;
+  // Test the entire detail BEFORE truncating: a key prefix beyond the bound
+  // must not make an earlier part of a credential visible.
+  if (credentialLike.test(detail)) return '[redacted]';
+  return detail.replace(quotedSpans, '[redacted]').replace(/[\r\n\t]/g, ' ').slice(0, 300);
+};
+
+const proposedScalars = (raw: unknown): Record<string, string | number | boolean> => {
+  const summary: Record<string, string | number | boolean> = {};
+  if (typeof raw !== 'string') return summary;
+  let args: unknown;
+  try { args = JSON.parse(raw); } catch { return summary; }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return summary;
+  for (const key of REFUSAL_SCALARS) {
+    const value = (args as Record<string, unknown>)[key];
+    if (typeof value === 'number' ? !Number.isFinite(value)
+      : typeof value === 'string' ? value.length > 80 || credentialLike.test(value)
+        || /["“”‘’`\r\n\t]/.test(value) || /(?:^|\s)'|'(?:\s|$)/.test(value)
+      : typeof value !== 'boolean') continue;
+    const next = { ...summary, [key]: value };
+    if (JSON.stringify(next).length <= 600) summary[key] = value as string | number | boolean;
+  }
+  return summary;
+};
 
 const textOf = (items: readonly Record<string, unknown>[]): string => {
   let t = '';
@@ -271,6 +407,9 @@ export async function runAgentTurn(
   const mode: AgentLaneMode = input.mode ?? 'full';
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const withheld = new Set(input.withheldTools ?? []);
+  const refusalCounts = new Map<string, number>();
+  const repeatLimitations = new Map<string, string>();
+  const repeatedRefusals = new Map<string, ToolResult>();
   /**
    * ⭐ THE STATE THE SERVER ALREADY HOLDS IS GIVEN, NOT FETCHED (slice C1; P3A replay of Paul's transcript, 27 Sep).
    * Every ordinary turn spent a whole model call (~3 s) asking for `get_canonical_state`, and every answer then sat
@@ -288,13 +427,18 @@ export async function runAgentTurn(
     && eligibility.omitted.some((o) => o.name === 'get_canonical_state')
     ? { role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(input.canonicalContext.packet.state)}` }] }
     : undefined;
+  const selectionItem = input.selectionNote !== undefined && input.selectionNote !== ''
+    ? { role: 'developer', content: [{ type: 'input_text', text: input.selectionNote }] }
+    : undefined;
   const items: unknown[] = [
     ...input.history,
     ...(stateItem !== undefined ? [stateItem] : []),
+    ...(selectionItem !== undefined ? [selectionItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
-  /** What this turn hands on as history: everything but the state it was given. */
-  const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
+  /** What this turn hands on as history: everything but the state and the selection it was given. */
+  const handedOn = (): unknown[] => (stateItem === undefined && selectionItem === undefined
+    ? items : items.filter((i) => i !== stateItem && i !== selectionItem));
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
@@ -351,24 +495,88 @@ export async function runAgentTurn(
     };
   };
 
+  let narrateNext = false;
+  let previousHopBuilt = false;
+  let writingEmitted = false;
+  let lastHeldCall: { name: string; args: unknown; result: ToolResult } | undefined;
+  /**
+   * ⛔ A NARRATION FAILURE NEVER LOSES A HELD CHANGE (Codex #2781 r3 / DL 6049608420, P1).
+   * The previous hop already prepared it: recover from its LAST held call and exact result, never from partial
+   * provider output. Keep the tool record intact so the normal reply still offers that proposal's approve card.
+   */
+  const recoverNarration = (err: unknown, hopsTaken: number): AgentTurnResult => {
+    const held = lastHeldCall!; // `narrateNext` is true only after a hop whose every call held a proposal.
+    const composed = input.composeReply?.(held.name, held.args, held.result);
+    // ⛔ P44 (a) / Codex #2781 r5: failed conversational gates must not hide the held result's disclosures.
+    // Preserve the user-figure honesty gate; an absent runtime message is treated as ''.
+    const recoveredReply = typeof composed === 'string' && composed.trim() !== '' ? composed
+      : composeRecoveredProposalReply(held.name, held.args, held.result, input.message ?? '');
+    const text = typeof recoveredReply === 'string' && recoveredReply.trim() !== '' ? recoveredReply
+      : heldChangeSentence(held.result.public_label);
+    items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+    log.warn({ hop: hopsTaken, err: String(err) }, 'agent-lane: narration failed — answering from the held proposal');
+    return {
+      assistant_text: text,
+      items: handedOn(),
+      tool_calls: toolCalls,
+      tool_results: toolResults,
+      mutated,
+      hops: hopsTaken,
+      stopped_reason: 'answered',
+      reply_author: 'host',
+      timing: ((t) => { emitTiming(t); return t; })(timingAt(hopsTaken)),
+    };
+  };
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
-    providerCalls += 1;
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
+    const narrateHop = narrateNext;
+    const limitationItems = [...repeatLimitations.values()].map(text => ({
+      role: 'developer', content: [{ type: 'input_text', text }],
+    }));
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
       .filter((t) => !withheld.has(t.name));
-    const forced = hop === 0 && input.firstCallTool !== undefined && offered.some((t) => t.name === input.firstCallTool)
+    const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
+      ? input.hostFirstCall : undefined;
+    const forced = hop === 0 && hostCall === undefined && input.firstCallTool !== undefined && offered.some((t) => t.name === input.firstCallTool)
       ? input.firstCallTool : undefined;
-    const resp = await callModel({
+    const request: ModelCallRequest = {
       instructions: input.instructions,
-      input: items,
+      input: [...items, ...limitationItems, ...(narrateNext ? [NARRATE_ITEM] : [])],
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-    });
-    providerMs += Math.max(0, now() - providerStartedAt);
+      ...(narrateHop ? { reasoning_role: 'narrate' as const } : {}),
+    };
+    if (hostCall !== undefined) {
+      void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
+        .catch((err: unknown) => { log.debug({ err: String(err) }, 'agent-lane: cache prewarm failed (nothing reads it)'); });
+    } else {
+      providerCalls += 1;
+    }
+    let resp: ModelCallResponse;
+    try {
+      if (hostCall !== undefined) {
+        resp = { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] };
+      } else {
+        // ⭐ P44 S2 — only the real reply call after the previous hop's successful, unreplayed build.
+        if (hop > 0 && previousHopBuilt && !writingEmitted) {
+          emitAgentPhase('writing');
+          writingEmitted = true;
+        }
+        resp = await callModel(request);
+      }
+    } catch (err: unknown) {
+      if (!narrateHop) throw err;
+      providerMs += Math.max(0, now() - providerStartedAt);
+      return recoverNarration(err, hop);
+    }
+    if (hostCall === undefined) providerMs += Math.max(0, now() - providerStartedAt);
+    if (narrateHop && answerIsIncomplete(resp)) {
+      return recoverNarration(new Error(`narration incomplete: ${resp.incomplete_reason ?? 'unknown'}`), hop);
+    }
     const out = resp.output ?? [];
     /**
      * ⛔ EVERY CALL IN THE OUTPUT, NOT THE FIRST ONE.
@@ -406,6 +614,7 @@ export async function runAgentTurn(
           mutated,
           hops: hop,
           stopped_reason: 'incomplete',
+          reply_author: 'host',
           timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
         };
       }
@@ -418,6 +627,7 @@ export async function runAgentTurn(
         mutated,
         hops: hop,
         stopped_reason: 'answered',
+        reply_author: 'ai',
         timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
       };
     }
@@ -425,14 +635,25 @@ export async function runAgentTurn(
     // The whole output array first — the reasoning item must accompany the
     // calls — then one output per call, in the order they were made.
     items.push(...out);
+    const hopResultsFrom = toolResults.length;
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = withheld.has(String(call.name))
+      const result: ToolResult = repeatLimitations.has(String(call.name))
+        ? { ...repeatedRefusals.get(String(call.name))!, detail: repeatLimitations.get(String(call.name)), repeat_withheld: true }
+        : withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
+          }
+        // ⛔ The narrating call may not approve the change THIS turn just held for the user's yes (Codex #2781 r1 P1; DL
+        // ruling B). One an earlier turn showed and the user approved stays approvable on any hop.
+        : narrateHop && String(call.name) === AUTHORISE_TOOL
+          && proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+        ? {
+            ok: false, mutated: false, refusal: NOT_ON_NARRATION,
+            detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.',
           }
         // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
         // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
@@ -440,13 +661,29 @@ export async function runAgentTurn(
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
           // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
           // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
-          : String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+          : String(call.name) === WITHDRAW_PROPOSAL && !(proposalIdArg(call.arguments) ?? '').startsWith('goal-scope:')
+            && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
             ? {
                 ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
                 detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
                   + 'a change the user has already seen stays theirs to approve or decline.',
               }
             : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+      if (result.ok === false && typeof result.refusal === 'string' && !withheld.has(String(call.name))) {
+        const key = `${String(call.name)}:${result.refusal}`;
+        const count = (refusalCounts.get(key) ?? 0) + 1;
+        refusalCounts.set(key, count);
+        // One corrected retry remains possible. Only the second identical refusal withholds the tool.
+        if (count === 2) {
+          withheld.add(String(call.name));
+          const detail = typeof result.detail === 'string' && result.detail.trim() !== ''
+            ? result.detail.replace(/\s+/g, ' ').slice(0, 600) : result.refusal;
+          const text = REPEATED_REFUSAL_NARRATION.replace('{tool}', () => String(call.name))
+            .replace('{refusal}', () => result.refusal as string).replace('{detail}', () => detail);
+          repeatLimitations.set(String(call.name), text);
+          repeatedRefusals.set(String(call.name), structuredClone(result));
+        }
+      }
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own
@@ -478,6 +715,16 @@ export async function runAgentTurn(
         providerCalls += Math.floor(claimedCalls);
       }
       if (result.mutated) mutated = true;
+      if (result.ok === false && MUTATION_TOOLS.includes(String(call.name))) {
+        log.info({
+          event: 'v5.agent.tool_refused',
+          request_id: input.ctx.request_id,
+          tool: String(call.name),
+          refusal: result.refusal,
+          detail: refusalDetail(result.detail),
+          proposed: proposedScalars(call.arguments),
+        }, 'Agent mutation tool refused');
+      }
       toolCalls.push({
         name: String(call.name),
         ok: result.ok,
@@ -496,8 +743,36 @@ export async function runAgentTurn(
       items.push({
         type: 'function_call_output',
         call_id: call.call_id,
-        output: JSON.stringify(result),
+        // ⭐ The model reads the LICENSED run (`licensed-run-view.ts`): on a turn it may not name a leader, no leader
+        // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
+        output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
+    }
+    const hopResults = toolResults.slice(hopResultsFrom);
+    // Finish every call's bookkeeping before returning, so history retains a paired output for each call.
+    // The route still checks the final canonical read before shipping the result and its bound Explain control.
+    if (input.stopAfterSuccessfulRun !== undefined && calls.some((call, index) =>
+      call.name === 'run_analysis' && hopResults[index]?.ok === true && hopResults[index]?.ran === true)) {
+      const text = input.stopAfterSuccessfulRun();
+      items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+      return {
+        assistant_text: text, items: handedOn(), tool_calls: toolCalls, tool_results: toolResults,
+        mutated, hops: hop + 1, stopped_reason: 'answered', reply_author: 'host',
+        timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+      };
+    }
+    // ⛔ P44 S2 — align each call with its own result; refused and replayed builds cannot announce writing.
+    previousHopBuilt = calls.some((call, index) => {
+      const result = hopResults[index];
+      return call.name === 'build_model_from_brief' && result?.ok === true && result.mutated === true && result.replayed !== true;
+    });
+    narrateNext = hopOnlyHeldProposals(calls.map((c) => ({ name: String(c.name) })), hopResults);
+    lastHeldCall = undefined;
+    if (narrateNext) {
+      const call = calls.at(-1)!;
+      let args: unknown;
+      try { args = JSON.parse(String(call.arguments ?? '{}')); } catch { args = undefined; }
+      lastHeldCall = { name: String(call.name), args, result: toolResults.at(-1)! };
     }
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
     if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
@@ -514,6 +789,7 @@ export async function runAgentTurn(
           mutated,
           hops: hop + 1,
           stopped_reason: 'answered',
+          reply_author: 'host',
           timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
         };
       }
@@ -530,6 +806,7 @@ export async function runAgentTurn(
     mutated,
     hops: maxHops,
     stopped_reason: 'hop_limit',
+    reply_author: 'host',
     timing: ((t) => { emitTiming(t); return t; })(timingAt(maxHops)),
   };
 }

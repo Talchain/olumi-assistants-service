@@ -1,0 +1,22 @@
+[
+  {
+    "check": "validate-handler-ownership",
+    "exit_code": 0
+  },
+  {
+    "check": "validate-v5-phase1.5-invariants",
+    "exit_code": 0
+  },
+  {
+    "check": "check-no-direct-analysis-ready",
+    "exit_code": 0
+  },
+  {
+    "check": "check-forbidden-boundary-patterns",
+    "exit_code": 0
+  },
+  {
+    "check": "typecheck-ratchet",
+    "exit_code": 0
+  }
+]

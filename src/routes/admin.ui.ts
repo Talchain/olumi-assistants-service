@@ -3907,7 +3907,7 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
    *
    * Security: IP allowlist check (same as admin API routes)
    */
-  app.get('/admin', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     // Verify IP is allowed before serving admin UI
     if (!verifyIPAllowed(request, reply)) return;
 
@@ -3927,7 +3927,7 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
    * Visual dashboard showing active prompt metadata, model routing per task,
    * and key feature flag status. Requires admin key via Alpine.js prompt.
    */
-  app.get('/admin/dashboard', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/dashboard', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyIPAllowed(request, reply)) return;
 
     return reply
@@ -3947,7 +3947,7 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
    * Returns NODE_ENV and key feature flags read from config (not raw env).
    * Requires admin key.
    */
-  app.get('/admin/dashboard/env', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/dashboard/env', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     let nodeEnv: string;

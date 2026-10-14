@@ -192,6 +192,20 @@ describe('run_delta outcome disclosure', () => {
     expect(got[0].run_analysis_facts_count).toBe(1);
   });
 
+  it('RED (AI HARNESS, F5 I3.1): a caller that binds the delta itself is named as such, never as prior_facts_absent', () => {
+    const before = response(BOUND_PAIR[0]!);
+    const finalised = finaliseV5Response(response(BOUND_PAIR[0]!), { scenarioId: SCENARIO_ID, runDeltaBoundByCaller: true, mayNameLeadingOption: true });
+
+    const got = outcomeEvents();
+    expect(got).toHaveLength(1);
+    expect(got[0].outcome).toBe('skipped');
+    expect(got[0].reason).toBe('caller_binds_run_delta');
+    expect(got[0].wire_reason_carried).toBeNull();
+    // Telemetry only: the exit's wire is what it was (no delta built here, no reason stamped).
+    expect('run_delta' in finalised).toBe('run_delta' in before);
+    expect(wireReason(finalised)).toBeUndefined();
+  });
+
   it('names prior_facts_absent — the caller-owned cause the producer cannot see', () => {
     finalise(undefined, BOUND_PAIR[0]!);
 
@@ -473,7 +487,13 @@ describe('run_delta absence reason reaches the client', () => {
 
 
 describe('goal-unit snapshot freshness clamps Run comparisons', () => {
-  it.each(['goal_unit_changed', 'goal_snapshot_unverified'] as const)(
+  const WORDS = {
+    goal_unit_changed: 'your goal’s unit changed',
+    goal_snapshot_unverified: 'the saved goal’s unit could not be confirmed',
+    // RT-10: the direction the Run sent is not the one the model sends now.
+    goal_direction_changed: 'which way counts as better for your goal changed',
+  } as const;
+  it.each(['goal_unit_changed', 'goal_snapshot_unverified', 'goal_direction_changed'] as const)(
     'removes both existing and newly derived run_delta for %s only', (reason) => {
       const newest = BOUND_PAIR[0] as RunAnalysisHandlerFact;
       const fresh = finalise(BOUND_PAIR, newest);
@@ -492,7 +512,7 @@ describe('goal-unit snapshot freshness clamps Run comparisons', () => {
       expect(graphless.analysis_state?.run_state.kind).toBe('complete_stale');
       expect(graphless.run_delta).toBeUndefined();
       expect(graphless.analysis_ready).toMatchObject({ freshness: 'stale',
-        freshness_reason: reason === 'goal_unit_changed' ? 'your goal’s unit changed' : 'the saved goal’s unit could not be confirmed',
+        freshness_reason: WORDS[reason],
         computed_at: base.computed_at, graph_hash_at_run: base.graph_hash_at_run, current_graph_hash: base.current_graph_hash });
       expect(out.blocks.some((b) => b.type === 'analysis_result')).toBe(false);
       const ordinary = finaliseV5Response(response(newest), {

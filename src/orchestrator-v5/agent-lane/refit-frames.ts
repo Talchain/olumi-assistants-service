@@ -23,12 +23,17 @@
  * Tightening the source (AIQ's F_S floor, 5894561359) is not built in v1: on `c96` it makes two new cuts (AIQ).
  * PURE: the input graph is never mutated.
  */
+import { clearPlaceholderMarker } from '../../cee/magnitude/link-sizing.js';
+import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
+
 type Rec = Record<string, any>;
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const above1 = (v: unknown): v is number => num(v) && v > 1;
 const [MIN_STD, MAX_STD] = [1e-4, 2.0];
 const TOL = 1e-9;
+/** Decision and option scaffolding: their links carry no causal size, so no frame move touches them. */
+const STRUCTURAL_KINDS: ReadonlySet<unknown> = new Set(['decision', 'option']);
 
 export interface FrameRefit {
   readonly node: string;
@@ -39,7 +44,7 @@ export interface FrameRefit {
 }
 export interface FrameRefusal {
   readonly link: string;
-  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale';
+  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale' | 'ambiguous_pair';
   /** For `new_cut`: the link that would be cut instead. */
   readonly detail?: string;
 }
@@ -103,7 +108,7 @@ function spreadWouldMove(n: Rec, Fold: number, F: number): boolean {
 }
 
 const key = (e: Rec): string => `${e.from}→${e.to}`;
-const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated';
+const userStated = (e: Rec): boolean => hasUserStatedSize(e);
 /**
  * ⭐ R3 #75 5923914386 FINDING 1 (DL 5923941128): the whole holds its parts. A DEFINITIONAL link (±1 in one unit, typed by
  * admission's `definitionalLink`) is exact by definition, like a user's size, so a frame that cuts it is refit the same
@@ -112,6 +117,61 @@ const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated
  * cold open declined the Run (CANVAS 5923984462). Its origin and its disclosure are unchanged: only frames move.
  */
 const sizedExactly = (e: Rec): boolean => userStated(e) || e.provenance?.definitional === true;
+
+const clampedFrom = (e: Rec): number | undefined => (num(e?.provenance?.clamped_from) ? e.provenance.clamped_from : undefined);
+
+/**
+ * ⭐ CLAMP AT PERSIST (DL #75 5924108406; R3 5924108105 / 5924114341; AIQ 5924120672; CODEX 5924186955 / 5924209469).
+ * A stored |mean| > 1 breaks the WHOLE model: `assertIngressGraphNumericBounds` refuses every later write ("Not saved",
+ * 52f8cd 5924036192) and the UI cold open declines its Run (CANVAS 5923984462). PLoT clamps it to ±1 at parse anyway, so
+ * the analysis is the same: a link no refit could fit is STORED at ±1 (sign kept, its spread scaled with it) with
+ * `provenance.clamped_from` = its full β. `EdgeStrengthV3` is a strict {mean, std}, so the marker rides the provenance,
+ * which passes through. `natural_effect` is never touched: the user's figure and range stay byte-exact, and its
+ * `strength_mean` keeps the full β, so the readers that trust a natural size only while it is the β analysed
+ * (`placeholder-parts`) read a clamped link as not analysed at the user's size, which is true.
+ */
+export function clampForPersist<G>(graph: G): G {
+  // ⛔ THE EXACT INGRESS BOUND (CODEX 5925312387): `assertIngressGraphNumericBounds` refuses ANY |mean| > 1, so ±1.0000000005
+  // is clamped too. Within rounding noise (≤ 1 + TOL) it is simply ±1 — nothing was cut, so no marker.
+  const over = (e: Rec): boolean => num(e?.strength?.mean) && Math.abs(e.strength.mean) > 1;
+  const edges = (graph as Rec | null)?.edges;
+  if (!Array.isArray(edges) || !edges.some(over)) return graph;
+  const g = structuredClone(graph) as Rec;
+  for (const e of g.edges as Rec[]) {
+    if (!over(e)) continue;
+    const full = e.strength.mean as number;
+    e.strength = { ...e.strength, mean: Math.sign(full), ...(num(e.strength.std) ? { std: e.strength.std / Math.abs(full) } : {}) };
+    if (Math.abs(full) > 1 + TOL) e.provenance = { ...(e.provenance ?? {}), clamped_from: full };
+  }
+  return g as G;
+}
+
+/**
+ * Every stored clamp undone: each marked link back at its full β, its spread with it, the marker dropped. Every refit, the
+ * F4 retirement and the run's wire copy start here (R3 5924114341: re-derive from the user's size, never from the stored
+ * ±1), so a later fit restores the full size, and PLoT is sent what it always was (it clamps, marks and withholds itself).
+ */
+export function withStatedStrengths<G>(graph: G): G {
+  const edges = (graph as Rec | null)?.edges;
+  if (!Array.isArray(edges) || !edges.some((e: Rec) => clampedFrom(e) !== undefined)) return graph;
+  const g = structuredClone(graph) as Rec;
+  for (const e of g.edges as Rec[]) {
+    const full = clampedFrom(e);
+    if (full === undefined) continue;
+    delete e.provenance.clamped_from;
+    // ⛔ A STALE MARKER IS DROPPED, NEVER APPLIED (CODEX 5924209469): the marker speaks only while the link still holds the
+    // clamp it was written with (±1, the same sign) and its natural size, where it has one, still records that β. Any
+    // later write of the strength or of the size (an edge edit, a link-effect answer) leaves it stale: the edit stands.
+    const ne = e.provenance?.natural_effect;
+    const stillTheClamp = num(e.strength?.mean) && Math.abs(Math.abs(e.strength.mean) - 1) <= TOL && Math.sign(e.strength.mean) === Math.sign(full)
+      // CODEX 5925312387: the clamp always writes the marker beside the user's natural size, and every real write of the
+      // strength or the size drops or replaces that size (adjust_edge_strength, link-effect-edit). No natural size = stale.
+      && num(ne?.strength_mean) && Math.abs(ne.strength_mean - full) <= TOL * Math.max(1, Math.abs(full));
+    if (!stillTheClamp) continue;
+    e.strength = { ...e.strength, mean: full, ...(num(e.strength?.std) ? { std: e.strength.std * Math.abs(full) } : {}) };
+  }
+  return g as G;
+}
 
 function reframed(graph: Rec, id: string, F: number): Rec {
   const g: Rec = structuredClone(graph);
@@ -132,16 +192,82 @@ function reframed(graph: Rec, id: string, F: number): Rec {
     // A relative change is scale-free (`change_rel`: the fraction r); a level or an absolute change is raw / cap.
     if (num(node.goal_threshold) && node.goal_threshold_frame !== 'change_rel') node.goal_threshold *= k;
   }
-  const frames = new Map((g.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
+  /**
+   * ⭐ RECOVERY BATCH C — AN IMPLICIT-FRAME NEIGHBOUR KEEPS ITS NATURAL SIZE TOO (Science F5 "Required conditions":
+   * "transform … downstream relationships consistently, including implicit-frame neighbours"). A link whose other end has
+   * no frame of its own (a 0–1 risk such as "Specialist underperformance") was skipped here, so widening the outcome it
+   * feeds silently re-sized it in natural units (−0.5 on 125 is −62.5 tickets; left at −0.5 on 200 it read −100). That end's
+   * implicit frame is fixed, so the link scales exactly as a framed one does. Only decision/option scaffolding (no causal
+   * size) and a dangling end are left as they are. A placeholder keeps its tag: only its coordinates move.
+   */
+  const kinds = new Map((g.nodes as Rec[]).map((n) => [n.id, n.kind]));
   for (const e of g.edges as Rec[]) {
     const scale = e.from === id ? F / Fold : e.to === id ? Fold / F : 1;
-    if (scale === 1 || frames.get(e.from === id ? e.to : e.from) === undefined) continue; // structural edge
+    const other = kinds.get(e.from === id ? e.to : e.from);
+    if (scale === 1 || other === undefined || STRUCTURAL_KINDS.has(other)) continue; // structural edge
     if (num(e.strength?.mean)) e.strength.mean *= scale;
     if (num(e.strength?.std)) e.strength.std *= scale;
     const ne = e.provenance?.natural_effect;
     if (ne !== undefined && num(ne.strength_mean)) ne.strength_mean *= scale;
+    // Pending estimates follow the same units when the user's pass moves their frames first.
+    const candidate = e.provenance?.olumi_fit_candidate;
+    if (candidate !== undefined) {
+      candidate.strength_mean *= scale;
+      candidate.strength_std *= scale;
+      if (num(candidate.natural_effect?.strength_mean)) candidate.natural_effect.strength_mean *= scale;
+    }
   }
   return g;
+}
+
+/**
+ * ⭐ S5t r2 (Codex r1 on #2631, P1 ×2): a refit made for the links in `written` leaves EVERY OTHER link's analysed size where
+ * it was. A link framed at both ends keeps β·F_to/F_from: `reframed` rescales it, but a CLAMPED link (|β| stored at 1)
+ * whose end is re-framed would not. A link into or out of a re-framed node whose other end has no frame (an implicit one,
+ * e.g. a 0–1 switch) is rescaled by `reframed` (Batch C) but read here with no frame to compare on, so when it carries a
+ * natural size the refit is still refused (conservative). A predicate only: construction's own call is unchanged.
+ */
+export function refitKeepsOtherLinks(before: Rec, after: Rec, written: ReadonlySet<string>): boolean {
+  const fb = new Map((before.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
+  const fa = new Map((after.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
+  const kinds = new Map((before.nodes as Rec[]).map((n) => [n.id, n.kind]));
+  const eb = before.edges as Rec[];
+  const ea = after.edges as Rec[];
+  if (eb.length !== ea.length) return false;
+  for (let i = 0; i < eb.length; i += 1) {
+    const b = eb[i]!;
+    const a = ea[i]!;
+    if (a.from !== b.from || a.to !== b.to) return false;
+    if (written.has(key(b)) || kinds.get(b.from) === 'option' || kinds.get(b.from) === 'decision') continue;
+    const [sb, tb, sa, ta] = [fb.get(b.from), fb.get(b.to), fa.get(b.from), fa.get(b.to)];
+    if (sb === sa && tb === ta) continue;
+    if (sb === undefined || tb === undefined || sa === undefined || ta === undefined) {
+      if (b.provenance?.natural_effect !== undefined) return false;
+      continue;
+    }
+    if (!num(b.strength?.mean) || !num(a.strength?.mean)) continue;
+    const was = (b.strength.mean * tb) / sb;
+    const now = (a.strength.mean * ta) / sa;
+    if (Math.abs(was - now) > TOL * Math.max(1, Math.abs(was))) return false;
+  }
+  return true;
+}
+
+/**
+ * ⭐ S5t receipt (Science d5 #87 6009444385, DL adopted): the nodes whose frame differs between two reads of the model, in
+ * `after`'s node order — what a refit actually moved, read off the stored graphs rather than the writer's own account.
+ */
+export function reframedNodeIds(before: unknown, after: unknown): string[] {
+  const nodesOf = (g: unknown): Rec[] => (g !== null && typeof g === 'object' && Array.isArray((g as Rec).nodes) ? (g as Rec).nodes : []);
+  const was = new Map(nodesOf(before).map((n) => [n.id, frameOf(n)]));
+  return nodesOf(after).filter((n) => typeof n.id === 'string' && was.has(n.id) && was.get(n.id) !== frameOf(n)).map((n) => n.id as string);
+}
+
+/** Every causal link out of the contract (|β| > 1), framed or not: only decision/option scaffolding is passed over. */
+function outOfContract(g: Rec): Rec[] {
+  const kinds = new Map((g.nodes as Rec[]).map((n) => [n.id, n.kind]));
+  return (g.edges as Rec[]).filter((e) => num(e.strength?.mean) && Math.abs(e.strength.mean) > 1 + TOL
+    && !STRUCTURAL_KINDS.has(kinds.get(e.from)) && !STRUCTURAL_KINDS.has(kinds.get(e.to)));
 }
 
 /** Links out of the contract (|β| > 1) between two framed nodes. */
@@ -153,12 +279,12 @@ function cuts(g: Rec): Rec[] {
 
 /**
  * `goalOwnRows`: the goal's OWN target/limit rows (`goal_constraints` naming the goal) do not refuse a goal widen. Opt-in,
- * passed only by `retireNormalisingGoalFrame` (F4, R3 #75 5922368144): those rows hold the RAW figure, and `reframed`
- * rescales the goal's normalised threshold and level with the frame, so the target the user approved reads the same.
- * Every other caller keeps v1's refusal byte for byte.
+ * passed by `retireNormalisingGoalFrame` (F4, R3 #75 5922368144) and by construction (`build-model.ts`, Batch C):
+ * those rows hold the RAW figure, and `reframed` rescales the goal's normalised threshold and level with the frame, so
+ * the target the user approved reads the same. Every other caller (the chat edits) keeps v1's refusal byte for byte.
  */
 export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwnRows?: boolean } = {}): { readonly graph: Rec; readonly refits: FrameRefit[]; readonly refused: FrameRefusal[] } {
-  let g = graph;
+  let g = withStatedStrengths(graph);
   const refits: FrameRefit[] = [];
   const refused: FrameRefusal[] = [];
   const tried = new Set<string>();
@@ -197,11 +323,91 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
       next = reframed(next, down.id, Fn);
       chain.push({ node: down.id, from: Fd, to: Fn, for_link: key(into[0]!) });
     }
+    // ⛔ A widened node's out-link into an IMPLICIT-frame node (now rescaled with it, above) can leave the contract too, and
+    // `cuts` reads framed pairs only: no frame there to widen, so the whole chain is refused rather than cut at persist.
+    newCut ??= outOfContract(next).find((x) => !outOfContract(g).some((y) => key(y) === key(x)));
     if (newCut !== undefined) { refused.push({ link: key(e), reason: 'new_cut', detail: key(newCut) }); continue; }
     g = next;
     refits.push(...chain);
   }
   return { graph: g, refits, refused };
+}
+
+/** User levels and ranges bind their frames. A goal's raw target alone does not. */
+function olumiMayReframe(node: Rec, edges: readonly Rec[]): boolean {
+  return !usersLevel(node) && !edges.some((e) => (e.from === node.id || e.to === node.id)
+    && userStated(e) && e.provenance?.natural_effect?.stated_range !== undefined);
+}
+
+/** Fit only pending Olumi estimates, after the user's pass. PURE; refusals leave only the old placeholder. */
+export function refitFramesForOlumiEstimates(graph: Rec): {
+  readonly graph: Rec; readonly fitted: string[]; readonly refused: FrameRefusal[];
+} {
+  if (!(graph.edges as Rec[]).some((e) => e.provenance?.olumi_fit_candidate !== undefined)) {
+    return { graph, fitted: [], refused: [] };
+  }
+  let g = structuredClone(graph);
+  const fitted: string[] = [];
+  const refused: FrameRefusal[] = [];
+  const goals = new Set((g.nodes as Rec[]).filter((n) => n.kind === 'goal').map((n) => n.id));
+  const pending = (g.edges as Rec[]).filter((e) => e.provenance?.olumi_fit_candidate !== undefined)
+    .sort((a, b) => Number(goals.has(b.to)) - Number(goals.has(a.to))).map(key);
+  for (const link of pending) {
+    // Endpoint identity must name exactly one edge, including non-candidate neighbours.
+    const matching = (g.edges as Rec[]).filter((e) => key(e) === link);
+    if (matching.length !== 1) {
+      refused.push({ link, reason: 'ambiguous_pair' });
+      for (const e of matching) delete e.provenance?.olumi_fit_candidate;
+      continue;
+    }
+    const before = g;
+    let next = structuredClone(before);
+    const edge = (next.edges as Rec[]).find((e) => key(e) === link)!;
+    const candidate = edge.provenance.olumi_fit_candidate;
+    edge.strength = { mean: candidate.strength_mean, std: candidate.strength_std };
+    edge.provenance.magnitude = 'olumi_estimate';
+    if (candidate.natural_effect !== undefined) edge.provenance.natural_effect = structuredClone(candidate.natural_effect);
+    else delete edge.provenance.natural_effect;
+    clearPlaceholderMarker(edge);
+    delete edge.provenance.olumi_fit_candidate;
+    const moved = new Set<string>();
+    let reason: FrameRefusal['reason'] | undefined;
+    // The minimum nice frame fits every cut into a node at once. Larger frames can only increase its outgoing cuts,
+    // so this monotone cascade moves the fewest possible nodes, including a goal-only fit when one suffices.
+    for (;;) {
+      const cut = cuts(next).find((e) => key(e) === link) ?? cuts(next)[0];
+      if (cut === undefined) break;
+      const target = (next.nodes as Rec[]).find((n) => n.id === cut.to);
+      const Fold = frameOf(target);
+      if (target === undefined || Fold === undefined) { reason = 'no_frame'; break; }
+      if (moved.has(target.id) || (key(cut) !== link && !moved.has(cut.from))) { reason = 'new_cut'; break; }
+      const into = cuts(next).filter((e) => e.to === target.id);
+      const F = niceFrameAtLeast(Math.max(...into.map((e) => Math.abs(e.strength.mean))) * Fold);
+      reason = widenRefusal(next, target, Fold, F, { goalOwnRows: true });
+      if (reason === undefined && !olumiMayReframe(target, next.edges)) reason = 'levels_set_on_node';
+      if (reason !== undefined) break;
+      next = reframed(next, target.id, F);
+      moved.add(target.id);
+    }
+    // Missing frames must not let an out-of-contract candidate escape the cascade.
+    if (reason === undefined && (next.edges as Rec[]).some((e) => !num(e.strength?.mean) || Math.abs(e.strength.mean) > 1 + TOL)) reason = 'new_cut';
+    if (reason === undefined && !refitKeepsOtherLinks(before, next, new Set([link]))) reason = 'new_cut';
+    if (reason !== undefined) {
+      refused.push({ link, reason });
+      // Exact rollback, then remove only the transient carrier.
+      delete (g.edges as Rec[]).find((e) => key(e) === link)!.provenance.olumi_fit_candidate;
+      continue;
+    }
+    if (candidate.basis !== undefined) (next.edges as Rec[]).find((e) => key(e) === link)!.provenance.basis = candidate.basis;
+    for (const node of next.nodes as Rec[]) {
+      if (moved.has(node.id) && num(node.observed_state?.std) && node.observed_state.std > 0) {
+        node.observed_state.std_source = 'frame_carried';
+      }
+    }
+    g = next;
+    fitted.push(link);
+  }
+  return { graph: g, fitted, refused };
 }
 
 /** Why `target` may not be widened from `Fold` to `F` (v1's guards, one per node, the cascade's included), else undefined. */

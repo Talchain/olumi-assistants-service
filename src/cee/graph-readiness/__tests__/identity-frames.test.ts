@@ -54,3 +54,32 @@ describe('a stated identity needs a frame on every part before the Run', () => {
     expect(statedIdentityFrameGaps(g).map((x) => x.id)).toEqual(['mrr']);
   });
 });
+
+describe('accumulation carrier frames use the existing three-part rule', () => {
+  const accumulation = (): Json => ({
+    nodes: [
+      { id: 'subscribers_at_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 5000,
+        nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'],
+          horizon_months: 12, rate_scale: 0.01, stated_in_brief: true } },
+      { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { raw_value: 250, value: 0.125, cap: 2000, unit: 'subscribers' } },
+      { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { raw_value: 3, value: 0.03, cap: 100, unit: '%' } },
+      { id: 'inflow', kind: 'factor', label: 'New subscribers each month', observed_state: { raw_value: 30, value: 0.15, cap: 200, unit: 'subscribers/month' } },
+    ],
+  });
+
+  it('subscribers_at_12 has its scale_frame and all three named parts have frames, so there is no gap', () => {
+    expect(statedIdentityFrameGaps(accumulation())).toEqual([]);
+  });
+
+  it('CONTROL: a frameless churn part is bound to subscribers_at_12, rather than ignored as a third participant', () => {
+    const g = accumulation();
+    const churn = node(g, 'churn');
+    delete churn.observed_state.cap;
+    churn.observed_state.value = churn.observed_state.raw_value;
+    expect(statedIdentityFrameGaps(g)).toEqual([
+      { id: 'churn', label: 'Monthly churn', identity_id: 'subscribers_at_12', identity_label: 'Subscribers at month 12' },
+    ]);
+    churn.scale_frame = 100;
+    expect(statedIdentityFrameGaps(g)).toEqual([]);
+  });
+});

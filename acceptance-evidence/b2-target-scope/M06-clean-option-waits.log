@@ -1,0 +1,36 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 35ms
+     × without an earlier withhold, only Starter is withheld and explained; no reason is invented for Keep 32ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > without an earlier withhold, only Starter is withheld and explained; no reason is invented for Keep
+AssertionError: expected [ 'raise', 'starter', 'keep' ] to deeply equal [ 'starter' ]
+
+- Expected
++ Received
+
+  [
++   "raise",
+    "starter",
++   "keep",
+  ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:78:66
+     76|     expect(warning(out)?.option_ids).toEqual(['starter']);
+     77|     expect(Object.keys(warning(out)?.per_option ?? {})).toEqual(['star…
+     78|     expect(Object.keys(perOptionTargetReasonsForRun(g, v, ids))).toEqu…
+       |                                                                  ^
+     79|   });
+     80|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:45:38
+   Duration  5.62s (transform 4.01s, setup 118ms, import 5.34s, tests 35ms, environment 0ms)
+

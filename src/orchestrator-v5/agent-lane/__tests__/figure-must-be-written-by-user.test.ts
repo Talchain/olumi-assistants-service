@@ -191,7 +191,7 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
 });
 
 describe('propose_assumptions: a revision is the user\'s only when they wrote the figure', () => {
-  const revise = { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%', basis: 'x', revise: true }] };
+  const revise = { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%', basis: 'x', user_stated: true, revise: true }] };
   const opAuthor = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
@@ -222,15 +222,37 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
 });
 
 describe('the Agent route binds the user\'s words to every tool it runs', () => {
-  it('RED: one tool context, built from what the user TYPED (never the history), used at every site', () => {
+  it('RED: one tool context, built from verified typed words (never unknown-source history), used at every site', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(route).toContain("capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' })");
     expect(route).toContain('const typedNow = typedByUser(body) ? message : null;');
-    expect(route).toContain('user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };');
-    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
+    expect(route).toContain('user_text: userWordsOf(authorshipWords.verified, typedNow)');
+    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow, toolCtx.user_text_complete);');
     expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
-    // Declared once; used at the four dispatch sites (incl. the route-issued confirm card, #2310) and the turn's state read (slice C1).
+    // Declared once; used at the eight dispatch sites (incl. the route-issued confirm card, #2310, the M1 Strengthen card,
+    // #2481, the T3 method turn's ONE card, the held Keep withdrawal, and the S-D typed decline of a held proposal,
+    // #2743) and the turn's state read (slice C1).
     expect(route).toContain("dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode)");
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the four dispatch sites and the state read').toBe(6);
+    expect(route).toContain("dispatchTool('propose_link_strengths', JSON.stringify(card.args), toolCtx, capabilities, mode)");
+    expect(route).toContain('await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode)');
+    expect(route).toContain('await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: keptProposal }), toolCtx, capabilities, mode)');
+    expect(route).toContain('await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode)');
+    // S-D slice 2: the approve site names it twice: an approve-with-edits of an Agent proposal binds the user's own
+    // Submit to the EDITED proposal's id (same context, `typed_approval_of` re-bound by the server).
+    expect(route).toContain('edited?.ok ? { ...toolCtx, typed_approval_of: target, proposal_edits: undefined } : toolCtx, capabilities, mode);');
+    // S-C (#2744): the widen Add press's ONE card (a dispatch site), and two reads of the SAME typed-words carrier
+    // (`toolCtx.user_text`: the risks turn's and the wire's gap signal) — never the history.
+    // RC3 (a′, #2803): the widen Add press names it twice, like the approve site: a precondition press carries the
+    // server-reminted `widen_relies_on` marker on the SAME typed-words context (never model- or history-authored).
+    expect(route).toContain('await dispatchTool(call.tool, JSON.stringify(call.args),');
+    expect(route).toContain('call.relies_on === undefined ? toolCtx : { ...toolCtx, widen_relies_on: { option_id: call.relies_on.option_id } }, capabilities, mode);');
+    expect(route.match(/toolCtx\.user_text \?\? ''/g)?.length, 'the gap signal reads the typed-words carrier only').toBe(2);
+    // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
+    expect(route).toContain('result = await drawnLinkPress(');
+    expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
+    // Paul #94 6166259456: the route's automatic Run after a committed change is a dispatch site on the SAME typed carrier.
+    expect(route).toContain('autoRun = await capabilities.runAnalysis(toolCtx, ');
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), and the automatic Run after a committed change').toBe(22);
   });
 });

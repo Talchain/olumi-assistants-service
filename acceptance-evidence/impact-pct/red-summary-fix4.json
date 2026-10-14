@@ -1,0 +1,109 @@
+{
+  "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+  "source_state": "unchanged production at RED; new regression test and fixture expectations only",
+  "started_at": "2026-10-08T10:36:16Z",
+  "starting_load": 19.1494140625,
+  "source_sha256": {
+    "src/orchestrator-v5/routing/stated-event-risk.ts": "e11f36d89804ca5a2f4a7264d6434f7b3417fc37c829a536763945cc303fb599",
+    "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e"
+  },
+  "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/impact-pct-fix4-red.json < /dev/null",
+  "raw_json": "/private/tmp/impact-pct-fix4-red.json",
+  "raw_json_sha256": "6714dc3352ad4539bbded9b978fac9a7c4227852af9a5f63ec94b7fa7dfbaea1",
+  "raw_log": "/private/tmp/impact-pct-fix4-red.log",
+  "passed": 35,
+  "failed": 22,
+  "total": 57,
+  "failed_tests": [
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N1: Within 6 months the hit to MRR is probably 10%."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N2: The revenue loss is probably 10% within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N3: Churn is probably 10% within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N4: Revenue will drop, maybe 10%, within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N5: The new supplier boosts our odds 10% within a year."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N6: Hiring a second supplier improves our odds 10% within a year."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-N14: The discount is probably 15% within 3 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-F2: I'd say about 40% that it happens within the next year."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-F4: Perhaps 15% within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-served-developer: Our key developer might leave, maybe 10–30% in the next 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-happen: It may happen 10–30% in the next 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-bare-noun: Our odds 10% within a year."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-bare-chance: Chance 20% within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-probable: Supplier failure is 30% probable within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-bare-risk: 30% risk within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-refuse-risk-the: 30% risk the supplier fails within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-read-F11: Odds of a strike are 30% within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-draft-D2: Supplier fails, there's a 30% chance within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-draft-D2-curly: Supplier fails, there’s a 30% chance within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-draft-D2-it: Supplier fails, it's a 30% chance within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-draft-D2-that: Supplier fails, that's a 30% chance within 6 months."
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk-fix4.test.ts",
+      "title": "fix4 explicit likelihood class fix4-draft-D4: Release slips; Supplier fails, maybe 30% within 6 months."
+    }
+  ],
+  "load_gate_rejections_before_red": 6,
+  "gate_rejections_ran_no_tests": true
+}

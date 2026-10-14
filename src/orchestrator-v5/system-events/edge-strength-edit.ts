@@ -8,6 +8,8 @@
  * compare-and-swap remain owned by `dispatch.ts` → `commitDirectAnswer`.
  */
 
+import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
+import { approvalSizes, ESTIMATE_MAGNITUDE, linkSizing, sizedByApproval, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import type {
   OlumiResponse,
   SystemEventTurnPayload,
@@ -18,16 +20,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { approvedLinkAdoptionFor } from '../agent-lane/approved-adoption-context.js';
-import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
+import { statedLinkBandFor, statedLinkReplacesUserFigureFor } from '../agent-lane/stated-link-band-context.js';
+import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText } from '../../cee/magnitude/user-figure-held.js';
 import { composeToolCallResponse } from '../compose.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../compose/definitional-links.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import {
-  edgeBandFromMagnitude,
-  edgeBandFromStrengthBand,
-  edgeBandStd,
-} from '../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
@@ -177,6 +176,12 @@ function rawExactEdge(
   return matches.length === 1 ? matches[0]! : null;
 }
 
+/** The link's sizing AS WRITTEN — the receipt's authorship — by 52f8cd's one predicate; no single exact edge → none. */
+function storedSizingOf(graph: unknown, from: string, to: string): LinkSizing | undefined {
+  const edge = rawExactEdge(graph, from, to);
+  return edge === null ? undefined : linkSizing(edge);
+}
+
 /**
  * ⭐ R11 — the ONE record a confirmation writes (AIQ #72 5872082179; storage by the Canonical lead, accepted by the DL
  * in the #2235 verdict): `provenance.reviewed_by_user = { intent: 'confirm', at: <ISO instant>, band? }`, with `band`
@@ -197,6 +202,10 @@ export function reviewIntentOf(provenance: unknown): unknown {
     : undefined;
 }
 
+/** The projection carrier, compared and carried OPAQUELY (R8-2: only `link-sizing.ts` reads its meaning). */
+const PROJECTION_CARRIER = 'mean_projected';
+const carrierOf = (p: object): Record<string, unknown> => Object.fromEntries(Object.entries(p).filter(([key]) => key === PROJECTION_CARRIER));
+
 /**
  * Full-graph confirmation guard. ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the
  * DL): a confirm never stamps the user's authorship, so it may not change who authored anything. The only permitted
@@ -204,12 +213,13 @@ export function reviewIntentOf(provenance: unknown): unknown {
  * - `provenance.reviewed_by_user` becoming exactly the confirm's review record ({@link isConfirmReview}) — required
  *   whenever the edge has a provenance record to hold it (an edge with none has no source to keep and none may be
  *   invented, so its provenance must stay absent);
- * - ONLY when `statedBand` is given — the user named the band the link already sits in (the Agent's confirm, AIQ #70
- *   5855430153; or the canvas pill's 0.60.0 `band` on a `confirm_current`) — `strength.std` becoming exactly that
- *   band's spread (`edgeBandStd`), with that band in the review record. The mean never moves. No band, no std change:
- *   a figure confirm.
+ * - when `statedBand` is given (the user named the band the link already sits in: the Agent's confirm, or the canvas
+ *   pill's 0.60.0 `band` on a `confirm_current`), that band in the review record. The strength itself — mean AND std —
+ *   never moves on any confirm (#2473 CR, CODEX_CLI_OVERFLOW 5937437431; it once took the band's spread).
+ * - L4: exactly `sizedByApproval`'s magnitude/carrier transition for an eligible placeholder. A projected user-drawn
+ *   link keeps both: losing its projection carrier would wrongly read the review as user authorship.
  * ⛔ Everything else is KEPT, and a change to any of it fails: `provenance.source` (so a confirm that stamps
- * `user_specified` — the bypass R11 closes — is refused), `magnitude`, `natural_effect`, `reasoning`,
+ * `user_specified` — the bypass R11 closes — is refused), any other magnitude/carrier change, `natural_effect`, `reasoning`,
  * `provenance_display`, and the edge's `defaulted` / `exists_defaulted` / `std_defaulted` flags. (Before R11 this
  * guard REQUIRED the `user_specified` / `user_set` stamp and admitted the removal of `defaulted` and of Olumi's sizing
  * and reasoning: Canvas #70 5848798561, A6c, A6e, A6f.) Every other byte of persisted JSON — including
@@ -238,15 +248,12 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
   if (beforeEdges.length !== 1 || afterEdges.length !== 1) return false;
   const beforeEdge = beforeEdges[0]!;
   const afterEdge = afterEdges[0]!;
-  // A figure confirm keeps the whole strength. A band confirm keeps the mean and may
-  // move the std only to the stated band's own spread — and only when the link
-  // really sits in that band.
+  // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): EVERY confirm keeps the whole strength, byte-equal — a
+  // figure confirm and a band confirm alike (the band one once moved the std to the band's spread, σ 0.3 → 0.0866). A
+  // band confirm is still judged by the band: the link must really sit in it.
   const strengthAdmitted =
-    args.statedBand === undefined
-      ? isDeepStrictEqual(beforeEdge.strength, afterEdge.strength)
-      : edgeBandFromMagnitude(Math.abs(beforeEdge.strength.mean)) === args.statedBand &&
-        afterEdge.strength.mean === beforeEdge.strength.mean &&
-        afterEdge.strength.std === edgeBandStd(args.statedBand);
+    isDeepStrictEqual(beforeEdge.strength, afterEdge.strength) &&
+    (args.statedBand === undefined || edgeBandFromMagnitude(Math.abs(beforeEdge.strength.mean)) === args.statedBand);
   if (!strengthAdmitted || beforeEdge.effect_direction !== afterEdge.effect_direction) {
     return false;
   }
@@ -263,6 +270,22 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
   if (isRecord(beforeProvenance)) {
     if (!isRecord(afterProvenance)) return false;
     if (!isConfirmReview(afterProvenance.reviewed_by_user, args.statedBand)) return false;
+    // ⭐ L4 (DL 5929790081): the ONE other provenance change a confirm may make — a placeholder becomes Olumi's estimate,
+    // now accepted (`sizedByApproval`). Exactly that transition, checked, then restored for the byte comparison below.
+    if (afterProvenance.magnitude !== beforeProvenance.magnitude) {
+      const approved = sizedByApproval(beforeProvenance, rawBeforeEdge);
+      if (!(approvalSizes(rawBeforeEdge) && afterProvenance.magnitude === ESTIMATE_MAGNITUDE
+        && afterProvenance.magnitude === approved.magnitude
+        && isDeepStrictEqual(carrierOf(afterProvenance), carrierOf(approved)))) return false;
+      if ('magnitude' in beforeProvenance) afterProvenance.magnitude = beforeProvenance.magnitude;
+      else delete afterProvenance.magnitude;
+      // P03 #2797 + R7: the approved transition drops a projected mean's marker (`sizedByApproval`); only here, and only
+      // exactly as checked above. R7: a non-user projected placeholder's canonical magnitude transition also removes its old projection carrier.
+      // Admit exactly that paired transition, then restore it for the full-graph check; carrier deletion alone refuses.
+      // Carried opaquely, as `link-sizing.ts` does (R8-2: only link-sizing READS the marker).
+      for (const key of Object.keys(afterProvenance)) if (key === PROJECTION_CARRIER) delete afterProvenance[key];
+      Object.assign(afterProvenance, structuredClone(carrierOf(beforeProvenance)));
+    }
     if ('reviewed_by_user' in beforeProvenance) {
       afterProvenance.reviewed_by_user = structuredClone(beforeProvenance.reviewed_by_user);
     } else {
@@ -270,16 +293,6 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
     }
   } else if (afterProvenance !== beforeProvenance) {
     return false;
-  }
-
-  // The band's spread was checked on the parsed edges above; restore the stored
-  // std so the byte comparison below judges everything else.
-  if (
-    args.statedBand !== undefined &&
-    isRecord(rawBeforeEdge.strength) &&
-    isRecord(rawAfterEdge.strength)
-  ) {
-    rawAfterEdge.strength.std = structuredClone(rawBeforeEdge.strength.std);
   }
 
   return isDeepStrictEqual(normalisedAfter, args.before);
@@ -510,11 +523,44 @@ export async function applyEdgeStrengthEdit(
     );
   }
 
+  // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's own
+  // figure would drop it. Refused here first, nothing written, the figure quoted, in the writer's own words
+  // (`user-figure-held.ts`) — the canvas pill, the slider and the β field included. Only an approval that carried the
+  // user's explicit replace for this exact link passes (`statedLinkReplacesUserFigureFor`); no client can claim it on the
+  // wire. A replace keeps the sign (buddy r1 #5), and is a real write even at a midpoint equal to the stored mean (#4),
+  // so the "unchanged set" refusal below never applies to it. A `confirm_current` (or anything that keeps the strength)
+  // changes nothing and is never refused.
+  const rawTargetEdge = Array.isArray((persistedGraph as { edges?: unknown }).edges)
+    ? ((persistedGraph as { edges: Array<{ from?: unknown; to?: unknown }> }).edges).find((e) => e?.from === event.from && e?.to === event.to)
+    : undefined;
+  const heldNow = userFigureHeld(rawTargetEdge ?? targetEdge);
+  const replacesUserFigure = heldNow !== null && statedLinkReplacesUserFigureFor(payload.scenario_id, event.from, event.to);
+  if (replacesUserFigure && target.effectDirection !== targetEdge.effect_direction) {
+    return refuse(payload, 'replace_keeps_direction', REPLACE_KEEPS_DIRECTION_TEXT);
+  }
+  const movesStrength = target.mean !== targetEdge.strength.mean || target.effectDirection !== targetEdge.effect_direction;
+  if (heldNow !== null && movesStrength && !replacesUserFigure) {
+    log.info(
+      {
+        event: 'v5.system_event.edge_strength_edit.user_figure_held',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'edge_strength_edit — the link holds the user\'s own figure; refusing to drop it without their replace',
+    );
+    return refuse(
+      payload,
+      'user_figure_held',
+      userFigureHeldRefusalText(heldNow, CANVAS_BAND_WORD[statedBand ?? edgeBandFromMagnitude(Math.abs(target.mean))]),
+    );
+  }
   // `set` and `confirm_current` are intentionally different acts. A set that
   // resolves to the already-persisted scientific tuple has changed nothing,
   // so it must not reach the handler merely to stamp human provenance. Only
   // the explicit confirmation intent grants that provenance-only write.
   if (
+    !replacesUserFigure &&
+    drawnLinkAdoptionFor(payload.scenario_id, event.from, event.to, event.magnitude, targetEdge) === undefined &&
     event.intent === 'set' &&
     target.mean === targetEdge.strength.mean &&
     target.effectDirection === targetEdge.effect_direction
@@ -610,6 +656,7 @@ export async function applyEdgeStrengthEdit(
     identityRunUseAuthority: params.lastRunIdentityUse ?? null,
     ...(statedBand !== undefined ? { edgeStrengthBandAuthority: statedBand } : {}),
     ...(adoptedEstimate !== undefined ? { edgeStrengthAdoptedEstimateAuthority: adoptedEstimate } : {}),
+    ...(replacesUserFigure ? { edgeStrengthReplacesUserFigureAuthority: true as const } : {}),
     // Give the canonical handler the strict raw persisted shape. It performs
     // its own GraphV3 narrowing for mutation while its existing merge helper
     // preserves additive top-level fields; the parsed `graph` above remains
@@ -713,6 +760,8 @@ export async function applyEdgeStrengthEdit(
               graph.nodes.find((node) => node.id === event.from)?.label ?? event.from,
             toLabel:
               graph.nodes.find((node) => node.id === event.to)?.label ?? event.to,
+            // Whose figure: the link AS WRITTEN (R3 5942069984), by the one sizing predicate.
+            sizing: storedSizingOf(projectedGraph, event.from, event.to),
           })
         : outcome.assistant_text,
     coaching: null,

@@ -12,7 +12,7 @@
 
 export interface CallBudget {
   readonly model: string;
-  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation';
+  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret' | 'narrate';
   readonly max_output_tokens: number;
   /** Omitted means "model default", which is what the banked sessions used. */
   readonly reasoning_effort?: 'low' | 'medium' | 'high';
@@ -57,8 +57,17 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     role: 'whole',
     // Was 6000: raised on a MEASURED truncation (see RAISED 27 Sep below), not on suspicion.
     max_output_tokens: 12000,
-    reasoning_effort: 'medium',
+    // AI HARNESS (programme-docs#85 5933181012, MG fidelity PASS 5933240506): medium → low. See LOWERED 1 Oct below.
+    reasoning_effort: 'low',
     evidence:
+      'LOWERED 1 Oct, medium -> low (AI HARNESS, DL 5932846526: <=8-call A/B, MG judges fidelity). Served first pass ' +
+      '(R3 5932840854, 20 brief turns): median 49.9 s, 1.0k-3.6k reasoning tokens; the share-build brief took 56.1 s + a ' +
+      '21.3 s range retry. Live A/B on that brief, the first pass sent exactly as served (BUILD_INSTRUCTIONS, ' +
+      'strictForTheDrafter(buildCandidateSchema()), 12000), n=3 per arm: medium 68.4/58.9/26.5 s (median 58.9 s, ' +
+      'reasoning 3.8k/2.7k/1.0k) vs low 50.1/36.2/39.8 s (median 39.8 s, reasoning 2.1k/1.5k/1.6k). Replayed through the ' +
+      'real buildModelFromBrief: 3/3 options and 1 risk in every draft at both efforts; MG fidelity PASS (A4 1/3 vs 1/3, ' +
+      'K3 0/3 vs 0/3, status quo kept). Bank: programme-docs harness/8e75e3-bank @a203785f output/ai-harness-8e75e3/' +
+      'construct-ab/. n=3 is a direction; medium is the fallback on a measured fidelity regression. ' +
       'EFFORT: MEDIUM per OpenAI Technical Architecture ruling (#63 5798194848), measured 23 Sep ' +
       'through the real buildModelFromBrief + admission on the compact builder (#1736): median ' +
       '40\u201344 s at medium vs 62\u201370 s at high on both canonical briefs, 0/8 structurally ' +
@@ -115,6 +124,37 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
       'no evidence supports a 16000 cap. Exact prompt/config handoff #78 5915316114.',
   },
   {
+    model: 'gpt-6.1-sol',
+    role: 'interpret',
+    max_output_tokens: 3400,
+    // AI HARNESS 2a (programme-docs#85; Paul 1 Oct: Run turns took 55–90 s, PLoT ~5 s of it): the Run button's ONE
+    // interpreting call (`tool_choice: 'none'`), same instructions and input as before, effort only.
+    reasoning_effort: 'low',
+    evidence:
+      'AI HARNESS 2a, 1 Oct, live API, Paul\'s frozen Run turn (bundle 2bb071fe, scenario 96c6f5f4; withheld leader, typed view), ' +
+      'identical instructions + full history, 3 reps per arm: effort high 28.7/41.8/38.3 s (median 38.3 s, ~1,000 reasoning ' +
+      'tokens) vs low 9.4/9.4/7.7 s (median 9.4 s, 0 reasoning). Truth content equal: leader asserted 0/6, typed view 6/6, ' +
+      'withheld reason, quoted target, Olumi-supplied count and "sensitivity not measured" kept in every reply. Trimming ' +
+      'history to the last 4 turns saved ~0.5 s more and was NOT taken (prompt rules and cache unchanged).',
+  },
+  {
+    model: 'gpt-6.1-sol',
+    role: 'narrate',
+    max_output_tokens: 3400,
+    // P44 S1 (DL 58e392 GO, 7 Oct): the call after a hop that only HELD proposals (`hopOnlyHeldProposals`) states the
+    // held change and asks for the yes; the decision was the hop before. Effort only, as AI HARNESS 2a did for interpret.
+    reasoning_effort: 'low',
+    evidence:
+      'P44 S1, 7 Oct, live API, the SERVED narration bytes captured in-process at CEE 7bb033d3 (prompt_sha256 8c743f05, ' +
+      'tools_sha256 ae038f5f, both equal to staging turn f1c55ab0 #5), propose_new_risk result in its success shape, 2 risks ' +
+      'x 2 reps per arm: high 7.3/6.0/5.8/7.5 s (median 6.7 s, 128-194 reasoning tokens) vs low 3.7/3.4/2.5/2.9 s (median ' +
+      '3.1 s, 0 reasoning). Truth rows 8/8 at both: not claimed added, what it threatens, drivers, placeholder strength, asks ' +
+      'for the yes, no proposal id; the double-count warning (existing junior ramp-up risk) kept 2/2 at low. Low paraphrased ' +
+      'the risk label 2/2 on one case (medium too, 0/2), so the narrating call ends with NARRATE_LABEL_LINE (agent-loop.ts): ' +
+      're-test at low, same bytes + that line, 2 x 2: exact quoted label 4/4, every other row 4/4, double-count kept 2/2, ' +
+      '5.3/3.8/4.3/3.5 s (median 4.1 s). Bank: output/dl-0df0e1/inflight/accel/status/P44.md.',
+  },
+  {
     model: 'gpt-5.6-sol',
     role: 'conversation',
     max_output_tokens: 3400,
@@ -147,3 +187,27 @@ export function budgetFor(model: string, role: CallBudget['role']): CallBudget {
 export function conversationBudgetFor(knownEmptyModel: boolean): CallBudget {
   return budgetFor(knownEmptyModel ? 'gpt-5.6-terra' : 'gpt-6.1-sol', 'conversation');
 }
+
+/**
+ * P44 S1: the effort for a narrating call (`reasoning_role: 'narrate'`) on this budget's model: its banked `narrate`
+ * entry, else the budget's own effort unchanged. Only a measured model is lowered.
+ */
+export function narrateEffortFor(budget: CallBudget): CallBudget['reasoning_effort'] {
+  return BANKED_BUDGETS.find((b) => b.model === budget.model && b.role === 'narrate')?.reasoning_effort ?? budget.reasoning_effort;
+}
+
+/** The effort one call is sent at: `narrateEffortFor` when the loop tags it `reasoning_role: 'narrate'`, else the budget's. */
+export function callEffortFor(budget: CallBudget, req: { readonly reasoning_role?: 'narrate' }): CallBudget['reasoning_effort'] {
+  return req.reasoning_role === 'narrate' ? narrateEffortFor(budget) : budget.reasoning_effort;
+}
+
+/** The Run button's one interpreting call (fast path 3, and the result-first follow-up that explains a Run). */
+export function interpretBudget(): CallBudget {
+  return budgetFor('gpt-6.1-sol', 'interpret');
+}
+
+/**
+ * The interpreting call's deadline. The result already stands when it is made, so a slow explanation is replaced by
+ * the honest fallback instead of holding the Run open (AI HARNESS 2a). Mutable for tests only.
+ */
+export const INTERPRET_DEADLINE = { ms: 30_000 };

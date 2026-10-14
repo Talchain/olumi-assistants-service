@@ -1,0 +1,31 @@
+{
+  "command": [
+    "node_modules/.bin/eslint",
+    "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts",
+    "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "src/orchestrator-v5/agent-lane/goal-level-in-goal-units.ts",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts",
+    "src/orchestrator/context/option-result-source.ts",
+    "src/routes/__tests__/convention-frame-source-wire.test.ts"
+  ],
+  "exit": 0,
+  "changed_ts_count": 16,
+  "output": "",
+  "full_eslint_exit": 0,
+  "full_eslint_errors": 0,
+  "full_eslint_warnings": 2,
+  "full_warning_files": [
+    "src/cee/provenance/__tests__/fixtures/trace-captures.ts",
+    "src/orchestrator-v5/tools/handlers/analysable-option-gate.ts"
+  ]
+}

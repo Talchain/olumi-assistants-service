@@ -275,10 +275,18 @@ const RECORDED_WITH_RULE_OFF = {
 const GRANDFATHER_STATUS_QUO_LEVEL = 0;
 const GRANDFATHER_LEVELLED_ASK =
   'Factor "Existing customers grandfathered" is currently 0. What should option "£59 for new Pro customers; grandfather existing customers" set it to?';
+/**
+ * AMENDED (C1 r1, Codex FAIL @04b67602 item 3): the record's "Olumi filled in the gaps here itself; you can review them, and
+ * nothing is required of you." was FALSE for this gap: it is offered and NOT waived (`waived_by_exclusion: false`), so Olumi has
+ * not filled it. The record is not edited; its one false sentence is patched here, like its hash and its ask.
+ */
+const C1_OPEN_GAP = 'One input is still open: give your value, or ask Olumi to estimate it.';
 const RECORDED_WITH_STATUS_QUO_LEVEL = {
   ...RECORDED_WITH_RULE_OFF,
   analysis_admission: {
     ...RECORDED_WITH_RULE_OFF.analysis_admission,
+    reasons: RECORDED_WITH_RULE_OFF.analysis_admission.reasons.map((reason) => reason.field === 'missing_important_inputs'
+      ? { ...reason, message: C1_OPEN_GAP } : reason),
     missing_important_inputs: [
       { ...RECORDED_WITH_RULE_OFF.analysis_admission.missing_important_inputs[0], why_it_matters: GRANDFATHER_LEVELLED_ASK },
     ],
@@ -311,15 +319,16 @@ describe("A1b — the model-level Run verdict does not move", () => {
     expect(optionRow(r, GRANDFATHER_OPTION).status).toBe("needs_encoding");
     expect(r.may_run).toBe(true);
     expect(JSON.stringify(r.may_run)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.may_run));
-    // ⭐ DR row 4 (#2371; PTL #77 5914383843) owns TWO fields of this record, and only them: this graph states a target
-    // it can't test yet, so the mode is capped at `exploratory` with `TARGET_NOT_TESTABLE` on the mode's field. The
-    // record is not edited; every other byte of the admission must still match it (the A1b claim).
+    // DR row 4 (#2371) used to own TWO fields of this record (the mode capped at `exploratory`, `TARGET_NOT_TESTABLE`).
+    // RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED) retired that cap, so the WHOLE admission matches
+    // the record again, the mode and its reason included (the A1b claim, un-carved). The record is not edited.
     const modeReason = (a: { reasons: readonly { field: string }[] }) => a.reasons.find((x) => x.field === 'permitted_analysis_mode') as { code?: string } | undefined;
     const { permitted_analysis_mode: liveMode, reasons: liveReasons, ...liveRest } = r.analysis_admission as unknown as { permitted_analysis_mode: string; reasons: { field: string }[] };
-    const { permitted_analysis_mode: _recordedMode, reasons: recordedReasons, ...recordedRest } = recordedPatched as unknown as { permitted_analysis_mode: string; reasons: { field: string }[] };
+    const { permitted_analysis_mode: recordedMode, reasons: recordedReasons, ...recordedRest } = recordedPatched as unknown as { permitted_analysis_mode: string; reasons: { field: string }[] };
     expect(JSON.stringify(liveRest)).toBe(JSON.stringify(recordedRest));
     expect(JSON.stringify(liveReasons.filter((x) => x.field !== 'permitted_analysis_mode'))).toBe(JSON.stringify(recordedReasons.filter((x) => x.field !== 'permitted_analysis_mode')));
-    expect([liveMode, modeReason({ reasons: liveReasons })?.code]).toEqual(['exploratory', 'TARGET_NOT_TESTABLE']);
+    expect([liveMode, modeReason({ reasons: liveReasons })?.code]).toEqual([recordedMode, modeReason({ reasons: recordedReasons })?.code]);
+    expect(liveMode).not.toBe('exploratory');
     expect(JSON.stringify(r.readiness_issues)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.readiness_issues));
     expect(r.status).toBe(RECORDED_WITH_STATUS_QUO_LEVEL.status);
   });

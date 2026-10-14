@@ -1,0 +1,2 @@
+ WARN  Issue while reading "/Users/paulslee/olumi-work/w9c/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/olumi-work/w9c/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}

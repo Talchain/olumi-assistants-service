@@ -19,6 +19,8 @@ const PREFIX_SYMBOL: ReadonlyMap<string, string> = new Map(Object.entries(CURREN
  * ("GBP" → "£30,000", DL copy nit on #2205 5864058391), never "30,000 GBP".
  */
 export function sayFigure(value: number, unit: string): string {
+  const state = twoStateLevelWords(value, unit);
+  if (state !== null) return state;
   // Money with pence says both digits (Panel ROOT 5870330356: "£58.8" beside the card's "£58.80").
   const pence = currencyOf(unit) !== undefined && !Number.isInteger(value) && Math.round(value * 100) / 100 === value;
   return place(value.toLocaleString('en-GB', { maximumFractionDigits: 2, minimumFractionDigits: pence ? 2 : 0 }), unit);
@@ -56,6 +58,11 @@ function place(n: string, rawUnit: string): string {
 export function sayFigureExactly(value: number, unit: string): string | null {
   if (!Number.isFinite(value) || Math.round(value * 100) / 100 !== value) return null;
   return sayFigure(value, spoken(value, unit.trim()));
+}
+
+/** Consent must keep every digit, including figures the two-decimal exact formatter cannot say. */
+export function sayFigureWithoutRounding(value: number, unit: string): string {
+  return sayFigureExactly(value, unit) ?? place(String(value), spoken(value, unit.trim()));
 }
 
 /** Percent spelled as a word is said as the sign; a machine unit's underscores are spaces. */
@@ -121,4 +128,58 @@ export function pluraliseUnit(unit: string, value: number): string {
     return unit.replace(/s$/i, '');
   }
   return unit;
+}
+
+/** One of a unit, said singular ("1 week", never "1 weeks"; "£1" as `sayFigure` says it). Moved from goal-certainty. */
+export function sayOneOf(unit: string): string {
+  return sayFigure(1, unit).replace(/^1 (\p{L}+)\b/u, (_, w: string) => `1 ${w.endsWith('ies') ? `${w.slice(0, -3)}y`
+    : /(?:ss|sh|ch|x|z)es$/.test(w) ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w}`);
+}
+
+/**
+ * ⭐ A TWO-STATE SOURCE IS SAID AS THE SWITCH, NEVER AS A RISE (DL 0df0e1; red team 19 #87 6009566552: served T1b
+ * a7d034ae asked "…when Starter tier launched rises by 1 0 / 1?").
+ *
+ * Two-state: typed so ("0/1", "binary", "yes/no", "on/off", "true/false"), or a switch the options create — the source
+ * has no unit of its own and every option that sets it sets 0 or 1. A unit of its own ("hires") keeps it a count, so
+ * "0 or 1 hire" still asks per hire.
+ */
+// B1b (cut 8 manual-test, 7 Oct): a draft stored "0-1" and the reply said "set to 1 0-1"; a slash, hyphen, en/em dash or
+// "to" separates the two states.
+const TWO_STATE_SEP = String.raw`\s{0,3}(?:\/|-|–|—|to)\s{0,3}`;
+const TWO_STATE_UNIT_RE = new RegExp(String.raw`^\s*(?:0${TWO_STATE_SEP}1|binary|bool(?:ean)?|yes${TWO_STATE_SEP}no|on${TWO_STATE_SEP}off|true${TWO_STATE_SEP}false)\s*$`, 'i');
+const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+export function isTwoStateSource(nodes: readonly unknown[], id: unknown, unit: unknown): boolean {
+  if (typeof unit === 'string' && TWO_STATE_UNIT_RE.test(unit)) return true;
+  if (typeof unit === 'string' && unit.trim() !== '') return false;
+  const set: number[] = [];
+  for (const n of nodes) {
+    if (!isRec(n) || n.kind !== 'option') continue;
+    const ivs = isRec(n.interventions) ? n.interventions : isRec(n.data) && isRec(n.data.interventions) ? n.data.interventions : undefined;
+    const iv = ivs !== undefined && typeof id === 'string' ? ivs[id] : undefined;
+    const v = typeof iv === 'number' ? iv : isRec(iv) && typeof iv.value === 'number' ? iv.value : undefined;
+    if (v !== undefined) set.push(v);
+  }
+  return set.length > 0 && set.every((v) => v === 0 || v === 1);
+}
+
+/** A factor's actual 0/1 level, using the lane's existing two-state classification. */
+export function twoStateLevelWords(value: number, unit: unknown, nodes: readonly unknown[] = [], id?: unknown): string | null {
+  if ((value !== 0 && value !== 1) || !isTwoStateSource(nodes, id, unit)) return null;
+  return value === 1 ? 'on' : 'off';
+}
+
+/**
+ * THE ONE PLACE an ask says a one-unit change in a SOURCE, so no site can say "rises by 1 0 / 1". `source` is said as
+ * the site says it (quoted or bare). A two-state source is the switch itself: "with X", or X as the subject.
+ */
+export function sourceChangeWords(source: string, unit: string, twoState: boolean): {
+  /** "a 1 week rise in X" | "X" */ readonly aRiseIn: string;
+  /** "each 1 week of X" | "X" */ readonly eachOf: string;
+  /** "when X rises by 1 week" | "with X" */ readonly when: string;
+} {
+  return twoState
+    ? { aRiseIn: source, eachOf: source, when: `with ${source}` }
+    : { aRiseIn: `a ${sayOneOf(unit)} rise in ${source}`, eachOf: `each ${sayOneOf(unit)} of ${source}`, when: `when ${source} rises by ${sayFigure(1, unit)}` };
 }

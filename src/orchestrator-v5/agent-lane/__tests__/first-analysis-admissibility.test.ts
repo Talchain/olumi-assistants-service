@@ -106,11 +106,17 @@ const HELD_OUT = (): CandidateModel => ({
 
 /** The canonical Pro plan brief: a price is the user's only when the brief states it (`withdrawUnstatedBaselineStamps`). */
 const PRO_PLAN_BRIEF = 'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?';
+const UNFLAGGED_PRO_PLAN_BRIEF = PRO_PLAN_BRIEF.replace('with the next AI feature release', 'with the next AI capability');
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown>; scale_frame?: number };
 type Graph = { nodes: Node[]; edges: { from: string; to: string; origin?: string }[] };
 
-async function registered(model: CandidateModel, brief = 'A decision brief.'): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+async function constructed(model: CandidateModel, brief = 'A decision brief.') {
+  const price = model.factors.find(f => f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit');
+  if (price && brief !== 'A decision brief.') {
+    price.baseline_evidence = { quote: 'Our Pro price is £49.' };
+    brief = `Our Pro price is £49.\n\n${brief}`;
+  }
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify({ ...model, unknowns: [] }) })) as unknown as CallStructuredModel;
   const d: InternalDispatch = async (path, body) => {
@@ -121,6 +127,11 @@ async function registered(model: CandidateModel, brief = 'A decision brief.'): P
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
   const out = await buildModelFromBrief('66666666-6666-4666-8666-666666666666', brief, d, call) as Record<string, unknown>;
+  return { graph, out };
+}
+
+async function registered(model: CandidateModel, brief = 'A decision brief.'): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+  const { graph, out } = await constructed(model, brief);
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(graph) as unknown as Graph, out };
 }
@@ -145,16 +156,18 @@ const valueIn = (g: unknown, id: string) =>
   ((g as Graph | null)?.nodes ?? []).find((n) => n.id === id)?.observed_state?.value;
 
 describe('a freshly built model is admissible for a provisional first analysis (exact cases)', () => {
-  // ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES"): each brief below states a target with no today's
-  // level, on links nobody sized, so the first analysis PROCEEDS but is `exploratory` (no leader, shares or goal
-  // chance) and says why on the mode's field. Was `quantified_provisional` / `comparative_leader` before #2371.
+  // ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES") capped these at `exploratory`. RE-PINNED, RT-10 B′ R2
+  // (Science #87 5999608477; DL e8 CONFIRMED, amending the maturity rule for an untestable target): each brief below
+  // states a target with no today's level, on links nobody sized; the first analysis PROCEEDS at the mode it had before
+  // #2371 (`quantified_provisional` / `comparative_leader`), and only the claims against the target are withheld (in the
+  // Run). The target's sentence rides the readiness view, not the mode's field.
   const targetReason = (g: Graph) => resolveAnalysisAdmission(g).reasons.find((r) => r.field === 'permitted_analysis_mode')?.code;
 
-  it('HIRING: proceeds, exploratory (its target can\'t be tested yet); every current value is Olumi’s estimate', async () => {
+  it('HIRING: proceeds at its pre-#2371 mode (the target no longer caps it); every current value is Olumi’s estimate', async () => {
     const { graph } = await registered(HIRING());
-    expect(targetReason(graph)).toBe('TARGET_NOT_TESTABLE');
+    expect(targetReason(graph)).not.toBe('TARGET_NOT_TESTABLE');
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'quantified_provisional', blockers: [],
       ceeInference: ['tech_leads', 'developers', 'coordination_overhead'],
     });
     expect(graph.nodes.find((n) => n.id === 'developers')?.observed_state).toStrictEqual({ value: 6 / 50, raw_value: 6, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
@@ -172,15 +185,15 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.edges.filter((e) => e.from === 'keep_the_current_price' && e.to !== 'decision_monthly_recurring_revenue')).toEqual([]);
   });
 
-  it('PRICING ("Status quo: stay at £49", one price arm): held and ready — and the Run floor now counts the held status quo, so it proceeds', async () => {
-    const { graph } = await registered(PRICING_STATUS_QUO(), PRO_PLAN_BRIEF);
+  it.each([PRO_PLAN_BRIEF, UNFLAGGED_PRO_PLAN_BRIEF])('PRICING one price arm: reachable ordinary fallback still runs (%s)', async brief => {
+    const { graph } = await registered(PRICING_STATUS_QUO(), brief);
     // ⭐ Changed on purpose (Delivery Lead 5842717741; MG 5842710702). The floor used to count only options
     // WITH a level, so a held status quo (no stored copy, #1902) beside one price arm refused "nothing to
     // compare" — Paul's own question could not run. The floor now fingerprints the set the run SUBMITS, in
     // which `gateAnalysableOptions` holds the status quo at the current values. Same verdict as two arms.
-    expect(targetReason(graph)).toBe('TARGET_NOT_TESTABLE');
+    expect(targetReason(graph)).not.toBe('TARGET_NOT_TESTABLE');
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'comparative_leader', blockers: [],
       ceeInference: ['monthly_churn_rate', 'pro_subscribers'],
     });
     const sq = resolveRunAdmission(graph).assessment.analysisReady?.options.find((o) => o.option_id === 'status_quo_stay_at_49');
@@ -189,18 +202,18 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.nodes.find((n) => n.id === 'pro_plan_price')?.observed_state?.source).toBe('brief_extraction');
   });
 
-  it('PRICING ("Status quo: stay at £49", two price arms): proceeds; the stated price stays the user’s', async () => {
+  it.each([PRO_PLAN_BRIEF, UNFLAGGED_PRO_PLAN_BRIEF])('PRICING two price arms: reachable ordinary fallback still runs (%s)', async brief => {
     const m = PRICING_STATUS_QUO();
     const two = { ...m, options: [m.options[0]!, { label: 'Raise to £55', provenance: 'explicit', changes: [],
       interventions: [{ factor_label: 'Pro plan price', value: 55, unit: 'GBP', provenance: 'explicit' }] }, m.options[1]!] } as CandidateModel;
-    const { graph } = await registered(two, PRO_PLAN_BRIEF);
+    const { graph } = await registered(two, brief);
     // ⚠ `comparative_leader`, by the UNCHANGED claim policy: the user's stated £49
     // is in the comparison's substrate, so "partly user-stated" licenses naming a
     // leader even though churn and subscribers are Olumi's. Pinned, not endorsed —
     // permission to calculate and permission to name a leader are the policy's call.
-    expect(targetReason(graph)).toBe('TARGET_NOT_TESTABLE');
+    expect(targetReason(graph)).not.toBe('TARGET_NOT_TESTABLE');
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'comparative_leader', blockers: [],
       ceeInference: ['monthly_churn_rate', 'pro_subscribers'],
     });
     // The semantic floor's own reason still publishes on its own field.
@@ -208,17 +221,18 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.nodes.find((n) => n.id === 'pro_plan_price')?.observed_state?.source).toBe('brief_extraction');
   });
 
-  it('HELD-OUT: refused on the unframeable guess’s missing level; zero is kept, the unframeable guess stays missing', async () => {
+  it('HELD-OUT A3: the named-unit estimate receives a frame and runs provisionally; zero stays kept', async () => {
     const { graph } = await registered(HELD_OUT());
-    // placeholder-zero (48f2e12f): an unvalued goal root now blocks the Run — `parcel_backlog` has no level, so it is asked.
+    // A3 retains the proposed 1200 parcels on a disclosed coordinate frame; no missing level is fabricated.
     expect(verdict(graph)).toEqual({
-      willProceed: false, mode: 'none', blockers: ['MISSING_FACTOR_LEVEL'],
-      ceeInference: ['depots', 'courier_partners'],
+      willProceed: true, mode: 'quantified_provisional', blockers: [],
+      ceeInference: ['depots', 'courier_partners', 'parcel_backlog'],
     });
-    // By identity: the one level ask is the unframeable guess, and the kept zero (`courier_partners`) is not asked.
-    expect(resolveRunAdmission(graph).assessment.blockingIssues.map((i) => i.factor_id)).toEqual(['parcel_backlog']);
+    // Both retained levels keep their exact amounts and Olumi authorship.
+    expect(resolveRunAdmission(graph).assessment.blockingIssues.map((i) => i.factor_id)).toEqual([]);
     expect(graph.nodes.find((n) => n.id === 'courier_partners')?.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'partners', source: 'cee_inference', extractionType: 'inferred' });
-    expect(graph.nodes.find((n) => n.id === 'parcel_backlog')).not.toHaveProperty('observed_state');
+    expect(graph.nodes.find((n) => n.id === 'parcel_backlog')?.observed_state).toStrictEqual({ value: 0.12, raw_value: 1200, unit: 'parcels', source: 'cee_inference', extractionType: 'inferred' });
+    expect(graph.nodes.find((n) => n.id === 'parcel_backlog')?.scale_frame).toBe(10000);
   });
 
   it('CHANGED INPUT: a different estimate reaches the analysis input as a different value', async () => {

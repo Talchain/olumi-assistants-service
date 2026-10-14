@@ -48,7 +48,10 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { edgeProvenanceDisplay, hasUserStatedSize, settingDisplayOf } from "../provenance/provenance-of.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
+import { readUnitParts, sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -447,6 +450,36 @@ export function extractStatedQuantities(text: string): Quantity[] {
     }
   }
   return out;
+}
+
+export interface StatedLikelyRange {
+  readonly low: number;
+  readonly high: number;
+  readonly text: string;
+}
+
+function relationNumber(raw: string): { value: number; unit: string } | undefined {
+  const money = raw.match(/£\s?([\d,]+(?:\.\d+)?)([kmb])?/i);
+  if (money) {
+    const multiplier = money[2]?.toLowerCase() === "k" ? 1_000 : money[2]?.toLowerCase() === "m" ? 1_000_000 : money[2]?.toLowerCase() === "b" ? 1_000_000_000 : 1;
+    return { value: Number(money[1]!.replace(/,/g, "")) * multiplier, unit: "£" };
+  }
+  const percent = raw.match(/([\d,]+(?:\.\d+)?)\s*%/);
+  if (percent) return { value: Number(percent[1]!.replace(/,/g, "")), unit: "%" };
+  const count = raw.match(/([\d,]+(?:\.\d+)?)\s+([a-z]+)/i);
+  if (count) return { value: Number(count[1]!.replace(/,/g, "")), unit: count[2]!.toLowerCase() };
+  const bare = raw.match(/^[\d,]+(?:\.\d+)?$/);
+  return bare ? { value: Number(bare[0].replace(/,/g, "")), unit: "" } : undefined;
+}
+
+/** Read a plain likely range from a quoted statement, without interpreting bounds. */
+export function extractStatedLikelyRange(text: string): StatedLikelyRange | undefined {
+  const match = /\bbetween\s+(£\s?[\d,]+(?:\.\d+)?|\d[\d,]*(?:\.\d+)?)\s+and\s+(£\s?[\d,]+(?:\.\d+)?|\d[\d,]*(?:\.\d+)?)/iu.exec(text);
+  if (!match) return undefined;
+  const low = relationNumber(match[1]!);
+  const high = relationNumber(match[2]!);
+  if (low === undefined || high === undefined || low.unit !== high.unit || low.value > high.value) return undefined;
+  return { low: low.value, high: high.value, text: match[0] };
 }
 
 // ── the two surfaces ────────────────────────────────────────────────────────
@@ -1243,6 +1276,17 @@ interface Candidate {
   /** The unit string the model declared, verbatim. A count can only match a
    *  carrier that declares the same unit family. */
   readonly declaredUnit: string | null;
+  /** An edge's `natural_effect` figure, not a node's own value: it never certifies the NODE's figure as the user's. */
+  readonly carrier?: "edge_effect";
+  /** The one place in the brief this figure may match. Absent means anywhere. */
+  readonly boundSpan?: { readonly start: number; readonly end: number };
+  /** A bare count located by this edge's verified quote and persisted user unit receipt. */
+  readonly receiptedQuantity?: Quantity;
+  /** An option's level on this factor (`collectSourceBoundInterventionCandidates`).
+   *  Admitted only under Science's W2/W3, see {@link admissibleCandidates}. */
+  readonly optionLevel?: true;
+  /** The `char_offset` of the ONE brief quantity an option level states (`bindOptionLevels`). */
+  readonly boundAt?: number;
 }
 
 /**
@@ -1284,19 +1328,19 @@ const briefCurrencyCode = (symbol: string | null): string | null =>
   symbol === null ? null : CURRENCY_SYMBOL_TO_CODE[symbol] ?? null;
 
 /**
- * Numeric candidates come ONLY from node/option value carriers that declare a
- * unit alongside them. Everything else numeric in the graph — prior bounds
- * (unitless [0,1]), intervention encodings (unitless 0..1), and the entire
- * `edges` subtree (strength, exists_probability, validation passes) — is
- * DELIBERATELY EXCLUDED. Those numbers are how the model computes, not what it
- * is claiming about the world, and matching against them is how a stated
- * quantity gets "found" in a model that never carried it.
+ * Numeric candidates come from node/option value carriers that declare a unit
+ * alongside them, plus verified natural effects written from the brief.
+ * Everything else numeric in the graph — prior bounds (unitless [0,1]),
+ * intervention encodings (unitless 0..1), and ordinary `edges` metadata
+ * (strength, exists_probability, validation passes) — is DELIBERATELY
+ * EXCLUDED. Those numbers are how the model computes, not what it is claiming
+ * about the world, and matching against them is how a stated quantity gets
+ * "found" in a model that never carried it.
  *
- * ⚠ THE `edges` SUBTREE IS EXCLUDED AND `SCOPE.model_surface` IS DERIVED FROM
- * THIS CONSTANT so the user-facing sentence cannot claim otherwise. It did:
- * it advertised "node, edge and option values" while this walked only nodes and
- * options. Edge LABELS are still text-searched (they are strings under a
- * non-skip top-level key); edge VALUES are not.
+ * ⚠ Ordinary edge values remain excluded. A verified
+ * `brief_extraction` / `user_stated` natural effect is different: it is the
+ * user's stated amount and per-change figure, with its own units, and is a
+ * named carrier rather than topology metadata.
  */
 const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
 
@@ -1308,6 +1352,18 @@ const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
  * The provenance tuple below is the fail-closed source-binding contract emitted
  * by the draft projector. A hypothesis — even one that happens to repeat the
  * same number — is not evidence that the amount was carried from the brief.
+ *
+ * ⚠ `value_confidence` IS NOT THE AUTHORITY; `source` IS (RT-4 class A, #87
+ * 5998705341). The served agent-lane producer (`admit-model` `ConstructedLevel`)
+ * writes `{ value, source, target_match, raw_value, unit }` and has no
+ * `value_confidence` field at all, so requiring "high" made every stated option
+ * figure read "absent". Seven served drafts replayed: 37/37 levels carried none,
+ * and £250k, £120k, 15%, 8% and 6% were all reported as missing from a model
+ * that held them. An ABSENT confidence is therefore no evidence either way. A
+ * producer that does write one and says less than "high" still withholds the
+ * credit (the extractor co-writes "low" with `cee_hypothesis`). `cee_hypothesis`
+ * is never credited, whatever it claims: £300, £8k and a 15% the brief states
+ * stay absent where the producer marked the level as Olumi's own.
  */
 function collectSourceBoundInterventionCandidates(
   option: Record<string, unknown>,
@@ -1328,8 +1384,10 @@ function collectSourceBoundInterventionCandidates(
     }
     const target = targetMatch as Record<string, unknown>;
     if (
-      intervention.source !== "brief_extraction" ||
-      intervention.value_confidence !== "high" ||
+      settingDisplayOf(intervention) !== "from_brief" ||
+      (intervention.value_confidence !== undefined &&
+        intervention.value_confidence !== null &&
+        intervention.value_confidence !== "high") ||
       target.node_id !== factorId ||
       target.confidence !== "high" ||
       target.match_type !== "exact_id"
@@ -1358,12 +1416,13 @@ function collectSourceBoundInterventionCandidates(
       unitKind: kind,
       currencyCode: currencyCode ?? null,
       declaredUnit,
+      optionLevel: true,
     });
   }
   return out;
 }
 
-function collectCandidates(graph: Record<string, unknown>): Candidate[] {
+function collectCandidates(graph: Record<string, unknown>, briefText: string): Candidate[] {
   const out: Candidate[] = [];
   const factorLabels = new Map<string, string>();
   if (Array.isArray(graph.nodes)) {
@@ -1408,6 +1467,207 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
     }
   }
   out.push(...collectLimitCandidates(graph));
+  out.push(...collectBriefNaturalEffectCandidates(graph, briefText));
+  return out;
+}
+
+/**
+ * The only edge-level value carrier the manifest may trust. The provenance
+ * gate is deliberately strict: an Olumi estimate or an interactively proposed
+ * effect must not make a number from the brief appear modelled before the
+ * existing approval/write rule has run.
+ */
+function collectBriefNaturalEffectCandidates(
+  graph: Record<string, unknown>,
+  briefText: string,
+): Candidate[] {
+  if (!Array.isArray(graph.edges)) return [];
+  const labels = new Map<string, string>();
+  const unitReadings = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(graph.nodes)) {
+    for (const raw of graph.nodes) {
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const node = raw as Record<string, unknown>;
+      if (typeof node.id === "string" && typeof node.label === "string") labels.set(node.id, node.label);
+      if (typeof node.id === "string" && node.unit_reading !== null && typeof node.unit_reading === "object"
+        && !Array.isArray(node.unit_reading)) unitReadings.set(node.id, node.unit_reading as Record<string, unknown>);
+    }
+  }
+  const out: Candidate[] = [];
+  for (const raw of graph.edges) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const edge = raw as Record<string, unknown>;
+    const provenance = edge.provenance;
+    if (provenance === null || typeof provenance !== "object" || Array.isArray(provenance)) continue;
+    const p = provenance as Record<string, unknown>;
+    // ⭐ WHO SIZED IT, not where the link came from (MC P0 F5, PR-U2a): `magnitude: 'user_stated'` is the user's own size
+    // — written by construction (`cee/magnitude/link-effect.ts`, userSizeEarned), the records projector (quoted) and a
+    // size said back in CHAT (`link-effect-edit.ts`, source `user_specified`). Science ruled the chat size is credited by
+    // the SAME one-span C3 binding as every other user_stated edge (Science ruling #87 6003878735, citing RT-6 B4 5998132756):
+    // the user repeating their brief figure to size a link must not leave "What I was given" saying it is missing.
+    // An Olumi estimate never counts.
+    if (!hasUserStatedSize(edge)) continue;
+    // ⛔ ...but WHO STAMPED IT decides how much the stamp alone proves (Codex r1 on #2610, P1). Construction's label door
+    // (`admit-model.ts` userSizeEarned) stamps a size when its amount is written about EITHER endpoint, so "Monthly
+    // revenue is £75,000 a month" earns a £75,000-per-switch effect on an inferred Campaign → Revenue link the user never
+    // sized. An INFERRED link (any source but the two below) is therefore credited only through a brief sentence that
+    // verifies its WHOLE effect: MC P0's Fi receipt (`source_quote`) or a records `quote`. A link the brief itself states
+    // (`brief_extraction`) keeps #2601's quote-less one-span rule; a size said in chat (`user_specified`) keeps Science's.
+    // ONE PROVENANCE AUTHORITY: who DREW the link (`edgeProvenanceDisplay`): said in chat (`user_set`) or by the brief.
+    const chatSized = edgeProvenanceDisplay(p.source) === "user_set";
+    const quoteLessWarrant = chatSized || edgeProvenanceDisplay(p.source) === "from_brief";
+    const effect = p.natural_effect;
+    if (effect === null || typeof effect !== "object" || Array.isArray(effect)) continue;
+    const natural = effect as Record<string, unknown>;
+    const from = typeof edge.from === "string" ? edge.from : null;
+    const to = typeof edge.to === "string" ? edge.to : null;
+    if (from === null || to === null) continue;
+    const sourceLabel = labels.get(from);
+    const targetLabel = labels.get(to);
+    if (sourceLabel === undefined || targetLabel === undefined) continue;
+    // ⭐⭐ A FIGURE HELD IN AN EDGE'S natural_effect IS NEVER `absent` (served false absence, #87 5996437122;
+    // AIE capture-b43bb79e/c1). The served agent route admits a stated size WITHOUT a `provenance.quote`
+    // (`admit-candidate.ts:116` has no such field), so requiring one made this whole route dead on the default path:
+    // "£75,000 a year" and "£12,000 upfront" read `absent` while two edges held them, and the coach told the user
+    // they "aren't represented". The warrant without a quote is the writer's stamp, `magnitude: 'user_stated'`, held
+    // to the limit above (quote-less, it counts only on a link the brief states or a chat size), and the figure binds
+    // to the one place the brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
+    // the whole effect.
+    // The edge's quote: the records projector writes `quote`; MC P0's Fi door writes `source_quote` — the ONE brief
+    // sentence its C2 binding validated (MC 5 Oct). A `source_quote` that is not in the brief (a size said in CHAT) is
+    // not brief evidence, so that edge binds as a quote-less one (one-span C3; Science ruling #87 6003878735).
+    const sourceQuote = typeof p.source_quote === "string" && p.source_quote.length > 0 && briefText.includes(p.source_quote)
+      ? p.source_quote
+      : null;
+    let quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : sourceQuote;
+    if (quote !== null && !briefText.includes(quote)) {
+      if (!chatSized) continue;
+      quote = null;
+    }
+
+    const amount = natural.amount;
+    const amountUnit = natural.amount_unit;
+    const perSourceChange = natural.per_source_change;
+    const perSourceChangeUnit = natural.per_source_change_unit;
+    if (typeof amount !== "number" || typeof amountUnit !== "string") continue;
+    // MC own-label units: only a persisted USER reading, attested inside this quote in this endpoint's stored unit,
+    // licences the label-head grammar. A proposed/Olumi reading never makes a brief figure appear represented.
+    const attestedUnit = (id: string, unit: unknown): boolean => {
+      const r = unitReadings.get(id);
+      return r?.source === "user_stated" && sameUnit(r.unit, unit) && typeof r.source_quote === "string"
+        && r.source_quote.length > 0 && quote !== null && quote.includes(r.source_quote);
+    };
+    const labelEnds = attestedUnit(to, amountUnit) || attestedUnit(from, perSourceChangeUnit)
+      ? { source: sourceLabel, target: targetLabel } : undefined;
+    const quoteVerified =
+      quote !== null &&
+      typeof perSourceChange === "number" &&
+      typeof perSourceChangeUnit === "string" &&
+      // A switch's quote writes its target figure only ("would win about 150 new subscribers"): the same matcher the
+      // binder stored it by (Codex buddy r1 F7, #2644).
+      (statedEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      }, undefined, labelEnds) || statedSwitchEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      }, undefined, labelEnds));
+    // ⛔ A RESIZE IN CHAT KEEPS THE OLD EVIDENCE (Codex r1 on #2610, P2): `link-effect-edit.ts` replaces `natural_effect`
+    // and keeps the rest of the provenance, so a Fi link resized from £1,200 to £2,000 still carries the £1,200 sentence.
+    // That sentence no longer describes the link's size. On a chat-sized link it is stale, never a veto: the link binds
+    // quote-less like any chat size. Any other link whose quote fails is not credited.
+    if (quote !== null && !quoteVerified) {
+      if (!chatSized) continue;
+      quote = null;
+    }
+    if (quote === null && !quoteLessWarrant) continue;
+    // ⛔ Without a quote, nothing says WHICH written figure the edge holds (Codex r1 on #2601: "Pension contributions are
+    // £75,000 a month" was credited to the spending edge too). So the edge binds to the ONE place the brief states its
+    // amount in its declared currency AND period, read by the quote check's own reader: "£75,000 a month" is not
+    // GBP/year. Two such places, or none, and it is not credited — the figure stays visibly unmatched, never guessed.
+    let boundSpan: { start: number; end: number } | undefined;
+    if (quote === null) {
+      const spans = statedTargetAmountSpans(briefText, amount, amountUnit);
+      if (spans.length !== 1) continue;
+      boundSpan = spans[0];
+    }
+    // ⛔ FA-R3 (Codex r2 on #2604): a VERIFIED quote binds its candidates to the numerals inside the quote's ONE place in
+    // the brief. Once "annually" verifies, an unbound quoted edge would also credit "Pension contributions are £75,000".
+    let sourceSpan: { start: number; end: number } | undefined;
+    if (quoteVerified) {
+      const spans = statedEffectSpansInText(briefText, quote!, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange as number,
+        per_source_change_unit: perSourceChangeUnit as string,
+      }, labelEnds);
+      if (spans === null) continue;
+      boundSpan = spans.target;
+      sourceSpan = spans.source ?? undefined;
+    }
+    const effectDirection = edge.effect_direction;
+    const signedEffect = Math.sign(amount) * Math.sign(typeof perSourceChange === "number" ? perSourceChange : 1);
+    if (
+      (effectDirection === "positive" && signedEffect < 0) ||
+      (effectDirection === "negative" && signedEffect >= 0)
+    ) continue;
+    if (typeof amount === "number" && Number.isFinite(amount) && typeof amountUnit === "string" && amountUnit.trim().length > 0) {
+      // The ONE grammar reads the edge's unit (Codex r1 on #2604, P2): "pounds/year", "GBP p.a." and "£k/year" are money
+      // with their scale, exactly as the span binding read them; the older currency reader stays the fallback.
+      const parts = readUnitParts(amountUnit);
+      const { kind, currencyCode, multiplier } = parts !== null && parts.kind === "currency"
+        ? { kind: "currency" as const, currencyCode: parts.code ?? undefined, multiplier: parts.scale }
+        : readCurrencyUnitWithQualifiers(amountUnit);
+      const targetLiteral = boundSpan === undefined ? "" : briefText.slice(boundSpan.start, boundSpan.end);
+      out.push({
+        nodeId: to,
+        label: targetLabel,
+        // Held SIGNED, as the edge holds it; `matchCandidate` also accepts the magnitude when the user wrote no sign.
+        value: amount * multiplier,
+        unitKind: kind,
+        currencyCode: currencyCode ?? null,
+        declaredUnit: amountUnit,
+        carrier: "edge_effect",
+        ...(boundSpan !== undefined ? { boundSpan } : {}),
+        // The general scanner deliberately omits bare numerals. A verified own-label count is no longer unitless:
+        // retain ONLY its target numeral, at the quote's unique span, licensed by this endpoint's USER receipt.
+        ...(quoteVerified && attestedUnit(to, amountUnit) && boundSpan !== undefined
+          && parts?.kind === "count" && /^\d[\d,]*(?:\.\d+)?$/.test(targetLiteral)
+          ? { receiptedQuantity: {
+            literal: targetLiteral,
+            at: boundSpan.start,
+            kind: "count" as const,
+            value: toNumber(targetLiteral),
+            mantissa: toNumber(targetLiteral),
+            unit: amountUnit,
+          } } : {}),
+      });
+    }
+
+    // The SOURCE-side figure is a stated figure only when the quote proved the user wrote it. Without a quote it is
+    // the producer's encoding (an option's on/off is `100 %`), never something the user said — so it is not offered.
+    if (
+      quoteVerified && sourceSpan !== undefined &&
+      typeof perSourceChange === "number" && Number.isFinite(perSourceChange) &&
+      typeof perSourceChangeUnit === "string" && perSourceChangeUnit.trim().length > 0
+    ) {
+      const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(perSourceChangeUnit);
+      out.push({
+        nodeId: from,
+        label: sourceLabel,
+        value: perSourceChange * multiplier,
+        unitKind: kind,
+        currencyCode: currencyCode ?? null,
+        declaredUnit: perSourceChangeUnit,
+        carrier: "edge_effect",
+        boundSpan: sourceSpan,
+      });
+    }
+  }
   return out;
 }
 
@@ -1470,6 +1730,8 @@ const canonicaliseMonths = (s: string): string =>
 
 interface Surfaces {
   readonly candidates: readonly Candidate[];
+  /** Where the brief states each limit (`constraintSpans`), so `classify` can keep a stated limit off an option's level. */
+  readonly limitSpans: readonly ConstraintSpan[];
   /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
   readonly modelStrings: readonly string[];
   /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
@@ -1490,7 +1752,7 @@ interface Surfaces {
  * The transform is idempotent (see `canonicaliseMonths`), so canonical strings
  * stored here read identically to the per-call form they replace.
  */
-function splitSurfaces(graph: Record<string, unknown>): Surfaces {
+function splitSurfaces(graph: Record<string, unknown>, briefText: string): Surfaces {
   const modelStrings: string[] = [];
   const proseStrings: string[] = [];
 
@@ -1505,8 +1767,18 @@ function splitSurfaces(graph: Record<string, unknown>): Surfaces {
       return;
     }
     if (typeof node === "object") {
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const object = node as Record<string, unknown>;
+      const naturalEffectProvenance = edgeProvenanceDisplay(object.source) === "from_brief"
+        && hasUserStatedSize({ provenance: object })
+        && object.natural_effect !== null
+        && typeof object.natural_effect === "object";
+      for (const [k, v] of Object.entries(object)) {
         if (k === "widening_log") continue;
+        // A natural-effect quote is evidence for the signed, unit-validated
+        // candidate route below, never an unanchored label match. Otherwise a
+        // wrong-sign or wrong-unit stored effect would still make its literal
+        // appear `in_model` merely because the provenance repeated the brief.
+        if (naturalEffectProvenance && k === "quote") continue;
         walkText(v, inProse || PROSE_KEYS.has(k));
       }
     }
@@ -1520,7 +1792,12 @@ function splitSurfaces(graph: Record<string, unknown>): Surfaces {
     else if (cls === "prose") walkText(v, true);
   }
 
-  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
+  return {
+    candidates: bindOptionLevels(collectCandidates(graph, briefText), extractStatedQuantities(briefText)),
+    limitSpans: constraintSpans(graph, briefText),
+    modelStrings,
+    proseStrings,
+  };
 }
 
 // ── matching ────────────────────────────────────────────────────────────────
@@ -1591,6 +1868,8 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
       // honestly; a count that cannot be verified falls to "not modelled yet",
       // which invites the user to add it rather than claiming we used it.
       if (q.unit === null || c.declaredUnit === null) return false;
+      // A receipt-located count belongs only to the edge that verified it, with its full noun/period unit.
+      if (c.receiptedQuantity === q) return sameUnit(q.unit, c.declaredUnit);
       return sameUnitFamily(q.unit, c.declaredUnit);
     }
     default:
@@ -1603,18 +1882,74 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
  *  say WHICH modelled quantity it is claiming. */
 function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
   if (q.value === null) return null;
-  for (const c of candidates) {
+  const receipt = candidates.find(c => c.receiptedQuantity === q);
+  for (const c of receipt === undefined ? candidates : [receipt]) {
+    if (c.boundSpan !== undefined && !(q.at < c.boundSpan.end && q.at + q.literal.length > c.boundSpan.start)) continue;
     if (!unitCompatible(q, c)) continue;
     if (numbersEqual(c.value, q.value)) return c;
+    // An edge holds its effect SIGNED (−75000 = "reducing … by £75,000"). A figure written WITHOUT a sign is a
+    // magnitude whose direction lives in the verb, so it matches |amount|; a written sign is compared as written.
+    if (c.carrier === "edge_effect" && q.value > 0 && numbersEqual(Math.abs(c.value), q.value)) return c;
   }
   return null;
+}
+
+/**
+ * The candidates a quantity may be matched against. Option levels are admitted
+ * only under Science's ruling on RT-4 class A (#87 5999083694):
+ *
+ *  · W2 — A LIMIT THE USER STATED IS NEVER AN OPTION'S LEVEL. Option candidates
+ *    are collected before limit candidates and `matchCandidate` takes the first
+ *    match, so "a £120k budget" beside a £120k option level would otherwise be
+ *    anchored to the option's factor instead of the limit.
+ *  · W3 — A FIGURE MATCHING LEVELS ON TWO DIFFERENT FACTORS NAMES NEITHER. Value
+ *    and unit cannot say which factor the user meant, so no option level is
+ *    credited. The same factor set by several options is one claim, not two.
+ *
+ * Every other candidate is untouched, so no previously anchored match moves.
+ */
+function admissibleCandidates(q: Quantity, s: Surfaces): readonly Candidate[] {
+  if (!s.candidates.some((c) => c.optionLevel === true)) return s.candidates;
+  const withoutOptionLevels = (): readonly Candidate[] => s.candidates.filter((c) => c.optionLevel !== true);
+  // ⛔ FALLBACK ONLY (Codex r2 (b) on #2603): an option level may turn an unmatched figure into a credit, never move
+  // one the model already accounts for. A served limit row carries no `source_quote`, so W2 alone could not see it:
+  // the £120k limit's anchor moved from the limit's node to the tool's cost. Any other carrier, or the model text,
+  // keeps the figure, exactly as before this route existed.
+  if (matchCandidate(q, withoutOptionLevels()) !== null || appearsInStrings(q, s.modelStrings)) {
+    return withoutOptionLevels();
+  }
+  if (classifyStatedKind(q, s.limitSpans) === "constraint") return withoutOptionLevels();
+  // Own span: an option level is offered only to the one literal it was bound to (`bindOptionLevels`).
+  const offered = s.candidates.filter((c) => c.optionLevel !== true || c.boundAt === q.at);
+  const factors = new Set(offered.filter((c) => c.optionLevel === true).map((c) => c.nodeId));
+  return factors.size > 1 ? withoutOptionLevels() : offered;
+}
+
+/**
+ * ⛔ AN OPTION LEVEL IS THE USER'S FIGURE ONLY WHERE THE BRIEF STATES IT ONCE (DL ruling on #2603, the Review Desk's
+ * lease ask; the same own-span rule #2601 applies to an unquoted edge effect). Value and unit alone cannot say which
+ * written figure a level holds: "raise prices by 8%" and "churn is 8% today" both read as 8%. So a level binds to the
+ * ONE brief quantity with its value and unit. Two such places, or none, and it is not offered at all — the figure stays
+ * visibly unmatched, never guessed. The cost is deliberate: a figure the user wrote twice is not credited by this route.
+ */
+function bindOptionLevels(candidates: readonly Candidate[], quantities: readonly Quantity[]): Candidate[] {
+  const out: Candidate[] = [];
+  for (const c of candidates) {
+    if (c.optionLevel !== true) {
+      out.push(c);
+      continue;
+    }
+    const places = quantities.filter((q) => q.value !== null && unitCompatible(q, c) && numbersEqual(c.value, q.value));
+    if (places.length === 1) out.push({ ...c, boundAt: places[0]!.at });
+  }
+  return out;
 }
 
 function classify(
   q: Quantity,
   s: Surfaces,
 ): { verdict: QuantityVerdict; matched: Candidate | null } {
-  const matched = matchCandidate(q, s.candidates);
+  const matched = matchCandidate(q, admissibleCandidates(q, s));
   if (matched !== null) return { verdict: "in_model", matched };
   // Text is the second route: a figure written into a label, a unit string or
   // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")
@@ -1762,6 +2097,17 @@ const SCOPE = {
   ],
 } as const;
 
+// Describe the receipt exception only when it actually adds a verified quantity to this manifest.
+const RECEIPTED_SCOPE = {
+  ...SCOPE,
+  searched:
+    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word or a verified user unit receipt, calendar dates and fiscal periods",
+  excluded_from_search: [
+    "bare numbers carrying no unit, currency or percent sign, unless a quoted effect and user unit receipt verify their own count unit",
+    "everything in not_tracked",
+  ],
+} as const;
+
 const UNAVAILABLE = (
   reason: "no_brief_text" | "no_graph",
 ): NotModelledManifest => ({
@@ -1811,8 +2157,19 @@ export function deriveNotModelledManifest(
     return UNAVAILABLE("no_graph");
   }
 
-  const surfaces = splitSurfaces(graph as Record<string, unknown>);
+  const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const quantities = extractStatedQuantities(briefText);
+  let supplemented = false;
+  for (const candidate of surfaces.candidates) {
+    const q = candidate.receiptedQuantity;
+    // Keep the existing scanner's literal when it already covers this numeral; never duplicate an item.
+    if (q !== undefined && !quantities.some(existing => existing.at < q.at + q.literal.length
+      && existing.at + existing.literal.length > q.at)) {
+      quantities.push(q);
+      supplemented = true;
+    }
+  }
+  if (supplemented) quantities.sort((a, b) => a.at - b.at);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
   const items: NotModelledItem[] = [];
@@ -1832,7 +2189,12 @@ export function deriveNotModelledManifest(
 
   for (const q of quantities) {
     const { verdict, matched } = classify(q, surfaces);
-    if (matched !== null) matchedNodeIds.add(matched.nodeId);
+    // An edge's figure is the user's EFFECT size, not the node's own value: crediting it must never hide Olumi's own
+    // estimate on that node from `inferred_factors` (Codex r1 on #2601).
+    // An option's level, like an edge's effect, is a figure ON the factor, not the factor's own: crediting it never
+    // certifies the factor's baseline or cap as the user's (RT-4 class A, #2603: the £250k fit-out level would have
+    // hidden that Olumi set that factor's £0 today and £500k cap).
+    if (matched !== null && matched.carrier !== "edge_effect" && matched.optionLevel !== true) matchedNodeIds.add(matched.nodeId);
     if (verdict === "in_model") {
       inModel += 1;
       if (matched !== null) inModelAnchored += 1;
@@ -1859,7 +2221,7 @@ export function deriveNotModelledManifest(
     schema: NOT_MODELLED_SCHEMA,
     status: "derived",
     unavailable_reason: null,
-    scope: SCOPE,
+    scope: supplemented ? RECEIPTED_SCOPE : SCOPE,
     quantities: {
       // Tallies count EVERY quantity found, not just the reported slice.
       total: quantities.length,

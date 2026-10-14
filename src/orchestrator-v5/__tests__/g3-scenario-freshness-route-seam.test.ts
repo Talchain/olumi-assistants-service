@@ -88,7 +88,7 @@ const ANALYSED_GRAPH = {
   nodes: [
     { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8 },
     { id: 'dec_growth', kind: 'decision', label: 'Growth approach' },
-    { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Capacity', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     {
       id: 'opt_hire',
       kind: 'option',
@@ -258,7 +258,6 @@ function makeStore(): Record<string, unknown> {
     loadGraphAndBriefText: async () => ({ graph: EDITED_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   };

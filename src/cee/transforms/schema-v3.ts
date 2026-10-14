@@ -49,7 +49,7 @@ import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { assertsBriefExtraction } from "../factor-extraction/brief-extraction-claim.js";
-import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
+import { isUnverifiedUserMaterial, nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // ⭐ THE SAME AUTHORITY THE PROJECTOR BINDS STATED ITEMS WITH. Imported, never
 // restated — `nodes[].provenance` and `options[].provenance.source` describe one
@@ -70,6 +70,7 @@ import {
 } from "./stated-option-figure-adoption.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
+import { isPlaceholderLink } from '../magnitude/link-sizing.js';
 
 // ============================================================================
 // V3 Types
@@ -436,11 +437,14 @@ export function transformNodeToV3(
     //    stamping it shifts that goal's sample base from 0.0 to B. The shift
     //    is UNIFORM ACROSS OPTIONS — it moves every option's samples by the
     //    same constant — so comparative verdicts (which option leads, by how
-    //    much) are unchanged. Goal PROBABILITY is unaffected for a different
-    //    reason: a root goal is refused outright at :3182 (`root_goal`,
-    //    "takes its base from observed_state.value, so its samples are not in
-    //    the non-root change-from-origin frame"), so no probability is
-    //    rendered either way. What DOES change is the absolute level of a root
+    //    much) are unchanged. Goal PROBABILITY: ISL no longer refuses every root
+    //    goal. It refuses one (`GOAL_THRESHOLD_NOT_CONVERTIBLE`, reason
+    //    `root_goal`) only with no measured level (`root_value_source`) or a
+    //    non-zero intercept (`root_intercept`); a root goal with a level and a
+    //    zero intercept is scored on the identity path (Science research, ISL
+    //    82842bb8). So stamping B can let a goal probability render that was
+    //    refused before; that effect is not analysed here (GOAL-REACH 3b,
+    //    flagged to Science). What DOES change is the absolute level of a root
     //    goal's reported samples and `GOAL_NODE_ROOT_STATIC.base_value` —
     //    arguably more correct (0.0 was a placeholder for "no observed
     //    value"), but a change, and named here so it is not mistaken for a
@@ -862,6 +866,12 @@ export function transformNodeToV3(
     }
   }
 
+  // Carry admission's withheld receipt intact through legacy projection; never infer this marker from extraction.
+  const incomingObserved = (node as { observed_state?: unknown }).observed_state;
+  if (isUnverifiedUserMaterial(incomingObserved)) {
+    v3Node.observed_state = incomingObserved as NodeV3T['observed_state'];
+  }
+
   // UI provenance display. Read extractionType from whichever location holds
   // it on this node — observed_state (factor with value), node-level
   // (external/repaired factors), or data (factor without observed_state).
@@ -871,7 +881,7 @@ export function transformNodeToV3(
     v3Node.observed_state?.extractionType
     ?? v3Node.extractionType
     ?? dataExtractionType;
-  const claimedProvenance = nodeProvenanceDisplay(extractionTypeForDisplay);
+  const claimedProvenance = nodeProvenanceDisplay(extractionTypeForDisplay, v3Node.observed_state);
 
   // ROADMAP 2.972 — A VALUE-FREE NODE CANNOT HAVE COME FROM THE BRIEF.
   //
@@ -1122,7 +1132,8 @@ export function transformEdgeToV3(
   const edgeId = `${edge.from}->${edge.to}`;
   // V4 fields take precedence, fallback to legacy for backwards compatibility
   const rawStrength = edge.strength_mean ?? edge.weight ?? DEFAULT_STRENGTH_MEAN;
-  if (edge.strength_mean === undefined && edge.weight === undefined) {
+  const meanDefaulted = edge.strength_mean === undefined && edge.weight === undefined;
+  if (meanDefaulted) {
     defaults.push({ edge_id: edgeId, field: "strength_mean", default_value: DEFAULT_STRENGTH_MEAN, reason: "no LLM value" });
   }
 
@@ -1207,8 +1218,15 @@ export function transformEdgeToV3(
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).
-  const provenance = extractProvenanceForV3(edge.provenance)
+  const extracted = extractProvenanceForV3(edge.provenance)
     ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
+  // Science 393023 LICENCE (b), 7 Oct 20:48Z: a size nobody stated (no mean AND no spread) is this door's default, so the
+  // edge carries `defaulted: true` AND the tag. A stated spread is kept untagged, exactly as before (buddy r2 P1: the tag
+  // would let the frame fallback overwrite it). A bare 0.5 (no `defaulted`) is never read as a placeholder.
+  const placeholderDefault = meanDefaulted && edge.strength_std === undefined;
+  const provenance = placeholderDefault
+    ? { ...(extracted ?? { source: "cee_hypothesis" as const }), magnitude: "olumi_placeholder" as const }
+    : extracted;
 
   return {
     edge: {
@@ -1226,7 +1244,7 @@ export function transformEdgeToV3(
       // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
       ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
       // F5: Preserve enrichment defaulted flag through V3 transform
-      ...((edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
+      ...(placeholderDefault ? { defaulted: true } : (edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
       // Preserve validation pipeline metadata (two-pass parameter review)
       ...((edge as any).validation != null ? { validation: (edge as any).validation } : {}),
     },
@@ -1263,7 +1281,7 @@ function mapToV3ProvenanceSource(source: string): V3ProvenanceSource {
  */
 function extractProvenanceForV3(
   prov?: string | ProvenanceObject
-): { source: V3ProvenanceSource; reasoning?: string } | undefined {
+): { source: V3ProvenanceSource; reasoning?: string; magnitude?: "olumi_placeholder" } | undefined {
   if (!prov) return undefined;
 
   if (typeof prov === "string") {
@@ -1273,6 +1291,8 @@ function extractProvenanceForV3(
   return {
     source: mapToV3ProvenanceSource(prov.source),
     reasoning: prov.quote,
+    // Science 393023 LICENCE (b): a default door's tag survives the transform (the enricher writes it).
+    ...(prov.magnitude === "olumi_placeholder" ? { magnitude: "olumi_placeholder" as const } : {}),
   };
 }
 
@@ -1559,7 +1579,9 @@ function projectNodeProvenance(
       typeof node.goal_threshold === "number" ||
       typeof node.goal_threshold_raw === "number" ||
       // The UI's stated goal target (#1921): a magnitude, the sibling of goal_threshold_raw.
-      typeof node.success_threshold === "number";
+      typeof node.success_threshold === "number" ||
+      // event_risk.v1: a stated occurrence range, attested by its own `basis` (src/schemas/event-risk.ts).
+      node.event_risk !== undefined;
     if (carriesValue) continue;
 
     const tokenCount = node.label.trim().split(/\s+/).filter(Boolean).length;
@@ -2213,6 +2235,7 @@ export function transformResponseToV3(
       node_id?: string;
       value?: number;
       unit?: string;
+      stated_relationship?: true;
     }> = [];
     let omitted = 0;
     for (const raw of v1RecordDisclosures) {
@@ -2233,6 +2256,7 @@ export function transformResponseToV3(
         duplicate_of?: unknown;
         value?: unknown;
         unit?: unknown;
+        stated_relationship?: unknown;
       };
       // The ONLY other rejection: a record that cannot be rendered at all. It is
       // COUNTED, never silently swallowed — a channel that quietly loses part of
@@ -2266,6 +2290,9 @@ export function transformResponseToV3(
         ...(anchorId ? { node_id: anchorId } : {}),
         ...(statedValue !== undefined ? { value: statedValue } : {}),
         ...(statedUnit !== undefined ? { unit: statedUnit } : {}),
+        // ⭐ SPINE X8: a RELATIONSHIP the user stated rides the disclosure (literal `true` only), so the notice
+        // counts it as the user's. Absent stays an ABSENT KEY: byte-identical for every current input.
+        ...(d.stated_relationship === true ? { stated_relationship: true as const } : {}),
       });
     }
     if (emitted.length > 0) {
@@ -2520,6 +2547,9 @@ function generateValidationWarnings(
 
   // P1-CEE-3: Check for negligible and low strength edges
   for (const edge of graph.edges) {
+    // Science 393023 LICENCE ruling 3 (P53x, Codex #2819 P2): a placeholder's mean is a default, not a size: never
+    // word it as 'low' or 'negligible' strength.
+    if (isPlaceholderLink(edge)) continue;
     const absMean = Math.abs(edge.strength.mean);
 
     if (absMean < EDGE_STRENGTH_LOW_THRESHOLD) {

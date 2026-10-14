@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 2 failed) 128ms
+     × a legacy partial warning with claims undefined grants no share or outcome permission 9ms
+     × a legacy partial warning with claims malformed grants no share or outcome permission 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims undefined grants no share or outcome permission
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims malformed grants no share or outcome permission
+AssertionError: expected 'This run withheld a target chance for…' not to contain 'Shares may be said'
+
+Expected: "Shares may be said"
+Received: "This run withheld a target chance for the options in `option_ids`. Never state or estimate those points. Their outcomes appear on the panel; never quote, estimate or compare those outcomes. Other options’ licensed points and ranges may be said as written, subject to the run’s other withhold rules. Shares may be said as findings of this model in the goal’s own direction, always as ‘in this model’, never as target chances or recommendations. Say `say` once, as written, when you describe the run."
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:177:28
+    175|     const agent = goalChanceWithheldForAgent({ enrichment: body }, und…
+    176|     expect(agent.option_ids).toEqual(['starter']);
+    177|     expect(agent.note).not.toContain('Shares may be said');
+       |                            ^
+    178|     expect(agent.note).not.toContain('outcomes appear on the panel');
+    179|     expect(agent.note).toContain('any leader are withheld');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 passed (14)
+   Start at  16:41:30
+   Duration  6.82s (transform 4.81s, setup 167ms, import 6.35s, tests 128ms, environment 0ms)
+

@@ -1,0 +1,1670 @@
+{
+  "metadata": {
+    "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+    "source_state": "uncommitted working tree; no commit or push",
+    "working_source_sha256": {
+      "src/orchestrator-v5/routing/stated-event-risk.ts": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70",
+      "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+      "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+      "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f",
+      "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+      "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+      "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+      "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+      "pnpm-lock.yaml": "ce7d9e4700397052733037b77f59c985405aa01de113e4cf2050bd81b6d7f763"
+    },
+    "script_sha256": {
+      "evidence-utils-fix4.ts": "e0bc7b512cb79a5f7edb64e2ce6dc7b1aa2965c7306513f9974b89338c78e27a",
+      "compare-corpus-fix4.ts": "6c3f9178fb06e37efcca2050b13db777327ace1865c2000b4b2beb064f3a5ed1",
+      "measure-timing-fix4.ts": "ec2d78b91362b6ce695efa469d2535638963c756c08178f403a38e5bc801d9fc",
+      "run-mutants-fix4.ts": "2ab74ef77f42ab99977461dff475db50bc09b8b40053c2c702a36ab23f3be84c"
+    },
+    "created_at": "2026-10-08T10:45:37.685Z",
+    "starting_load": 13.78759765625,
+    "review_fixture_sha256": "7393ec297418d5411990b83fb49b8263ddafa7f0f1a5dd066f9740c0f73e0db4",
+    "battery_fixture_sha256": "61b40053842995614f9ce7ce2d4d86a6ad6aa145664146473875895392f1ea93",
+    "original": {
+      "name": "working",
+      "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+      "source_state": "working tree",
+      "reader_sha256": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70",
+      "drafter_sha256": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "shared_dependency_sha256": {
+        "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+        "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+        "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+        "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+        "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+        "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+        "src/utils/telemetry.ts": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2",
+        "src/utils/logger-config.ts": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9",
+        "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+      },
+      "shared_dependencies_verified_against_source_sha": false
+    },
+    "mutant": {
+      "name": "readd-hedge-source",
+      "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+      "source_state": "scratch mutant of working tree",
+      "reader_sha256": "caf10b42218eefa610a0fa8e590d3300ccd1e107dcd56ee8691ed125eafa5e3e",
+      "drafter_sha256": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "shared_dependency_sha256": {
+        "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+        "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+        "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+        "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+        "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+        "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+        "src/utils/telemetry.ts": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2",
+        "src/utils/logger-config.ts": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9",
+        "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+      },
+      "shared_dependencies_verified_against_source_sha": false,
+      "original_reader_sha256": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70"
+    },
+    "legacy_hedge_source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+    "legacy_hedge_definition_sha256": "455cc9cd47f9b23476d517180f06b7b895c64dccdb759985dee7c229164a2612",
+    "mutation": "Append the pinned r3 HEDGE_BEFORE regex as FIX4_MUTANT_HEDGE_BEFORE; OR its result into directLikelihood. Retain every other class/impact/window rule.",
+    "serial": true,
+    "source_file_sha256_after": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70",
+    "source_file_never_modified": true
+  },
+  "must_fire_count": 39,
+  "must_fire_green": 39,
+  "must_fire_failures": [],
+  "mutant_killed_rows": [
+    "reviewBattery75/review-45",
+    "reviewBattery75/review-63",
+    "reviewBattery75/review-66",
+    "reviewR3New26/N1",
+    "reviewR3New26/N2",
+    "reviewR3New26/N3",
+    "reviewR3New26/N4",
+    "reviewR3New26/N14",
+    "reviewR3New26/F4"
+  ],
+  "required_N1_N2_N3_red": [
+    "N1",
+    "N2",
+    "N3"
+  ],
+  "original_failures": [],
+  "satisfies_required_pair": true,
+  "rows": [
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-01",
+      "input": "There will be a 20% hit to revenue within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-02",
+      "input": "Revenue could fall 15% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-03",
+      "input": "There's maybe a 10% dip in MRR within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-04",
+      "input": "The outage is likely to cut revenue 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-05",
+      "input": "Odds are it drops 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-06",
+      "input": "There is a one-in-five chance of a 10% fall within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-07",
+      "input": "There is a 1 in 5 chance of a 10% fall within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-08",
+      "input": "There is a 20% chance of a 10% fall within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-09",
+      "input": "There is a 20% chance of a 10% dip within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-10",
+      "input": "There is a 1 in 5 chance of a 10% dip within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-11",
+      "input": "Probably a 10% dip in MRR within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-12",
+      "input": "Maybe a 10% decrease in revenue within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-13",
+      "input": "Perhaps a 10% shortfall against plan within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-14",
+      "input": "MRR will probably be 10% down within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-15",
+      "input": "MRR is probably 10% below forecast within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-16",
+      "input": "Revenue is probably 10% under target within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-17",
+      "input": "Possibly a 15% slump in sales over the next 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-18",
+      "input": "There's a chance 10% of our customers cancel within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-19",
+      "input": "Maybe 10% of users churn within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-20",
+      "input": "I reckon 10% of our customers will leave within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-21",
+      "input": "I'd say 20% of the team quits within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-22",
+      "input": "Probably 10% of accounts downgrade in the next 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-23",
+      "input": "It might happen: 10% of our customers cancel within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-24",
+      "input": "There's a chance of a fall of 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-25",
+      "input": "There is a real chance of a drop of 10% in MRR within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-26",
+      "input": "The odds of a price cut of 15% within 3 months are high.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-27",
+      "input": "There is a chance that revenue is 10% below plan within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-28",
+      "input": "There's a chance that MRR is 10% down within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-29",
+      "input": "There is a chance that churn is 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-30",
+      "input": "There is a chance that MRR will be down 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-31",
+      "input": "The risk of 10% customer churn within 6 months worries me.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-32",
+      "input": "There is a risk of 10% attrition within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-33",
+      "input": "We face a risk of 10% budget overrun within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-34",
+      "input": "The risk of 7% user churn over 3 months is the issue.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-35",
+      "input": "The mitigation gives a 20% risk reduction within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-36",
+      "input": "Lenders will charge a 10% risk premium within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-37",
+      "input": "Add a risk: a 10% chance-free drop in MRR within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-38",
+      "input": "Add a risk: a 10% chance–free drop in MRR within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-39",
+      "input": "The delay raises our churn risk 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-40",
+      "input": "The new competitor increases the chance 10% within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-41",
+      "input": "It may happen: 10% in lost revenue within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-42",
+      "input": "It could happen, 10% over budget, within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-43",
+      "input": "There is a 30% chance the supplier fails within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-44",
+      "input": "I'd say 30% within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-45",
+      "input": "Probably 20% within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-46",
+      "input": "It's 20% likely to happen within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-47",
+      "input": "Odds are about 20% within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-48",
+      "input": "a 1 in 5 chance within 6 months",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-49",
+      "input": "There is a one in five chance within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-50",
+      "input": "20–30% chance within 6 months",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-51",
+      "input": "There's a 25% probability that the supplier fails within 6 months.",
+      "expected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-52",
+      "input": "The likelihood is about 20% within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-53",
+      "input": "I think there's a 20% chance within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-54",
+      "input": "Chance of supplier failure: 20% within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-55",
+      "input": "Probability of a supplier failure: 20% within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-56",
+      "input": "Likelihood of an outage = 20% within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-57",
+      "input": "The chance of an outage is about 20% within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-58",
+      "input": "Roughly 10% likely within a year.",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-59",
+      "input": "Supplier failure is 15% probable within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-60",
+      "input": "The probability that the supplier fails is 30% within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-61",
+      "input": "There's a 30% chance the release slips within 6 months, which would cut MRR by 10%.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-62",
+      "input": "A 30% chance the release slips within 6 months; it would cut MRR by 10%.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-63",
+      "input": "The release might slip, maybe 30% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-64",
+      "input": "I estimate 30% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-65",
+      "input": "I guess about 30% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-66",
+      "input": "Add a risk: our key developer might leave, maybe 10–30% in the next 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-67",
+      "input": "I'd put it at about 15–25% within 3 months",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-68",
+      "input": "10% chance it happens within 6 months",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-69",
+      "input": "1 in 10 chance within a year",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-70",
+      "input": "30% chance within 6 months",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-71",
+      "input": "30% likely within 6 months",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-72",
+      "input": "Supplier failure is 30% probable within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-73",
+      "input": "odds of 30% within a year",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "review-74",
+      "input": "It may happen 10–30% in the next 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewBattery75",
+      "id": "finding-etc-window",
+      "input": "There is a 30% chance of supplier issues, delays etc. We need the launch done within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N1",
+      "input": "Within 6 months the hit to MRR is probably 10%.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N2",
+      "input": "The revenue loss is probably 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N3",
+      "input": "Churn is probably 10% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N4",
+      "input": "Revenue will drop, maybe 10%, within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N5",
+      "input": "The new supplier boosts our odds 10% within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N6",
+      "input": "Hiring a second supplier improves our odds 10% within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N7",
+      "input": "Expect maybe a 12% markdown on stock within 3 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N8",
+      "input": "I guess 15% of pipeline slips within 3 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N9",
+      "input": "The odds are that we lose 10% of revenue within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N10",
+      "input": "Perhaps 20% of deals will be lost, within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N11",
+      "input": "A competitor price cut is likely, around 15%, within 3 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N12",
+      "input": "There's a likelihood of a 10% shrinkage within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N13",
+      "input": "The cost overrun would be maybe 20% over the next year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "N14",
+      "input": "The discount is probably 15% within 3 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 3
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F1",
+      "input": "There's roughly a 25% chance of that within 6 months.",
+      "expected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F2",
+      "input": "I'd say about 40% that it happens within the next year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F3",
+      "input": "The odds of the supplier failing are about 1 in 4 within a year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F4",
+      "input": "Perhaps 15% within 6 months.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F5",
+      "input": "We think the chance is about 30% over the next 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F6",
+      "input": "The supplier could go bust; I'd estimate 20% in the next year.",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F7",
+      "input": "Key supplier fails: 20–30% chance in the next 12 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F8",
+      "input": "It's maybe a 1 in 5 chance within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F9",
+      "input": "Probability of losing the anchor client: 35% within a year.",
+      "expected": {
+        "pLow": 0.35,
+        "pHigh": 0.35,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.35,
+        "pHigh": 0.35,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.35,
+        "pHigh": 0.35,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F10",
+      "input": "There is a 30 percent chance the migration slips within 6 months, costing us 10% of ARR.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F11",
+      "input": "Odds of a strike are 30% within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "reviewR3New26",
+      "id": "F12",
+      "input": "A data breach has a 5% chance within a year.",
+      "expected": {
+        "pLow": 0.05,
+        "pHigh": 0.05,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.05,
+        "pHigh": 0.05,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.05,
+        "pHigh": 0.05,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "mandatoryControls",
+      "id": "mandatory-with-probability",
+      "input": "Supplier fails with probability 10% within 6 months.",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "mandatoryControls",
+      "id": "mandatory-percent-chance",
+      "input": "10% chance it happens within 6 months",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "mandatoryControls",
+      "id": "mandatory-one-in",
+      "input": "1 in 10 chance within a year",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "mandatoryControls",
+      "id": "mandatory-chance-colon",
+      "input": "Chance of supplier failure: 20% within 6 months",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "mandatoryControls",
+      "id": "mandatory-word-percent-probability",
+      "input": "a 30 percent probability within 6 months",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "dataset": "mandatoryControls",
+      "id": "mandatory-percent-likely",
+      "input": "30% likely within 6 months",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    }
+  ]
+}

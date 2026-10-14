@@ -1,0 +1,6 @@
+Load gate exit: 0
+{"load":18.318359375,"threshold":25}
+node_modules/.bin/vitest list tests/contract/goal-record-census.guard.test.ts --config vitest.required.config.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+tests/contract/goal-record-census.guard.test.ts > S5 goal-record census ratchet > allows no new references and requires paid-down entries to shrink in the same PR
+tests/contract/goal-record-census.guard.test.ts > S5 goal-record census ratchet > is non-vacuous and its generated baseline counts describe the same file sets
+tests/contract/goal-record-census.guard.test.ts > S5 goal-record census ratchet > contrast control: present token has at least five files; absent token has zero

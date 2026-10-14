@@ -369,21 +369,37 @@ export class SupabaseCollabStore implements CollabStore {
   }): Promise<{ model_version_id: string }> {
     const { data, error } = await this.db
       .from('scenarios')
-      .select('graph, user_id')
+      .select('graph, user_id, current_model_version_id, revision')
       .eq('id', args.scenario_id)
       .maybeSingle();
     if (error !== null || data === null) {
       throw new Error('collab store: cannot read scenario graph to pin a round version');
     }
-    const row = data as { graph?: unknown; user_id?: string | null };
+    const row = data as {
+      graph?: unknown;
+      user_id?: string | null;
+      current_model_version_id?: string | null;
+      revision?: unknown;
+    };
     if (row.user_id === null || row.user_id === undefined) {
       refuse('collab_guest_scenario', 'This scenario has no owner.');
+    }
+    if (row.current_model_version_id === undefined) {
+      throw new Error('collab store: cannot read scenario head to pin a round version');
+    }
+
+    if (typeof row.revision !== 'number' || !Number.isSafeInteger(row.revision) || row.revision < 0) {
+      throw new Error('collab store: cannot read scenario revision to pin a round version');
     }
 
     const service = getModelManagementService();
     const result = await service.saveVersion({
+      expected_revision: row.revision,
       scenario_id: args.scenario_id,
       graph: row.graph,
+      // A concurrency precondition only. The round still pins the id RETURNED
+      // by the explicit mint, never this nullable pointer.
+      expected_head_version_id: row.current_model_version_id,
       provenance: args.provenance,
       label: 'Panel round',
     });

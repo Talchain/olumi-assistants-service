@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 45 sites, 32 findings, 20 OPEN, 12 accepted", () => {
+  it("the first cut is an ENUMERATION: 57 sites, 41 findings, 20 OPEN, 21 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -316,14 +316,46 @@ describe("the live value-bearing contract, adjudicated", () => {
     // +2 sites / +2 findings / +2 ACCEPTED, NONE (30 Sep, A4 CEE #2409): `natural_effect.stated_range.{low,high}` — the
     // written range a user's size is one end of. In the enclosing `amount_unit`, sourced by `text`, written only on the
     // user's own size (value-warrant-guard.ts records the inheritance).
-    expect(SITES.length).toBe(45);
-    expect(FINDINGS.length).toBe(32);
+    // +1 site / +0 findings, LEVEL_SOLE (1 Oct, MG F1 T1, schemas 0.69.0): the contract's NodeV3 `goal_stated_as[].value`
+    // — a figure the user GAVE, kept verbatim — names its warrant in its own object (`unit`, with `period` + `quote`), so it
+    // is warranted where it stands. The level it implies is written into `goal_threshold_raw` in the same write (G1).
+    // +1 LEVEL_SOLE site (2 Oct): goal_scope.component.share is a bounded fraction with its own source.
+    // +4 sites / +4 findings / +4 ACCEPTED, NONE (7 Oct, event_risk.v1, Science 393023 pilot): `event_risk.occurrence.
+    // {p_low,p_high}`, `horizon.months` and `mitigations[].occurrence_reduction`. Their warrant is the block's REQUIRED
+    // `occurrence.basis` (Science's name, not a warrant token), written only at the validated door (value-warrant-guard.ts).
+    // +4 sites / +4 findings / +4 ACCEPTED, NONE (7 Oct, schemas 0.82.0 re-vendor): the SAME four on the contract's NodeV3
+    // (`EventRiskV1Schema`), each recorded as the twin of its CEE entry above.
+    // +1 site / +0 findings / +0 ledger ACCEPTED, LEVEL_SOLE (9 Oct, S5 2b): `horizon_basis.bound_months`
+    // is a user-stated integer equal to `goal_horizon_months`, minted only by the user's press, with no model figure.
+    // ACCEPTED: its REQUIRED `source: user_stated` warrants the sole number in the attestation object; no finding
+    // needs a ledger entry (adding one would fail the stale-decision rule). The explicit decision is pinned below.
+    // +1 LEVEL_SHARED site / +1 ACCEPTED (S4): approved literal goal_horizon_stated_months, like goal_horizon_months.
+    // Batch C: ruling 4 — +2 LEVEL_SHARED sites / +2 findings / +2 ACCEPTED (12 Oct): CEE's NodeV3 `goal_target_basis`
+    // {target_raw (a staleness key equal to goal_threshold_raw), period_months (months by name, `source: olumi_reading`)}.
+    expect(SITES.length).toBe(59);
+    expect(FINDINGS.length).toBe(43);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(12);
+    expect(report.accepted.length).toBe(23);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
-    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(17);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(7);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(18);
+    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(25);
+  });
+
+  it("S4 stated months has the same duration classification as held horizon months", () => {
+    const stated = site("cee.NodeV3::goal_horizon_stated_months");
+    expect(stated.verdict).toBe(site("cee.NodeV3::goal_horizon_months").verdict);
+    expect(stated.verdict).toBe("LEVEL_SHARED");
+    expect(report.accepted.some(f => f.id === `scope-ambiguous:${stated.id}`)).toBe(true);
+  });
+
+  it("S5 2b — ACCEPTED: the user-stated bound months already carries its own source warrant", () => {
+    const s = site("cee.NodeV3::horizon_basis.bound_months");
+    expect(s.verdict).toBe("LEVEL_SOLE");
+    expect(s.numericsAtLevel).toBe(1);
+    expect(s.levelWarrants).toEqual(["source"]);
+    expect(FOUND.has(`unwarranted:${s.id}`)).toBe(false);
+    expect(FOUND.has(`scope-ambiguous:${s.id}`)).toBe(false);
   });
 
   it("no decision is a bare exemption — each one argues, or names the one that does", () => {

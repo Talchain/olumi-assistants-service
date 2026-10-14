@@ -114,6 +114,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   readFlipClaimPosture,
+  readTopLevelFlipRows,
   type FlipClaimPosture,
 } from '../context/flip-threshold-rows.js';
 import {
@@ -735,6 +736,8 @@ interface FactorSignal {
 }
 
 interface AnalysisSignals {
+  /** The selected Run's exact enrichment, also read to select the subject. */
+  readonly enrichment: Record<string, unknown>;
   readonly factors: readonly FactorSignal[];
   /**
    * Genuine per-factor Strong–Oakley EVPPI priority, read through the shared
@@ -860,6 +863,7 @@ function readAnalysisSignals(
   }
 
   return {
+    enrichment,
     factors,
     factorEvppiPriority: selectFactorEvppiPriority(enrichment),
     optionWinProbabilities,
@@ -980,9 +984,8 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
   // subject.
   const dominant = findDominantDriver(signals);
   if (dominant !== null) {
-    // DOMINANT_DRIVER's copy ends "…how far it can move before the leading
-    // option changes", which presupposes the leading option CAN change. On an
-    // attested-no-flip run it cannot, so this door is remapped too.
+    // Keep the attested-no-flip remap. Missing evidence still allows this
+    // qualitative lens; buildSelection separately licenses its measured copy.
     return {
       code: noFlip ? 'DOMINANT_DRIVER_NO_FLIP' : 'DOMINANT_DRIVER',
       subjectFactorId: dominant.factorId,
@@ -1384,19 +1387,22 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
 };
 
+const DOMINANT_DRIVER_QUALITATIVE_BODY = 'One factor is doing most of the work in this result.';
+export const DOMINANT_DRIVER_MEASURED_TAIL = 'A sensitivity check shows how far it can move before the most-supported option changes.';
+
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   FLIP_RISK_ISOLATED:
-    'The result leans on a single factor that could tip which option leads on its own — a small change to it alone could flip the outcome. Asking what would flip the decision shows how much room for error you have.',
+    'The result leans on a single factor that could change the most-supported option on its own — a small change to it alone could flip the outcome. Asking what would flip the result shows how much room for error you have.',
   FLIP_RISK_CORRELATED:
-    'No single factor is decisive here, but the right combination of factors could tip which option leads — the outcome is more finely balanced than it first looks. Asking what would flip the decision shows which factors move together.',
+    'No single factor is decisive here, but the right combination of factors could change the most-supported option — the outcome is more finely balanced than it first looks. Asking what would flip the result shows which factors move together.',
   DOMINANT_DRIVER:
-    'One factor is doing most of the work in this result. A sensitivity check shows how far it can move before the leading option changes.',
+    `${DOMINANT_DRIVER_QUALITATIVE_BODY} ${DOMINANT_DRIVER_MEASURED_TAIL}`,
   CONFIDENCE_NEEDS_WORK:
     'The analysis is usable but not yet solid. A pre-mortem — imagining the choice went wrong and asking why — surfaces the weak points worth shoring up first.',
   TOP_FACTOR_LOW_CONFIDENCE:
     'The factor that moves this result the most is also the one you are least sure about. A pre-mortem helps you name what could go wrong before you commit.',
   WIN_PROB_MODERATE:
-    'The leading option is ahead, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
+    'One option was supported by the most runs, but by fewer than 70% of them. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
   RESOLVED_EVPPI_PRIORITY:
     'This run ranked one assessed factor first for further evidence. Investigate that priority before widening the search.',
   // ── ROADMAP 2.989 — the resolvable fragile relationship ────────────────────
@@ -1430,11 +1436,11 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'Change it and which option is most likely to hit your goal could change, so firming it up is the highest-value thing to resolve next.',
   // ── DSK slice 1 — disconfirmation + devil's advocacy ───────────────────────
   CLEAR_WINNER_DISCONFIRMATION:
-    'One option is clearly ahead here. Before you commit, spend a few minutes making the strongest honest case against it — if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.',
+    'In this model, one option scored highest by a wide margin. Before you commit, spend a few minutes making the strongest honest case against it — if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.',
   DOMINANT_FACTOR_DISSENT:
     'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:
-    'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
+    'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the most-supported option changes as it moves — shows how much the choice hangs on it.',
   // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
   // What is TRUE on these turns and what is NOT, because the copy turns on it:
   // the robustness Monte Carlo reports the result is not stable (`is_robust:
@@ -1560,9 +1566,22 @@ const CORRELATED_YIELD_CODES: ReadonlySet<LensRationaleCode> = new Set([
   'SENSITIVITY_CORRELATED_NO_FLIP',
 ]);
 
+/** A measurement licenses only its subject in this selected Run's enrichment. */
+export function hasMeasuredFlipThresholdFor(
+  enrichment: Record<string, unknown>,
+  subjectFactorId: string | null,
+): boolean {
+  return subjectFactorId !== null &&
+    enrichment.flip_thresholds_status !== 'unavailable' &&
+    readTopLevelFlipRows(enrichment).some(
+      (row) => row.kind === 'flip_pair' && row.factor_id === subjectFactorId,
+    );
+}
+
 function buildSelection(
   lens: LensId,
   hit: EvaluatorHit,
+  signals: AnalysisSignals,
   displacedLens?: LensId,
   displacementCause?: 'no_repeat' | 'correlated_yield',
 ): LensSelection {
@@ -1570,7 +1589,10 @@ function buildSelection(
     lens,
     rationaleCode: hit.code,
     title: TITLE_OVERRIDE_BY_RATIONALE[hit.code] ?? TITLE_BY_LENS[lens],
-    body: BODY_BY_RATIONALE[hit.code],
+    body:
+      hit.code === 'DOMINANT_DRIVER' && !hasMeasuredFlipThresholdFor(signals.enrichment, hit.subjectFactorId)
+        ? DOMINANT_DRIVER_QUALITATIVE_BODY
+        : BODY_BY_RATIONALE[hit.code],
     groundingField: GROUNDING_FIELD_BY_RATIONALE[hit.code],
     // Wave-4 δ2: expose the focus subject when the lens points at a single
     // factor. Omitted (undefined) for subject-less rationales → the directive
@@ -2144,7 +2166,7 @@ export function rankInterventions(
   ) {
     marks.set(head.lens, 'displaced_head');
     return finish(
-      buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat'),
+      buildSelection(runnerUp.lens, runnerUp.hit, signals, head.lens, 'no_repeat'),
       marks,
     );
   }
@@ -2153,6 +2175,7 @@ export function rankInterventions(
     buildSelection(
       head.lens,
       head.hit,
+      signals,
       yieldedLens,
       yieldedLens !== undefined ? 'correlated_yield' : undefined,
     ),

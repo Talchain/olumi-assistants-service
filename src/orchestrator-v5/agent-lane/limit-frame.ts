@@ -85,6 +85,7 @@ export function sayGoalChange(
   held?: unknown,
 ): string | undefined {
   if (frame !== 'change_rel' && frame !== 'change_abs') return undefined;
+  if (stored === 0 && (held === '<=' || held === '>=')) return held === '<=' ? 'no higher than today' : 'no lower than today';
   const dir = stored < 0 ? 'down' : 'up';
   const bound = held === '>=' || held === '<=' || held === '>' || held === '<' ? `${changeWords(held, stored >= 0)} ` : '';
   if (frame === 'change_rel') return `${dir} ${bound}${Math.round(Math.abs(stored) * 100 * 1e6) / 1e6}% from today`;

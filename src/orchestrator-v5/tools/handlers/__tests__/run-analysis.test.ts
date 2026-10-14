@@ -45,6 +45,10 @@ import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larg
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { composeAnalysisStateV1 } from '../../../compose/analysis-state-v1.js';
 import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/analysis-projection-policy.js';
+import { ANALYSIS_PROJECTION_VERSION } from '../../../context/graph-identity.js';
+import { toSafeTransportEnrichment } from '../../../compose.js';
+import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -141,7 +145,7 @@ describe('run_analysis handler — happy path', () => {
     // on the lone fragile edge, no graph nodes to map against), so the
     // driver-with-margin shape (Case B) fires.
     expect(outcome.assistant_text).toBe(
-      'Option A scored highest against your goal in 62% of runs of this model because Price is the strongest driver.',
+      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
     );
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
@@ -186,37 +190,11 @@ describe('run_analysis handler — happy path', () => {
   });
 
   /**
-   * RE-POINTED 2026-07-26 (T1 claim safety, layer 2) — read this before
-   * loosening it further.
-   *
-   * The invariant WAS "fact.result.enrichment equals the validated
-   * V2RunResponse byte-for-byte". It is now: **PLoT's response verbatim, PLUS
-   * EXACTLY ONE CEE-owned `__cee_`-namespaced key, and nothing else.**
-   *
-   * That is a TIGHTER statement than the old one, not a weaker one: the old
-   * test permitted no exception and therefore said nothing about what a future
-   * exception would be allowed to look like. This one pins the exception to a
-   * single, namespaced, enumerable key — so a second CEE key, an un-namespaced
-   * key, or any edit to a PLoT field all still fail here.
-   *
-   * WHY THE EXCEPTION EXISTS. "May a leading option be named" is a fact about
-   * the analysis and must be readable on every path that rebuilds prose from
-   * the fact — including the prior-fact lifecycle rebuild, which runs no
-   * handler and so has no `HandlerOutcome` to thread. Its correct home is a
-   * first-class `constraint_verdict` field on `RunAnalysisResultSchema`, which
-   * is `.strict()` in the vendored `@talchain/schemas`, so adding it needs a
-   * package release blocked behind V5-CI-01. `enrichment` is `z.record` and
-   * passes strict unchanged. See `CEE_CLAIM_SAFETY_ENRICHMENT_KEY`.
-   *
-   * The pass-through itself is UNCHANGED: the handler still builds and
-   * schema-validates `enrichment: response as Record<string, unknown>` verbatim
-   * (which `scripts/validate-handler-ownership.sh` §6 still enforces), and the
-   * stamp is applied afterwards as a separate, named step.
-   *
-   * WHEN V5-CI-01 UNBLOCKS: move the verdict to the fact field, delete the
-   * stamp, and restore the plain byte-for-byte assertion below.
+   * Every new Run records the existing projection stamp in persisted metadata.
+   * PLoT fields and transport bytes remain unchanged. Claim safety lives on
+   * constraint_verdict, and no other key may be added to enrichment.
    */
-  it('fact.result.enrichment is the validated V2RunResponse VERBATIM — zero added keys', async () => {
+  it('fact.result.enrichment adds only the existing projection stamp; provider and transport remain VERBATIM', async () => {
     const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(responseSnapshot),
@@ -229,31 +207,24 @@ describe('run_analysis handler — happy path', () => {
 
     const enrichment = fact.result.enrichment as Record<string, unknown>;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // STRENGTHENED at @talchain/schemas 0.25.0, and the strengthening is the
-    // point of the release. This test previously read "…VERBATIM PLUS EXACTLY
-    // ONE CEE KEY" and asserted `added` equalled
-    // `['__cee_claim_safety']` — a documented, deliberate BREACH of the
-    // handler-ownership invariant ("enrichment is byte-for-byte PLoT",
-    // scripts/validate-handler-ownership.sh §6), tolerated only because
-    // `RunAnalysisResultSchema` was `.strict()` and the verdict had nowhere
-    // else to live. 0.25.0 gives it `result.constraint_verdict`, so the
-    // invariant is now satisfied EXACTLY and this assertion tightens from
-    // "one known exception" to "none".
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // 1. ZERO added keys. The pass-through is total.
+    // 1. Only the existing internal projection key is added to persisted facts.
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([]);
+    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY]);
+    expect(enrichment[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
     // The interim key specifically is GONE — nothing writes it any more.
     expect(CEE_CLAIM_SAFETY_ENRICHMENT_KEY in enrichment).toBe(false);
 
     // 2. Every PLoT field is untouched — no projection, no stripping, and no
     //    field reordering that would change JSON.stringify byte output.
-    expect(enrichment).toEqual(responseSnapshot);
-    expect(JSON.stringify(enrichment)).toBe(JSON.stringify(responseSnapshot));
+    const providerFields = { ...enrichment };
+    delete providerFields[RUN_ANALYSIS_PROJECTION_KEY];
+    expect(providerFields).toEqual(responseSnapshot);
+    expect(JSON.stringify(providerFields)).toBe(JSON.stringify(responseSnapshot));
+    expect(responseSnapshot).toEqual(happyFixture);
+    expect(JSON.stringify(toSafeTransportEnrichment(enrichment)))
+      .toBe(JSON.stringify(toSafeTransportEnrichment(responseSnapshot)));
 
     // 3. The verdict carries a real answer, not a placeholder, and it is on the
     //    CONTRACT field. This fixture ratifies no hard constraint, so the
@@ -312,7 +283,7 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      `Option A scored highest against your goal in 62% of runs of this model because Price is the strongest driver.${REDUCED_SUFFIX}`,
+      `Option A was supported by 62% of runs of this model because Price is the strongest driver.${REDUCED_SUFFIX}`,
     );
   });
 
@@ -345,7 +316,7 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      'Option A scored highest against your goal in 62% of runs of this model because Price is the strongest driver.',
+      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
     );
   });
 });
@@ -496,7 +467,7 @@ describe('run_analysis handler — freshness fields on the fact', () => {
 
 describe('run_analysis handler — assistant_text ownership contract', () => {
   const allowedTemplates: readonly string[] = Object.values(RUN_ANALYSIS_ASSISTANT_TEMPLATES);
-  const HEADLINE_SHAPE = / scored highest against your goal in \d{1,3}% of runs of this model\b/;
+  const HEADLINE_SHAPE = / was supported by \d{1,3}% of runs of this model\b/;
 
   it('DEFAULT template matches the locked string exactly', () => {
     expect(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT).toBe('Ran analysis on your current scenario.');
@@ -673,7 +644,7 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     expect(fact.result.leading_option_id).toBe('oc_a');
     // option_comparison shape yields a Case D headline (winner + probability,
     // no driver/fragility data in this synthetic fixture).
-    expect(outcome.assistant_text).toContain('OC A scored highest against your goal in');
+    expect(outcome.assistant_text).toContain('OC A was supported by');
   });
 
   it('record with only option_label (no option_id) uses the label as id', async () => {
@@ -906,7 +877,7 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
     const outcome = await handler(makeInvocation());
     // Single option at 100% → Case D headline (winner + probability).
     expect(outcome.assistant_text).toBe(
-      'X scored highest against your goal in 100% of runs of this model. Run the follow-up checks before treating this as final.',
+      'X was supported by 100% of runs of this model. Run the follow-up checks before treating this as final.',
     );
   });
 
@@ -1188,7 +1159,7 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_only');
     // Minimal fixture has a single option at 1.0 → Case D headline.
-    expect(outcome.assistant_text).toContain('scored highest against your goal in 100% of runs of this model');
+    expect(outcome.assistant_text).toContain('was supported by 100% of runs of this model');
   });
 
   it('larger fixture (3 options) selects the top-prob option deterministically', async () => {
@@ -1452,7 +1423,7 @@ describe('run_analysis handler — numeric integrity guard', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toContain('Option A scored highest against your goal in');
+    expect(outcome.assistant_text).toContain('Option A was supported by');
     expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });
@@ -1568,7 +1539,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     // The engine's constraint warning alone must NOT change the message when
     // the user ratified nothing — this is the byte-parity guarantee, and it
     // is what proves the assertions in the next test are not vacuous.
-    expect(outcome.assistant_text).toContain('scored highest against your goal in');
+    expect(outcome.assistant_text).toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).not.toContain('could not be checked');
   });
 
@@ -1581,6 +1552,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
 
     // (a) No recommendation may exist while a stated condition is unchecked.
     expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).not.toContain('percentage points');
 
     // (b) Exactly which user condition was not evaluated.
@@ -1609,6 +1581,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 
@@ -1626,6 +1599,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 
@@ -1636,7 +1610,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      'Option A scored highest against your goal in 62% of runs of this model because Price is the strongest driver.',
+      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
     );
   });
 });

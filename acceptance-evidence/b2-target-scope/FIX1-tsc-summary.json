@@ -1,0 +1,11 @@
+{
+  "command": "NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit",
+  "exit": 2,
+  "total_errors": 290,
+  "changed_ts_count": 16,
+  "changed_file_errors": [],
+  "changed_file_error_count": 0,
+  "source_digest_match": true,
+  "log_sha256": "098ab75b317bc85fe0e8ba78a396daf24c7242c37e3fa9cd77536b9168f28dc0",
+  "initial_and_final_diagnostics_identical": true
+}

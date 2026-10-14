@@ -445,6 +445,10 @@ const CARRIED_FROM_CANONICAL = [
   // verdict at all. That is not hypothetical: it is exactly how `may_run` once
   // shipped absent on 9 of 9 draft turns.
   "analysis_admission",
+  // DL gate 2 (Science, 5 Oct): the non-factor roots the analysis treats as zero. Only the canonical
+  // assessment computes them (`goalRootsWithoutStatusQuoLevel`), so a re-projected payload carries them
+  // from the canonical one (`carryCanonicalOnlyFields`) or the turn would drop the disclosure.
+  "unvalued_roots",
 ] as const;
 
 const DELIBERATELY_NOT_CARRIED = [

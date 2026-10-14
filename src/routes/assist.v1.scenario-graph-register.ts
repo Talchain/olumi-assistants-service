@@ -1,161 +1,43 @@
-/**
- * ROADMAP 2.467 — `register_graph`: THE DETERMINISTIC WHOLE-GRAPH WRITE SEAM.
- *
- * ── WHY THIS ROUTE EXISTS AT ALL ───────────────────────────────────────────
- * Canvas import performs ZERO server-side persistence, and run turns carry no
- * graph. The analyse path is UI → CEE → PLoT → ISL with **CEE reloading its OWN
- * persisted graph**, so after an import the results describe the pre-import
- * server graph while the imported one is on screen. That was witnessed on a real
- * browser on 4 Aug (analysis naming the OLD graph's nodes ×44, the sentinel ×0,
- * old rows re-bound BY NODE ID to the imported labels under an affirmative
- * "Analysis reflects the current model."). An interim UI mitigation (#592,
- * witnessed prevented 5 Aug) stopped the product ASSERTING that the mismatch was
- * fine. It did not make the import work. This route is what makes it work: it
- * puts the imported graph where CEE will actually read it.
- *
- * ── WHY IT IS NOT THE LLM EDIT TOOL (design review amendment A8, BINDING) ──
- * `propose_structural_edit` is architecturally incapable of this job, for three
- * independent byte-level reasons:
- *   · CAPS — referee `PROPOSAL_CAP = 8` envelopes and pipeline
- *     `MAX_PATCH_OPERATIONS = 15`, against imports that run to
- *     `GRAPH_MAX_NODES`/`GRAPH_MAX_EDGES` (50/100). A multi-batch train breaks
- *     the atomicity a registration requires.
- *   · BASE-HASH CURRENCY — every edit envelope must prove currency against the
- *     SERVER graph. An import wants to REPLACE that graph regardless of its hash.
- *   · FABRICATION — expressing a whole-graph replace as op diffs means the LLM
- *     computes the diff, which is precisely the 2.461 class the edit tool exists
- *     to kill.
- * So: no LLM in the loop, no ops, no referee. One graph in, one graph stored.
- *
- * ── THE ORDER OF THE CHECKS IS THE DESIGN ──────────────────────────────────
- *   0. identity     — headers only, before any state read (the read route's
- *                     rule: a refusal must not become an existence oracle).
- *   1. UUID syntax  — `scenarios.id` is a UUID column.
- *   2. PAYLOAD      — shape, caps, kind/type normalisation, ingress parse. All
- *                     of it BEFORE any database work, so a malformed body costs
- *                     no round trip and cannot be used to probe scenarios.
- *   3. ownership    — the SAME shared pre-flight the turn route runs.
- *                     ⚠ Ownership here is the VERIFIED TOKEN SUBJECT alone
- *                     (`CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE` at the call
- *                     site), which makes CEE_REQUIRE_USER_JWT load-bearing
- *                     rather than a rollback lever: with it OFF — its DEFAULT,
- *                     and unguarded in that direction — no caller is ever
- *                     identified and every OWNED scenario is refused to its
- *                     OWN owner across all six /assist/v1/scenarios/*
- *                     endpoints. Disclosed at boot
- *                     (`config.scenario_ownership_posture`, server.ts) and
- *                     pinned in the suite as a KNOWN MISCONFIGURATION.
- *   4. the base read— the trusted CAS base, from the SERVER's own bytes.
- *   5. the write    — projected, hashed, atomic.
- *
- * ⚠ (2) BEFORE (3) IS DELIBERATE AND IS THE INVERSE OF THE READ ROUTE'S ORDER,
- *   for the opposite reason. The read route gates on EXISTENCE first because
- *   `authorizeScenarioOwnership` upserts, and a read must never create the row
- *   it reads. A WRITE legitimately creates: a freshly-imported scenario has no
- *   row yet, and refusing it would make import-into-a-new-scenario impossible —
- *   which is the second import route (`ScenarioSwitcher → importScenarioFromFile`
- *   mints a NEW scenario id). Validating first means a hostile caller cannot
- *   grow `scenarios` with junk payloads; the rate limiter bounds the rest, and
- *   the turn route already carries this exact property.
- *
- * ── WHAT MAKES IT ATOMIC, AND WHY NOT `store_draft_graph` ──────────────────
- * `scenarios.graph` and `scenarios.graph_identity_hash` MUST move in one
- * statement. `append_turn_atomic_v3`/`_v4` (reached through `store.append`) do
- * exactly that under a `SELECT … FOR UPDATE` row lock, stamping
- * `p_incoming_graph_identity_hash` from the single normaliser authority. The
- * lighter `store_draft_graph` RPC does NOT write the identity hash, so using it
- * would leave the column describing a graph we no longer store — silently
- * poisoning every later CAS compare, which reads that column as its base.
- *
- * ⚠ UPDATED (C3 closure) — this used to end "there is exactly one correct
- * writer here and it is `store.append`". The atomicity argument above is
- * unchanged and still the reason, but the call is now
- * `appendCheckedGraphWrite` (`orchestrator-v5/persist-graph-write.ts`), which
- * enforces the terminal structural invariants and then performs that same
- * `store.append`. The correction matters rather than being cosmetic: while this
- * route called `store.append` directly it was the ONLY `scenarios.graph` writer
- * that skipped those invariants, so a registration could persist a violation
- * the turn path refuses fail-closed.
- *
- * The write is expressed as a `direct_answer` turn with `handler_id: null` —
- * the DL-7 precedent the system-event dispatcher already uses for
- * server-initiated, non-conversational commits (`system-events/dispatch.ts`).
- * That is not incidental: a graph replacement IS a state transition worth a row
- * in the turn log, and piggy-backing on the sanctioned writer is what buys the
- * atomicity above.
- *
- * ── FRESHNESS AND ANALYSIS STATE CLEAR THEMSELVES, BY CONSTRUCTION ─────────
- * Nothing here has to "clear the analysis". CEE stores no analysis snapshot and
- * no `last_result_hash` on `scenarios`; `deriveAnalysisFreshness` DERIVES the
- * verdict by comparing the newest `run_analysis` fact's `graph_hash_at_run`
- * against `computeAnalysisAffectingGraphHash(currentGraph)` at read time. The
- * moment this route replaces the graph, that comparison diverges and the verdict
- * flips to `graph_hash_diverged` on its own. Pending actions self-invalidate the
- * same way (`pending-action.ts`, reason `graph_hash_changed`) — but ONLY if the
- * bytes we hash are the bytes we store, which is why `projectGraphForPersistence`
- * runs BEFORE the hash and before the write, never after.
- *
- * ⚠ THE CAS BASE IS READ FROM THE SERVER, NEVER FROM THE REQUEST. The trusted
- *   base rule (`SessionTurnWrite.expectedGraphIdentityHash`) exists because a
- *   CAS that validates a write against the very graph being written always
- *   "matches". Under a `shadow` RPC posture this is telemetry; under `enforce`
- *   it becomes a real guard, and this route is written so that promotion needs
- *   no change here.
- *
- *   ⭐ THE POSTURE IS NOW OBSERVABLE — DERIVE IT, DO NOT READ IT HERE.
- *   This sentence used to assert "the deployed `CEE_V5_GRAPH_CAS_RPC=shadow`
- *   posture" while `resolveGraphCasCapability` in `config/index.ts` asserted
- *   staging runs `MODE=observe` + `RPC=enforce`. One was stale, neither was
- *   evidence, and the deployed value — living only in the Render dashboard —
- *   was unobservable from any client. Both sites were left pointing at each
- *   other so no reader picked one at random.
- *
- *   Since 18 Sep 2026 `/healthz` publishes the resolved capability:
- *
- *       curl -s https://cee-staging.onrender.com/healthz | jq .graph_cas
- *
- *   ⛔ Do not restore a posture claim to this header. Behaviour here must
- *   still be correct under BOTH postures — that requirement never depended on
- *   knowing which one is deployed, which is exactly why the two prose claims
- *   were able to disagree for a month without anything failing.
- *
- * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
- * · It does not run an LLM, compose a response, or touch the referee.
- * · It does not merge. A registration is a REPLACE — the client's graph is the
- *   graph. Merging would re-introduce the "two models, one screen" ambiguity.
- * · It does not accept layout. `scenarios.graph` holds no positions; a caller
- *   that sends them will simply have them hashed and stored, so the client is
- *   responsible for projecting canvas → wire before calling. (The read route's
- *   `layout_present` reports on that, measured rather than promised.)
- * · It does not mint an identity scheme: `graph_identity_hash` is
- *   `computeGraphIdentityHash`, identity.v1, the single normaliser authority,
- *   and it is an OPAQUE CEE-issued token — consumers store and compare it
- *   CEE-to-CEE gated on `projection_version`, and never recompute it locally.
- */
+import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
+/** Register a scenario graph through the existing CAS/atomic-write boundary.
+ * Central ownership admission uses the declared path id and verified caller.
+ * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
+ * Payload, CAS, stored-fact carry and write-error contracts remain in this handler. */
+
+import { assertShareByDatePreserved, ShareByDateOwnershipError } from '../orchestrator-v5/goal-target/share-by-date-carrier.js';
+import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
+import { isDeepStrictEqual } from 'node:util';
+import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
+
 
 import type { FastifyInstance } from "fastify";
 
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
+import { withoutParkedHorizonAttestations } from "../adapters/llm/normalisation.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
 import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
+import { readReliesOnRisk } from "../orchestrator-v5/routing/relies-on-risk.js";
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
+import { eventRiskIngressIssues } from "../schemas/event-risk.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
-import {
-  authorizeScenarioOwnership,
-  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-  resolveVerifiedIdentityOrRefuse,
-} from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from "../orchestrator/tools/encode-option-interventions.js";
+import { admitInterventionRange, interventionPoint } from "../orchestrator-v5/intervention-range.js";
+import { statedCountInterventionRange } from "../orchestrator-v5/agent-lane/stated-by-user.js";
+import { sameUnit } from "../orchestrator-v5/agent-lane/same-unit.js";
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
-import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+import { ModelWriteOwnershipRefused } from "../orchestrator-v5/ownership/door-ownership.js";
+import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, PreconditionRiskLinkWriteError } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { useAppendV6 } from "../orchestrator-v5/session/supabase-store.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { readRevisionConflictDetails, withRevisionConflictWire } from "../orchestrator-v5/graph-revision-conflict.js";
 import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
 import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
@@ -163,14 +45,77 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
-import { loadMostRecentPendingActionsIntegrityStrict } from "../orchestrator-v5/build-turn-context.js";
+import { loadMostRecentPendingActionsIntegrityStrict, markDraftGraphWriteFailed } from "../orchestrator-v5/build-turn-context.js";
 import {
   emitHoldLapseTelemetry,
   threadHoldsThroughMutatingCommit,
 } from "../orchestrator-v5/handlers/hold-thread-through.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 
+/** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
+function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | undefined): boolean {
+  if (brief === undefined) return false;
+  const rec = (v: unknown): Record<string, unknown> | undefined =>
+    v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+  const quantities = graph.nodes.map(n => ({ label: n.label, unit: rec(n.observed_state)?.unit }));
+  const mirrors: unknown[] = Array.isArray(graph.options) ? graph.options : [];
+  for (const entry of [...graph.nodes, ...mirrors]) {
+    const row = rec(entry);
+    const cells = rec(row?.interventions);
+    if (cells === undefined) continue;
+    const options = graph.nodes.filter(n => n.id === row?.id && n.kind === 'option');
+    for (const [factorId, rawCell] of Object.entries(cells)) {
+      const cell = rec(rawCell);
+      if (cell?.range === undefined) continue;
+      if (options.length !== 1 || row?.label !== options[0]!.label) return false;
+      const factors = graph.nodes.filter(n => n.id === factorId && n.kind === 'factor');
+      if (factors.length !== 1) return false;
+      const factor = factors[0]!;
+      const unit = rec(factor.observed_state)?.unit ?? cell.unit;
+      const point = interventionPoint(cell);
+      const verdict = admitInterventionRange(cell);
+      if (typeof unit !== 'string' || point === undefined || verdict === undefined || !('range' in verdict)
+        || (cell.unit !== undefined && !sameUnit(cell.unit, unit))) return false;
+      const range = statedCountInterventionRange(point, unit, factor.label, options[0]!.label, brief, quantities);
+      if (range === undefined || !isDeepStrictEqual(cell.range, {
+        low: range.low, high: range.high, meaning: 'likely_range', source: 'brief_extraction', source_quote: range.text,
+      })) return false;
+    }
+  }
+  return true;
+}
+
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
+
+class PreconditionStampApprovalRequiredError extends Error {}
+
+/** A whole-graph UI registration cannot erase or rebind a surviving server-stamped identity. */
+function withStoredPreconditionRiskStamps<T extends { nodes: ReadonlyArray<{ id?: unknown; kind?: unknown; relies_on?: unknown }> }>(
+  graph: T,
+  stored: unknown,
+): T {
+  const prior = isEdgeRecord(stored) && Array.isArray(stored.nodes) ? stored.nodes.filter(isEdgeRecord) : [];
+  let changed = false;
+  const nodes = graph.nodes.map((node) => {
+    const previous = prior.find((old) => old.id === node.id);
+    const stamp = readReliesOnRisk(previous?.relies_on);
+    // A stamp is server-owned: a registration may carry a stored one, never introduce one (Codex r2 P1 on #2803).
+    if (stamp === undefined) {
+      if (readReliesOnRisk(node.relies_on) !== undefined) throw new PreconditionStampApprovalRequiredError();
+      return node;
+    }
+    const submitted = readReliesOnRisk(node.relies_on);
+    if (node.kind !== previous?.kind || (submitted !== undefined && submitted.option_id !== stamp.option_id)) {
+      throw new PreconditionStampApprovalRequiredError();
+    }
+    if (submitted !== undefined) return node;
+    // Absent/malformed read metadata makes no statement about the host stamp.
+    // Carry it before hashing and central validation; an accompanying edge is refused, never dropped.
+    changed = true;
+    return { ...node, relies_on: stamp };
+  });
+  return changed ? { ...graph, nodes } : graph;
+}
 
 /**
  * ⭐ AN ABSENT `goal_constraints` IS "NO STATEMENT", NOT "NO LIMITS" (#70 5852105101).
@@ -199,7 +144,88 @@ function withStoredLimitsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: un
   return carried.length === 0 ? graph : { ...graph, goal_constraints: carried };
 }
 
+/** A UI that omits the approved CEE scope makes no statement about it. */
+function withStoredGoalScopeWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown }> }>(graph: T, stored: unknown): T {
+  const ns = stored !== null && typeof stored === 'object' && Array.isArray((stored as {nodes?: unknown}).nodes)
+    ? (stored as {nodes: Record<string, unknown>[]}).nodes : [];
+  return { ...graph, nodes: graph.nodes.map(n => {
+    const matches = ns.filter(old => old.id === n.id && old.kind === 'goal');
+    if ('goal_scope' in n || matches.length !== 1 || !scopeOf(matches[0]!.goal_scope)) return n;
+    return { ...n, goal_scope: matches[0]!.goal_scope };
+  }) };
+}
+
 type EdgeRecord = Record<string, unknown>;
+
+class OptionGapApprovalRequiredError extends Error {}
+
+/** Private exact-target refusal of the registration authority. Temporal and
+ * other carrier preservation use the same cohorts rather than choosing a row. */
+function requireUnambiguousRegistrationTarget(cohorts: readonly (readonly unknown[])[], refusal: Error): void {
+  if (cohorts.some(rows => rows.length > 1)) throw refusal;
+}
+
+/** Registration carries stored gap evidence. Only the existing approved batch
+ * may change this pair on an option that already exists. */
+function withStoredOptionGapsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown; kind?: unknown }>; options?: unknown }>(graph: T, stored: unknown): T {
+  const priorGraph = isEdgeRecord(stored) ? stored : {};
+  const keys = ['unresolved_targets', 'user_questions'];
+  const idOf = (row: EdgeRecord): unknown => typeof row.id === 'string' ? row.id.trim() : row.id;
+  const oldNodes = Array.isArray(priorGraph.nodes) ? priorGraph.nodes.filter(isEdgeRecord) : [];
+  const oldMirrors = Array.isArray(priorGraph.options) ? priorGraph.options.filter(isEdgeRecord) : [];
+  const incomingNodes = graph.nodes.filter(isEdgeRecord);
+  const incomingMirrors = Array.isArray(graph.options) ? graph.options.filter(isEdgeRecord) : [];
+  const matching = (rows: readonly EdgeRecord[], id: unknown) => rows.filter(row => idOf(row) === id);
+  const retained = (id: unknown) => incomingNodes.some(row => row.kind === 'option' && idOf(row) === id);
+  // Refusal belongs to the existing preservation authority. It checks both
+  // sides of a replacement, including inherited ambiguity repaired by a client.
+  // Temporal carrier preservation can use this same exact-target refusal seam.
+  for (const row of [...oldNodes.filter(n => n.kind === 'option'), ...incomingNodes.filter(n => n.kind === 'option')]) {
+    const id = idOf(row);
+    const evidence = [...matching(oldNodes, id), ...matching(oldMirrors, id)]
+      .some(old => keys.some(key => Object.hasOwn(old, key)));
+    if (evidence && matching(incomingNodes, id).some(n => n.kind !== 'option' || n.id !== row.id)) {
+      throw new OptionGapApprovalRequiredError();
+    }
+    if (!retained(id)) continue;
+    requireUnambiguousRegistrationTarget([oldNodes, oldMirrors, incomingNodes, incomingMirrors]
+      .map(rows => matching(rows, id)), new OptionGapApprovalRequiredError());
+  }
+  const carry = (row: EdgeRecord, prior: EdgeRecord | undefined): EdgeRecord => {
+    if (prior === undefined) return row;
+    const hasEvidence = keys.some(key => Object.hasOwn(prior, key));
+    // Canonical readers trim ids and require a usable label. Preserving bytes
+    // while disabling their consumption is an unapproved admission change.
+    if (hasEvidence && (row.id !== prior.id || typeof row.label !== 'string' || row.label.trim() === ''
+      || (Object.hasOwn(row, 'kind') && row.kind !== 'option'))) throw new OptionGapApprovalRequiredError();
+    const next = { ...row };
+    for (const key of keys) {
+      if (Object.hasOwn(row, key) && (!Object.hasOwn(prior, key) || !isDeepStrictEqual(row[key], prior[key]))) {
+        throw new OptionGapApprovalRequiredError();
+      }
+      if (!Object.hasOwn(row, key) && Object.hasOwn(prior, key)) next[key] = structuredClone(prior[key]);
+    }
+    // Baseline status can suppress consumption of an existing unresolved gap.
+    if (hasEvidence && (row.is_baseline === true) !== (prior.is_baseline === true)) throw new OptionGapApprovalRequiredError();
+    return next;
+  };
+  const nodes = incomingNodes.map(row => row.kind === 'option'
+    ? carry(row, matching(oldNodes, idOf(row))[0]) : row);
+  const heldMirrors = oldMirrors.filter(row => retained(idOf(row)) && keys.some(key => Object.hasOwn(row, key)));
+  const options = Array.isArray(graph.options) ? [...incomingMirrors]
+    : heldMirrors.length > 0 ? oldMirrors.filter(row => retained(idOf(row))) : undefined;
+  if (options !== undefined) {
+    for (const old of heldMirrors) if (matching(options, idOf(old)).length === 0) options.push(structuredClone(old));
+    for (let i = 0; i < options.length; i++) {
+      const row = options[i]!;
+      // A newly created mirror inherits the node's evidence rather than
+      // shadowing it with READY. Existing historical shadowing is retained.
+      const prior = matching(oldMirrors, idOf(row))[0] ?? matching(oldNodes, idOf(row))[0];
+      options[i] = carry(row, prior);
+    }
+  }
+  return { ...graph, nodes, ...(options !== undefined ? { options } : {}) } as T;
+}
 
 const isEdgeRecord = (value: unknown): value is EdgeRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -249,7 +275,8 @@ function sameAnalysisNumbers(a: EdgeRecord, b: EdgeRecord): boolean {
  *   · a field the caller SENT is its statement and is never overwritten;
  *   · changed numbers mean the caller asserted new values (an import of a different model): nothing is carried and
  *     the edge stands as sent;
- *   · an ambiguous match (duplicate endpoint pairs on either side) carries nothing.
+ *   · an ambiguous match (duplicate endpoint pairs on either side) carries no other stored facts; the unchanged-size
+ *     mean_projected carrier is preserved separately below.
  * Nodes are not touched here: the witness measured them byte-identical across a UI re-register.
  *
  * Bound to the SAME server read as the CAS base, and applied BEFORE the persistence projection, the invariant checks
@@ -265,18 +292,43 @@ function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRe
   if (storedEdges.length === 0) return graph;
 
   let changed = false;
-  const edges = graph.edges.map((edge) => {
+  const edges = graph.edges.map((submittedEdge) => {
+    let edge = submittedEdge;
     const candidates = storedEdges.filter((s) => sameEdgeKey(edge, s));
+    const endpointMatches = storedEdges.filter((s) => s.from === edge.from && s.to === edge.to);
+    const incomingEndpoints = graph.edges.filter((e) => e.from === edge.from && e.to === edge.to);
+    // Edge ids are not hashed. A unique endpoint pair must keep its carrier even
+    // when the client assigns a new id; other stored facts still need the old key.
+    if (endpointMatches.length === 1 && incomingEndpoints.length === 1) {
+      const guarded = keepMeanProjectionWhenSizeUnchanged(endpointMatches[0], edge);
+      if (guarded !== edge) { edge = guarded; changed = true; }
+    } else {
+      // Ambiguous parallel links cannot be paired by order or count. Every
+      // unchanged size matching a stored carrier keeps it conservatively.
+      for (const prior of endpointMatches) {
+        if (!isEdgeRecord(prior.provenance) || !Object.hasOwn(prior.provenance, 'mean_projected')) continue;
+        const guarded = keepMeanProjectionWhenSizeUnchanged(prior, edge);
+        if (guarded !== edge) { edge = guarded; changed = true; break; }
+      }
+    }
     if (candidates.length !== 1) return edge;
     const match = candidates[0]!;
     if (graph.edges.filter((e) => sameEdgeKey(e, match)).length !== 1) return edge;
+    // Only the unique endpoint case may restore an absent old carrier. An
+    // unflagged id match must not undo the conservative duplicate carry above.
     if (!sameAnalysisNumbers(edge, match)) return edge;
 
     const carried: EdgeRecord = {};
     for (const field of CEE_OWNED_EDGE_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(edge, field)) continue;
+      if (Object.prototype.hasOwnProperty.call(submittedEdge, field)) continue;
       if (match[field] === undefined) continue;
       carried[field] = structuredClone(match[field]);
+      // Whole-provenance carry remains under full numeric equality, but an
+      // ambiguous stored id must not erase the carrier just preserved above.
+      const storedFact = carried[field];
+      if (field === 'provenance' && isEdgeRecord(storedFact) && isEdgeRecord(edge.provenance)) {
+        carried[field] = { ...storedFact, ...edge.provenance };
+      }
     }
     if (Object.keys(carried).length === 0) return edge;
     changed = true;
@@ -311,9 +363,8 @@ const UUID_PATTERN =
  * offer — it may re-send the very graph the offer was made on.
  *
  * NOT a conversational turn, so no turn-TTL decrement (the commit carry-forward
- * owns that on real turns). Returns `undefined` — today's write, no
- * `pending_actions` key — when there is nothing to thread or the read failed;
- * the failure is logged, never silent.
+ * owns that on real turns). Always carries the surviving pending set. A failed
+ * authoritative read refuses registration instead of erasing an unresolved issue.
  */
 async function threadLiveHoldsThroughRegistration(input: {
   readonly scenarioId: string;
@@ -333,11 +384,11 @@ async function threadLiveHoldsThroughRegistration(input: {
         scenario_id: input.scenarioId,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      "Graph registration — prior pending read failed; the register writes without threading live holds",
+      "Graph registration — prior pending read failed; refusing to erase live holds or scope issues",
     );
-    return undefined;
+    throw err; // Never erase an unresolved issue because its authoritative read failed.
   }
-  if (prior.length === 0) return undefined;
+  // Even with no earlier issue, an approved scope may now contradict a canvas value.
   const result = threadHoldsThroughMutatingCommit({
     priorPendingActions: prior,
     graphAfterCommit: input.graphForStore,
@@ -354,7 +405,7 @@ async function threadLiveHoldsThroughRegistration(input: {
     turnId: input.turnId,
     site: "graph_registration",
   });
-  return result.threaded;
+  return scopeIssuesAfterWrite(result.threaded, input.graphForStore, input.scenarioId);
 }
 
 export default async function route(app: FastifyInstance) {
@@ -378,7 +429,7 @@ export default async function route(app: FastifyInstance) {
       // reason as the sibling read route: through the `/bff/cee/*` edge every
       // visitor arrives carrying the SAME injected assist key, so a key-derived
       // bucket would be one product-wide shared-fate throttle.
-      config: {
+      config: { scenarioId: { from: 'params', key: 'scenario_id' },
         rateLimit: {
           max: RATE_LIMIT_MAX,
           timeWindow: "1 minute",
@@ -441,12 +492,6 @@ export default async function route(app: FastifyInstance) {
               requestId,
             ),
           );
-
-      // ── 0. Identity, from headers only, before ANY read of server state ──
-      const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
-      if (!resolved.ok) {
-        return reply.code(resolved.status).send(resolved.error);
-      }
 
       // ── 1. Syntax ───────────────────────────────────────────────────────
       if (!UUID_PATTERN.test(scenarioId)) {
@@ -639,7 +684,7 @@ export default async function route(app: FastifyInstance) {
       // The ingress parse is the contract gate: ids, kinds, labels, from/to.
       // It runs on the NORMALISED bytes, because a `type`-only node would
       // otherwise fail here for a reason we already know how to fix.
-      const parsed = GraphStateIngressSchema.safeParse(normalised.graph);
+      const parsed = GraphStateIngressSchema.safeParse(withoutParkedHorizonAttestations(normalised.graph));
       if (!parsed.success) {
         return invalid(
           "GRAPH_CONTRACT_INVALID",
@@ -648,45 +693,21 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
-      // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
-      let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
-      try {
-        owned = await authorizeScenarioOwnership(
-          scenarioId,
-          // Ownership on this surface is derived from the verified token
-          // subject. A request-supplied identifier is not an input to that
-          // decision, so the sentinel is passed rather than the parsed
-          // extension. See the constant for why this is expressed here and not
-          // in the shared function.
-          CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-          resolved.identity,
-          requestId,
+      // event_risk.v1 — the write door (src/schemas/event-risk.ts). A malformed block, or one on a
+      // non-risk node, is REFUSED: stored, it would be dropped on read and the risk would run as an
+      // ordinary node. A graph with no block is untouched.
+      const eventRiskIssues = eventRiskIngressIssues(
+        parsed.data.nodes as ReadonlyArray<Record<string, unknown>>,
+      );
+      if (eventRiskIssues.length > 0) {
+        return invalid(
+          "EVENT_RISK_INVALID",
+          "A risk's event details do not match the event_risk v1 contract. Nothing was written.",
+          { issues: eventRiskIssues },
         );
-      } catch (err) {
-        log.warn(
-          {
-            event: "v5.scenario_graph_register.ownership_read_failed",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            err: err instanceof Error ? err.message : String(err),
-          },
-          "Graph registration — ownership pre-flight threw; failing closed",
-        );
-        return unavailable();
-      }
-      if (!owned.ok) {
-        log.warn(
-          {
-            event: "v5.scenario_graph_register.refused_not_owner",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            reason: owned.reason,
-          },
-          "Graph registration — caller is not authorized for this scenario",
-        );
-        return refuse();
       }
 
+      if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
       const store = getSessionStore();
 
       // ── 4. The trusted CAS base — the SERVER's bytes, never the request's ─
@@ -700,6 +721,7 @@ export default async function route(app: FastifyInstance) {
       // `goal_constraints` wholesale-erased the stored limits on a transient error.
       let expectedGraphIdentityHash: string | null | undefined;
       let expectedGraphAnalysisHash: string | null | undefined;
+      let expectedRevision: number | undefined;
       // The SAME server-read bytes serve two different questions: the trusted
       // CAS base (hashes, below) and the invariant BASELINE handed to the
       // persistence floor. Hoisted out of the try so the floor can see it —
@@ -711,7 +733,14 @@ export default async function route(app: FastifyInstance) {
       // re-derives — one helper, one base, so a lost-response retry still matches its own committed request hash.
       const withEntityRefs = <G,>(g: G): G => assignEntityRefs(g, baseGraphForInvariants).graph;
       try {
-        const base = await store.loadGraph(scenarioId);
+        let base: unknown;
+        if (useAppendV6()) {
+          const state = await store.loadGraphAndBriefText(scenarioId);
+          base = state.graph;
+          expectedRevision = state.revision;
+        } else {
+          base = await store.loadGraph(scenarioId);
+        }
         baseGraphForInvariants = base;
         const hashes = computeExpectedGraphCasHashes(base);
         expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
@@ -732,10 +761,26 @@ export default async function route(app: FastifyInstance) {
       // An absent `goal_constraints` keeps the stored limits, and an unchanged edge keeps the
       // stored CEE-owned facts the caller omitted (see the helpers). Both are bound to the SAME
       // server read as the CAS base above.
-      const graphToRegister = withStoredEdgeFactsWhenUnstated(
-        withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants),
-        baseGraphForInvariants,
-      );
+      let graphToRegister: typeof parsed.data;
+      try {
+        graphToRegister = withStoredPreconditionRiskStamps(withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
+          withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
+          baseGraphForInvariants,
+        ), baseGraphForInvariants), baseGraphForInvariants);
+        // The canvas omits edge provenance; verify the postimage after restoring unchanged held facts.
+        assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
+      } catch (err) {
+        if (err instanceof PreconditionStampApprovalRequiredError) {
+          return invalid('PRECONDITION_STAMP_SERVER_OWNED',
+            'A precondition risk needs its dedicated proposal and approval; nothing was changed.');
+        }
+        if (err instanceof ShareByDateOwnershipError) return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'The share_by_date carrier is server-owned. Nothing was written.', { code: 'SHARE_BY_DATE_SERVER_OWNED' }, requestId));
+        if (!(err instanceof OptionGapApprovalRequiredError)) throw err;
+        return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',
+          { code: 'OPTION_GAP_APPROVAL_REQUIRED' }, requestId));
+      }
 
       /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
@@ -982,12 +1027,32 @@ export default async function route(app: FastifyInstance) {
       // which a graph is persisted". Hashing before it would advertise an
       // identity for bytes we do not store, which is the exact ordering defect
       // `commit.ts` was restructured to close.
-      const graphForStore = withEntityRefs(projectGraphForPersistence(graphToRegister, {
+      try {
+        // Same deterministic check as the proposal writer and final append floor.
+        assertNoScopedIdentityConflict(graphToRegister);
+        assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId));
+      } catch (err) {
+        if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
+        log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
+        return unavailable();
+      }
+      const projected = projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",
-      }));
+      });
+      if (hasNewInterventionRanges(baseGraphForInvariants, projected)
+        && !(callerExpectsNoGraph && onlyBriefStatedCountRanges(projected, brief.value))) {
+        return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'A new or changed likely range needs approval on its stored change card. Nothing was written.',
+          { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
+      }
+      const graphForStore = withEntityRefs(projectGraphForPersistence(
+        clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
+          scenarioId, turnClass: "direct_answer", source: "graph_registration",
+        }));
 
+      prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);
       // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
@@ -1141,10 +1206,16 @@ export default async function route(app: FastifyInstance) {
             ...(threadedPendings === undefined ? {} : { pending_actions: threadedPendings }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
+            ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           },
           });
         });
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) {
+          await markDraftGraphWriteFailed(scenarioId, turnId, err.code, requestId, 'turn_dead_only');
+          return reply.code(403).send({ error: err.code });
+        }
+        if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
         if (err instanceof TurnFenceRejectedError) {
           // A later-started write on this scenario owns the graph now, or the
           // user stopped it: nothing was written, and saying so is a 409 the
@@ -1175,6 +1246,9 @@ export default async function route(app: FastifyInstance) {
                 requestId,
               ),
             );
+        }
+        if (err instanceof PreconditionRiskLinkWriteError) {
+          return invalid(err.code, err.message);
         }
         if (err instanceof PersistedGraphInvariantError) {
           // The caller supplied these bytes, so name what is wrong with them —
@@ -1220,7 +1294,7 @@ export default async function route(app: FastifyInstance) {
           return reply
             .code(409)
             .send(
-              buildErrorV1(
+              withRevisionConflictWire(buildErrorV1(
                 // See the `invalid()` note: the shared `ErrorCode` family has
                 // no CONFLICT member, so 409 is carried by the HTTP status and
                 // the reason by `details.code`.
@@ -1228,7 +1302,7 @@ export default async function route(app: FastifyInstance) {
                 "This model changed while you were importing. Reload and import again.",
                 { code: "GRAPH_STALE" },
                 requestId,
-              ),
+              ), { conflict_category: err.conflict_category, ...readRevisionConflictDetails(err) }),
             );
         }
         log.error(

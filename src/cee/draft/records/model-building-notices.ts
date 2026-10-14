@@ -207,6 +207,8 @@ export const NOTICE_KIND_BY_REASON: Record<
 const KIND_ORDER: readonly ModelBuildingNoticeKind[] = [
   "detail_not_connected",
   "relationship_not_used",
+  // schemas 0.77.0 (SPINE X8): beside its Olumi-authored sibling, so the two relationship groups read together.
+  "stated_relationship_not_used",
   "alternative_consolidated",
   "conflict_resolved_conservatively",
   "target_not_modelled_as_threshold",
@@ -264,7 +266,17 @@ export function buildModelBuildingNotices(
       // table makes this unreachable from the current producer; it stays
       // because this function's input is `unknown` and a wire value is not
       // bound by our types.
-      bump(NOTICE_KIND_BY_REASON[reason as DroppedRecordRef["reason"]] ?? "other");
+      const kind = NOTICE_KIND_BY_REASON[reason as DroppedRecordRef["reason"]] ?? "other";
+      // ⭐ SPINE X8 (schemas 0.77.0): a relationship the USER stated is theirs. Every consumer words
+      // `relationship_not_used` as Olumi's ("Connections Olumi proposed…"), so counting the user's own stated
+      // relationship there credits their words to Olumi. The producer's literal `stated_relationship: true`
+      // (never a guess from the reason name — a stated LIMIT shares these reasons — and never a truthy value)
+      // moves ONLY a relationship refusal; every other kind keeps its reason's kind.
+      bump(
+        kind === "relationship_not_used" && (raw as { stated_relationship?: unknown }).stated_relationship === true
+          ? "stated_relationship_not_used"
+          : kind,
+      );
     }
   }
 

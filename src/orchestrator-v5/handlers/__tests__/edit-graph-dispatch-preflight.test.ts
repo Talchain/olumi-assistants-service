@@ -54,6 +54,8 @@ vi.mock('../../build-turn-context.js', () => ({
   // feed. Empty — this suite exercises preflight behaviour, not
   // conversation history.
   loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
+
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
 }));
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';

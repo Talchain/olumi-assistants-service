@@ -62,7 +62,8 @@ const scenarioExists = vi.fn();
 const loadGraphAndBriefText = vi.fn();
 const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
-const store = { scenarioExists, loadGraphAndBriefText, ensureScenarioExists, getScenarioOwner };
+const store = {
+  readMostRecentPendingActions: async () => [], scenarioExists, loadGraphAndBriefText, ensureScenarioExists, getScenarioOwner };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({ getSessionStore: () => store }));
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";

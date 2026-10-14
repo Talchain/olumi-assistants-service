@@ -1,3 +1,5 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
+import { installOwnershipHarness } from "../../../../tests/utils/ownership-route-harness.js";
 /**
  * ⛔ A PENDING APPROVAL SURVIVES A RESTART (root cause of Paul's failing test, 24 Sep 09:39–09:53Z,
  * scenario `d41e2c21`, #63 5811981438): proposals lived only in process memory
@@ -15,6 +17,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from '../proposal-object/lifecycle.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -47,6 +50,8 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
 const store = {
+  scenarioExists: async () => true,
+  getScenarioOwner: async () => null,
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   // The committed row a REPLAY is answered from, with its pending actions parsed exactly as
   // `supabase-store.ts` readCommittedTurn parses them (real parser, foreign-scenario entries dropped).
@@ -96,13 +101,14 @@ describe('a pending approval survives a restart', () => {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const a = Fastify({ logger: false });
-    a.post('/assist/v1/scenarios/:id/graph', async () => ({
+    await installOwnershipHarness(a, () => identity);
+    a.post('/assist/v1/scenarios/:id/graph', { config: { scenarioId: { from: 'params', key: 'id' } } }, async () => ({
       graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
       graph_hash: `h${edges.length}`,
     }));
     // Counted, and never served: a write this harness did not expect fails loudly instead of "landing".
-    a.post('/assist/v1/scenarios/:id/graph/register', async (_req, reply) => { registers += 1; return reply.code(503).send({ code: 'NOT_SERVED_BY_THIS_HARNESS' }); });
-    a.post('/orchestrate/v2/turn', async (req) => {
+    a.post('/assist/v1/scenarios/:id/graph/register', { config: { scenarioId: { from: 'params', key: 'id' } } }, async (_req, reply) => { registers += 1; return reply.code(503).send({ code: 'NOT_SERVED_BY_THIS_HARNESS' }); });
+    a.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (req) => {
       writes += 1;
       const b = req.body as { kind?: string; event?: { from: string; to: string } };
       if (b.kind === 'system_event') systemEvents += 1;
@@ -116,6 +122,8 @@ describe('a pending approval survives a restart', () => {
   beforeAll(() => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'propose_model_change', call_id: 'c1',
@@ -150,10 +158,17 @@ describe('a pending approval survives a restart', () => {
     expect(approve, `the control: a real proposal was offered — ${JSON.stringify({ tools: t1._agent?.tool_calls, text: String(t1.assistant_text ?? '').slice(0, 200), chips: t1.suggested_actions })}`).toBeDefined();
     return approve!;
   };
-  /** A plain question: no tool call, no chip — the turn that used to drop the carrier. */
-  const askIn = async (a: FastifyInstance, message = 'What would that change for the team?'): Promise<Body> => {
+  /**
+   * A plain question: no tool call — the turn that used to drop the carrier. S-D (#2743 slice 1, #2756 slice 2): a held
+   * proposal's card is re-offered on such a turn (card continuity), so the control now pins that it IS offered again,
+   * from the carried row, never from a new proposal (no tool call).
+   */
+  const askIn = async (a: FastifyInstance, message = 'What would that change for the team?', heldCard = false): Promise<Body> => {
     const t = await turn(a, { message });
-    expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'the control: the question turn offered no approve chip').toBe(false);
+    expect((t._agent?.tool_calls ?? []).length, 'the control: the question turn made no tool call').toBe(0);
+    // While the proposal is held, its card is offered again (S-D continuity); once applied or superseded, never.
+    expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')),
+      heldCard ? 'S-D card continuity: the held card is offered again' : 'the control: an applied or superseded proposal is never re-offered').toBe(heldCard);
     return t;
   };
   const approveIn = (a: FastifyInstance, approve: Chip): Promise<Body> =>
@@ -222,7 +237,7 @@ describe('a pending approval survives a restart', () => {
   it('(a) RED: propose → a plain question → the process restarts → approve → SAVED (the question row carried the offer)', async () => {
     const approve = await inProcess(async (a) => {
       const chip = await offerIn(a);
-      await askIn(a);
+      await askIn(a, undefined, true);
       return chip;
     });
     expect(carrierIn(latestRow())?.chip_id, 'the latest row — the QUESTION row — carries the offer').toBe(approve.id);
@@ -231,30 +246,33 @@ describe('a pending approval survives a restart', () => {
 
   it('(a) RED: restarts at EVERY step — propose | restart | question | restart | approve → SAVED (a restored offer is carried too)', async () => {
     const approve = await propose();
-    await inProcess((a) => askIn(a));
+    await inProcess((a) => askIn(a, undefined, true));
     expect(carrierIn(latestRow())?.chip_id, 'the question row, written by a restarted process, carries the offer').toBe(approve.id);
     expectSaved(await approveOnFreshProcess(approve));
   }, 60_000);
 
   // ── (b) THE CARRIER'S LIFETIME ─────────────────────────────────────────────────────────────────────
-  it('(b) RED: the carrier lives 30 minutes / 12 turns — at minute 20 a restarted process still applies it (real parser)', async () => {
+  it('(b) RED: the carrier lives 24 hours / the held turn budget — at minute 20 a restarted process still applies it (real parser)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const t0 = Date.parse('2026-09-24T10:00:00.000Z');
     vi.setSystemTime(t0);
     const approve = await propose();
     const pa = carrierIn(latestRow())!;
-    expect(Date.parse(pa.expires_at_iso) - Date.parse(pa.emitted_at_iso)).toBe(30 * 60_000);
-    expect(pa.expires_at_turn_count).toBe(12);
+    // S-D, Paul 7 Oct: every held Agent carrier has the refreshed 24-hour idle lifetime.
+    expect(Date.parse(pa.expires_at_iso) - Date.parse(pa.emitted_at_iso)).toBe(PROPOSAL_IDLE_TTL_MS);
+    // S-D, Paul 7 Oct: held proposals use HELD_PROPOSAL_TURN_BUDGET.
+    expect(pa.expires_at_turn_count).toBe(HELD_PROPOSAL_TURN_BUDGET);
     vi.setSystemTime(t0 + 20 * 60_000);
     expectSaved(await approveOnFreshProcess(approve));
   }, 60_000);
 
-  it('(b) CONTRAST: at minute 31 the carrier has lapsed — a restarted process refuses, nothing written', async () => {
+  it('(b) CONTRAST: after 24 idle hours the carrier has lapsed — a restarted process refuses, nothing written', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const t0 = Date.parse('2026-09-24T10:00:00.000Z');
     vi.setSystemTime(t0);
     const approve = await propose();
-    vi.setSystemTime(t0 + 31 * 60_000);
+    // S-D, Paul 7 Oct: the stale contrast is beyond the new idle backstop.
+    vi.setSystemTime(t0 + PROPOSAL_IDLE_TTL_MS + 60_000);
     const t2 = await approveOnFreshProcess(approve);
     expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'unknown_proposal' })]);
     expect(edges).toEqual([]);
@@ -266,8 +284,9 @@ describe('a pending approval survives a restart', () => {
     vi.setSystemTime(t0);
     const approve = await propose();
     vi.setSystemTime(t0 + 25 * 60_000);
-    await inProcess((a) => askIn(a));
-    expect(Date.parse(carrierIn(latestRow())!.expires_at_iso)).toBe(t0 + 55 * 60_000);
+    await inProcess((a) => askIn(a, undefined, true));
+    // S-D, Paul 7 Oct: every Agent answer refreshes the held lifetime.
+    expect(Date.parse(carrierIn(latestRow())!.expires_at_iso)).toBe(t0 + 25 * 60_000 + PROPOSAL_IDLE_TTL_MS);
     vi.setSystemTime(t0 + 50 * 60_000);
     expectSaved(await approveOnFreshProcess(approve));
   }, 60_000);
@@ -337,9 +356,11 @@ describe('a pending approval survives a restart', () => {
     expect(replay.assistant_text, 'the replay is the original answer').toBe(original.assistant_text);
     expect(canonical(), 'a replay writes nothing').toEqual(beforeRetry);
     // The exact chip the original answer offered — id, label and message — and its amend companion.
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
     expect(replay.suggested_actions.map((c) => [c.id, c.label, c.message])).toEqual([
       [offered!.id, offered!.label, offered!.message],
       ['agent-amend-proposal', 'Change something first', 'Before you apply it, I want to change some of it.'],
+      [`agent-decline-proposal:${offered!.id.slice('agent-approve-proposal:'.length)}`, 'Not now', 'Not now.'],
     ]);
     expectSaved(await approveOnFreshProcess(approveChipOf(replay)!));
     expect(systemEvents, 'saved exactly once: ONE canonical write').toBe(1);
@@ -361,14 +382,16 @@ describe('a pending approval survives a restart', () => {
     expect(approveChipOf(replay), 'an applied proposal is never re-offered').toBeUndefined();
   }, 60_000);
 
-  it('(e) CONTRAST: a lost QUESTION response replays with NO approve chip — the row carried the offer, but that answer never showed it', async () => {
+  it('(e) CONTRAST (S-D card continuity): a lost QUESTION response replays with exactly the held card its original answer re-offered', async () => {
     const approve = await propose();
     const turnId = randomUUID();
-    await inProcess((a) => turn(a, { message: 'What would that change for the team?', turn_id: turnId }));
+    const first = await inProcess((a) => turn(a, { message: 'What would that change for the team?', turn_id: turnId }));
     expect(carrierIn(latestRow())?.chip_id, 'the control: the question row carries the offer').toBe(approve.id);
     const replay = await inProcess((a) => turn(a, { message: 'What would that change for the team?', turn_id: turnId }));
     expect(replay._agent.replayed).toBe(true);
-    expect(approveChipOf(replay), 'a replay offers only what the original answer offered').toBeUndefined();
+    // S-D card continuity: the original answer re-offered the held card, so the replay offers exactly that card again.
+    expect(approveChipOf(first)?.id, 'the original answer offered the held card').toBe(approve.id);
+    expect(approveChipOf(replay)?.id, 'a replay offers only what the original answer offered').toBe(approveChipOf(first)?.id);
   }, 60_000);
 
   it('(e) CONTRAST: the model moved since → the lost proposing response replays WITHOUT the approve chip, nothing written', async () => {
@@ -387,7 +410,7 @@ describe('a pending approval survives a restart', () => {
   const RUN_CHIP = { id: 'agent-run-analysis', action_type: 'run_analysis' };
   const runIn = async (a: FastifyInstance): Promise<Body> => {
     const t = await turn(a, { message: 'Run analysis.', source: 'chip', chip: RUN_CHIP });
-    expect(t._diagnostic_trace.fast_path, 'the control: the typed Run path').toBe('run');
+    expect(t._diagnostic_trace.fast_path, 'the control: the typed Run path').toBeUndefined();
     expect(t._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: true })]);
     return t;
   };
@@ -414,6 +437,66 @@ describe('a pending approval survives a restart', () => {
     expect(canonical().systemEvents, 'the Run adds no canonical write').toBe(afterApproval.systemEvents);
     expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
   }, 60_000);
+
+  // ── R2 T1 (friction audit row T1): typed "Yes, that is my deadline." — the card's own button words — was refused
+  // ("Please use the approval button…" + a false "Not saved: … ask me to try again"). Words typed EXACTLY equal to the ONE
+  // waiting card's button words are that press; anything else stays as it was. This harness's model never authorises.
+  const typedIn = (a: FastifyInstance, message: string, turnId: string = randomUUID()): Promise<Body> => turn(a, { message, turn_id: turnId });
+  it('R2 T1: typed words EXACTLY equal to the one waiting card\'s button → applied once on the approval path; a resend writes nothing more', async () => {
+    const turnId = randomUUID();
+    let words = '';
+    const t = await inProcess(async (a) => {
+      const approve = await offerIn(a);
+      words = approve.message;
+      return typedIn(a, words, turnId);
+    });
+    expect(words).toBe('Yes, make that change.');
+    expectSaved(t);
+    const after = { writes, systemEvents };
+    // The same request again (a client retry): the stored answer is replayed, no second write.
+    const replay = await inProcess((b) => typedIn(b, words, turnId));
+    expect(replay._agent.replayed, 'the same turn replays').toBe(true);
+    // The user types it again as a new message: no card waits now, so nothing is applied.
+    const again = await inProcess((b) => typedIn(b, 'Yes, make that change.'));
+    expect(again._diagnostic_trace.fast_path).toBeUndefined();
+    expect({ writes, systemEvents }, 'no second write').toEqual(after);
+    expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
+  }, 60_000);
+
+  it.each([
+    ['a near match (lower case)', 'yes, make that change.'],
+    ['a near match (extra words)', 'Yes, make that change please.'],
+  ])('R2 T1 CONTRAST: %s with one card waiting → not the approval path, nothing written', async (_name, words) => {
+    const t = await inProcess(async (a) => { await offerIn(a); return typedIn(a, words); });
+    expect(t._diagnostic_trace.fast_path).toBeUndefined();
+    expect(edges).toEqual([]);
+  }, 60_000);
+
+  it('R2 T1 CONTRAST: two cards waiting → the exact words are not bound to either; nothing written', async () => {
+    const { computeProposalId } = await import('../proposal.js');
+    const approve = await propose();
+    const row = latestRow()!;
+    const first = row.pending_actions.find((p) => (p as { chip_id?: string }).chip_id === approve.id) as Carrier;
+    const second = structuredClone(first);
+    const { proposal_id: _id, ...content } = second.action.inline_patch.agent_proposal as unknown as Record<string, unknown> & { proposal_id: string };
+    const changed = { ...content, public_label: `${String(content.public_label)} (second)` };
+    const id = computeProposalId(changed as never);
+    second.action.inline_patch.agent_proposal = { ...changed, proposal_id: id } as never;
+    second.chip_id = `agent-approve-proposal:${id}`;
+    second.action.proposal_ref = second.chip_id;
+    row.pending_actions.push(second);
+    const { isHeldProposal } = await import('../proposal-object/record.js');
+    expect((await store.readMostRecentPendingActions(SCENARIO) as never[]).filter(isHeldProposal), 'the control: two valid held cards').toHaveLength(2);
+    const t = await inProcess((b) => typedIn(b, approve.message));
+    expect(t._diagnostic_trace.fast_path).toBeUndefined();
+    expect(edges).toEqual([]);
+  }, 60_000);
+
+  it('R2 T1 CONTRAST: no card waiting → the same words are an ordinary message; nothing written', async () => {
+    const t = await inProcess((a) => typedIn(a, 'Yes, make that change.'));
+    expect(t._diagnostic_trace.fast_path).toBeUndefined();
+    expect(edges).toEqual([]);
+  }, 60_000);
 });
 
 describe('the persisted carrier satisfies the production parser', () => {
@@ -430,7 +513,69 @@ describe('the persisted carrier satisfies the production parser', () => {
   });
 });
 
-describe('(b) the shared pending-action machinery respects the stamped 12-turn / 30-minute lifetime', () => {
+/**
+ * ⛔ THE CARD THE OFFER SHOWED COMES BACK WITH IT (#2480 Codex P2-2; DL overnight queue 5941571221). A keep card's figure
+ * and target are composed from the stored proposal AND the proposer's result, which is not persisted, so a replay or a
+ * restarted process used to put the button back with no card. The offered chip's `detail` now rides the carrier.
+ */
+describe('the approval card survives a replay and a restart (#2480 P2-2)', () => {
+  const KEEP_CARD = 'Keep Olumi\u2019s estimate: Sprint capacity for AI reporting at 40%';
+  const offer = async (detail: string | undefined, message = 'Yes, keep Olumi\u2019s estimate.') => {
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    const { proposalPendingAction } = await import('../durable-proposal.js');
+    const { createProposal } = await import('../proposal.js');
+    const p = createProposal({ scenario_id: 'scn', user_id: 'u1', base_graph_identity_hash: 'hash-base', operations: [{ op: 'add_edge', path: 'a::b' }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: KEEP_CARD });
+    const chip = { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Keep Olumi\u2019s estimate', message, ...(detail !== undefined ? { detail } : {}) };
+    const emitted = proposalPendingAction(p, chip, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    // As the column gives it back: JSONB key order, then the REAL parser.
+    return { p, chip, pa: parsePendingAction(jsonbOrder(JSON.parse(JSON.stringify(emitted))))! };
+  };
+  it('RED: a replay of the offering row re-offers the chip WITH its card, exactly as offered', async () => {
+    const { offeredApproveChipOnRow } = await import('../durable-proposal.js');
+    const { chip, pa } = await offer(KEEP_CARD);
+    expect(offeredApproveChipOnRow([pa], { scenario_id: 'scn', user_id: 'u1' })).toEqual(chip);
+  });
+  it('RED: a restarted process restores the carrier WITH its card, and a carried copy keeps it on the next row', async () => {
+    const { rehydrateProposals, carrierForAnswerRow, offeredApproveChipOnRow } = await import('../durable-proposal.js');
+    const { ProposalStore } = await import('../proposal.js');
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    const { pa } = await offer(KEEP_CARD);
+    const store = new ProposalStore();
+    const restored: { chip: { detail?: string } }[] = [];
+    expect(rehydrateProposals([pa], store, { scenario_id: 'scn', user_id: 'u1' }, Date.now(), (c) => restored.push(c))).toBe(1);
+    expect(restored[0]?.chip.detail).toBe(KEEP_CARD);
+    // A plain question next: its row CARRIES the offer (not offered on it), card included, for the restart after.
+    const carried = carrierForAnswerRow({ offered: undefined, carried: restored[0] as never, store, subject: { scenario_id: 'scn', user_id: 'u1' },
+      currentGraphHash: 'hash-base', emittedAtIso: new Date().toISOString() });
+    const back = parsePendingAction(jsonbOrder(JSON.parse(JSON.stringify(carried))))!;
+    const again: { chip: { detail?: string } }[] = [];
+    rehydrateProposals([back], new ProposalStore(), { scenario_id: 'scn', user_id: 'u1' }, Date.now(), (c) => again.push(c));
+    expect(again[0]?.chip.detail).toBe(KEEP_CARD);
+    // ...and the question's own replay shows no approve chip: that answer never showed it.
+    expect(offeredApproveChipOnRow([back], { scenario_id: 'scn', user_id: 'u1' })).toBeUndefined();
+  });
+  it('CONTROL: a row from before the stored card — no card for a plain message; a link-effect message still reads its reading', async () => {
+    const { offeredApproveChipOnRow } = await import('../durable-proposal.js');
+    const { linkEffectApproveMessage, readingOfLinkEffectApproval } = await import('../approval-chips.js');
+    const { pa } = await offer(undefined);
+    expect(offeredApproveChipOnRow([pa], { scenario_id: 'scn', user_id: 'u1' })?.detail).toBeUndefined();
+    const words = linkEffectApproveMessage('Record: 1 more hour → 2% more signings');
+    const { pa: effect } = await offer(undefined, words);
+    expect(offeredApproveChipOnRow([effect], { scenario_id: 'scn', user_id: 'u1' })?.detail).toBe(readingOfLinkEffectApproval(words));
+  });
+  it('NEGATIVE: a card on a carrier whose chip names ANOTHER proposal is never shown; a blank card is not stored', async () => {
+    const { offeredApproveChipOnRow, proposalPendingAction } = await import('../durable-proposal.js');
+    const { pa } = await offer(KEEP_CARD);
+    const forged = { ...pa, chip_id: 'agent-approve-proposal:prop_000000' };
+    expect(offeredApproveChipOnRow([forged as never], { scenario_id: 'scn', user_id: 'u1' })).toBeUndefined();
+    const { p } = await offer(undefined);
+    const blank = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'x', message: 'y', detail: '   ' }, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    expect((blank.action as { inline_patch: Record<string, unknown> }).inline_patch).not.toHaveProperty('approve_detail');
+  });
+});
+
+describe('(b) the shared pending-action machinery respects the stamped held lifetime', () => {
   const T0 = Date.parse('2026-09-24T10:00:00.000Z');
   const carrier = async () => {
     const { parsePendingAction } = await import('../../session/pending-action.js');
@@ -441,15 +586,17 @@ describe('(b) the shared pending-action machinery respects the stamped 12-turn /
     const emitted = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Make this change', message: 'Yes, make that change.' }, { scenario_id: 'scn', emitted_at_iso: new Date(T0).toISOString() });
     return { p, pa: parsePendingAction(JSON.parse(JSON.stringify(emitted)))! };
   };
-  it('the real parser keeps it, it is live at minute 20 and lapsed at minute 31, and it restores at minute 20', async () => {
+  it('the real parser keeps it, it is live at minute 20 and lapsed after 24 idle hours, and it restores at minute 20', async () => {
     const { isPendingActionExpired } = await import('../../session/pending-action.js');
     const { rehydrateProposals } = await import('../durable-proposal.js');
     const { ProposalStore } = await import('../proposal.js');
     const { pa } = await carrier();
-    expect(pa.expires_at_turn_count).toBe(12);
-    expect(Date.parse(pa.expires_at_iso)).toBe(T0 + 30 * 60_000);
+    // S-D, Paul 7 Oct: held proposals use HELD_PROPOSAL_TURN_BUDGET.
+    expect(pa.expires_at_turn_count).toBe(HELD_PROPOSAL_TURN_BUDGET);
+    // S-D, Paul 7 Oct: emission and answer-row refresh use the same held lifetime.
+    expect(Date.parse(pa.expires_at_iso)).toBe(T0 + PROPOSAL_IDLE_TTL_MS);
     expect(isPendingActionExpired(pa, T0 + 20 * 60_000)).toBe(false);
-    expect(isPendingActionExpired(pa, T0 + 31 * 60_000)).toBe(true);
+    expect(isPendingActionExpired(pa, T0 + PROPOSAL_IDLE_TTL_MS + 60_000)).toBe(true);
     expect(rehydrateProposals([pa], new ProposalStore(), { scenario_id: 'scn', user_id: 'u1' }, T0 + 20 * 60_000)).toBe(1);
   });
   it('the recorded-ask widen and clamp leave it untouched; a conventional carry-forward decrements its count and keeps its wall expiry', async () => {
@@ -460,7 +607,8 @@ describe('(b) the shared pending-action machinery respects the stamped 12-turn /
     expect(clampRecordedAskWindow(pa)).toBe(pa);
     const carried = computeSurvivingPriorPendingsDetailed([pa], [], [], 'hash-base', T0 + 20 * 60_000);
     expect(carried.survivors).toHaveLength(1);
-    expect(carried.survivors[0]!.expires_at_turn_count).toBe(11);
+    // S-D, Paul 7 Oct: conventional carry still decrements once from the new held budget.
+    expect(carried.survivors[0]!.expires_at_turn_count).toBe(HELD_PROPOSAL_TURN_BUDGET - 1);
     expect(carried.survivors[0]!.expires_at_iso).toBe(pa.expires_at_iso);
   });
   it('a conventional "yes" can only refuse it: no handler_id → invalid on the same revision, superseded on another', async () => {
@@ -581,3 +729,5 @@ describe('a proposal with object operation values survives the JSONB round trip'
     } finally { warn.mockRestore(); }
   });
 });
+
+vi.mock('../../../utils/supabase-user-jwt.js', async () => ({ looksLikeJwt: () => true, verifySupabaseUserJwt: (await import('../../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity }));

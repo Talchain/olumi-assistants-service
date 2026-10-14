@@ -1,3 +1,4 @@
+import type { NewLimitValue } from './stated-limit.js';
 /**
  * ⭐ ONE CLICK TO APPROVE THE PROPOSAL THE USER IS LOOKING AT.
  *
@@ -18,11 +19,38 @@
  */
 import type { SuggestedAction } from '../compose/types.js';
 import { formatFactorValueApprox } from '../compose/format-factor-value.js';
-import type { StructuredProposal } from './proposal.js';
+import { hasCardOnlyOperations, type StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
+import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
+import { linkEffectSourceLevels } from './link-effect-figures.js';
+import { namesSourceOf } from './stated-by-user.js';
+import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
+import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { CONFIRM_GOAL_READING_OP } from '../goal-target/held-change-target.js';
+
+/**
+ * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
+ * link-effect-edit.ts), so "percentage points" meets a "%" reading. Without it the card for a points answer through a %
+ * gauge was never built, and the prepared change had no Approve.
+ */
+const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
+// ⛔ Codex r1 #2652 P1: the card takes the WRITER's own unit rule (`statedInOneOf`), so an answer the door writes ("GBP/month"
+// against a £/month reading) never loses its card. Exact where the writer is exact: points never meet "% of appointments",
+// and £ never meets % (#2641's twins).
+const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
+  || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
+
+/** AIE_TEXT_PENDING: the button on the card answering the goal's open question (`goal-target/held-change-target.ts`). */
+export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' } as const;
+
+/** AIE packet 6e52e896 `event_risk.Q3`: the button on the card of Olumi's range for a risk root (`risk-occurrence.ts`). */
+const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message: 'Yes, use that.' } as const;
+
+/** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
+const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -32,6 +60,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
   // The goal's current level, as the user stated it (`goal-current-level.ts`).
+  reconcile_goal_scope: { label: 'Record this goal reading', message: 'Yes, record this reading.' },
   propose_goal_current_level: { label: 'Record this current level', message: 'Yes, record it.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
@@ -41,6 +70,14 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_effect: { label: 'Record this reading', message: 'Yes, record that reading.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
+  // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
+  propose_team_time: { label: 'Yes', message: 'Yes' },
+  // E5: the user's hiring times per option, on ONE card (`hiring-times.ts`). Two buttons: [Use these times] [Change].
+  propose_hiring_times: { label: 'Use these times', message: 'Yes, use these hiring times.' },
+  propose_new_limit: { label: 'Yes', message: 'Yes, record that limit.' },
+  propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
+  // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
+  propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).
@@ -71,6 +108,9 @@ export const ONE_CHANGE_PER_APPROVAL_DETAIL =
   + 'have answered. Never ask them to approve both.';
 
 /** Whether a tool leaves a proposal awaiting the user's yes — the approve chip's own list. */
+/** P44 S1: `authorise_change` refused on a narrating call (`agent-loop.ts`); the held change stays offered. */
+export const NOT_ON_NARRATION = 'not_on_narration';
+
 export const isProposingTool = (name: string): boolean => APPROVE[name] !== undefined;
 
 /**
@@ -87,6 +127,13 @@ export function withdrawnThisTurn(toolCalls: readonly { name: string; ok: boolea
   return new Set(toolCalls.filter((c) => c.name === WITHDRAW_PROPOSAL && c.ok && typeof c.proposal_id === 'string').map((c) => c.proposal_id as string));
 }
 
+/** S-E GOALS: the deadline card's second button (Science ruling §3: "[Yes] [Change date]"). */
+export const DEADLINE_CHANGE_CHIP: SuggestedAction = {
+  id: 'agent-deadline-change',
+  label: 'Change date',
+  message: 'That is not my deadline. I will give you the date.',
+};
+
 export const AMEND_CHIP: SuggestedAction = {
   id: 'agent-amend-proposal',
   label: 'Change something first',
@@ -99,7 +146,7 @@ export const AMEND_CHIP: SuggestedAction = {
  * authorisation's identity is unknown: never a guess about which proposal it consumed.
  */
 export function proposalsAwaitingApproval(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
 ): ReadonlyMap<string, string> {
   /**
    * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
@@ -112,7 +159,8 @@ export function proposalsAwaitingApproval(
    * (Codex #1806 5807933515: propose B on H0, then approve A → H1, offered a chip that could not
    * commit). So only a proposal made AFTER the turn's last model change is still offerable.
    */
-  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  // An approval refused on a narrating call (`NOT_ON_NARRATION`, P44 S1) never reached the store: it consumes nothing.
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change' && c.refusal !== NOT_ON_NARRATION);
   if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return new Map();
   const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
   // A change the Agent withdrew this turn is neither offered nor carried (`WITHDRAW_PROPOSAL`).
@@ -132,7 +180,7 @@ export interface ApprovalLabelSource {
 }
 
 export function approvalChipsFor(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
   labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined,
 ): SuggestedAction[] {
   const offered = proposalsAwaitingApproval(toolCalls);
@@ -147,7 +195,8 @@ export function approvalChipsFor(
    * the hold was minted with — so if the click ever reaches the product's route directly, the exact copy still
    * resolves the hold instead of reading as new words for the edit model.
    */
-  const held = labelSourceFor?.(proposalId)?.result;
+  const source = labelSourceFor?.(proposalId);
+  const held = source?.result;
   if (HELD_ON_THE_PRODUCT_SEAM.has(tool) && /^gmh_/.test(proposalId) && held !== undefined) {
     const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
@@ -161,7 +210,38 @@ export function approvalChipsFor(
   }
   // Adoption is a proposal about an EXISTING Olumi option. The card, including every displayed
   // level, is derived from the stored proposal; only its exact pressed words authorise the write.
-  const stored = labelSourceFor?.(proposalId)?.proposal;
+  const stored = source?.proposal;
+  // A real label-source lookup that cannot recover the stored levels card
+  // cannot prove that its omitted operations were gap-free. Offer no approval.
+  if (labelSourceFor !== undefined && stored === undefined
+    && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
+  // ⭐ G (card-only, so before the generic card-only button): the answer to the goal's open question has its own button, never "Set this target" (it sets none); the card's words
+  // ride in `detail`, only when the proposer's own result for that id returned the same card.
+  if (stored?.operations.length === 1 && stored.operations[0]?.op === CONFIRM_GOAL_READING_OP) {
+    if (stored.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored.public_label !== 'string' || held.public_label !== stored.public_label) return [];
+    return [{ id: approvalChipIdFor(proposalId), ...CONFIRM_GOAL_READING_APPROVE, detail: stored.public_label }, AMEND_CHIP];
+  }
+  if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
+    // This must precede every generic/special chip path: the exact stored gap
+    // card and its operands are the subject of the existing typed approval.
+    if (stored!.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
+      || held.public_label !== stored!.public_label) return [];
+    const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
+    const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
+    return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message : approve.message,
+      detail: stored!.public_label }, AMEND_CHIP];
+  }
+  if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
+  }
+  if (tool === 'propose_model_change' && stored?.proposal_id === proposalId && stored.operations.length === 1
+    && stored.operations[0]?.op === 'add_edge' && (stored.operations[0].value as { author?: unknown }).author === 'model_proposed') {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Approve', message: approve.message, detail: stored.public_label }, AMEND_CHIP,
+      { id: `agent-decline-drawn-link:${proposalId}`, label: 'Decline', message: 'Decline this suggested link.' }];
+  }
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
@@ -177,7 +257,11 @@ export function approvalChipsFor(
   if (tool === 'propose_identity') {
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
-      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') && (stored === undefined || identityReadingOf(stored)?.operation !== 'sum') ? "Yes, that's how" : approve.label,
+        message: identityApproveMessage(words), detail: words },
+        ...(stored !== undefined && identityReadingOf(stored)?.one_off_words !== undefined
+          ? [{ id: approvalChipIdFor(proposalId) + ':one-off', label: identityReadingOf(stored)!.one_off_words!,
+            message: `No — ${words}`, detail: words }] : [AMEND_CHIP])];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
@@ -185,8 +269,108 @@ export function approvalChipsFor(
     return effectReading === undefined ? []
       : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: linkEffectApproveMessage(effectReading), detail: effectReading }, AMEND_CHIP];
   }
-  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId));
+  // ⭐ A KEEP CHANGES NO FIGURE (52f8cd #2436): the button says what the Yes records — the user's acceptance — never
+  // "Set … to"; the card with the figure rides in `detail`.
+  const keep = keepCardFor(tool, labelSourceFor?.(proposalId));
+  if (keep !== undefined) return [{ id: approvalChipIdFor(proposalId), ...keep }, AMEND_CHIP];
+  // ⭐ A GOAL TARGET WHOSE DIRECTION IS THE AGENT'S READING IS A DECISION (DL 380e54 on #2447; ruling 5930770727 (c)):
+  // the user's words said neither way, so the reading is the primary button and the other direction the alternative —
+  // never a typed magic word. The primary approves the stored card; the alternative asks for the other direction.
+  const choice = directionChoiceFor(tool, labelSourceFor?.(proposalId));
+  if (choice !== undefined) {
+    const card = labelSourceFor?.(proposalId)?.proposal?.public_label;
+    return [
+      { id: approvalChipIdFor(proposalId), label: DIRECTION_CHOICE_LABEL[choice.chosen], message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
+      { id: 'agent-direction-alternative', label: DIRECTION_CHOICE_LABEL_INSTEAD[choice.alternative], message: DIRECTION_CHOICE_MESSAGE[choice.alternative] },
+      AMEND_CHIP,
+    ];
+  }
+  // ⭐ S-E GOALS: the deadline card asks "Is your deadline 7 April 2027 (6 months from today)?" — the STORED card's words ride
+  // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
+  if (tool === 'propose_new_limit' || tool === 'propose_limit_change') {
+    if (stored?.operations.length === 1 && stored.operations[0]?.op === 'set_limit') {
+      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve']; role?: unknown };
+      // B (3): a row that is one of the goal's targets has the target's button, never "Change this limit".
+      const edit = value.role === 'goal_target' ? APPROVE.propose_goal_target! : APPROVE.propose_limit_change!;
+      return [{ id: approvalChipIdFor(proposalId), label: edit.label, message: edit.message, detail: stored.public_label }, AMEND_CHIP,
+        ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
+          message: value.reserve.message, detail: value.reserve.detail }])];
+    }
+    if (tool !== 'propose_new_limit' || stored?.operations.length !== 1 || stored.operations[0]?.op !== 'add_limit'
+      || held?.ok !== true || held.proposal_id !== stored.proposal_id || held.public_label !== stored.public_label) return [];
+    const value = stored.operations[0].value as NewLimitValue;
+    return [{ id: approvalChipIdFor(proposalId), label: 'Yes', message: approve.message, detail: stored.public_label },
+      { id: 'agent-limit-change', label: 'Change', message: 'Change that limit; I will give you the figure.' },
+      ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
+        message: value.reserve.message, detail: value.reserve.detail }])];
+  }
+  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time' || tool === 'propose_hiring_times') {
+    const source = labelSourceFor?.(proposalId);
+    const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
+      && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
+    return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' }
+        : tool === 'propose_hiring_times' ? { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' } : DEADLINE_CHANGE_CHIP];
+  }
+  const detail = assumptionCardFor(tool, labelSourceFor?.(proposalId))
+    ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
+}
+
+/**
+ * ⭐ A LINK-STRENGTH APPROVAL SAYS WHAT IT RECORDS (CODEX_CLI_OVERFLOW P1 + DL ruling on #2481; ONE projection, shared
+ * with #2480's card): the button alone read "Record these links", so the band and whose estimate it is were hidden. The
+ * STORED proposal's own card — each link, its band and whose estimate it is, including a first estimate for a link
+ * nobody had sized, as `proposeLinkStrengths`
+ * minted it — rides in `detail`. Identity: the store's proposal for THIS chip's id, every operation a link strength.
+ * Never the Agent's prose. Used live and on a replay, which rebuilds the chip from the same stored proposal.
+ */
+export function linkStrengthCardFor(proposalId: string, proposal: StructuredProposal | undefined): string | undefined {
+  if (proposal === undefined || proposal.proposal_id !== proposalId || proposal.operations.length === 0
+    || proposal.operations.some((o) => o.op !== 'set_link_strength')) return undefined;
+  return typeof proposal.public_label === 'string' && proposal.public_label.trim() !== '' ? proposal.public_label : undefined;
+}
+
+type Direction = 'at_least' | 'at_most' | 'below' | 'above';
+const DIRECTION_CHOICE_LABEL: Readonly<Record<Direction, string>> = {
+  at_least: 'Yes, at least', at_most: 'Yes, at most', below: 'Yes, below', above: 'Yes, above',
+};
+const DIRECTION_CHOICE_LABEL_INSTEAD: Readonly<Record<Direction, string>> = {
+  at_least: 'At least instead', at_most: 'At most instead', below: 'Below instead', above: 'Above instead',
+};
+const DIRECTION_CHOICE_MESSAGE: Readonly<Record<Direction, string>> = {
+  at_least: 'No, the goal should be at least that figure.',
+  at_most: 'No, the goal should be at most that figure.',
+  below: 'No, the goal should be below that figure.',
+  above: 'No, the goal should be above that figure.',
+};
+/** The proposer's own typed choice for a goal target the Agent read the direction of (`proposeGoalTarget`). */
+function directionChoiceFor(tool: string, source: ApprovalLabelSource | undefined): { chosen: Direction; alternative: Direction } | undefined {
+  if (tool !== 'propose_goal_target') return undefined;
+  const c = (source?.result as { direction_choice?: { chosen?: unknown; alternative?: unknown } } | undefined)?.direction_choice;
+  const ok = (d: unknown): d is Direction => d === 'at_least' || d === 'at_most' || d === 'below' || d === 'above';
+  return c !== undefined && ok(c.chosen) && ok(c.alternative) && c.chosen !== c.alternative ? { chosen: c.chosen, alternative: c.alternative } : undefined;
+}
+
+/** The stored basis of a keep proposal (`proposeAssumptions` `keep: true`) — the authority the keep button binds to. */
+export const KEEP_PROPOSAL_BASIS = 'Olumi\u2019s current estimates, unchanged, for the user to accept';
+export const isKeepProposal = (proposal: StructuredProposal): boolean =>
+  proposal.provenance.basis === KEEP_PROPOSAL_BASIS || proposal.provenance.original_basis === KEEP_PROPOSAL_BASIS;
+
+
+/**
+ * The keep button, ONLY when the STORED proposal is a keep (its basis) and the proposer's own result for that same id
+ * returned the same card — never the Agent's prose.
+ */
+function keepCardFor(tool: string, source: ApprovalLabelSource | undefined): { label: string; message: string; detail: string } | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  if (!isKeepProposal(proposal) || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
+  const n = proposal.operations.length;
+  return n === 1
+    ? { label: 'Keep Olumi\u2019s estimate', message: 'Yes, keep Olumi\u2019s estimate.', detail: proposal.public_label }
+    : { label: `Keep Olumi\u2019s ${n} estimates`, message: 'Yes, keep those estimates.', detail: proposal.public_label };
 }
 
 /** Every op sets a factor value the USER wrote (`authored_by: 'user_stated'`, the write's own predicate). */
@@ -201,11 +385,13 @@ const allUsersOwnValues = (proposal: StructuredProposal): boolean =>
  * while the Agent said "Olumi's estimate". The STORED proposal's own card rides in `detail`, only when the proposer's
  * result for that same id returned the same words — never the Agent's prose.
  */
-function usersOwnCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
+// AIE B4: new assumptions and combined starting points use the same visible, bound carrier.
+function assumptionCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
   const proposal = source?.proposal;
   const result = source?.result;
-  if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  if (!allUsersOwnValues(proposal) || typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
+  if ((tool !== 'propose_assumptions' && tool !== 'propose_starting_point') || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  if (!proposal.operations.some(op => op.op === 'set_factor_value')) return undefined;
+  if (typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
   return proposal.public_label;
 }
 
@@ -231,11 +417,22 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
   const proposal = source?.proposal;
   const result = source?.result;
   if (tool !== 'propose_link_effect' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
-    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
-  const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
-  if (op === undefined || link === undefined || link.your_words !== op.quote) return undefined;
-  return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
+  if (proposal.operations.length === 0 || proposal.operations.some((op) => op.op !== 'set_link_effect')) return undefined;
+  if (proposal.operations.length === 1) {
+    const op = proposal.operations[0]!.value as
+      { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown };
+    // A grouped request can prepare just one operation (including when its other rows refuse).
+    // It returns `links`, but approval still records the same single-operation reading.
+    const link = (result.link ?? (Array.isArray(result.links) && result.links.length === 1 ? result.links[0] : undefined)) as
+      { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
+    if (link === undefined || link === null || link.your_words !== op.quote) return undefined;
+    return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
+  }
+  const links = result.links;
+  if (!Array.isArray(links) || links.length !== proposal.operations.length) return undefined;
+  const labels = links.map((link) => link as { from: unknown; to: unknown; your_words?: unknown });
+  if (labels.some((link, i) => link.your_words !== (proposal.operations[i]!.value as { quote?: unknown }).quote)) return undefined;
+  return linkEffectReadingsOf(proposal, labels);
 }
 
 /**
@@ -244,13 +441,121 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
  */
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
-    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
+    { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
+      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
-    || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
-  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
-  return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}" `
-    + `\u2014 from your words: "${op.quote}"`;
+    || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
+    || typeof e.per_source_change !== 'number' || !Number.isFinite(e.per_source_change) || e.per_source_change === 0
+    || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string'
+    || (op.link_selected !== undefined && op.link_selected !== true)) return undefined;
+  const unsigned = (v: number, unit: string): string => figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`;
+  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${unsigned(v, unit)}`;
+  let reversal = '';
+  if (op.reversal !== undefined) {
+    const r = op.reversal as { from?: unknown; to?: unknown } | null;
+    const direction = Math.sign(e.amount) * Math.sign(e.per_source_change) < 0 ? 'negative' : 'positive';
+    if (r === null || typeof r !== 'object' || Object.keys(r).length !== 2
+      || (r.from !== 'positive' && r.from !== 'negative') || r.to !== direction || r.from === r.to) return undefined;
+    reversal = `REVERSAL: this changes the link from ${r.from} to ${r.to}. `;
+  }
+  // ⭐ No-dead-end (B)/(C) (Science #87 6006425419, 6006548763, 6006685510): a level-less mediator's reading, said for
+  // approval. Strict: each item names one end, in the unit that end's figure now carries; anything else, no card.
+  if (op.mediator_readings !== undefined && (!Array.isArray(op.mediator_readings) || op.mediator_readings.length > 2)) return undefined;
+  const mediated: string[] = [];
+  let through: { readonly child: string; readonly mediator: string } | undefined;
+  for (const raw of (op.mediator_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; via?: unknown; unit?: unknown; other_label?: unknown; replaces?: unknown } | null;
+    if (item === null || typeof item !== 'object' || typeof item.node_id !== 'string' || (item.node_id !== op.from && item.node_id !== op.to)
+      || typeof item.unit !== 'string' || item.unit.trim() === '' || typeof item.other_label !== 'string' || item.other_label.trim() === ''
+      || Object.keys(item).some((k) => !['node_id', 'via', 'unit', 'other_label', 'replaces'].includes(k))
+      || (item.replaces !== undefined && (item.replaces !== true || item.via !== 'gauge'))) return undefined;
+    const end = item.node_id === op.from ? labels.from : labels.to;
+    if (item.via === 'sized_parents' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, from its own estimate of the link from \u2018${item.other_label}\u2019; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'definitional_part' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      // FA1 (Science d5, 6 Oct): the part's unit is read off its definition, said here for approval.
+      mediated.push(`Olumi treats \u2018${end}\u2019 as part of \u2018${item.other_label}\u2019, so it\u2019s measured in ${item.unit}; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'product' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      // FA1-3 (DL, 6 Oct): a product's unit is read off its operands' units, said here for approval.
+      mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, as ${item.other_label}; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'gauge' && item.node_id === op.to && meetsReading(e.amount_unit, item.unit) && through === undefined) {
+      through = { child: item.other_label, mediator: end };
+      mediated.push(`Olumi treats \u2018${end}\u2019 as part of how \u2018${labels.from}\u2019 moves \u2018${item.other_label}\u2019, so your answer sizes the whole path.`
+        + (item.replaces === true ? ` Your answer replaces Olumi\u2019s own estimate for the link from \u2018${labels.from}\u2019 to \u2018${end}\u2019.` : ''));
+    } else return undefined;
+  }
+  // Through a gauge the user sized the PATH: the record names the quantity it reaches, through the mediator.
+  const reached = through === undefined ? `"${labels.to}"` : `"${through.child}" through "${through.mediator}"`;
+  // G1b answer door: a switch (the sizer's "switch", ±1) is turned on or off, never "raised by 1 switch".
+  const turning = e.per_source_change_unit === 'switch' && Math.abs(e.per_source_change) === 1
+    ? `${e.per_source_change < 0 ? 'turning off' : 'turning on'} "${labels.from}"` : undefined;
+  const words = `${turning ?? `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)}`} `
+    + `${e.amount < 0 ? 'lowers' : 'raises'} ${reached} by ${unsigned(e.amount, e.amount_unit)}`;
+  const levels = linkEffectSourceLevels(op.quote, namesSourceOf({ source: labels.from, target: labels.to }));
+  const transition = levels !== undefined && levels.change === e.per_source_change
+    ? ` Source change: ${levels.from}% \u2192 ${levels.to}% = ${signed(levels.change, levels.unit)}.` : '';
+  const head = `${reversal}Record: ${turning ?? `${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}"`} \u2192 ${signed(e.amount, e.amount_unit)} in ${reached}: ${words}.${transition}`;
+  if (op.unit_readings !== undefined && (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2)) return undefined;
+  const disclosures: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of (op.unit_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; unit_reading?: { unit?: unknown; source?: unknown; source_quote?: unknown } } | null;
+    const reading = item?.unit_reading;
+    if (item === null || typeof item !== 'object' || Object.keys(item).length !== 2 || typeof item.node_id !== 'string'
+      || (item.node_id !== op.from && item.node_id !== op.to) || seen.has(item.node_id)
+      || reading === undefined || reading === null || typeof reading !== 'object' || Object.keys(reading).length !== 3
+      || typeof reading.unit !== 'string' || reading.unit.length < 1 || reading.unit.length > 40 || reading.source !== 'user_stated'
+      || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1 || reading.source_quote.length > 500
+      || !op.quote.includes(reading.source_quote)) return undefined;
+    seen.add(item.node_id);
+    disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
+  }
+  // ⭐ RT-6 row 1b (Science #87 6005615422): an end the user named by its node's own LABEL is said back in that node's
+  // unit, for approval, never silently: "I've read that as +1 percentage point per 10 cafés (the unit of "Café
+  // subscribers")". Each reading must be exactly the unit the effect now carries at its end; anything else, no card.
+  if (op.label_readings !== undefined && (!Array.isArray(op.label_readings) || op.label_readings.length > 2)) return undefined;
+  const labelled: string[] = [];
+  for (const raw of (op.label_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; said?: unknown; unit?: unknown } | null;
+    if (item === null || typeof item !== 'object' || Object.keys(item).length !== 3 || typeof item.node_id !== 'string'
+      || (item.node_id !== op.from && item.node_id !== op.to) || typeof item.said !== 'string' || item.said.trim() === ''
+      || typeof item.unit !== 'string' || (item.node_id === op.from ? e.per_source_change_unit : e.amount_unit) !== item.unit) return undefined;
+    const label = item.node_id === op.from ? labels.from : labels.to;
+    if (labelled.includes(label)) return undefined;
+    labelled.push(label);
+  }
+  if (labelled.length > 0) {
+    // Codex r1: a negative source change keeps its sign ("−1 percentage point per −10 cafés"), never a reversed ratio.
+    const perWords = e.per_source_change < 0 ? signed(e.per_source_change, e.per_source_change_unit) : unsigned(e.per_source_change, e.per_source_change_unit);
+    disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${perWords} `
+      + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
+  }
+  disclosures.push(...mediated);
+  // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
+  return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`
+    + (disclosures.length > 0 ? ` ${disclosures.join(' ')}` : '')
+    + ' Approve, or correct.';
+}
+
+/** The same card reading for one stored operation; kept separate so the single-link wording remains byte-for-byte. */
+function linkEffectReadingOfOperation(
+  operation: StructuredProposal['operations'][number],
+  labels: { readonly from: unknown; readonly to: unknown },
+): string | undefined {
+  const proposal: StructuredProposal = { ...({} as StructuredProposal), operations: [operation] };
+  return linkEffectReadingOf(proposal, labels);
+}
+
+/** The card reading for an all-link-effect proposal, one natural sentence per line. */
+export function linkEffectReadingsOf(
+  proposal: StructuredProposal,
+  labels: readonly { readonly from: unknown; readonly to: unknown }[],
+): string | undefined {
+  if (proposal.operations.length === 0 || proposal.operations.length !== labels.length
+    || proposal.operations.some((op) => op.op !== 'set_link_effect')) return undefined;
+  const readings = proposal.operations.map((operation, i) => linkEffectReadingOfOperation(operation, labels[i]!));
+  return readings.every((reading): reading is string => reading !== undefined) ? readings.join('\n') : undefined;
 }
 
 /**
@@ -262,7 +567,8 @@ const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
 export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
 /** The reading a link-effect card's words carry, or `undefined` for any other words. */
 export function readingOfLinkEffectApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+  return typeof message === 'string' && (message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+    || /^Yes \u2014 REVERSAL: this changes the link from (positive|negative) to (positive|negative)\. Record: /.test(message))
     ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
 }
 
@@ -347,6 +653,10 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const result = source?.result;
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;
   const ops = proposal.operations;
+  // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
+  if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
+  // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
+  if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the
@@ -371,9 +681,13 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const usersOwn = tool === 'propose_assumptions' && allUsersOwnValues(proposal);
   const ownFallback = usersOwn ? (ops.length === 1 ? 'Record your figure' : `Record your ${ops.length} figures`) : fallback;
   if (ops.length > 1) {
-    // A revision the user asked for replaces figures already there: it is not a set of starting figures.
-    const revises = ops.some((o) => o.op === 'set_factor_value' && (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated');
-    return revises ? ownFallback : `Use these ${ops.length} starting figures`;
+    // A figure the user WROTE is recorded as theirs, a revision or a first value alike (DL ruling, X8): never a starting
+    // figure or assumption. All theirs: recorded as theirs; some: named with how many are Olumi's (as a mixed level batch
+    // is, above); none: Olumi's starting figures.
+    const yours = ops.filter((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated').length;
+    const olumi = ops.length - yours;
+    return usersOwn ? ownFallback : yours === 0 ? `Use these ${ops.length} starting figures`
+      : `Record ${ops.length} figures (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
   }
   const op = ops[0]!;
   const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown };
@@ -404,7 +718,9 @@ export const approvalChipIdFor = (proposalId: string): string => `${APPROVE_PREF
 export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
-  const proposalId = id.slice(APPROVE_PREFIX.length);
+  const named = id.slice(APPROVE_PREFIX.length);
+  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length)
+    : named.endsWith(':one-off') ? named.slice(0, -':one-off'.length) : named;
   // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
   return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }

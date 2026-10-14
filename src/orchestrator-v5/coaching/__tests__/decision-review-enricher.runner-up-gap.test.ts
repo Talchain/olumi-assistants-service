@@ -79,7 +79,7 @@ const LIVE_ROBUSTNESS_SUMMARY = 'The lead is 14 percentage points and holds acro
 
 /** A review that states the RATIFIED-CORRECT statistic and nothing else. */
 const CORRECT_NARRATIVE =
-  'Switch to HubSpot scored highest against your goal in 61% of runs of this model, driven by Sales Team Capacity. ' +
+  'Switch to HubSpot was supported by 61% of runs of this model, driven by Sales Team Capacity. ' +
   'Raising conversion rate by 5 percentage points would not change that ordering.';
 
 function runAnalysisFact(enrichment: Record<string, unknown>): HandlerFact {

@@ -1,0 +1,15 @@
+{
+  "arm-mechanism-2842/B1-d2.json": "Does “MRR” mean Pro-plan MRR only or MRR across all plans? This model provisionally measures the Pro plan only.",
+  "arm-mechanism-2842/B1-d3.json": "What is current MRR, and does the £20k target cover the Pro plan only or all plans together?",
+  "arm-mechanism/B1-d1.json": "What is current total MRR, and does the £20k target cover the Pro plan only or all plans?",
+  "arm-mechanism/B1-d2.json": "The model assumes the MRR goal refers to the Pro plan only because the decision changes the Pro price. Confirm whether “MRR” instead means all plans combined.",
+  "arm-mechanism/B1-d3.json": "Is the £20k MRR target for the Pro plan only or for all plans together? The model provisionally measures the Pro plan only.",
+  "p44-lab-two-risks-20261008/B1-d1.json": "Is the £20k MRR goal for the Pro plan only or for all plans together? The provisional model uses the Pro plan only.",
+  "p44-lab-two-risks-20261008/B1-d2.json": "The brief does not state whether £20k MRR means Pro-plan MRR only or MRR across all plans; this model provisionally measures Pro-plan MRR only.",
+  "p44-lab-two-risks-20261008/B1-d3.json": "What is current MRR, and does the £20k target cover the Pro plan only or MRR across all plans?",
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json": "What is current total MRR, and does the £20k MRR goal apply to the Pro plan only or to all plans together?",
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json": "What is current total MRR, and does the £20k target apply to the Pro plan only or to all plans together?",
+  "p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json": "Does “MRR” mean Pro-plan MRR only or MRR across all plans? The model provisionally measures the Pro plan only.",
+  "R2/B1-A": "What is current MRR, and does the £20k MRR goal cover the Pro plan only or all plans?",
+  "R2/B1-B": "Is the £20k MRR goal for the Pro plan only or for all plans together?"
+}

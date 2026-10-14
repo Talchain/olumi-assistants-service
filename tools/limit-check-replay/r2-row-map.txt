@@ -1,0 +1,69 @@
+14:  it('the captured limit IS the goal: same node, comparator, raw figure and unit', () => {
+18:    expect([c.node_id, c.operator, c.value, c.unit]).toEqual([goal.id, goal.goal_direction, goal.goal_threshold_raw, goal.goal_threshold_unit]);
+21:  it('both captured options are checked; the chat carrier has no contradictory unsized sentence', () => {
+23:    expect(checks(s)[0]).toEqual({ constraint_id: s.graph.goal_constraints[0].constraint_id,
+25:    expect(savedFacts(s).limit_checks.limits).toEqual(checks(s));
+26:    expect(JSON.stringify(savedFacts(s).limit_checks)).not.toContain('couldn’t be checked');
+27:    expect(JSON.stringify(savedFacts(s).limit_checks)).not.toContain('Olumi hasn’t sized');
+30:  it('the direct link and absent-risk-unit link are sized by the one read-time reader, with no stored write', () => {
+34:    expect(units(s).get(riskId)).toBe('customers');
+35:    expect(sized(edge(s, 'existing_price_rise', goalId))).toBe(true);
+36:    expect(sized(edge(s, 'existing_price_rise', riskId))).toBe(true);
+37:    expect(userSizedLevelLessLinks(s.graph).has(`existing_price_rise→${riskId}`)).toBe(true);
+38:    expect(mediatorReadings(s.graph).get(riskId)).toEqual({ via: 'user_sized_links', unit: 'customers', child: goalId });
+39:    expect(goalPaths(s)).toEqual([]);
+41:    expect(goalCertaintyDecisions(s.graph, [{ option_id: 'raise_prices_10', probability_of_goal: 1 }], evaluations(s))[0].earned).toBe(true);
+42:    expect(JSON.stringify(s)).toBe(bytes);
+45:  it('explicit agreeing-unit control stays checked', () => {
+48:    expect(units(s).has(riskId)).toBe(false);
+49:    expect(checks(s)[0].say).toBe(checkedSentence);
+52:  it('out-link source unit orders disagrees: no authority and the option remains unchecked', () => {
+55:    expect(units(s).has(riskId)).toBe(false);
+56:    expect(checks(s)[0].withheld_for).toEqual(['Raise Prices 10%']);
+57:    expect(goalCertaintyDecisions(s.graph, [{ option_id: 'raise_prices_10', probability_of_goal: 1 }], evaluations(s))[0].earned).toBe(false);
+60:  it.each([
+68:    expect(units(s).has(riskId)).toBe(false);
+69:    expect(checks(s)[0].withheld_for).toContain('Raise Prices 10%');
+72:  it.each(['unit', 'observed_state', 'unit_reading', 'data'])('explicit conflicting node unit on %s stays unchanged', (carrier) => {
+77:    expect(units(s).has(riskId)).toBe(false);
+78:    expect(checks(s)[0].withheld_for).toEqual(['Raise Prices 10%']);
+79:    expect(JSON.stringify(n)).toBe(before);
+82:  it('genuinely unsized control: removing a natural effect preserves the sentence', () => {
+85:    expect(checks(s)[0].say).toContain('Olumi hasn’t sized');
+86:    expect(checks(s)[0].withheld_for).toContain('Raise Prices 10%');
+89:  it('different-unit control: a £ cost cap fed by a customer-sized link remains unsized', () => {
+92:    expect(checks(s).find(c => c.constraint_id === 'cost-cap')?.say).toContain('Olumi hasn’t sized');
+95:  it('every touching user link participates, including an extra in-link or out-link off the goal path', () => {
+102:      expect(units(s).has(riskId)).toBe(false);
+103:      expect(checks(s)[0].withheld_for).toContain('Raise Prices 10%');
+107:  it('a touching user-stated shared-cause link cannot hide a conflicting unit', () => {
+114:    expect(units(s).has(riskId)).toBe(false);
+115:    expect(userSizedLevelLessLinks(s.graph).has(`existing_price_rise→${riskId}`)).toBe(false);
+116:    expect(mediatorReadings(s.graph).get(riskId)?.via).not.toBe('user_sized_links');
+119:  it('at least one link on EACH side is required; singular/plural uses the writer’s grammar', () => {
+123:      expect(units(s).has(riskId)).toBe(false);
+127:    expect(units(s).get(riskId)).toBe('customers');
+128:    expect(checks(s)[0].say).toBe(checkedSentence);
+131:  it('a stale user figure cannot establish the missing unit', () => {
+134:    expect(units(s).has(riskId)).toBe(false);
+135:    expect(checks(s)[0].withheld_for).toContain('Raise Prices 10%');
+138:  it('goal-chance licence bytes stay 47/34/0 (<1 on screen), and the whole captured result stays byte-identical', () => {
+144:    expect(licence()).toBe(beforeLicence);
+145:    expect(JSON.parse(licence()!).pct_by_option).toEqual({ raise_prices_10: 47, launch_starter_tier: 34, keep_pricing_as_it_is: 0 });
+146:    expect(JSON.stringify(s.analysis_result)).toBe(before);
+149:  it('every captured spelling keeps its meaning; missing unit is not a spelling alias', () => {
+150:    for (const u of ['£/month', 'GBP', '%', '£/subscriber/month', 'subscribers', 'customers', 'switch', 'binary']) expect(sameUnit(u, u)).toBe(true);
+151:    expect(sameUnit('£/month', 'GBP')).toBe(false);
+152:    expect(sameUnit('customers', '')).toBe(false);
+155:  it('the actual runAnalysis chat carrier passes the same Run evaluation, with a missing-carrier contrast', async () => {
+157:    expect((await runCarrier(s)).limit_checks.limits).toEqual(checks(s));
+158:    expect((await runCarrier(s, false)).limit_checks.limits[0].withheld_for).toEqual(['Launch Starter Tier']);
+161:  it('Starter exact operands require this Run’s identity carrier through BOTH sentence paths', () => {
+163:    expect(checks(s)[0].say).toBe(checkedSentence);
+164:    expect(checks(s, false)[0].withheld_for).toEqual(['Launch Starter Tier']);
+165:    expect(savedFacts(s).limit_checks.limits[0].say).toBe(checkedSentence);
+166:    expect(savedFacts(s, false).limit_checks.limits[0].withheld_for).toEqual(['Launch Starter Tier']);
+168:    expect(unsizedLeaderGoalPaths(s.graph, ids, evaluations(s))).toEqual([]);
+169:    expect(unsizedLeaderGoalPaths(s.graph, ids, [])).toEqual([{ option_id: 'launch_starter_tier', links: [{ from: 'starter_tier_monthly_price', to: 'starter_tier_mrr' }] }]);
+170:    expect(exactIdentityOperandLinks(s.graph.nodes, s.graph.edges, [{ node_id: 'starter_tier_mrr', evaluated: true, operation: 'sum' }]).size).toBe(0);
+171:    expect(exactIdentityOperandLinks(s.graph.nodes, s.graph.edges, [{ node_id: 'starter_tier_mrr', evaluated: true, factor_ids: ['starter_tier_monthly_price', 'starter_tier_monthly_price'] }]).size).toBe(0);

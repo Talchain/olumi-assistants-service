@@ -11,7 +11,7 @@
  * Real path: strict candidate schema → `buildModelFromBrief` (two scripted drafter calls) → `/graph/register` → GraphV3.
  */
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, firstConstructInput, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -78,6 +78,7 @@ function repairedDraft(dealSize: Size = { amount: 1000000, per: 1, by: 'explicit
 
 async function build(drafts: readonly Record<string, unknown>[], brief: string = BRIEF) {
   let body: unknown = null;
+  let registeredBrief: unknown = null;
   const inputs: string[] = [];
   const call = (async (req: { input: string }) => {
     inputs.push(req.input);
@@ -86,13 +87,14 @@ async function build(drafts: readonly Record<string, unknown>[], brief: string =
   const d: InternalDispatch = async (path, b) => {
     if (path.endsWith('/graph/register')) {
       body = structuredClone((b as { graph: unknown }).graph);
+      registeredBrief = (b as { brief_text?: unknown }).brief_text;
       return { status: 200, json: { model_version: { version_number: 1 } } };
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
   const out = await buildModelFromBrief('a4a4a4a4-0000-4a4a-8a4a-a4a4a4a4a4a4', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return { graph: GraphV3.parse(body) as unknown as Graph, out, inputs };
+  return { graph: GraphV3.parse(body) as unknown as Graph, out, inputs, registeredBrief };
 }
 
 const dealLink = (g: Graph) => g.edges.find((e) => e.from === 'deals_closed' && e.to === 'securing_funding');
@@ -264,5 +266,41 @@ describe('A4 guarantee: every other shape keeps the first draft', () => {
     });
     const { graph } = await build([withRisk(servedFirstDraft()), repairedDraft()]);
     kept(graph);
+  });
+});
+
+// ⭐ A4 FIRST PASS (MG lease 5944839798; DL GO): the range is asked of the FIRST construct, so a first draft that carries it
+// needs no second call (Paul's brief: 7 of 8 served first briefs paid one, median +15.7 s). The retry stays the backstop.
+/** T2 corpus briefs A and C (`output/mg-0ebb952a/t2/T2-CORPUS.json`), verbatim: a price MOVE written inside a question. */
+const T2_A = "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?";
+const T2_C = "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?";
+const T2_D1 = "I need some help framing a prioritisation conflict for our sprint planning on Monday.\nSales is breathing down my neck because they have this huge enterprise prospect—like potentially our biggest deal of the quarter—but the prospect is saying they won’t sign unless we can promise an AI reporting module by next month. The sales rep is saying it's a \"make or break\" thing.\nBut my lead engineer just showed me the data on our new trial signup flow and it’s a total mess. We're losing like 15% of people before they even finish setting up their profile because of a bug in the integration step. If we don't fix that now, we're basically burning marketing budget.\nEngineering says they only have bandwidth to tackle one of these properly in the upcoming sprint. I need to write an update for the leadership team explaining what we're going to do, but honestly, I'm stuck. How should I approach this trade-off? What am I missing here?";
+const PER_ONE = 'If it is a money size PER ONE of something the brief names (per deal, per contract, per customer), apply the '
+  + 'per-one rule: keep that countable as its own quantity, link it to the money goal, and size that link per one at the LOW '
+  + 'end of "£1-2 million" (effect_provenance "explicit").';
+
+describe('A4 first pass: the written range is asked of the FIRST construct', () => {
+  it('RED: Paul\'s brief → the FIRST call already asks the per-one rule of "£1-2 million"; a draft that carries it is ONE call', async () => {
+    const { graph, inputs, registeredBrief } = await build([repairedDraft()]);
+    expect(inputs).toHaveLength(1);
+    // CODEX CEE BUDDY 5944923532: the notes ride the drafter's input ONLY — the persisted brief is the user's words, verbatim.
+    expect(registeredBrief).toBe(BRIEF);
+    expect(inputs[0]).toBe(`${BRIEF}\n\nConstruction notes: ${JSON.stringify([`The brief writes "£1-2 million". ${PER_ONE} If it is not a size per one of anything, draw it as you otherwise would.`])}`);
+    expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
+  });
+
+  it('BACKSTOP: the retry still asks with its OWN words, byte for byte as before, when the first draft ignores the note', async () => {
+    const { inputs } = await build([servedFirstDraft(), repairedDraft()]);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain(JSON.stringify([`The brief writes "£1-2 million" and no link in the model carries it. ${PER_ONE} If it is not a size per one of anything, change nothing for it.`]));
+  });
+
+  it('CONTROL (DL condition 1): T2 briefs A and C write "from £49 to £59" inside a QUESTION, and D1 writes no range → sent byte for byte as before', () => {
+    for (const brief of [T2_A, T2_C, T2_D1]) expect(firstConstructInput(brief)).toBe(brief);
+  });
+
+  it('CONTROL: a range asked as a question ("Should we focus on firms that do deals between £1-2m?") is no note', () => {
+    const asked = 'We need to raise at least £1.2m in 2 months. Should we focus on firms that do deals between £1-2m?';
+    expect(firstConstructInput(asked)).toBe(asked);
   });
 });

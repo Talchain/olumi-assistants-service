@@ -12,7 +12,9 @@ import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 const readFactsFor = vi.fn();
 vi.mock('../../session/index.js', () => ({
-  getSessionStore: () => ({ readRecent: async () => [{ id: 'row' }], readFactsFor, readAnalysisInvalidatedAt: async () => null }),
+  getSessionStore: () => ({ readRecent: async () => [{ id: 'row' }], readFactsFor, readAnalysisInvalidatedAt: async () => null,
+    // A reload with no scope issue still reads pending state successfully.
+    readMostRecentPendingActions: async () => [] }),
 }));
 
 import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';

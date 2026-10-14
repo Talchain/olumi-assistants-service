@@ -29,6 +29,7 @@ const readAnalysisInvalidatedAt = vi.fn();
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
   getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [],
     readRecent,
     readFactsFor,
     readFactsWithTurnFor,

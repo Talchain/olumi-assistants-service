@@ -1,0 +1,17 @@
+{
+ "_source": "Talchain/olumi-programme-docs @a4992165 output/reasoning-coach/REASONING-INTERVENTIONS.json method_turns.RC-WHAT-CHANGES.link_tipping_points_copy (verbatim)",
+ "link_tipping_points_copy": {
+  "status": "contract for SCIENCE/DSK's CEE leg (lease 5950283606); deterministic, 0 LLM; serving waits for Paul's science reviewer",
+  "signal": "run.link_tipping_points: per requested link (top-2 goal-path links by the stored Run's fragile_edges order), one of quoted {threshold, current_mean, other_option_label} | no_change | absent {reason}",
+  "quoted": "{other} would come out ahead if {from}'s effect on {to} fell below about {fraction} of what it is now.",
+  "fraction_rule": "ratio = |threshold| / |current_mean| (a negative link weakens toward zero too). {fraction} = the LARGEST ladder value <= ratio (round DOWN, so the claim is always a sufficient condition and never false): a tenth 0.1 · a fifth 0.2 · a quarter 0.25 · a third 1/3 · two fifths 0.4 · half 0.5 · three fifths 0.6 · two thirds 2/3 · three quarters 0.75 · four fifths 0.8 · nine tenths 0.9. ratio < 0.1 → \"{other} would come out ahead only if {from}'s effect on {to} all but disappeared.\" ratio >= 1, non-finite, or current_mean 0 → absent (no claim).",
+  "no_change": "{leader} would still lead even if {from} had no effect on {to}.",
+  "absent": "silent on that link (no sentence); every requested link absent → honest_limit",
+  "never": [
+   "a band word for the tipping point ('{tip_band} rather than {band}'): a band is wider than the tipping point (SCIENCE/DSK 5950269835: D1 tips at 0.064 inside 'slight' 0-0.2; at 0.15 the lead does not change)",
+   "the threshold or current strength as a number or percentage",
+   "'No single assumption measurably changes which option leads' or any claim that nothing would change the answer"
+  ],
+  "source": "RC 5950124321 (no_change/absent); ratio wording proposed by SCIENCE/DSK 5950269835, adopted with round-DOWN ladder by RC"
+ }
+}

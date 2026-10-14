@@ -1,0 +1,1403 @@
+{
+ "_provenance": "RT-10 (#87 5992802436 / 5992853052). Verbatim GRAPH_READY graphs from red-team guest captures of the B2 brief through /agent/v1/turn (output/red-team-87/evidence/wire, programme-docs red-team/github-87 @ffa3eb07). cee_build per capture is read from the capture's own _provider_calls stamp. Not edited.",
+ "brief": "Our support team handles 12,000 tickets a month with 30 agents. Median first response is 9 hours, and customers who wait more than a day churn at 4% a month against 1.5% for everyone else. We are choosing between hiring 10 more agents at £38k each a year, buying an AI triage tool for £120k a year that the vendor says deflects 35% of tickets, or doing nothing. Our goal is to get monthly churn below 2% within 9 months. Our head of support thinks the tool will deflect only 15% of tickets, not 35%.",
+ "captures": {
+  "staging_a4977d9d": {
+   "cee_build": "a4977d9de07a1a9deb630f9f3fc2e5e235ff1b84",
+   "capture_file": "b2r2-turn1.txt",
+   "graph": {
+    "nodes": [
+     {
+      "id": "decision_monthly_churn",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Decision: monthly churn",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "monthly_churn",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "monthly churn",
+      "provenance": "from_brief",
+      "goal_direction": "<",
+      "goal_threshold": 0.02,
+      "threshold_source": "brief_extraction",
+      "goal_threshold_cap": 100,
+      "goal_threshold_raw": 2,
+      "goal_horizon_months": 9,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "metric_scale"
+     },
+     {
+      "id": "hire_10_agents",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire 10 agents",
+      "provenance": "from_brief",
+      "interventions": {
+       "support_agents": {
+        "unit": "agents",
+        "value": 0.4,
+        "source": "cee_hypothesis",
+        "raw_value": 40,
+        "target_match": {
+         "node_id": "support_agents",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "annual_incremental_support_investment": {
+        "unit": "GBP/year",
+        "value": 0.38,
+        "source": "cee_hypothesis",
+        "raw_value": 380000,
+        "target_match": {
+         "node_id": "annual_incremental_support_investment",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "buy_ai_triage",
+      "ref": "O2",
+      "kind": "option",
+      "label": "Buy AI triage",
+      "provenance": "from_brief",
+      "interventions": {
+       "ai_ticket_deflection": {
+        "unit": "%",
+        "value": 0.15,
+        "source": "cee_hypothesis",
+        "raw_value": 15,
+        "target_match": {
+         "node_id": "ai_ticket_deflection",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "annual_incremental_support_investment": {
+        "unit": "GBP/year",
+        "value": 0.12,
+        "source": "brief_extraction",
+        "raw_value": 120000,
+        "target_match": {
+         "node_id": "annual_incremental_support_investment",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "do_nothing",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Do nothing",
+      "provenance": "from_brief",
+      "is_baseline": true
+     },
+     {
+      "id": "support_agents",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Support agents",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 100,
+       "unit": "agents",
+       "value": 0.3,
+       "source": "brief_extraction",
+       "raw_value": 30,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "ai_ticket_deflection",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "AI ticket deflection",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "monthly_support_tickets",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "Monthly support tickets",
+      "category": "observable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "tickets/month",
+       "value": 0.24,
+       "source": "brief_extraction",
+       "raw_value": 12000,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "median_first_response_time",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Median first response time",
+      "category": "observable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 72,
+       "unit": "hours",
+       "value": 0.125,
+       "source": "brief_extraction",
+       "raw_value": 9,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "customers_waiting_over_one_day",
+      "ref": "F5",
+      "kind": "factor",
+      "label": "Customers waiting over one day",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0.1,
+       "source": "cee_inference",
+       "raw_value": 10,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "annual_incremental_support_investment",
+      "ref": "F6",
+      "kind": "factor",
+      "label": "Annual incremental support investment",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 1000000,
+       "unit": "GBP/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "budget_pressure",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "Budget pressure",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_10_agents",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "buy_ai_triage",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "do_nothing",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "support_agents",
+      "from": "hire_10_agents",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_incremental_support_investment",
+      "from": "hire_10_agents",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_ticket_deflection",
+      "from": "buy_ai_triage",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_incremental_support_investment",
+      "from": "buy_ai_triage",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "support_agents",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_incremental_support_investment",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_ticket_deflection",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "median_first_response_time",
+      "from": "support_agents",
+      "strength": {
+       "std": 0.15625,
+       "mean": -0.3125
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": -2.25,
+        "amount_unit": "hours",
+        "strength_mean": -0.3125,
+        "per_source_change": 10,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "agents"
+       }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "median_first_response_time",
+      "from": "ai_ticket_deflection",
+      "strength": {
+       "std": 0.06250000000000001,
+       "mean": -0.12500000000000003
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": -1.35,
+        "amount_unit": "hours",
+        "strength_mean": -0.12500000000000003,
+        "per_source_change": 15,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "median_first_response_time",
+      "from": "monthly_support_tickets",
+      "strength": {
+       "std": 0.26041666666666663,
+       "mean": 0.5208333333333333
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.75,
+        "amount_unit": "hours",
+        "strength_mean": 0.5208333333333333,
+        "per_source_change": 1000,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "tickets/month"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "customers_waiting_over_one_day",
+      "from": "median_first_response_time",
+      "strength": {
+       "std": 0.0125,
+       "mean": 0.025
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "customers_waiting_over_one_day",
+      "strength": {
+       "std": 0.0125,
+       "mean": 0.025
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.025,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.025,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "budget_pressure",
+      "from": "annual_incremental_support_investment",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "budget_pressure",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 12,
+    "edge_count": 17
+   }
+  },
+  "staging_91656b1b": {
+   "cee_build": "91656b1b0ba9081c6177dad3a23524eb992e6e1b",
+   "capture_file": "b2-turn1.txt",
+   "graph": {
+    "nodes": [
+     {
+      "id": "decision_monthly_churn",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Decision: monthly churn",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "monthly_churn",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "monthly churn",
+      "provenance": "from_brief",
+      "goal_direction": "<",
+      "goal_threshold": 0.02,
+      "threshold_source": "brief_extraction",
+      "goal_threshold_cap": 100,
+      "goal_threshold_raw": 2,
+      "goal_horizon_months": 9,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "metric_scale"
+     },
+     {
+      "id": "hire_10_agents",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire 10 agents",
+      "provenance": "from_brief",
+      "interventions": {
+       "support_agents": {
+        "unit": "agents",
+        "value": 0.4,
+        "source": "cee_hypothesis",
+        "raw_value": 40,
+        "target_match": {
+         "node_id": "support_agents",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "buy_ai_triage_tool",
+      "ref": "O2",
+      "kind": "option",
+      "label": "Buy AI triage tool",
+      "provenance": "from_brief",
+      "interventions": {
+       "ai_ticket_deflection": {
+        "unit": "%",
+        "value": 0.15,
+        "source": "brief_extraction",
+        "raw_value": 15,
+        "target_match": {
+         "node_id": "ai_ticket_deflection",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "do_nothing",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Do nothing",
+      "provenance": "from_brief",
+      "is_baseline": true
+     },
+     {
+      "id": "support_agents",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Support agents",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 100,
+       "unit": "agents",
+       "value": 0.3,
+       "source": "brief_extraction",
+       "raw_value": 30,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "ai_ticket_deflection",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "AI ticket deflection",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 100,
+       "unit": "%",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "monthly_support_tickets",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "Monthly support tickets",
+      "category": "external",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "tickets/month",
+       "value": 0.24,
+       "source": "brief_extraction",
+       "raw_value": 12000,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "median_first_response_time",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Median first-response time",
+      "category": "observable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 72,
+       "unit": "hours",
+       "value": 0.125,
+       "source": "brief_extraction",
+       "raw_value": 9,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "customers_waiting_over_a_day",
+      "ref": "F5",
+      "kind": "factor",
+      "label": "Customers waiting over a day",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0.1,
+       "source": "cee_inference",
+       "raw_value": 10,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "churn_rate_after_over_a_day_wait",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "Churn rate after over-a-day wait",
+      "provenance": "from_brief",
+      "scale_frame": 100
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_10_agents",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "buy_ai_triage_tool",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "do_nothing",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "support_agents",
+      "from": "hire_10_agents",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_ticket_deflection",
+      "from": "buy_ai_triage_tool",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "support_agents",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_ticket_deflection",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "median_first_response_time",
+      "from": "support_agents",
+      "strength": {
+       "std": 0.20833333333333331,
+       "mean": -0.41666666666666663
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": -0.3,
+        "amount_unit": "hours",
+        "strength_mean": -0.41666666666666663,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "agents"
+       }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "median_first_response_time",
+      "from": "ai_ticket_deflection",
+      "strength": {
+       "std": 0.0625,
+       "mean": -0.125
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": -0.09,
+        "amount_unit": "hours",
+        "strength_mean": -0.125,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "median_first_response_time",
+      "from": "monthly_support_tickets",
+      "strength": {
+       "std": 0.26041666666666663,
+       "mean": 0.5208333333333333
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.75,
+        "amount_unit": "hours",
+        "strength_mean": 0.5208333333333333,
+        "per_source_change": 1000,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "tickets/month"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "customers_waiting_over_a_day",
+      "from": "median_first_response_time",
+      "strength": {
+       "std": 0.0125,
+       "mean": 0.025
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "customers_waiting_over_a_day",
+      "strength": {
+       "std": 0.0125,
+       "mean": 0.025
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.025,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.025,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "churn_rate_after_over_a_day_wait",
+      "strength": {
+       "std": 0.05,
+       "mean": 0.1
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.1,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.1,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 11,
+    "edge_count": 13
+   }
+  },
+  "prod_fdbef0ad": {
+   "cee_build": "fdbef0ada784a4a2b00af03a79f2b8c8b572242c",
+   "capture_file": "prod-b2-turn1.txt",
+   "graph": {
+    "nodes": [
+     {
+      "id": "decision_monthly_churn",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Decision: monthly churn",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "monthly_churn",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "monthly churn",
+      "provenance": "from_brief",
+      "goal_direction": "<",
+      "goal_threshold": 0.02,
+      "threshold_source": "brief_extraction",
+      "goal_threshold_cap": 100,
+      "goal_threshold_raw": 2,
+      "goal_horizon_months": 9,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "metric_scale"
+     },
+     {
+      "id": "hire_10_agents",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire 10 agents",
+      "provenance": "from_brief",
+      "interventions": {
+       "support_agents": {
+        "unit": "agents",
+        "value": 0.4,
+        "source": "brief_extraction",
+        "raw_value": 40,
+        "target_match": {
+         "node_id": "support_agents",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "annual_intervention_cost": {
+        "unit": "£/year",
+        "value": 0.38,
+        "source": "brief_extraction",
+        "raw_value": 380000,
+        "target_match": {
+         "node_id": "annual_intervention_cost",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "buy_ai_triage_tool",
+      "ref": "O2",
+      "kind": "option",
+      "label": "Buy AI triage tool",
+      "provenance": "from_brief",
+      "interventions": {
+       "ai_ticket_deflection": {
+        "unit": "%",
+        "value": 0.15,
+        "source": "brief_extraction",
+        "raw_value": 15,
+        "target_match": {
+         "node_id": "ai_ticket_deflection",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "annual_intervention_cost": {
+        "unit": "£/year",
+        "value": 0.12,
+        "source": "brief_extraction",
+        "raw_value": 120000,
+        "target_match": {
+         "node_id": "annual_intervention_cost",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "do_nothing",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Do nothing",
+      "provenance": "from_brief",
+      "is_baseline": true
+     },
+     {
+      "id": "support_agents",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Support agents",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 100,
+       "unit": "agents",
+       "value": 0.3,
+       "source": "brief_extraction",
+       "raw_value": 30,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "ai_ticket_deflection",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "AI ticket deflection",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 100,
+       "unit": "%",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "monthly_support_tickets",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "Monthly support tickets",
+      "category": "external",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "tickets/month",
+       "value": 0.24,
+       "source": "brief_extraction",
+       "raw_value": 12000,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "median_first_response",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Median first response",
+      "category": "observable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 72,
+       "unit": "hours",
+       "value": 0.125,
+       "source": "brief_extraction",
+       "raw_value": 9,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "customers_waiting_over_24_hours",
+      "ref": "F5",
+      "kind": "factor",
+      "label": "Customers waiting over 24 hours",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0.08,
+       "source": "cee_inference",
+       "raw_value": 8,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "annual_intervention_cost",
+      "ref": "F6",
+      "kind": "factor",
+      "label": "Annual intervention cost",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 1000000,
+       "unit": "£/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "ai_triage_misrouting",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "AI triage misrouting",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "budget_pressure_from_intervention_spend",
+      "ref": "R2",
+      "kind": "risk",
+      "label": "Budget pressure from intervention spend",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_10_agents",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "buy_ai_triage_tool",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "do_nothing",
+      "from": "decision_monthly_churn",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "support_agents",
+      "from": "hire_10_agents",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_intervention_cost",
+      "from": "hire_10_agents",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_ticket_deflection",
+      "from": "buy_ai_triage_tool",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_intervention_cost",
+      "from": "buy_ai_triage_tool",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "support_agents",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_intervention_cost",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "ai_ticket_deflection",
+      "from": "do_nothing",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "median_first_response",
+      "from": "support_agents",
+      "strength": {
+       "std": 0.1736111111111111,
+       "mean": -0.3472222222222222
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": -0.25,
+        "amount_unit": "hours",
+        "strength_mean": -0.3472222222222222,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "agents"
+       }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "median_first_response",
+      "from": "ai_ticket_deflection",
+      "strength": {
+       "std": 0.0625,
+       "mean": -0.125
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": -0.09,
+        "amount_unit": "hours",
+        "strength_mean": -0.125,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "median_first_response",
+      "from": "monthly_support_tickets",
+      "strength": {
+       "std": 0.26041666666666663,
+       "mean": 0.5208333333333333
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.75,
+        "amount_unit": "hours",
+        "strength_mean": 0.5208333333333333,
+        "per_source_change": 1000,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "tickets/month"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "customers_waiting_over_24_hours",
+      "from": "median_first_response",
+      "strength": {
+       "std": 0.36000000000000004,
+       "mean": 0.7200000000000001
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 1,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.7200000000000001,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "hours"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "customers_waiting_over_24_hours",
+      "strength": {
+       "std": 0.0125,
+       "mean": 0.025
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_estimate",
+       "natural_effect": {
+        "amount": 0.025,
+        "amount_unit": "percentage points",
+        "strength_mean": 0.025,
+        "per_source_change": 1,
+        "strength_mean_frame": "edge_strength",
+        "per_source_change_unit": "%"
+       }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "ai_triage_misrouting",
+      "from": "ai_ticket_deflection",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "ai_triage_misrouting",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "budget_pressure_from_intervention_spend",
+      "from": "annual_intervention_cost",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "budget_pressure_from_intervention_spend",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 13,
+    "edge_count": 19
+   }
+  }
+ }
+}

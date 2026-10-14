@@ -73,9 +73,10 @@ describe('P1-d — an out-of-date run is never labelled "withheld for a limit"',
     expect(compose('fresh').leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_CONSTRAINT_VERDICT });
   });
 
-  it('PRECEDENCE: a cause the caller stated outranks out-of-date (unrequested, then nonlinear identity)', () => {
+  it('PRECEDENCE (DL 7 Oct, W1c): the policy cause outranks out-of-date; a cause about the analysed revision does not', () => {
     expect(compose('stale', { unrequested: true }).leader_claim.withheld_reason).toBe(WITHHELD_UNREQUESTED_ANALYSIS);
-    expect(compose('stale', { identity: true }).leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    expect(compose('stale', { identity: true }).leader_claim.withheld_reason).toBe(WITHHELD_RUN_OUT_OF_DATE);
+    expect(compose('fresh', { identity: true }).leader_claim.withheld_reason, 'CONTROL: current run').toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
   });
 
   it('the code is classified: the current model was not evaluated (like an unconfirmed run identity)', () => {

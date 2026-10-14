@@ -1,0 +1,18 @@
+{
+ "step": "PM",
+ "status": 200,
+ "cee_build": "ee9a69d",
+ "ui": "e3f2fc82",
+ "request_body": {
+  "kind": "message",
+  "turn_id": "91869263-5b62-4db6-86b5-8b786aa75e71",
+  "scenario_id": "2920a8ed-d723-4223-843e-9044baf4462a",
+  "stage": "analyse",
+  "turn_class": "frame",
+  "message": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
+  "source": "chip",
+  "chip": {
+   "id": "agent-next-pre-mortem"
+  }
+ }
+}

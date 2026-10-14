@@ -41,6 +41,7 @@ import {
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { BASE_HASH_DIVERGED } from '../../graph-management/reason-codes.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 
 const SCENARIO_ID = '11111111-1111-4111-8111-111111111111';
 const TURN_ID = '22222222-2222-4222-8222-222222222222';
@@ -184,6 +185,23 @@ describe('structural_rename — fixture preconditions', () => {
 
 // ───────────────────────────────────────────────────────────────────────────
 describe('structural_rename — the rename LANDS (defect class A)', () => {
+  it('B3-7 CONTROL: the real rename writer retains limits and retires the label offer in its output', () => {
+    const base = persistedGraph();
+    const nodes = base.nodes as Array<Record<string, unknown>>;
+    nodes.find((n) => n.id === 'goal_revenue')!.provenance = 'ai_inferred';
+    base.goal_constraints = [{ constraint_id: 'budget', node_id: 'fac_price', operator: '<=', value: 50000, unit: 'GBP', value_frame: 'level', provenance: 'explicit' }];
+    const ctx = { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
+    expect(decisionInputAsk(base, ctx)).toContain('provisional objective');
+    const result = run({ node_id: 'goal_revenue', expected_label: 'Grow revenue', label: 'Increase profit', base_graph_hash: baseHashOf(base) }, base);
+    expect(result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') throw new Error('rename did not commit');
+    expect(result.handlerFacts[0]?.fact_type).toBe('edit_graph');
+    const readback = JSON.parse(JSON.stringify(result.graph));
+    expect(readback.goal_constraints).toEqual(base.goal_constraints);
+    expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').provenance).toBe('user_set');
+    expect(decisionInputAsk(readback, ctx)).not.toContain('provisional objective');
+    expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').label).toBe('Increase profit');
+  });
   it('⭐ the named node carries the new label in the graph that would persist', () => {
     const result = run();
     expect(result.kind).toBe('mutated');

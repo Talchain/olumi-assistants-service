@@ -1,0 +1,70 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (12 tests | 2 failed) 89ms
+     × a linkless P5 failure preserves the existing no-goal-path withhold for everyone 10ms
+     × the Agent target-only note keeps the partial option scope and permits clean options' licences 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a linkless P5 failure preserves the existing no-goal-path withhold for everyone
+AssertionError: expected [ { precondition: 'P5', …(6) } ] to match object [ { case: 'c', links: [] } ]
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  [
+    {
+      "case": "c",
+-     "links": [],
++     "links": [
++       {
++         "from": "u",
++         "to": "a",
++       },
++       {
++         "from": "a",
++         "to": "middle",
++       },
++     ],
+    },
+  ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:155:34
+    153|   it('a linkless P5 failure preserves the existing no-goal-path withho…
+    154|     const g = graph(); g.edges = g.edges.filter((e: Rec) => e.to !== '…
+    155|     expect(failures(g).failures).toMatchObject([{ case: 'c', links: []…
+       |                                  ^
+    156|     const out = withholdGoalFiguresForUntestableTarget(envelope(), g, …
+    157|     expect(chances(out)).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > the Agent target-only note keeps the partial option scope and permits clean options' licences
+AssertionError: expected undefined to deeply equal [ 'starter' ]
+
+- Expected:
+[
+  "starter",
+]
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:165:30
+    163|     const out = withholdGoalFiguresForUntestableTarget(envelope(), g, …
+    164|     const agent = goalChanceWithheldForAgent({ enrichment: out }, g, u…
+    165|     expect(agent.option_ids).toEqual(['starter']);
+       |                              ^
+    166|     expect(agent.note).not.toContain('EVERY option');
+    167|     expect(agent.note).toContain('Other options');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 passed (12)
+   Start at  16:35:49
+   Duration  5.60s (transform 3.89s, setup 170ms, import 5.15s, tests 89ms, environment 0ms)
+

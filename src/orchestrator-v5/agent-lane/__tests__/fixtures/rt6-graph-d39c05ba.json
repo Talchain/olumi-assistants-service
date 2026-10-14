@@ -1,0 +1,328 @@
+{
+ "edges": [
+  {
+   "to": "hire_two_developers",
+   "from": "decision_feature_points_per_week",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "hire_one_tech_lead",
+   "from": "decision_feature_points_per_week",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "carry_on_as_now",
+   "from": "decision_feature_points_per_week",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_headcount",
+   "from": "hire_two_developers",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_lead_headcount",
+   "from": "hire_one_tech_lead",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_headcount",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_lead_headcount",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "feature_points_per_week",
+   "from": "developer_headcount",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_points_per_week",
+   "from": "feature_points_per_developer_week",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_points_per_developer_week",
+   "from": "tech_lead_headcount",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.25
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 1,
+     "amount_unit": "feature points/developer/week",
+     "strength_mean": 0.25,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "tech leads"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "onboarding_drag",
+   "from": "developer_headcount",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_points_per_developer_week",
+   "from": "onboarding_drag",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  }
+ ],
+ "nodes": [
+  {
+   "id": "decision_feature_points_per_week",
+   "ref": "D1",
+   "kind": "decision",
+   "label": "Decision: Feature points per week",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "feature_points_per_week",
+   "ref": "G1",
+   "kind": "goal",
+   "label": "Feature points per week",
+   "provenance": "from_brief",
+   "goal_direction": ">=",
+   "goal_threshold": 0.8,
+   "observed_state": {
+    "cap": 37.5,
+    "unit": "feature points/week",
+    "value": 0.5333333333333333,
+    "source": "brief_extraction",
+    "baseline": 0.5333333333333333,
+    "raw_value": 20
+   },
+   "threshold_source": "brief_extraction",
+   "goal_threshold_cap": 37.5,
+   "goal_threshold_raw": 30,
+   "nonlinear_identity": {
+    "operation": "product",
+    "factor_ids": [
+     "developer_headcount",
+     "feature_points_per_developer_week"
+    ],
+    "stated_in_brief": false
+   },
+   "goal_threshold_unit": "feature points/week",
+   "goal_threshold_frame": "level",
+   "goal_threshold_cap_provenance": "target_derived_headroom"
+  },
+  {
+   "id": "hire_two_developers",
+   "ref": "O1",
+   "kind": "option",
+   "label": "Hire two developers",
+   "provenance": "from_brief",
+   "interventions": {
+    "developer_headcount": {
+     "unit": "developers",
+     "value": 0.3,
+     "source": "brief_extraction",
+     "raw_value": 6,
+     "target_match": {
+      "node_id": "developer_headcount",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "hire_one_tech_lead",
+   "ref": "O2",
+   "kind": "option",
+   "label": "Hire one tech lead",
+   "provenance": "from_brief",
+   "interventions": {
+    "tech_lead_headcount": {
+     "unit": "tech leads",
+     "value": 0.2,
+     "source": "cee_hypothesis",
+     "raw_value": 1,
+     "target_match": {
+      "node_id": "tech_lead_headcount",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "carry_on_as_now",
+   "ref": "O3",
+   "kind": "option",
+   "label": "Carry on as now",
+   "provenance": "from_brief",
+   "is_baseline": true
+  },
+  {
+   "id": "developer_headcount",
+   "ref": "F1",
+   "kind": "factor",
+   "label": "Developer headcount",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 20,
+    "unit": "developers",
+    "value": 0.2,
+    "source": "brief_extraction",
+    "raw_value": 4,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "tech_lead_headcount",
+   "ref": "F2",
+   "kind": "factor",
+   "label": "Tech lead headcount",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 5,
+   "observed_state": {
+    "unit": "tech leads",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "feature_points_per_developer_week",
+   "ref": "F3",
+   "kind": "factor",
+   "label": "Feature points per developer-week",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 20,
+   "observed_state": {
+    "unit": "feature points/developer/week",
+    "value": 0.25,
+    "source": "cee_inference",
+    "raw_value": 5,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "onboarding_drag",
+   "ref": "R1",
+   "kind": "risk",
+   "label": "Onboarding drag",
+   "provenance": "ai_inferred"
+  }
+ ],
+ "ref_high_water": {
+  "D": 1,
+  "F": 3,
+  "G": 1,
+  "O": 3,
+  "R": 1
+ }
+}

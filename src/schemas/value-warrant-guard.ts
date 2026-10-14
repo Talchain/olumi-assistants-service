@@ -799,6 +799,15 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
       "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
   },
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_horizon_stated_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the same field-scoped duration warrant as goal_horizon_months: its unit is whole months " +
+      "(`.int().positive()`), and the S4 deadline door writes it only from the user's literal stated duration " +
+      "on the approved deadline card. Generic AI mutations cannot write it (field-safety pipeline-owned roots). " +
+      "Absence means no literal duration was stated; target-level qualifiers do not attest this duration.",
+  },
   // ── UNWARRANTED, ADJUDICATED: a link size's written range (declared 30 Sep 2026, A4, CEE #2409) ──────────
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.low",
@@ -806,11 +815,16 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     decision:
       "ACCEPTED — its warrant is inherited from the object it sits in, by its one writer's rule. `stated_range` lives " +
       "INSIDE `natural_effect`: `low` and `high` are in `natural_effect.amount_unit` (the size's own unit, in the size's " +
-      "own scale), and `amount` equals one of them by construction (`end`). Its SOURCE is `text` — the range exactly " +
-      "as the user wrote it — and its authorship is `provenance.magnitude: 'user_stated'`: admission writes it ONLY " +
-      "on the user's own size, and only when ONE written span about this link's source carries the range " +
-      "(`writtenRangeFor`, stated-by-user.ts). It is a WORDS field (what the reply and the card say beside the " +
-      "amount), never an analysis input: out of the analysis hash (graph-hash.ts picks natural_effect fields by name).",
+      "own scale), and `amount` equals one of them (`end` 'low'/'high') or lies strictly inside them (`end` 'centre'). " +
+      "Its SOURCE is `text` — the range exactly as the user wrote it — and its authorship is " +
+      "`provenance.magnitude: 'user_stated'`: admission writes it ONLY on the user's own size, and only when ONE written " +
+      "span about this link's source carries the range (`writtenRangeFor`, stated-by-user.ts), or the very sentence " +
+      "that bound the size writes it around that figure (`centreRangeAt`, stated-size-binding.ts; d5 6009282279). " +
+      "The chat writer (`applyLinkEffectEdit`) writes it by the same reading of the one sentence its approved card quotes " +
+      "(`centreRangeOfQuote` → `centreRangeAt`, stated-by-user.ts; G1b answer door), only on that user-stated size. " +
+      "The range itself is not hashed (graph-hash.ts picks natural_effect fields by name), but it IS an analysis input " +
+      "once #2643's hold reads it: a held link's effective existence and its range-derived spread are projected into the " +
+      "hash there (#2643 @a59c9e10), read at Run-input time and never written back (Desk 6b, #2644).",
   },
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.high",
@@ -818,6 +832,106 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     decision:
       "ACCEPTED — the same warrant as its `low` sibling (settled together): in `natural_effect.amount_unit`, sourced by " +
       "`text`, written only on the user's own size by `writtenRangeFor`, and never an analysis input.",
+  },
+  // ── UNWARRANTED, ADJUDICATED: event_risk.v1 (declared 7 Oct 2026, Science 393023 pilot §4; src/schemas/event-risk.ts) ──
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.occurrence.p_low",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its warrant is the object it sits in, by construction. `occurrence` holds exactly one stated range " +
+      "(`p_low`, `p_high`), its MEANING (`at_least_once_within_horizon`: a probability, unitless, in [0,1]) and its " +
+      "attestation `basis` (`user` | `olumi` | `reference`: whose range it is), which is REQUIRED, so an unattested " +
+      "range cannot be written. Science named the field `basis` (science-richness-P0-20261007.md §4), which is not a " +
+      "warrant token, hence the row. Writers: the user's graph registration, validated at the door " +
+      "(`eventRiskIngressIssues`); the chat add-risk door's hold stamp (event_risk.v1 slice 2a: `readStatedEventRisk` " +
+      "reads the user's own words, `basis: 'user'`, validated by `EventRiskV1` before holding, stamped after the " +
+      "re-referee); and the draft door (slice 2c, `holdStatedEventRisks` in `buildModelFromBrief`: the same reader over " +
+      "one sentence of the BRIEF that names exactly that risk, `basis: 'user'`, never from the drafter); and the approved " +
+      "card of Olumi's range for an unvalued risk ROOT (`risk-occurrence.ts`: `basis: 'olumi'`, over the goal's own period, " +
+      "validated by `EventRiskV1`, written only by the atomic level door after the user's press). No producer may " +
+      "author it (field-safety pipeline-owned). Never defaulted. It IS an analysis input: ISL draws occurrence from it.",
+  },
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.occurrence.p_high",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the same warrant as its `p_low` sibling (settled together): one stated range, its `meaning` and its " +
+      "required `basis`, on the same object; reason given at unwarranted:cee.NodeV3::event_risk.occurrence.p_low.",
+  },
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.horizon.months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (months, positive, " +
+      "≤ 600) and its attestation is the enclosing block's `occurrence.basis` (the horizon is the window that range " +
+      "is stated over; the two are written together, never separately). Not rescaled to the goal's own deadline in " +
+      "v1 (Science Q-horizon: that needs a constant-hazard ruling).",
+  },
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — a fraction in [0,1] (unit by meaning: the share of occurrence the named preventer removes while it " +
+      "is in place, p × (1 − m)), attested by the block's `occurrence.basis` and written with it at the same door. " +
+      "Its `factor_id` names what it scales. ISL derives the preventer link's coefficient from it; the link's own " +
+      "strength is ignored by contract.",
+  },
+  // ── the SAME four on the contract's NodeV3 (schemas 0.82.0, main c7461d7e; reached CEE with the 0.82.0 re-vendor) ──
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.occurrence.p_low",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.occurrence.p_low (settled together, " +
+      "same reason): schemas 0.82.0 `EventRiskV1Schema` is the shape CEE's own `EventRiskV1` mirrors, with the same " +
+      "REQUIRED `occurrence.basis` beside the range and the same strict object, so the warrant travels with the value.",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.occurrence.p_high",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.occurrence.p_high; reason given at " +
+      "unwarranted:cee.NodeV3::event_risk.occurrence.p_low.",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.horizon.months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.horizon.months; reason given there " +
+      "(unit by name, attested by the block's `occurrence.basis`).",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.mitigations[].occurrence_reduction",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction; " +
+      "reason given there (a fraction by meaning, attested by the block's `occurrence.basis`).",
+  },
+  // ── SCOPE-AMBIGUOUS: the goal's target basis (declared 12 Oct 2026, recovery Batch C; Batch 0 change-goal decision
+  //    ruling 4 and amendments 2–3) — two numbers inside one CEE-only block, never on the wire and never hashed ──────
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_target_basis.target_raw",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — not a value, a STALENESS KEY. Its one writer (`admitGoalTargetBasis`, goal-target-basis.ts) copies the " +
+      "goal's own stored `goal_threshold_raw` into it, and its one reader (`goalTargetBasisOf`) drops the WHOLE basis " +
+      "unless it still equals the node's `goal_threshold_raw` exactly (with `quantity_frame` / `target_frame`), so an " +
+      "edited target can never be read through an old basis. Its unit and attestation are therefore `goal_threshold_raw`'s " +
+      "(`goal_threshold_unit`, `threshold_source`) by equality; nothing reads it as a number. No producer may write it " +
+      "(field-safety CEE-owned roots). It enters the analysis hash only inside the whole well-formed basis (graph-hash.ts " +
+      "`projectNode`, Batch C gap 2), so a basis change stales a stored Run; absent, every hash is unchanged.",
+  },
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_target_basis.period_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (whole months, " +
+      "`.int().min(1).max(120)`), and what it measures is named by its two siblings — `reference` (today | launch) and " +
+      "`period_kind` (at_end | over_period). Its attestation is the block's REQUIRED literal `source: 'olumi_reading'`: " +
+      "it is always Olumi's reading of the brief, never presented as the user's. Its one writer refuses it when it " +
+      "disagrees with the drafted deadline ('period_conflict'), and the horizon verdict licenses a chance on it only " +
+      "when it equals the held months ('basis_at_h'). Read only for the licence's words and that verdict; no producer may " +
+      "write it (field-safety CEE-owned). It enters the analysis hash inside the whole well-formed basis, only when " +
+      "present (graph-hash.ts `projectNode`, Batch C gap 2): a basis-only change stales a stored Run.",
   },
 ];
 

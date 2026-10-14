@@ -42,7 +42,8 @@ describe('a factor no option changes is held as context', () => {
   it('RED: the server says so, and offers to connect it', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ok: true, mutated: true, model_version: { version_number: 1 }, treated_as_context: ['Pro feature release readiness'] }]);
     // AIQ 5923232439 (DL 5923219186, a brief turn ≤160 words): the fact at rest, its ask behind the questions toggle.
-    expect(n.status).toBe('The model was saved as version 1. Held fixed (no option changes it): Pro feature release readiness.'
+    expect(n.status).not.toMatch(/\bsaved\b/i);
+    expect(n.status).toBe('Held fixed (no option changes it): Pro feature release readiness.'
       + ' Questions this model does not answer yet: Should one of the options change Pro feature release readiness?');
     expect(n.status, 'no dash at rest (DS §29)').not.toContain('\u2014');
   });
@@ -130,6 +131,9 @@ describe('a factor no option changes is held as context', () => {
 
   it('CONTRAST: nothing demoted → no sentence', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ok: true, mutated: true, model_version: { version_number: 1 } }]);
-    expect(n.status).toBe('The model was saved as version 1.');
+    expect(n.status).toBeNull();
+    expect(n.text).toBe('');
+    const control = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ok: true, mutated: true, treated_as_context: ['Release readiness'] }]);
+    expect(control.status).toContain('Held fixed (no option changes it): Release readiness.');
   });
 });

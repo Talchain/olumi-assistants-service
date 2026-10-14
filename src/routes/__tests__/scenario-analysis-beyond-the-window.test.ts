@@ -163,7 +163,7 @@ describe('a DEGRADED durable read cannot prove a run never happened (the hot win
     expect(result.analysis_result).toBeNull();
   });
 
-  it('DEGRADED, RUN IN WINDOW: durable read fails but the window holds the run — positive evidence still decides: current', async () => {
+  it('DEGRADED, LEGACY RUN IN WINDOW: a failed durable read cannot verify goal-only admission — stale', async () => {
     readScenarioRunAnalysisFactsFor.mockRejectedValue(new Error('durable read unavailable'));
     readRecent.mockResolvedValue([...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), { id: RUN_TURN }]);
     readFactsFor.mockResolvedValue([RUN]);
@@ -173,8 +173,8 @@ describe('a DEGRADED durable read cannot prove a run never happened (the hot win
 
     const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'deg-in-window' });
 
-    expect(result.analysis_state?.run_state.kind).toBe('complete_current');
-    expect(JSON.stringify(result.analysis_result)).toContain(HASH);
+    expect(result.analysis_state?.run_state.kind).toBe('complete_stale');
+    expect(result.analysis_result).toBeNull();
   });
 
   it('COMPLETE AND EMPTY: the durable record is complete and holds no run — absence is authoritative: never_run', async () => {

@@ -1,0 +1,36 @@
+Load gate exit: 0
+{"load":6.39892578125,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/b2-zero-spread.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts (15 tests | 1 failed) 55ms
+     × pins the lane witness bytes and the original generic-empty-cell defect 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > pins the lane witness bytes and the original generic-empty-cell defect
+AssertionError: expected undefined to be 'f8ed674dec63758a2945acaffebe67e26a5f0…' // Object.is equality
+
+- Expected:
+"f8ed674dec63758a2945acaffebe67e26a5f0a4a"
+
++ Received:
+undefined
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:84:46
+     82|     expect(WIRE.build).toBe('f8ed674');
+     83|     expect(READ.scenario_id).toBe('5e0fbc03-8af8-488e-b02f-82c25499e59…
+     84|     expect(RUN._provider_calls[0].cee_build).toBe(STAGING_CONTROL.sour…
+       |                                              ^
+     85|     expect(READ.graph.nodes.find((node: Rec) => node.id === GOAL).goal…
+     86|     expect(READ.graph.nodes.some((node: Rec) => node.nonlinear_identit…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 passed (15)
+   Start at  21:18:49
+   Duration  3.01s (transform 2.03s, setup 153ms, import 2.67s, tests 55ms, environment 0ms)
+

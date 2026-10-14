@@ -487,6 +487,7 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
  */
 // The combined carrier and native-intervention changes retain 46 sites across 25 files; the percent-level predicate
 // (#2034) adds one: 47 across 26. A1's switch-level refusal copy (`shownSwitchLevel`) adds one: 48 across 27.
+// RT-18's card points rule (`meetsReading`) adds one: exact '%' reading only, the writer's own rule.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
@@ -502,6 +503,9 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/transforms/graph-data-integrity.ts": 2,
   "cee/unified-pipeline/stages/repair/deterministic-sweep.ts": 1,
   "cee/unified-pipeline/stages/repair/unreachable-factors.ts": 3,
+  // `meetsReading` (RT-18, #2641): points meet ONLY an exact '%' reading (the writer's POINTS_STATED rule); a
+  // "% of appointments" reading must NOT admit points, so the broader percent classifier would widen it.
+  "orchestrator-v5/agent-lane/approval-chips.ts": 1,
   // `percentLevelFrame` (#2034, R&C B1): the ONE "is this limit a percentage level?" rule. It reads the canonicaliser's
   // OWN output, whose unit is exactly '%' (the relabel) or the verbatim input; a broader percent classifier would re-admit
   // the ambiguous "0.5 % per month" that B1 closes.

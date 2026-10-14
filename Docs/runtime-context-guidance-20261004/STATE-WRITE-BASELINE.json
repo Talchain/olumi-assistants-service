@@ -1,0 +1,28 @@
+{
+  "base": "5a60b234126ff54052abcc21473dae95d5b3787d",
+  "guard_sha256": "987611b1c46e83ddb9347aa114a3683a4aa64d3648d3c578e01248d53d6be94f",
+  "verdict": "BASELINE_RED_UNCHANGED; not a green guard",
+  "comparisons": [
+    {
+      "file": "src/orchestrator-v5/agent-lane/turn-context/guidance-history.ts",
+      "baseline_matches": [],
+      "current_matches": []
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/turn-context/guidance-wire.ts",
+      "baseline_matches": [],
+      "current_matches": []
+    },
+    {
+      "file": "src/routes/agent-v1-turn.ts",
+      "baseline_matches": [
+        "from '../orchestrator-v5/session/index.js'",
+        "from '../orchestrator-v5/session/store.js'"
+      ],
+      "current_matches": [
+        "from '../orchestrator-v5/session/index.js'",
+        "from '../orchestrator-v5/session/store.js'"
+      ]
+    }
+  ]
+}

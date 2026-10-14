@@ -6,7 +6,7 @@
  * src/orchestrator-v5/commit.ts after a durable commit carrying a
  * successful run_analysis fact — UNCONDITIONAL since #539 deleted
  * CEE_DECISION_RECORD_CAPTURE, Paul's 19 Jul no-dark-launch ruling;
- * fire-and-forget — failures never affect the turn).
+ * bounded post-append wait — failures never affect the turn).
  *
  * Env-read pattern — call-time, not module-load (mirrors
  * model-management/index.ts and session/index.ts and their documented

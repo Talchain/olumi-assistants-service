@@ -7,7 +7,285 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.64.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.83.0.tgz`: THE CURRENT PIN (recovery Batch C: strict goal comparators, joint goal chance and precision; DL, 12 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.83.0/f3930713b0cac6d86264d895020a112643ac0293`. Registry gitHead
+`1e451c55536776cdd1d1ae1fd1f9a3c3a3fadf03` = tag `v0.83.0` (olumi-schemas `main`, schemas #96, DL publish 12 Oct 01:58Z). **874,038 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  f3930713b0cac6d86264d895020a112643ac0293   (the registry download id)
+integrity (sha512) sha512-2yK1A9GDHfeLV1mm9bjF3omNCzsnKBLBWZ7Pb/HfpVhnH7G7xOlJ2L42leYd2eQaKTsJs0829mLrd9ifZnLMZg==
+sha256             69e11b74af105b5f89a40a3d992cd889945c3458cd4cedb32529e323534f11ce   (the .sha256 sidecar)
+```
+
+0.83.0 adds the strict goal comparators (`>`/`<` beside `>=`/`<=`), `probability_of_joint_goal` with `probability_of_joint_goal_precision`,
+`constraint_probabilities_precision[constraint_id]` and `constraint_results[].probability_precision` (PLoT's wire names), all optional. ORDER:
+readers (UI/PLoT 0.82.0, C step 1) were promoted before this writer contract.
+
+### `talchain-schemas-0.82.0.tgz` (historical — no longer vendored as of 0.83.0) (event_risk.v1 pilot; DL 0fd71f, 7 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.82.0/3c18c6453ba15df76cd309058aff06fef885d12d`; registry gitHead
+`c7461d7ed76133cf0e8310c22026e93935833da2` = tag `v0.82.0` (olumi-schemas `main`, DL publish). **869,122 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  3c18c6453ba15df76cd309058aff06fef885d12d   (the registry download id)
+integrity (sha512) sha512-vqEsT6Vi9HfxETGOXT+9zIfCIoRQHUMRATa78ImVuP4W460VFzopwb4U02GbcSwibjwgEVyBt592XU+rdUjbTA==
+sha256             976e9fdf9712a14b9633a28c56e03287c919abc46a590dd7dd15ba1af67ee651   (the .sha256 sidecar)
+```
+
+0.82.0 adds the optional strict `NodeV3.event_risk` (`EventRiskV1Schema`: `{version: 1, occurrence {p_low, p_high, basis},
+horizon, meaning, mitigations?}`) and moves the graph-hash projection to **v6** (`event_risk` appended to the node fields). A graph
+with no `event_risk` hashes byte-identically (`graph-hash-proposed-by` CONTROL row); a node carrying it moves the hash
+(`graph-hash-whose-value` `node.event_risk`). ORDER: 0.81.0's `NodeV3Schema` is `.passthrough()`, so a DGAI still on 0.81.0
+neither refuses nor strips a node carrying `event_risk`; CEE only writes it through the add-risk door (event_risk.v1 slice 2a).
+
+### `talchain-schemas-0.81.0.tgz` (historical — no longer vendored as of 0.82.0) (Compare-chance chain, CEE #2741; DL #87 6035414740, 7 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.81.0/6ca5c614caa32c47f249717f373e5ca75e5616ff`; registry gitHead
+`581a825b9fa8b01a5c77558823e8a041c9ca7683` = tag `v0.81.0` (olumi-schemas `main` after #92, DL merge). **847,240 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  6ca5c614caa32c47f249717f373e5ca75e5616ff   (the registry download id)
+integrity (sha512) sha512-uPDNZyTsfhjhpTo+ertGa7Hg693e2unCY7NNpNV+Hno8QR+61oyZwpmE2ZuGkdyHRWGcljv65kJSAu5mHpVU6w==
+sha256             4e80994aa1b4356b24cba6d17ea11fb7637ac7a7516e051f44c4e197dd074945   (the .sha256 sidecar)
+```
+
+0.81.0 adds the optional strict `run_delta.goal_chances[]` (`{option_id, prior, current}`, each side `point | range | withheld |
+not_recorded`, figures only). ⛔ ORDER: DGAI parses `run_delta` strictly, so DGAI #2597 (0.81 pin) is SERVED before this CEE
+emits `goal_chances` (an old DGAI pin drops the whole block), and a production cut carries both.
+
+### `talchain-schemas-0.80.0.tgz` (historical — no longer vendored as of 0.81.0) (keep-list: `dominant_factor` + `flip_thresholds_status(_reason)`; a8's carry, opened by 0a5c9f per DL 0fd71f, 7 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.80.0/d53e6524c5464c7b82b54abc7df3d258c67c65fd`; registry gitHead
+`5a538ef40f8771708ca5d1fc4746ed68c2aada8b` (olumi-schemas `main` after #91, DL merge). **842,252 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  d53e6524c5464c7b82b54abc7df3d258c67c65fd   (the registry download id)
+integrity (sha512) sha512-Aql/3HcFITmeJ2vO6sh7Zv7O24mhjX+zIqhB4RmcXnumTdk4un5i6FBmznP9LknrN8dlmBe6TyFIbExZlMvNuQ==
+sha256             bc3fbe9b75fc1a2ba2eb0549a5fe78d9807411f1191cf0f1179d6c0cb74206fa   (the .sha256 sidecar)
+```
+
+0.80.0 adds `dominant_factor`, `flip_thresholds_status` and `flip_thresholds_status_reason` to `CEE_UI_ENRICHMENT_KEEP_LIST`
+(19 → 22 keys); `compose.ts` P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP carries the same three in this PR (the keep-list drift bolt
+in `tests/contract/cee-to-ui.contract.test.ts` pins them equal). Additive and optional: older UI pins carry them unread.
+
+### `talchain-schemas-0.79.0.tgz` (historical — no longer vendored as of 0.80.0) (SD-1 Slice R on the agent lane: READER first; DL ruling #87 option A, 6 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.79.0/fad0e0ad5476e89a56a9a33de7f8adf8c57cb573`; registry gitHead
+`483cd0e0cb3b87ee84ee4ee19f3f59af7ca15313` (olumi-schemas `main` after #90, DL merge; publish run 37420869388).
+**839,015 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  fad0e0ad5476e89a56a9a33de7f8adf8c57cb573   (the registry download id)
+integrity (sha512) sha512-Skb46DmDdFCtBxQBf6Y/bpF1J/dkzqwJQzQtGWzw2398WAMt1eucbc+lzfRLD/TeEWd9UvczOsOoyIaRKGjmZA==
+sha256             f3efc0d02000bcdd75221d188bad99d4eafb357d6781a7c065c3d0d94777332c   (the .sha256 sidecar)
+```
+
+0.79.0 appends ONE member to the closed `HandlerFactSchema` union: `run_delivery` {run_id, record: RunDeliveredRecord},
+what a Run's turn delivered, recorded by the agent lane's ANSWER row after its final egress (the served Run commits its
+`run_analysis` fact before the blocks exist). ⛔ ORDER: this PR is the READER (the scenario read serves the newest
+`run_delivery` for the selected Run; nothing writes one). The WRITER (label `writer-after-prod-0.79`) lands only once
+staging AND prod CEE serve 0.79: a CEE on 0.78 that reads a prior turn carrying the fact loses that turn's whole
+prior-facts window (`readFactsWithTurnFor` strict parse → `SessionReadDegraded`). Known accepted-degraded readers on the
+same database (DL 6 Oct): cee-native-context-trial (0.73) and cee-demo (0.23).
+
+### `talchain-schemas-0.78.0.tgz` (historical — no longer vendored as of 0.79.0) (SD-1 cut 6: READER first; DL 0df0e1 6 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.78.0/29c008b0e8ee596fa5ce6a02c79271a86d3dae7c`
+(registry `dist-tags.latest` = 0.78.0); registry gitHead `28f4eccc2eeb256cedeb98ecdf835e58764b5b91` = tag `v0.78.0`
+(olumi-schemas `main` after #89, DL merge; publish run 37406852540). **829,871 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  29c008b0e8ee596fa5ce6a02c79271a86d3dae7c   (the registry download id)
+integrity (sha512) sha512-Lq+VKRiRM5qwRbRsEwmYSIkimOrbQSPjY3JVl8+BXmAqWbuRW+rzux3mSeT9bOSrx9Gbq4EHvdGFmU6V4Uz6ag==
+sha256             79789bb0c80478c097217a37fdd2a11028649820215f8b26be7949c2fae5111a   (the .sha256 sidecar)
+```
+
+0.78.0 adds `RunInputLinkSchema.natural_effect?`, `RunInputField` `'effect'` + `RunInputValueSchema.per?`, and
+`RunAnalysisResultSchema.delivered_record?` (SD-1 Slice R). ⛔ ORDER (DL, 6 Oct): CEE vendors 0.78 as a READER first (this
+PR: the differ reads `natural_effect` and says `effect` rows; nothing writes it); every WRITE (#2638, label
+`writer-after-prod-0.78`) lands only once prod CEE serves 0.78, because CEE strictly re-parses stored facts and staging and
+prod share one database.
+
+### `talchain-schemas-0.77.0.tgz` (historical — no longer vendored as of 0.78.0) (SPINE X8, a relationship the user stated is the user's)
+
+The published `@talchain/schemas@0.77.0` registry artefact (olumi-schemas #88 → main `b0378e7f` = tag `v0.77.0`),
+byte-identical to the copies DGAI #2506 and PLoT #435 vendor:
+
+```
+sha256 ed6ca2a58beee5166d81abe92d5d7a2359bc7a24820b7f9bd6b70efafd1659ad
+sha1   57f6764c02225a80cd4a8d992acb872724ea1a9f   (= the registry shasum)
+sha512 UntaRpeyLzQhz3NO9slhaUaLpjc5GLzb1Ggc7RPcSLrtCZ6u/BL+T3r5libE9pt4cvJn8NzBsd5rq/3MKW8zwg==   (= the registry integrity)
+```
+
+0.77.0 adds ONE closed `ModelBuildingNoticeKindSchema` member, `stated_relationship_not_used`: a relationship the USER
+stated that the model could not use as written. Before it, such a row could only be counted under `relationship_not_used`,
+which every consumer words as Olumi's ("Connections Olumi proposed…"). In `dist/`, only `boundary/olumi-response.js`, the
+generated constants and the fixtures differ from 0.76.0. Order (DL, SPINE X8): DGAI served 0.77.0 first (13:28Z 5 Oct),
+PLoT second, CEE last. 0.76.0 is no longer vendored.
+
+### `talchain-schemas-0.76.0.tgz` (historical — no longer vendored as of 0.77.0) (SCI-DEEP v1, “Test without this link”)
+
+<!-- talchain-schemas-0.76.0.tgz was built from olumi-schemas PR #86 @71da209c (independently approved) and is not yet on schemas main. -->
+
+The approved published `@talchain/schemas@0.76.0` archive supplied for CEE #2544,
+verified against the approved SHA-256 and the installed package version. The supplied
+archive and vendored copy are byte-identical; this checkout did not repack it or fetch the registry.
+
+```
+sha256 594fcedb65b385fe701ea9dcac98cce2b73e85c7e3c9e10ba1ceddd82999268d
+```
+
+0.76.0 adds `StructuralChallengeResultV1Schema` and its claim, baseline and alternative
+contracts. CEE imports those published types and validates every dispatched result with
+that schema, including the evidence rules for constraint boundaries, leader holds, equal
+seed/sample budget/engine builds, absence and non-completed provenance. Missing evidence
+withholds the comparison or yields values without a structural verdict; it is never invented.
+The route integration and UI adoption remain separate steps.
+
+The 0.75.0 → 0.76.0 edge-strength reader check was re-derived from these tarballs:
+all four `dist/boundary/enums.{js,d.ts}` and `dist/boundary/turn-payload.{js,d.ts}` files
+are byte-identical; the fixture registry changes, but its `edge_strength_edit` lines do not.
+Only 0.76.0 is retained in `vendor/`, per the update procedure; 0.74.0 and 0.75.0 and
+their checksum manifests are removed. Git history retains the rollback copies.
+
+### `talchain-schemas-0.75.0.tgz` (historical — no longer vendored) (SCIENCE/DSK fa13b6a1, the decision-flip block)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`55a72e62`** (schemas #85 merge; publish run 36995247489), 2026-10-02. Fetched with `npm pack
+> @talchain/schemas@0.75.0` from `npm.pkg.github.com`.
+>
+> ```
+> npm shasum (sha1)  b608fb229e4c9083a219c3e1eddabeec31827a44   ← matches
+> integrity (sha512) sha512-ZeH7GM/D8axbMZRT29VsdQGJEZS+nli9QW/8PBAjw7zR3dV09zfqFvBQwcuv8jC3wGmnTdY0ZzsTW5nTyBeh0g==   ← matches (pnpm-lock, written by pnpm)
+> sha256             015ddc38a5b32c71410bfdb89ec5209d4e7c50666732fbe6bb0ba486f11c441f
+> ```
+>
+> **What 0.74.0 + 0.75.0 add (additive):** 0.74.0 `ModelVersionDiffV2Schema` (opt-in, recorded results for two stored
+> versions); 0.75.0 `DecisionFlipBlockV1Schema` — the recommendation's tipping point per link (ISL #220 → PLoT #431),
+> with the licence structural (R1–R10). CEE is its validating boundary (`plot-client.ts` `parseDecisionFlipResponse`).
+
+### `talchain-schemas-0.74.0.tgz` (historical — no longer vendored) (CODEX BUILDER, opt-in saved-version result comparison)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by DL from `olumi-schemas` `main`
+> **`c47767f9690c49d092145cbd90247fd0da22da34`** (schemas #84 merge; publish run 36988699914), 2026-10-02. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.74.0/ea5d0acdf3a277c243dfa391161450e1b2675df5`.
+>
+> ```
+> npm shasum (sha1)  ea5d0acdf3a277c243dfa391161450e1b2675df5
+> integrity (sha512) sha512-elhMD41qf21TI+x9hk305AUAGfMtPB1RBa12KKtAoanN/ulbvqVqcbZs2oWGhi6GnmDSgRWSkpu9Ru69bEt+lw==
+> sha256             3850f3aaa1f7e064d8c5649068eae773a0c97c3633d1b27e7fc8452766a2df07
+> ```
+>
+> Verified all three hashes against the downloaded bytes and registry `gitHead` against the merged source.
+> Package version and exported schema digest also agree. The lockfile is generated by pnpm.
+> **What 0.74.0 adds:** strict `model_version_diff.v2` result comparison arms: paired Runs with the existing canonical
+> `RunDelta`, one shared Run, or typed unavailability. Version diff v1 and canonical RunDelta remain unchanged.
+> The CEE comparison route opts in with `response_schema: 'model_version_diff.v2'`; existing callers use v1.
+>
+> **Existing edge-strength reader re-derived for this bump:** the 0.73/0.74 tarballs match the registry SHA1 values
+> below/above. `dist/boundary/enums.{js,d.ts}` and `dist/boundary/turn-payload.{js,d.ts}` are byte-identical.
+> `dist/fixtures/index.js` changes its registry and adds three v2 fixtures; an AST comparison preserves all 177
+> prior fixture initializers and removes no export. The exact-version tests now pin 0.74; their reader assertions
+> are retained. No claim that the entire fixture registry stayed byte-identical.
+
+### `talchain-schemas-0.73.0.tgz` (superseded) (F1b 52f8cd, a factor's `authorship_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`b447da6f`** (schemas #83 merge; publish run 36964921360), 2026-10-02. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.73.0/ab0b2c9af7e9441ba88e45837f1cff89bd449379`.
+>
+> ```
+> npm shasum (sha1)  ab0b2c9af7e9441ba88e45837f1cff89bd449379   ← matches
+> integrity (sha512) sha512-GZFRo1Nl8yTGdKRO6TqU/cH4vGuxvHb0n758g7pDq17pMMiK0CMCnEeAedhYa6RuE+yrX2ZspYCzASRClsOTSA==   ← matches (pnpm-lock, written by pnpm)
+> sha256             c74339dc4eb24a2571958bf7ae3f91ebbd511b2afd4295791d5a0d5236132dd4
+> ```
+>
+> **What 0.73.0 adds (additive, optional):** Run snapshot `factors[].authorship_digest` — the factor's authorship as sent
+> (CEE `FACTOR_AUTHORSHIP_MEMBERS`, measured on the real value writer → wire), so a user's value edit is credited pairwise:
+> an authorship change is explained only beside that factor's own value row. `RunDelta` unchanged; the UI needs no re-vendor.
+
+### `talchain-schemas-0.72.0.tgz` (superseded) (F1b 52f8cd, a link's `authorship_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`cd1e868e`** (schemas #82 merge; publish run 36935147076), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.72.0/fd389b22eebbedb4f7544d9dffa47c610a0c8487`.
+>
+> ```
+> npm shasum (sha1)  fd389b22eebbedb4f7544d9dffa47c610a0c8487   ← matches
+> integrity (sha512) sha512-xRsNlJYILXVmd/6galcPOKu0rhu4V+K5DoGRHoAe+99IV/FBXLkbDGM2ehHpmgmkdfEFOgdf2/CQzO4JzI6pQQ==   ← matches (pnpm-lock, written by pnpm)
+> sha256             c5ea5c57d26db4dd62f6c60c41e5def94db23ff7015eee51d0548c550a8067ff
+> ```
+>
+> **What 0.72.0 adds (additive, optional):** Run snapshot `links[].authorship_digest` — the link's authorship as sent, so an
+> authorship change is explained pairwise only beside a `sizing` row to `user` or `placeholder → olumi_accepted` (DL
+> ruling #2482 r3). `RunDelta` unchanged; the UI needs no re-vendor.
+
+### `talchain-schemas-0.71.0.tgz` (superseded) (F1b 52f8cd, `complete` means VERIFIED: `residual_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`56888181`** (schemas #81 merge; publish run 36923548214), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.71.0/c783076ef0b70d5036ce03a08ec40643d9862912`.
+>
+> **767,235 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  c783076ef0b70d5036ce03a08ec40643d9862912   ← matches
+> integrity (sha512) sha512-xIsf5VttWdKT/cGn98KQhGJblmJ1oZ4Tpk9K5hXy6uZOiTepYWxO6glq3nm0YSCLzDq9TdbnkTMYtyrVer6cyg==   ← matches (pnpm-lock)
+> sha256             7be834c8d062b60f1e600947160332bdda282f8734eeefd6a2e0573ac140e593
+> ```
+>
+> **What 0.71.0 adds (additive, optional):** `RunInputSnapshot.residual_digest` — every analysis input the snapshot does
+> not record, digested; a pair is `input_coverage: 'complete'` only when both ends carry an equal one (DL ruling on
+> #2482, 5939864517). `RunDelta` is unchanged, so the UI needs no re-vendor. ⚠ The lock line is pnpm's own (`pnpm
+> install`), never hand-edited: a hand-edited `version: 0.69.0` beside the 0.70.0 tgz killed every CI install on #2482.
+
+### `talchain-schemas-0.70.0.tgz` (superseded) (F1b 52f8cd, R3 DEFECT 3 + typed empty win shares)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
+> **`cace462d`** (schemas #80 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.70.0/a987224c3442bdf1bb1c9efe02e2f0f2470769e8`.
+>
+> **766,456 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  a987224c3442bdf1bb1c9efe02e2f0f2470769e8   ← matches
+> integrity (sha512) sha512-+IUB15tcl7WCOUgJNkqTh1LEtzr4j+0pALo2a57uvb9DHqUPQWR33um8ywigiHOSAEOKA1AOAuOadpgYudRmlg==   ← matches
+> sha256             d7764a0067639b4b207234960eb6779c9a0d3e9d6f495f57c5fb723aebb1806e
+> ```
+>
+> **What 0.70.0 adds (additive, optional; no analysis-hash input moves):** Run snapshot `links[].band` / `links[].sizing`;
+> `RunInputField` `sizing`; `run_delta.win_probabilities_unavailable` (`prior_withheld | no_matched_option`, only beside
+> an empty list). **UI-first:** DGAI vendors 0.70.0 before CEE emits any of them (the `.strict()` RunDelta on 0.69
+> refuses every new member).
+
+### `talchain-schemas-0.69.0.tgz` (superseded) (MG, F1 T1)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
+> **`5b0ca7f5`** (schemas #78 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.69.0/939f5c9ecfcb8cfc27329bf7bd94cf91adb1ad8c`.
+>
+> **761,983 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  939f5c9ecfcb8cfc27329bf7bd94cf91adb1ad8c   ← matches
+> integrity (sha512) sha512-uj3eCrm41M/WZjW8hgAuxeCPDviP+Sh8v/bIEQdwBrNrGGGcZmTe2e260Ymvz5jaZQUM45jqV7cHGn9rfKIhjw==   ← matches
+> sha256             ebd1745c6581cf163242b7af5e68546dfbaac58b25596fbe427eda6234e2a5d4
+> ```
+>
+> **What 0.69.0 adds (additive, optional; no analysis-hash input moves):** NodeV3 `goal_period` / `goal_horizon` /
+> `goal_stated_as` / `option_status` / `count_noun` / `full_label`; the `option_status_edit` system event (required
+> `expected_status`); `goal_target_edit` optional period / horizon / stated figures with their expected values; Run
+> records `excluded_infeasible` / `excluded_removed` and not-sent `infeasible` / `removed` (UI-first: DGAI vendors first).
+
+
+### `talchain-schemas-0.64.0.tgz` (superseded)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

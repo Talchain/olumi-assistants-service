@@ -1,3 +1,4 @@
+import { runPreflightThroughOwnership } from '../../utils/run-preflight-through-ownership.js';
 /**
  * Unit tests for `runPreFlight` — the shared pre-flight helper used by
  * route-v2.ts. Locks the exact BoundaryError envelope shape emitted on
@@ -14,7 +15,7 @@
  * future schema change produces a visible snapshot diff rather than a
  * silent wire-contract drift.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { attachCallerContext } from '../../../src/context/index.js';
 
@@ -23,6 +24,7 @@ import { attachCallerContext } from '../../../src/context/index.js';
 // The cross-tenant snapshot test wants the store to report a different
 // owner than the caller; the other two tests never reach the store.
 const ensureScenarioExistsSpy = vi.fn();
+const getScenarioOwnerSpy = vi.fn(async () => null as string | null);
 // The anti-resurrection gate runs BEFORE the upsert. Defaulting the row to
 // PRESENT keeps every pre-existing case in this file on exactly the path it
 // was written for; the deleted-scenario case below flips both spies.
@@ -32,6 +34,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     ensureScenarioExists: ensureScenarioExistsSpy,
     scenarioExists: scenarioExistsSpy,
+    getScenarioOwner: getScenarioOwnerSpy,
     scenarioHasAdmittedTurn: scenarioHasAdmittedTurnSpy,
     append: async () => ({ id: 'unused' }),
     readRecent: async () => [],
@@ -49,7 +52,11 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   SessionReadError: class SessionReadError extends Error {},
 }));
 
-const { runPreFlight } = await import('../../../src/orchestrator/route-v2-preflight.js');
+const { runPreFlight: validatePreflight } = await import('../../../src/orchestrator/route-v2-preflight.js');
+
+async function runPreFlight(req: { body: unknown; headers: Record<string, string> }) {
+  return runPreflightThroughOwnership(req, validatePreflight);
+}
 
 const FIXED_REQUEST_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
@@ -76,6 +83,12 @@ function makeHmacReq(body: unknown): { body: unknown; headers: Record<string, st
   attachCallerContext(req as never, { keyId: 'preflight-envelope-suite', hmacAuth: true });
   return req;
 }
+
+beforeEach(() => {
+  scenarioExistsSpy.mockReset().mockResolvedValue(true);
+  scenarioHasAdmittedTurnSpy.mockReset().mockResolvedValue(false);
+  getScenarioOwnerSpy.mockReset().mockResolvedValue(null);
+});
 
 describe('runPreFlight — 422 envelope shapes', () => {
   it('extension-parse failure: structurally invalid graph_state produces a V5RequestExtensions BoundaryError', async () => {
@@ -156,6 +169,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
   });
 
   it('guest mode (no user_id): pre-flight calls store with null, skips ownership check, returns ok', async () => {
+    scenarioExistsSpy.mockResolvedValue(false);
     ensureScenarioExistsSpy.mockReset();
     ensureScenarioExistsSpy.mockResolvedValueOnce({ user_id: null });
 
@@ -187,7 +201,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
     // because the client's guidance table has no row for this reason yet and
     // its fallback says the opposite.
     ensureScenarioExistsSpy.mockReset();
-    scenarioExistsSpy.mockResolvedValueOnce(false);
+    scenarioExistsSpy.mockResolvedValue(false);
     scenarioHasAdmittedTurnSpy.mockResolvedValueOnce(true);
 
     const req = makeReq({
@@ -237,7 +251,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
     // null). Before the fix this passed pre-flight (either-null skip), so any
     // anonymous request could act on any owned scenario. Now it must 422.
     ensureScenarioExistsSpy.mockReset();
-    ensureScenarioExistsSpy.mockResolvedValueOnce({ user_id: OWNER_USER_ID });
+    getScenarioOwnerSpy.mockResolvedValueOnce(OWNER_USER_ID);
 
     const req = makeReq({
       kind: 'message',
@@ -269,14 +283,15 @@ describe('runPreFlight — 422 envelope shapes', () => {
         "validator": "scenario_preflight",
       }
     `);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
   });
 
   it('scenario-preflight failure: cross-tenant ownership mismatch produces a scenario_preflight BoundaryError', async () => {
     // Store returns a different owner than the caller — cross-tenant.
     ensureScenarioExistsSpy.mockReset();
-    ensureScenarioExistsSpy.mockResolvedValueOnce({ user_id: OWNER_USER_ID });
+    getScenarioOwnerSpy.mockResolvedValueOnce(OWNER_USER_ID);
 
     const req = makeHmacReq({
       kind: 'message',
@@ -310,7 +325,8 @@ describe('runPreFlight — 422 envelope shapes', () => {
       }
     `);
     // The spy was called exactly once with the caller's user_id and scenario_id.
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, CALLER_USER_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
   });
 });

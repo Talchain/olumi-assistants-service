@@ -34,6 +34,9 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { loadScenarioAnalysisAnchorFactsForRead } from '../build-turn-context.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
 import { log } from '../../utils/telemetry.js';
 import type {
@@ -50,6 +53,13 @@ export class DecisionRecordSignInRequiredError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DecisionRecordSignInRequiredError';
+  }
+}
+
+export class AnalysisAnchorUnavailableError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('analysis_anchor_unavailable', options);
+    this.name = 'AnalysisAnchorUnavailableError';
   }
 }
 
@@ -255,6 +265,7 @@ export interface RecordDecisionOutcomeWrite {
  */
 export interface DecisionRecordOwnerRead {
   readonly record_id: string;
+  readonly scenario_id: string;
   readonly owner_user_id: string | null;
   /** `prediction.confidence` when present, finite and in [0,1]; else undefined. */
   readonly confidence: number | undefined;
@@ -264,7 +275,7 @@ export interface DecisionRecordOwnerRead {
 
 /**
  * The analysis anchor a USER COMMIT is recorded against: the `graph_hash_at_run`
- * of the scenario's newest non-noop `run_analysis` fact, plus when it was
+ * of the scenario's selected successful `run_analysis` fact, plus when it was
  * computed. Derived SERVER-side — never supplied by a caller (see
  * user-commit.ts's anchor note).
  */
@@ -304,6 +315,24 @@ export interface DecisionRecordRead {
 export interface RetrieveDecisionRecordsOpts {
   /** Max records to return (most-recent-first). Hard-capped by the adapter. */
   readonly limit?: number;
+}
+
+/**
+ * ⭐ DECIDE & REVIEW S1 (MG lease #85 5948537951): one USER-AUTHORED row for the
+ * read-back — the columns the record card needs, which {@link DecisionRecordRead}
+ * never carried (`review_date`, and whether an outcome is on record).
+ */
+export interface DecisionRecordUserRead extends DecisionRecordRead {
+  /** ISO timestamptz — the date the user is asked to look again (NOT NULL column). */
+  readonly review_date: string;
+  /** True once `record_decision_outcome` has written the write-once outcome. */
+  readonly has_outcome: boolean;
+}
+
+/** The user-authored page: same pre-cap truth as {@link DecisionRecordReadPage}. */
+export interface DecisionRecordUserReadPage {
+  readonly records: readonly DecisionRecordUserRead[];
+  readonly totalCount: number;
 }
 
 /**
@@ -349,6 +378,17 @@ export interface DecisionRecordStorePort {
   ): Promise<DecisionRecordReadPage>;
 
   /**
+   * The scenario's USER-AUTHORED records only (`decision.committed_by_user = true`),
+   * newest-first, hard-capped. The filter is in the QUERY, never after it: every
+   * Run auto-captures a `model_derived` row (`commit.ts`), so a post-filter on a
+   * capped page would let a few Runs push the user's own decision out of the window.
+   * The CALLER owns the scenario-ownership check (service-role read, no RLS), AND every row is filtered to
+   * `owner_user_id = ownerUserId` (CODEX P1 on S1): decision records SURVIVE their scenario's deletion with the old
+   * owner's id, so a scenario UUID re-created by someone else would otherwise pass the scenario check and read them.
+   */
+  retrieveUserRecords(scenarioId: string, ownerUserId: string): Promise<DecisionRecordUserReadPage>;
+
+  /**
    * Fill a record's WRITE-ONCE outcome. Throws
    * {@link DecisionRecordNotFoundError} (DR404) and
    * {@link DecisionRecordOutcomeConflictError} (DR409) as typed errors; an
@@ -368,10 +408,11 @@ export interface DecisionRecordStorePort {
   readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null>;
 
   /**
-   * The scenario's newest non-noop `run_analysis` fact, reduced to the
-   * analysis anchor. `null` when the scenario has never completed an
-   * analysis — a commit then has nothing to anchor to and is refused rather
-   * than anchored to a fabricated hash.
+   * The ONE selector's successful `run_analysis` fact, reduced to the
+   * analysis anchor. `null` only for complete history with no success.
+   * Unreadable history or a capped page without success throws
+   * AnalysisAnchorUnavailableError. A commit with no successful analysis
+   * is refused rather than anchored to a fabricated hash.
    */
   readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null>;
 }
@@ -384,6 +425,8 @@ export const DECISION_RECORDS_HARD_CAP = 8;
 
 /** Columns the read projection needs — NEVER `owner_user_id` (not projected). */
 const DECISION_RECORD_READ_COLUMNS = 'record_id, scenario_id, created_at, decision, prediction';
+/** The user read-back adds the review date and the outcome (presence only is surfaced). Still never `owner_user_id`. */
+const DECISION_RECORD_USER_READ_COLUMNS = `${DECISION_RECORD_READ_COLUMNS}, review_date, outcome`;
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -426,7 +469,10 @@ function errCode(e: unknown): string | undefined {
 }
 
 export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(
+    private readonly client: SupabaseClient,
+    private readonly analysisSessionStore?: Parameters<typeof loadScenarioAnalysisAnchorFactsForRead>[2],
+  ) {}
 
   async createRecord(write: CreateDecisionRecordWrite): Promise<DecisionRecordWriteOutcome> {
     // PostgREST discipline (the 20260426160532 lesson, carried through the
@@ -523,6 +569,40 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     return { records: out, totalCount };
   }
 
+  async retrieveUserRecords(scenarioId: string, ownerUserId: string): Promise<DecisionRecordUserReadPage> {
+    // Same SCOPE-AT-THE-BYTES guard as retrieveRecords, plus the OWNER (filtered, never selected) and the authorship
+    // filter IN the query (`decision->>committed_by_user = 'true'`), so the LIMIT and the exact count both count only
+    // this user's own decisions.
+    const { data, error, count } = await this.client
+      .from('decision_records')
+      .select(DECISION_RECORD_USER_READ_COLUMNS, { count: 'exact' })
+      .eq('scenario_id', scenarioId)
+      .eq('owner_user_id', ownerUserId)
+      .eq('decision->>committed_by_user', 'true')
+      .order('created_at', { ascending: false })
+      .limit(DECISION_RECORDS_HARD_CAP);
+    if (error) {
+      throw new DecisionRecordStoreError(
+        `retrieveUserRecords for scenario ${scenarioId} failed: ${errMsg(error)}`,
+        { cause: error },
+      );
+    }
+    if (!Array.isArray(data)) return { records: [], totalCount: 0 };
+    const out: DecisionRecordUserRead[] = [];
+    for (const row of data) {
+      const parsed = parseReadRow(row);
+      if (parsed === null || parsed.scenario_id !== scenarioId) continue;
+      // Defence-in-depth on the authorship filter: a row that is not the user's
+      // own commit never reaches a surface that says "your decision".
+      if (parsed.decision.committed_by_user !== true) continue;
+      const { review_date: reviewDate, outcome } = row as { review_date?: unknown; outcome?: unknown };
+      if (typeof reviewDate !== 'string' || reviewDate.length === 0) continue;
+      out.push({ ...parsed, review_date: reviewDate, has_outcome: outcome !== null && outcome !== undefined });
+    }
+    const totalCount = typeof count === 'number' && Number.isFinite(count) && count >= out.length ? count : out.length;
+    return { records: out, totalCount };
+  }
+
   async recordOutcome(write: RecordDecisionOutcomeWrite): Promise<DecisionRecordWriteOutcome> {
     // Same PostgREST discipline as createRecord: distinct function name, all
     // named args passed explicitly.
@@ -562,7 +642,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   async readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null> {
     const { data, error } = await this.client
       .from('decision_records')
-      .select('record_id, owner_user_id, prediction, outcome')
+      .select('record_id, scenario_id, owner_user_id, prediction, outcome')
       .eq('record_id', recordId)
       .limit(1);
     if (error) {
@@ -574,7 +654,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     const rows = (data ?? []) as Array<Record<string, unknown>>;
     const row = rows[0];
     if (!row) return null;
-    if (typeof row.record_id !== 'string' || row.record_id.length === 0) return null;
+    if (typeof row.record_id !== 'string' || row.record_id.length === 0 || typeof row.scenario_id !== 'string' || row.scenario_id.length === 0) return null;
     const prediction = isPlainObject(row.prediction) ? row.prediction : {};
     const rawConfidence = prediction.confidence;
     // The SAME usability bound the contract and the RPC enforce ([0,1],
@@ -589,6 +669,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
         : undefined;
     return {
       record_id: row.record_id,
+      scenario_id: row.scenario_id,
       owner_user_id:
         typeof row.owner_user_id === 'string' && row.owner_user_id.length > 0
           ? row.owner_user_id
@@ -599,43 +680,30 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   }
 
   async readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null> {
-    // SCOPE AT THE BYTES: `.eq('scenario_id', …)` is the only thing between
-    // this service-role read and every other scenario's facts — the client
-    // bypasses RLS. Index: (scenario_id, handler_id, created_at DESC)
-    // = v5_handler_facts_scenario_handler_idx (migration 20260417160000), so
-    // the ORDER BY … LIMIT 1 is a single index descent.
-    //
-    // `handler_id` + the real `noop` COLUMN, never a JSONB path: the same
-    // filter shape the session store's own newest-analysis read uses.
-    const { data, error } = await this.client
-      .from('v5_handler_facts')
-      .select('payload')
-      .eq('scenario_id', scenarioId)
-      .eq('handler_id', 'run_analysis')
-      .eq('noop', false)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (error) {
-      // THROWS, never returns null: "this scenario has no analysis" and "I
-      // could not look" are exactly the two states a commit must not
-      // conflate — the second would anchor nothing and refuse a legitimate
-      // decision, or worse, invite a fabricated anchor.
-      throw new DecisionRecordStoreError(
-        `readNewestAnalysisAnchor(${scenarioId}) failed: ${errMsg(error)}`,
-        { cause: error },
-      );
+    try {
+      // Anchor-only loader isolates corrupt rows without weakening the
+      // reasoning/claim-safety page contract. Dynamic import keeps the capture-only
+      // adapter free of turn-context initialisation until this read is needed.
+      const { loadScenarioAnalysisAnchorFactsForRead } = await import('../build-turn-context.js');
+      const page = await withAnalysisReadDeadline(() => loadScenarioAnalysisAnchorFactsForRead(
+        scenarioId, 'decision-record-anchor', this.analysisSessionStore,
+      ));
+      const selected = selectRunAnalysisFact(page.facts);
+      if (selected === null) {
+        if (page.malformed_row_count > 0 || page.capped) throw new AnalysisAnchorUnavailableError();
+        return null;
+      }
+      const hash = selected.graph_hash_at_run;
+      // Defensive check after the loader has isolated unrecorded/malformed rows.
+      if (typeof hash !== 'string' || hash.trim() === ''
+        || (selected.computed_at !== null && !Number.isFinite(Date.parse(selected.computed_at)))) {
+        throw new AnalysisAnchorUnavailableError();
+      }
+      return { graphHashAtRun: hash, computedAt: selected.computed_at };
+    } catch (cause) {
+      if (cause instanceof AnalysisAnchorUnavailableError) throw cause;
+      throw new AnalysisAnchorUnavailableError({ cause });
     }
-    const rows = (data ?? []) as Array<{ payload?: unknown }>;
-    const payload = rows[0]?.payload;
-    if (!isPlainObject(payload)) return null;
-    const result = payload.result;
-    if (!isPlainObject(result)) return null;
-    const hashAtRun = result.graph_hash_at_run;
-    if (typeof hashAtRun !== 'string' || hashAtRun.length === 0) return null;
-    return {
-      graphHashAtRun: hashAtRun,
-      computedAt: typeof result.computed_at === 'string' ? result.computed_at : null,
-    };
   }
 }
 

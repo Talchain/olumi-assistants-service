@@ -1,0 +1,7 @@
+Baseline: GREEN (node assertions; no vitest, no LLM)
+RED: same-goal identity: different limit figure (AssertionError)
+RED: direct path sized: remove natural effect (AssertionError)
+RED: missing risk unit: supply the stated unit (AssertionError)
+RED: run-evaluated identity: remove attestation (AssertionError)
+RED: same-run chances: change Raise probability (AssertionError)
+Restored: GREEN; byte-identical backup restored; no production mutation

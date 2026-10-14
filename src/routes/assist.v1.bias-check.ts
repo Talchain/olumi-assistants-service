@@ -83,7 +83,7 @@ export default async function route(app: FastifyInstance) {
   const BIAS_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_BIAS_CHECK_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.biasCheckFeatureVersion || "bias-check-1.0.0";
 
-  app.post("/assist/v1/bias-check", async (req, reply) => {
+  app.post("/assist/v1/bias-check", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

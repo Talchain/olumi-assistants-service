@@ -1,3 +1,5 @@
+import { twoStateLevelWords } from '../agent-lane/say-figure.js';
+
 /**
  * V5 P0.2 — conservative unit-aware display formatter for a factor's
  * USER-SCALE (raw) value.
@@ -94,6 +96,8 @@ export function formatFactorValue(
   unit?: string | null,
 ): FormattedFactorValue | null {
   if (!Number.isFinite(value)) return null;
+  const state = twoStateLevelWords(value, unit);
+  if (state !== null) return { display: state, value };
   // EXACT-only (P0.2 guardrail): display === executed value, and we never
   // round-and-execute. If the user-scale value is not a whole number we
   // SKIP rather than round it for display, because the rounded value would
@@ -181,6 +185,8 @@ export function formatFactorValueApprox(
   unit?: string | null,
 ): ApproxFactorValue | null {
   if (!Number.isFinite(value)) return null;
+  const state = twoStateLevelWords(value, unit);
+  if (state !== null) return { display: state, rounded: value, approximate: false };
   const rounded = roundToTenth(value);
   if (rounded === 0) return null; // 0 carries no useful "test at" value
   const approximate = rounded !== value;

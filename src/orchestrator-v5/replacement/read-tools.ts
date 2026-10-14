@@ -642,7 +642,7 @@ function optionSection(enrichment: AnalysisEnrichment): string[] {
     lines.push(`  - ${label === null ? '(unlabelled option)' : label}${id === null ? '' : ` [${id}]`}`);
 
     const win = finite(row['win_probability']);
-    if (win !== null) lines.push(`      wins most often in ${num(win)} of runs`);
+    if (win !== null) lines.push(`      supported by ${num(win)} of runs`);
 
     lines.push(...outcomeLine(row));
     lines.push(...downsideLine(row));
@@ -676,7 +676,7 @@ function separationSection(enrichment: AnalysisEnrichment): string[] {
   if (nearTie === null) {
     return [
       'SEPARATION: not computed. This analysis carries no tie verdict, so nothing ' +
-        'here establishes whether one option is genuinely ahead. Do not infer a ' +
+        'here establishes whether one option is genuinely separated from the rest. Do not infer a ' +
         'leader from the figures above.',
     ];
   }
@@ -697,8 +697,8 @@ function separationSection(enrichment: AnalysisEnrichment): string[] {
   const verdict = isTie
     ? 'THE OPTIONS TIE: the producer judged the top options too close to separate. ' +
       'Do not name a leader.'
-    : 'THE OPTIONS DO NOT TIE: the producer judged the top option genuinely ahead ' +
-      'of the next one.';
+    : 'THE OPTIONS DO NOT TIE: the producer judged the option the most runs supported genuinely ' +
+      'separated from the next one.';
 
   return [`SEPARATION: ${measured}${against}. ${verdict}`];
 }
@@ -726,7 +726,7 @@ function fragileEdgeSection(enrichment: AnalysisEnrichment): string[] {
   if (rows.length === 0) {
     return [
       'FRAGILE LINKS: none. The producer found no causal link whose being wrong ' +
-        'would change which option comes out ahead.',
+        'would change how the options compare in this model.',
     ];
   }
 
@@ -743,8 +743,8 @@ function fragileEdgeSection(enrichment: AnalysisEnrichment): string[] {
 
     const consequence =
       winner === null
-        ? 'the producer did not name which option would win instead'
-        : `"${winner}" wins instead`;
+        ? 'the producer did not name which option the most runs would support instead'
+        : `the most runs would support "${winner}" instead`;
 
     const likelihood =
       probability === null
@@ -880,7 +880,7 @@ export function createReadResultsTool(deps: ReadResultsDeps): AgentTool {
         'Read the latest analysis of this model: for each option its outcome range ' +
         '(mean, p10, median, p90) and its downside, whether the top options are ' +
         'genuinely separated or too close to call, the causal links whose being wrong ' +
-        'would change the answer (with which option would win instead and how often), ' +
+        'would change the answer (with which option the most runs would support instead and how often), ' +
         'and what resolving every uncertainty would be worth. Always states first ' +
         'whether the analysis is current for the model as it stands; if it is out of ' +
         'date the figures are still reported, and you must say they are out of date.',

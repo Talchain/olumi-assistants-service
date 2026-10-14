@@ -36,6 +36,7 @@
  */
 
 import type { PendingAction } from '../session/pending-action.js';
+import { GM_HELD_HANDLER_ID, GM_HELD_UNTIL_DECIDED_KEY } from '../handlers/edit-graph-referee-gate.js';
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
@@ -485,9 +486,27 @@ export function scopePendingsToChipClickIntent(
   return pendings.filter((pa) => pa.action.kind === 'what_would_flip');
 }
 
+/**
+ * ⭐ S-D (lane EDIT-PANEL): DURABLE RETENTION IS NOT BARE-CONFIRM ELIGIBILITY (Codex P1 on the design, and r1 P1 on
+ * #2743). The Agent lane keeps a held product proposal until it is approved or declined
+ * (`agent-lane/proposal-object/lifecycle.ts`) and marks it (`GM_HELD_UNTIL_DECIDED_KEY`), refreshing its stored
+ * lifetime. A marked hold is NEVER bound by a bare "yes" here: on the lane that keeps it, only its exact card confirms
+ * it (the label pick, `turn-executor.ts` `tryProposalOrdinalSelect`), so a refreshed lifetime can never become consent
+ * time. An unmarked pending (every conventional hold) is untouched.
+ */
+function bareConfirmEligible(pa: PendingAction): boolean {
+  if (pa.action.kind !== 'apply_proposed_change') return true;
+  const patch = pa.action.inline_patch as Record<string, unknown> | undefined;
+  return patch?.['handler_id'] !== GM_HELD_HANDLER_ID || patch[GM_HELD_UNTIL_DECIDED_KEY] !== true;
+}
+
 export function tryShortConfirmResume(
-  input: TryShortConfirmResumeInput,
+  rawInput: TryShortConfirmResumeInput,
 ): ShortConfirmDispatch {
+  const input: TryShortConfirmResumeInput = {
+    ...rawInput,
+    pendingActions: rawInput.pendingActions.filter(bareConfirmEligible),
+  };
   // Pre-compute live apply_proposed_change candidates once. They unlock
   // two pre-route branches: (1) PROPOSAL_CONFIRM_PATTERN bypasses the
   // edit-verb gate for proposal-targeted phrases ("add that", "make

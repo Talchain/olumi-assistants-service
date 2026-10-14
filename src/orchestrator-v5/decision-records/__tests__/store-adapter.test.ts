@@ -310,3 +310,107 @@ describe('SupabaseDecisionRecordStore.retrieveRecords (scenario-scoped read)', (
     await expect(store.retrieveRecords('scen-target')).rejects.toBeInstanceOf(DecisionRecordStoreError);
   });
 });
+
+// S1 R07: the real durable decoder/loader/reconciler feeds the ONE successful selector.
+import { anchorFact, anchorFixture, anchorRow, ANCHOR_SCENARIO } from './analysis-anchor-fixture.js';
+import { selectRunAnalysisFact } from '../../context/freshness.js';
+
+const EARLY = '2026-10-09T10:00:00.000Z';
+const LATE = '2026-10-09T12:00:00.000Z';
+function anchorStore(fixture: ReturnType<typeof anchorFixture>) {
+  // Constructor's optional SessionStore seam is the same loader port production uses.
+  return new SupabaseDecisionRecordStore(fixture.client, fixture.sessionStore);
+}
+describe('S1 user-commit anchor — canonical successful Run', () => {
+  it('skewed insertion/computation times anchor the selected Run', async () => {
+    const newest = anchorFact('computed-newest', LATE);
+    const insertedLast = anchorFact('inserted-last', EARLY);
+    const fixture = anchorFixture([anchorRow(insertedLast, 2, LATE), anchorRow(newest, 1, EARLY)]);
+    const selected = selectRunAnalysisFact([insertedLast, newest]);
+    expect(selected?.fact).toEqual(newest);
+    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+      graphHashAtRun: 'hash-computed-newest', computedAt: LATE,
+    });
+    expect(fixture.queries.every(table => table === 'v5_handler_facts')).toBe(true);
+  });
+  it.each(['refused', 'degraded', 'partial', 'failed'])('ignores a newer %s Run', async status => {
+    const fixture = anchorFixture([anchorRow(anchorFact('bad-status', LATE, status), 2, LATE),
+      anchorRow(anchorFact('success', EARLY), 1, EARLY)]);
+    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+      graphHashAtRun: 'hash-success', computedAt: EARLY,
+    });
+  });
+  it('ties preserve loaded created_at/id order through the ONE selector', async () => {
+    const fixture = anchorFixture([anchorRow(anchorFact('tie-a', LATE), 1, EARLY),
+      anchorRow(anchorFact('tie-z', LATE), 2, EARLY)]);
+    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+      graphHashAtRun: 'hash-tie-z', computedAt: LATE,
+    });
+  });
+  it('missing legacy timestamp sorts after a recorded timestamp', async () => {
+    const fixture = anchorFixture([anchorRow(anchorFact('legacy', undefined), 2, LATE),
+      anchorRow(anchorFact('timestamped', EARLY), 1, EARLY)]);
+    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+      graphHashAtRun: 'hash-timestamped', computedAt: EARLY,
+    });
+  });
+  it.each(['older', 'newest'] as const)('isolates a malformed %s row and anchors the valid success', async malformedPosition => {
+    const malformed = anchorRow({ fact_type: 'run_analysis', fact_version: 1, result: [] }, 2,
+      malformedPosition === 'older' ? EARLY : LATE);
+    const validAt = malformedPosition === 'older' ? LATE : EARLY;
+    const fixture = anchorFixture([malformed, anchorRow(anchorFact('valid', validAt), 1, validAt)]);
+    const warn = vi.spyOn(telemetry.log, 'warn').mockImplementation(() => undefined);
+    try {
+      // Choosing the older valid success when the newest row is malformed is intentional.
+      await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+        graphHashAtRun: 'hash-valid', computedAt: validAt,
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toEqual({
+        event: 'v5.decision_record.anchor_rows_isolated', request_id: 'decision-record-anchor',
+        scenario_id: ANCHOR_SCENARIO, malformed_row_count: 1, malformed_row_ids: [malformed.id],
+      });
+    } finally { warn.mockRestore(); }
+  });
+  it.each(['empty-hash', 'invalid-time'] as const)('isolates a schema-valid row with %s anchor fields', async invalid => {
+    const malformed = anchorFact('malformed-anchor', LATE);
+    if (malformed.fact_type !== 'run_analysis') throw new Error('Fixture must be a Run');
+    if (invalid === 'empty-hash') malformed.result.graph_hash_at_run = '';
+    else malformed.result.computed_at = 'not-an-instant';
+    const fixture = anchorFixture([anchorRow(malformed, 2, LATE), anchorRow(anchorFact('valid', EARLY), 1, EARLY)]);
+    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+      graphHashAtRun: 'hash-valid', computedAt: EARLY,
+    });
+  });
+  it('all malformed rows are unavailable and emit one payload-free isolation event', async () => {
+    const rows = [anchorRow({ fact_type: 'run_analysis', result: [] }, 2, LATE),
+      anchorRow({ fact_type: 'run_analysis', result: null }, 1, EARLY)];
+    const warn = vi.spyOn(telemetry.log, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(anchorStore(anchorFixture(rows)).readNewestAnalysisAnchor(ANCHOR_SCENARIO))
+        .rejects.toThrow('analysis_anchor_unavailable');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toEqual({
+        event: 'v5.decision_record.anchor_rows_isolated', request_id: 'decision-record-anchor',
+        scenario_id: ANCHOR_SCENARIO, malformed_row_count: 2, malformed_row_ids: rows.map(row => row.id),
+      });
+    } finally { warn.mockRestore(); }
+  });
+  it('other readers still reject a page containing a malformed row', async () => {
+    const fixture = anchorFixture([anchorRow({ fact_type: 'run_analysis', result: [] }, 2, EARLY),
+      anchorRow(anchorFact('valid', LATE), 1, LATE)]);
+    await expect(fixture.sessionStore.readScenarioRunAnalysisFactsFor!(ANCHOR_SCENARIO, 21))
+      .rejects.toMatchObject({ code: 'analysis_fact_corrupt' });
+  });
+  it('capped page with no successful Run is explicitly unavailable', async () => {
+    const rows = Array.from({ length: 21 }, (_, i) => anchorRow(anchorFact(`refused-${i}`, LATE, 'refused'), i + 1, LATE));
+    await expect(anchorStore(anchorFixture(rows, 22)).readNewestAnalysisAnchor(ANCHOR_SCENARIO))
+      .rejects.toThrow('analysis_anchor_unavailable');
+  });
+  it('complete all-degraded history is absent; a failed durable read is unavailable', async () => {
+    const rows = [anchorRow(anchorFact('degraded', LATE, 'degraded'), 1, LATE)];
+    await expect(anchorStore(anchorFixture(rows)).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toBeNull();
+    await expect(anchorStore(anchorFixture(rows, 1, true)).readNewestAnalysisAnchor(ANCHOR_SCENARIO))
+      .rejects.toThrow('analysis_anchor_unavailable');
+  });
+});

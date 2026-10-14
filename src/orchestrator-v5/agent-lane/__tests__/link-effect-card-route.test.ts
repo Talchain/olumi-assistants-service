@@ -40,17 +40,21 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 // Served journey C (5411da8): a DIRECT, UNSIZED "Pro plan price" → "Pro plan paying subscribers" link.
 const graph = (JSON.parse(readFileSync(new URL('./fixtures/served-journey-c-price-subscribers-unsized-5411da8.json', import.meta.url), 'utf8')) as { graph: Json }).graph;
 const PRISTINE_EDGES = structuredClone(graph.edges);
-const THEIRS = { source: 'user_specified', magnitude: 'user_stated',
-  natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' } };
 const doorCalls: unknown[] = [];
 vi.mock('../../system-events/dispatch.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, commitOptionLevelsInProcess: async (input: unknown) => {
     doorCalls.push(input);
-    const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
-    // The door stores exactly the effect it was sent (the read-back checks it is the approved one).
-    const sent = (input as { link_effect?: { effect?: Record<string, unknown> } }).link_effect?.effect;
-    e.provenance = { ...(e.provenance ?? {}), ...THEIRS, natural_effect: { ...THEIRS.natural_effect, ...(sent ?? {}) } };
+    // The door stores the REAL writer's postimage of the approved reading (RT-6 step 3, B4: the read-back checks the
+    // reloaded link IS that postimage, `reading` and `source_quote` included). Was a hand-made THEIRS provenance.
+    const { applyLinkEffectEdit } = await import('../../system-events/link-effect-edit.js');
+    const le = (input as { link_effect: Json }).link_effect;
+    const out = applyLinkEffectEdit({ persistedGraph: structuredClone(graph), from: le.from, to: le.to, effect: le.effect, quote: le.quote,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, edge_token: le.edge_token }, reading_token: le.reading_token,
+      ...(le.unit_readings !== undefined ? { unit_readings: le.unit_readings } : {}), ...(le.reversal !== undefined ? { reversal: le.reversal } : {}) });
+    if (out.kind !== 'mutated') throw new Error(`writer refused in the stub door: ${JSON.stringify(out)}`);
+    const i = (graph.edges as Json[]).findIndex((x) => x.from === le.from && x.to === le.to);
+    graph.edges[i] = (out.mutatedGraph as Json).edges.find((x: Json) => x.from === le.from && x.to === le.to);
     return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   } };
 });
@@ -92,7 +96,8 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
     const proposalId = b1._agent.tool_calls.find((c) => c.name === 'propose_link_effect' && c.ok)?.proposal_id;
     expect(proposalId, JSON.stringify(b1._agent.tool_calls)).toMatch(/^prop_/);
     const card = b1.suggested_actions.find((c) => c.id === `agent-approve-proposal:${proposalId}`)!;
-    expect(card.detail).toMatch(/from your words: "every £1 on the Pro price loses us about 50 paying subscribers"$/);
+    // B3 (RT-6 step 3): the sentence is followed by the consent words; was `…from your words: "…"` at the end.
+    expect(card.detail).toMatch(/From your words: "every £1 on the Pro price loses us about 50 paying subscribers"\. Approve, or correct\.$/);
 
     // Words, not the card: the Agent calls authorise_change on the same proposal → refused, nothing written.
     script.push({ output: [{ type: 'function_call', name: 'authorise_change', call_id: 'c2', arguments: JSON.stringify({ proposal_id: proposalId }) }] });
@@ -126,19 +131,24 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
 
   it('RED (PR Review @ fe509477; AIQ 5885833834; Canonical 5885850080): a press for a proposal with no ISSUED card on offer writes nothing, even with its exact id and reading', async () => {
     const sid = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a5d';
+    let lastText = '';
     const offer = async (said: string, args: Json) => {
       script.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: 'p', arguments: JSON.stringify(args) }] });
       const b = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid, message: said } })).json() as
-        { suggested_actions: { id: string; message: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
+        { assistant_text: string; suggested_actions: { id: string; message: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
+      lastText = b.assistant_text;
       const id = b._agent.tool_calls.find((c) => c.name === 'propose_link_effect' && c.ok)?.proposal_id;
       expect(typeof id === 'string' ? 'prop' : JSON.stringify(b._agent.tool_calls)).toBe('prop');
       return b.suggested_actions.find((c) => c.id === `agent-approve-proposal:${id}`)!;
     };
     const p1 = await offer(SAID, ARGS);
+    expect(lastText, 'control: the first offer replaces nothing').not.toContain('was replaced by the newer card');
     // The user states another figure: P2's card is now the one on offer. P1 is still stored and would execute.
     const p2 = await offer('Actually, every £1 on the Pro price loses us about 40 paying subscribers.',
       { ...ARGS, amount: -40, quote: 'every £1 on the Pro price loses us about 40 paying subscribers' });
     expect(p2.id).not.toBe(p1.id);
+    // DL 7 Oct (f48e3e67): the replaced P1 is SAID, never silently dropped.
+    expect(lastText).toContain('was replaced by the newer card for the same change; nothing in the model changed.');
     const press = async (c: { id: string; message: string }) => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: sid, message: c.message, source: 'chip', chip: { id: c.id },
     } })).json() as { _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };

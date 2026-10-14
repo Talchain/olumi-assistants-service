@@ -418,3 +418,15 @@ describe('fail-closed on internal error', () => {
     expect(d.pendingActions).toBeNull();
   });
 });
+
+
+describe('B3 sanctioned gap pair does not grant generic update_node permission', () => {
+  it('a complete paired payload still refuses at the generic edit gate', () => {
+    expect(evaluateEditGraphMutations(baseInput()).blockApply).toBe(false);
+    const before = structuredClone(GRAPH);
+    const decision = evaluateEditGraphMutations(baseInput({ operations: [{ op: 'update_node', path: 'o-a',
+      value: { unresolved_targets: [], user_questions: [] } }] }));
+    expect(decision.blockApply).toBe(true); expect(decision.governing).toBe('rejected');
+    expect(GRAPH).toEqual(before);
+  });
+});

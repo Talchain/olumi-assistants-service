@@ -16,7 +16,12 @@
  * It checks two independent failure modes, in order:
  *
  *   PHASE 1 — DID THE BUILD EVEN SHIP?
- *     Polls /healthz until the served `build` matches the commit we expect.
+ *     Polls the `x-olumi-service-build` response header until it matches the
+ *     commit we expect. NOT /healthz: every /healthz call fans out into full
+ *     prompt-history Supabase reads (the 30 Sep 2026 egress runaway), and the
+ *     estate bans polling it. The header is stamped on EVERY response by
+ *     `plugins/boundary-logging.ts`, so an unauthenticated GET of a path no
+ *     route serves answers 401/404 from memory, with the build, and no I/O.
  *     A service still serving an older build than the tip is itself an outage:
  *     it means the deploy failed, and every downstream "verified on staging"
  *     claim is measuring the wrong code. This half is arguably more valuable
@@ -91,7 +96,18 @@
  *                    https://staging--olumi.netlify.app. Required, not
  *                    defaulted: a gate that invents its own origin would pass
  *                    while every real browser was being refused.
- *   SMOKE_EXPECT_SHA (optional) commit expected to be serving; enables Phase 1
+ *   SMOKE_EXPECT_SHA (optional) an EXPLICIT commit to measure (dispatch input);
+ *                    wins over the branch head. Enables Phase 1, the per-turn
+ *                    served-build check and Phase 3.
+ *   SMOKE_HEAD_REPO / SMOKE_HEAD_BRANCH (CI) owner/repo and branch whose CURRENT
+ *                    head is measured (see resolveTarget); with GITHUB_TOKEN.
+ *                    Set = the head is required: unreadable is a red.
+ *   SMOKE_EVENT_SHA  (CI) the commit the triggering event named; only compared,
+ *                    to say when a run was triggered by a stale event
+ *   SMOKE_SETTLE_MATCHES (default 3) consecutive Phase-1 header matches
+ *   SMOKE_WATCH_MS   (default 720000 = 12 min) Phase 3, the live-vs-head watch;
+ *                    0 = off (local runs only)
+ *   SMOKE_RENDER_SERVICE_ID (optional) named in the revert red's redeploy command
  *   SMOKE_FRESHNESS_TIMEOUT_MS (default 900000 = 15 min)
  *   SMOKE_TURN_TIMEOUT_MS      (default 180000 = 3 min)
  */
@@ -101,6 +117,142 @@
  * two different opinions about which path is under test. See the header.
  */
 export const TURN_PATH = "/proxy/v5/turn";
+
+/** Stamped on every CEE response by `src/plugins/boundary-logging.ts` (SERVICE_BUILD_HEADER). */
+export const BUILD_HEADER = "x-olumi-service-build";
+
+/**
+ * Phase 1's probe target: a path NO route serves, so the auth hook answers 401
+ * (or the router 404) from memory and the onSend hook still stamps the build.
+ * Never /healthz — see the header.
+ */
+export const BUILD_PROBE_PATH = "/__journey-smoke/build";
+
+/**
+ * ⭐ WHICH COMMIT A RUN MEASURES: THE BRANCH HEAD, NOT THE EVENT'S SHA.
+ *
+ * MEASURED, 5 Oct 2026 (CI OPTIMISER E21): GitHub delivered the 147c6630 push
+ * event TWICE — the staging ref activity lists `ed245a15→147c6630` twice, and
+ * the second copy arrived at 17:31:24Z, 16 s after b02a3cc1 was pushed. Render
+ * deployed the event's SHA (new_commit, live 17:35:25Z over b02a3cc1), and THIS
+ * workflow ran for it too: that stale run cancelled the head's run under
+ * `cancel-in-progress` and measured 147c6630. 30 Sep had the same shape
+ * (d6d3896b's event reached Render 9 min late, after d3d28031).
+ *
+ * So in CI the run resolves the CURRENT head of the deployed branch and measures
+ * that; a run triggered by a stale event says so and still measures the head. An
+ * explicit `expect_sha` (dispatch) wins. When the head is required (CI) and
+ * cannot be read, the run is UNMEASURED — a red, never a fallback to the event.
+ */
+const SHA40_RE = /^[0-9a-f]{40}$/i;
+
+/** Two build identifiers name the same commit: a 7+ char prefix of one is a prefix of the other. */
+function sameBuild(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return false;
+  const n = Math.min(x.length, y.length);
+  return x.slice(0, n) === y.slice(0, n);
+}
+
+/**
+ * @param {{explicitSha?: string, eventSha?: string, headSha?: string|null, headRequired?: boolean}} input
+ * @returns {{sha: string|null, source: "explicit"|"head"|"event"|"head_unreadable"|"none", stale: boolean}}
+ */
+export function resolveTarget({ explicitSha, eventSha, headSha, headRequired = false }) {
+  const explicit = String(explicitSha ?? "").trim();
+  if (explicit) return { sha: explicit, source: "explicit", stale: false };
+  const head = typeof headSha === "string" && SHA40_RE.test(headSha.trim()) ? headSha.trim().toLowerCase() : null;
+  const event = String(eventSha ?? "").trim().toLowerCase();
+  if (head) return { sha: head, source: "head", stale: event.length > 0 && !sameBuild(event, head) };
+  if (headRequired) return { sha: null, source: "head_unreadable", stale: false };
+  return event ? { sha: event, source: "event", stale: false } : { sha: null, source: "none", stale: false };
+}
+
+/**
+ * ⭐ PHASE 1 SETTLES BEFORE THE JOURNEY. Measured: 2 of the first 7 automatic runs
+ * (16c5397b, ed245a15) saw the new build on the FIRST header hit, then had turn 1
+ * served by the OLD build and turn 2 answered HTTP 502 while it drained — Render
+ * routes to both during a rollover. So the target must be seen on N CONSECUTIVE
+ * probes (15 s apart) before Phase 2; any other answer restarts the count.
+ */
+export const SETTLE_MATCHES_DEFAULT = 3;
+
+/** One Phase-1 probe folded into the consecutive-match count. Pure. */
+export function settleStep(streak, served, want, needed) {
+  const next = sameBuild(served, want) ? streak + 1 : 0;
+  return { streak: next, done: next >= needed };
+}
+
+/**
+ * ⭐ PHASE 3 — LIVE-VS-HEAD WATCH. The stale deploy went live 2 min after the
+ * head did (5 Oct) — after every per-run check had finished — so nothing told
+ * anyone staging was serving the wrong build. For WATCH_WINDOW after the
+ * journey, every WATCH_INTERVAL the run reads the served build and the branch
+ * head. The head is compared with a BASELINE (the head this run measured, or —
+ * for an explicit dispatch sha — the head read when the run started): a newer
+ * push ends the watch (its own run takes over). The served build differing from
+ * the target, with the head still the baseline, on WATCH_REVERT_TICKS
+ * CONSECUTIVE decided ticks is a REVERT, and a red. A tick missing either
+ * reading decides nothing AND breaks the streak. `held` needs AFFIRMATIVE
+ * evidence: at least WATCH_MIN_DECIDED_FRACTION of the ticks MATCHED the target,
+ * the last decided tick matched, and at least WATCH_REVERT_TICKS ticks ran.
+ * Anything less is UNMEASURED, a red (Codex r2: 16 decided mismatches broken up
+ * by unreadable ticks must not read as held).
+ *
+ * 3 ticks (90 s), not 2: an old instance still answering just after a rollover
+ * must not read as a revert. The stale build in both incidents stayed live until
+ * someone redeployed (5 Oct: 4.5 min), so 90 s costs nothing in detection.
+ */
+export const WATCH_INTERVAL_MS = 30000;
+export const WATCH_REVERT_TICKS = 3;
+export const WATCH_MIN_DECIDED_FRACTION = 0.5;
+
+/**
+ * One watch tick. Pure.
+ * @param {{mismatches: number}} state
+ * @param {{served: string|null, head: string|null}} tick
+ * @param {string} target the commit the run measured
+ * @param {string|null} baselineHead the head the watch compares against (see above); null = cannot tell a push from a revert
+ * @returns {{state: {mismatches: number}, verdict: "continue"|"superseded"|"revert", decided: boolean, matched: boolean, served?: string, head?: string}}
+ */
+export function watchStep(state, tick, target, baselineHead, revertTicks = WATCH_REVERT_TICKS) {
+  const mismatches = state?.mismatches ?? 0;
+  const head = typeof tick?.head === "string" && SHA40_RE.test(tick.head) ? tick.head.toLowerCase() : null;
+  const served = typeof tick?.served === "string" && /^[0-9a-f]{7,40}$/i.test(tick.served) ? tick.served : null;
+  const baseline = typeof baselineHead === "string" && SHA40_RE.test(baselineHead) ? baselineHead : null;
+  if (head && baseline && !sameBuild(head, baseline)) return { state: { mismatches: 0 }, verdict: "superseded", decided: true, matched: false, head };
+  // Undecidable: the streak is broken, so a revert needs CONSECUTIVE decided mismatches.
+  if (!head || !baseline || !served) return { state: { mismatches: 0 }, verdict: "continue", decided: false, matched: false };
+  if (sameBuild(served, target)) return { state: { mismatches: 0 }, verdict: "continue", decided: true, matched: true };
+  const n = mismatches + 1;
+  return { state: { mismatches: n }, verdict: n >= revertTicks ? "revert" : "continue", decided: true, matched: false, served };
+}
+
+/**
+ * The watch's verdict when its window ends without a revert or a newer push. Pure.
+ * @param {{ticks: number, matched: number, lastDecidedMatched: boolean}} input
+ */
+export function watchOutcome({ ticks, matched, lastDecidedMatched }) {
+  if (ticks < WATCH_REVERT_TICKS) return "unmeasured";
+  return matched > 0 && matched >= Math.ceil(ticks * WATCH_MIN_DECIDED_FRACTION) && lastDecidedMatched === true
+    ? "held"
+    : "unmeasured";
+}
+
+/** The red a revert produces: what happened, and the exact redeploy. */
+export function revertMessage({ target, served, renderServiceId }) {
+  const svc = renderServiceId || "<render-service-id>";
+  return (
+    `LIVE ≠ HEAD: staging was serving ${target.slice(0, 8)} (the commit this run measured) but build ${served} went live ` +
+    `over it with no newer push — ` +
+    `a late duplicate push event redeployed an older commit (seen 30 Sep 19:21Z, 5 Oct 17:35Z). Redeploy the head now: ` +
+    `Render → cee-staging → Manual Deploy → "Deploy latest commit", or ` +
+    `curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" ` +
+    `https://api.render.com/v1/services/${svc}/deploys -d '{"commitId":"${target}"}'`
+  );
+}
 
 export const MIN_NODES = 4;
 export const MIN_OPTIONS = 2;
@@ -733,6 +885,17 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
   const f = [];
   diagnostics.forEach((d, i) => {
     if (!d) return;
+    // A turn that RAN a construction must name the construction call's prompt,
+    // not merely some prompt: the Agent's conversation call also carries an
+    // identity, and on its own it says nothing about which prompt built the graph.
+    if (d.constructed && !d.construct_identified) {
+      f.push(
+        `turn ${i + 1}: this turn ran a construction (_diagnostic_trace.construction is set) but no ` +
+          `allowed _provider_calls row carries prompt_alias=${AGENT_CONSTRUCT_ALIAS} with a provider, ` +
+          "model and prompt_sha256 — we cannot prove WHICH prompt built this graph.",
+      );
+      return;
+    }
     const delivered = carriedDraftGraph(bodies[i]);
     const declared = d.exit_path === DRAFT_EXIT_PATH;
     if (!delivered && !declared) return;
@@ -742,22 +905,128 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
       : `exit_path=${DRAFT_EXIT_PATH}`;
     f.push(
       `turn ${i + 1}: this turn produced a graph — it ${how} — but prompt_identity was empty: ` +
-        "the served prompt version/hash did not reach the trace, so we cannot prove WHICH " +
-        "prompt produced this graph.",
+        "the served prompt version/hash reached neither the trace nor the provider-call ledger, " +
+        "so we cannot prove WHICH prompt produced this graph.",
     );
   });
   return f;
+}
+
+/**
+ * Every turn must be served by the commit under test. Phase 1 confirms the
+ * build ONCE; this confirms it PER TURN, and per MODEL CALL: every Agent call
+ * stamps `cee_build` on its own `_provider_calls` row (`agentRequestIdentity`),
+ * so EVERY such row must carry a valid build equal to the expected commit — a
+ * missing or malformed stamp on a real call is "cannot confirm", a red, and one
+ * conflicting row is not masked by a matching one. A turn with no Agent call
+ * has nothing to stamp: it falls back to the trace's `environment.build_sha`
+ * (the orchestrator path), and is reported, not failed, when that is absent.
+ *
+ * @param {Array<{build_sha: string|null, agent_builds?: Array<string|null>}|null>} diagnostics
+ * @param {string} expectSha the commit Phase 1 waited for; blank = not checked
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertServedBuild(diagnostics, expectSha) {
+  const want = String(expectSha ?? "").trim().toLowerCase();
+  if (want.length < 7) return [];
+  const matches = (b) => {
+    const got = typeof b === "string" && BUILD_RE.test(b) ? b.toLowerCase() : "";
+    if (got.length === 0) return null;
+    const n = Math.min(got.length, want.length);
+    return got.slice(0, n) === want.slice(0, n);
+  };
+  const f = [];
+  diagnostics.forEach((d, i) => {
+    if (!d) return;
+    const builds = Array.isArray(d.agent_builds) ? d.agent_builds : [];
+    if (builds.length > 0) {
+      const unstamped = builds.filter((b) => matches(b) === null).length;
+      const other = [...new Set(builds.filter((b) => matches(b) === false))];
+      if (unstamped > 0) {
+        f.push(
+          `turn ${i + 1}: ${unstamped} of ${builds.length} Agent model call(s) carried no valid cee_build — ` +
+            `cannot confirm this turn was served by the commit under test ${want.slice(0, 8)}.`,
+        );
+      }
+      if (other.length > 0) {
+        f.push(
+          `turn ${i + 1}: served by build ${other.map((b) => b.slice(0, 8)).join(", ")}, not the commit under test ` +
+            `${want.slice(0, 8)} — this sample measured a different build from the one Phase 1 confirmed.`,
+        );
+      }
+      return;
+    }
+    if (matches(d.build_sha) === false) {
+      f.push(
+        `turn ${i + 1}: served by build ${String(d.build_sha).slice(0, 8)}, not the commit under test ${want.slice(0, 8)} — ` +
+          "this sample measured a different build from the one Phase 1 confirmed.",
+      );
+    }
+  });
+  return f;
+}
+
+/**
+ * The Agent route's identity carrier. With `PROXY_V5_TARGET=agent` every browser
+ * turn is served by `src/routes/agent-v1-turn.ts`, whose `_diagnostic_trace`
+ * (exit_path `agent_lane_v1`) has NO `prompt_identity`: its prompts are in no
+ * registry. Each model call instead records its identity on its own
+ * `_provider_calls` row (`adapters/llm/provider-policy.ts` GenerativeCall):
+ * `prompt_alias` (`agent-lane/runtime/prompt-identity.ts` AGENT_PROMPT_ALIASES),
+ * `prompt_sha256` of the instructions it actually sent, `provider`, `model`
+ * and `cee_build`. Measured on served 5e79d2d (fixtures
+ * `live-journey-agent-turn{1,2}-5e79d2d.json`): turn 1 carried agent.converse +
+ * agent.construct rows, turn 2 one agent.converse row; both `openai`.
+ */
+export const AGENT_CONSTRUCT_ALIAS = "agent.construct";
+const AGENT_ALIAS_RE = /^agent\.[a-z_]+$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const BUILD_RE = /^[0-9a-f]{7,40}$/i;
+/** sha256 of '' — what `promptSha256` records for absent instructions: "no prompt", never an identity. */
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/** The allowed ledger rows that fully identify the call: alias, prompt hash, provider and model. */
+export function agentLedgerIdentity(body) {
+  const rows = Array.isArray(body?._provider_calls) ? body._provider_calls : [];
+  return rows.filter(
+    (r) =>
+      r !== null &&
+      typeof r === "object" &&
+      r.outcome === "allowed" &&
+      typeof r.prompt_alias === "string" &&
+      AGENT_ALIAS_RE.test(r.prompt_alias) &&
+      typeof r.prompt_sha256 === "string" &&
+      SHA256_RE.test(r.prompt_sha256) &&
+      r.prompt_sha256 !== EMPTY_SHA256 &&
+      typeof r.provider === "string" &&
+      r.provider.length > 0 &&
+      typeof r.model === "string" &&
+      r.model.length > 0 &&
+      r.model !== "unknown",
+  );
 }
 
 /** Extract the diagnostics we report on every run, healthy or not. */
 export function extractDiagnostics(body) {
   const t = body?._diagnostic_trace ?? {};
   const identity = Array.isArray(t.prompt_identity) ? t.prompt_identity : [];
+  const ledger = agentLedgerIdentity(body);
+  // EVERY allowed Agent-aliased call, identified or not: each one stamps its build.
+  const rows = Array.isArray(body?._provider_calls) ? body._provider_calls : [];
+  const agentBuilds = rows
+    .filter((r) => r !== null && typeof r === "object" && r.outcome === "allowed" && typeof r.prompt_alias === "string" && AGENT_ALIAS_RE.test(r.prompt_alias))
+    .map((r) => (typeof r.cee_build === "string" ? r.cee_build : null));
   return {
-    build_sha: t?.environment?.build_sha ?? null,
+    build_sha: t?.environment?.build_sha ?? agentBuilds.find((b) => b !== null && BUILD_RE.test(b)) ?? null,
+    agent_builds: agentBuilds,
     exit_path: t?.exit_path ?? null,
-    prompt_identity_count: identity.length,
-    prompt_identity: identity.map((p) => `${p?.task_id}=${p?.version}#${String(p?.hash ?? "").slice(0, 8)}`),
+    prompt_identity_count: identity.length + ledger.length,
+    prompt_identity: [
+      ...identity.map((p) => `${p?.task_id}=${p?.version}#${String(p?.hash ?? "").slice(0, 8)}`),
+      ...ledger.map((r) => `${r.prompt_alias}=${r.provider}/${r.model}#${r.prompt_sha256.slice(0, 8)}`),
+    ],
+    constructed: t?.construction !== null && typeof t?.construction === "object",
+    construct_identified: ledger.some((r) => r.prompt_alias === AGENT_CONSTRUCT_ALIAS),
   };
 }
 
@@ -1251,37 +1520,131 @@ async function postTurn(base, origin, payload, timeoutMs) {
 }
 
 /**
- * PHASE 1. Poll /healthz until the served build matches `expectSha`.
+ * The build a CEE response says served it, from {@link BUILD_HEADER}; null when
+ * absent (a Render edge page during a deploy carries no CEE header).
+ *
+ * @param {{ get(name: string): string|null }} headers a fetch `Headers`
+ */
+export function servedBuildFromHeaders(headers) {
+  const v = headers?.get?.(BUILD_HEADER);
+  return typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim()) ? v.trim() : null;
+}
+
+/** One header probe: `{status, served}`, or null when unreachable. Never a body, never /healthz. */
+async function probeServedBuild(base) {
+  try {
+    const res = await fetch(`${base}${BUILD_PROBE_PATH}`, { signal: AbortSignal.timeout(20000) });
+    await res.body?.cancel();
+    return { status: res.status, served: servedBuildFromHeaders(res.headers) };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * The current head of the deployed branch, from the GitHub REST API (the job's
+ * own read-only token). Null when unconfigured or unreadable.
+ */
+async function readBranchHead() {
+  const repo = process.env.SMOKE_HEAD_REPO ?? "";
+  if (!repo) return null;
+  const branch = process.env.SMOKE_HEAD_BRANCH || "staging";
+  const api = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
+  const token = process.env.GITHUB_TOKEN ?? "";
+  try {
+    const res = await fetch(`${api}/repos/${repo}/branches/${encodeURIComponent(branch)}`, {
+      headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const sha = (await res.json())?.commit?.sha;
+    return typeof sha === "string" && SHA40_RE.test(sha) ? sha.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PHASE 1. Poll {@link BUILD_PROBE_PATH}'s build header until the served build
+ * matches `expectSha` on `settleMatches` CONSECUTIVE probes (see settleStep).
+ * Reads headers only — never a body, never /healthz.
  * Returns {ok, served, waitedMs}. Never throws on a bad build — the caller
  * decides, so the failure message stays in one place.
  */
-async function waitForBuild(base, expectSha, timeoutMs) {
+async function waitForBuild(base, expectSha, timeoutMs, settleMatches = SETTLE_MATCHES_DEFAULT) {
   const deadline = Date.now() + timeoutMs;
   const want = expectSha.slice(0, 7);
   let served = null;
   let attempt = 0;
+  let streak = 0;
   while (Date.now() < deadline) {
     attempt += 1;
-    try {
-      const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
-      const body = await res.json();
-      served = body?.build ?? null;
-      if (served && served.slice(0, 7) === want) {
+    const probe = await probeServedBuild(base);
+    if (probe) {
+      served = probe.served;
+      const step = settleStep(streak, served, expectSha, settleMatches);
+      streak = step.streak;
+      if (step.done) {
         return { ok: true, served, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
       }
-      log(`  [freshness] attempt ${attempt}: serving ${served ?? "?"}, want ${want} — waiting…`);
-    } catch (e) {
-      log(`  [freshness] attempt ${attempt}: /healthz unreachable (${e.name}) — waiting…`);
+      log(
+        streak > 0
+          ? `  [freshness] attempt ${attempt}: HTTP ${probe.status}, serving ${served} — match ${streak}/${settleMatches}, settling…`
+          : `  [freshness] attempt ${attempt}: HTTP ${probe.status}, serving ${served ?? "?"}, want ${want} — waiting…`,
+      );
+    } else {
+      streak = 0;
+      log(`  [freshness] attempt ${attempt}: ${BUILD_PROBE_PATH} unreachable — waiting…`);
     }
     // Never sleep PAST the deadline. A fixed 15s wait on the final iteration
     // burns up to 15s of job time after the poll has already given up. The
-    // 15s interval itself is deliberately kept — ~60 healthz GETs over 15
-    // minutes is negligible load and needs no backoff.
+    // 15s interval itself is deliberately kept: the probe is answered from
+    // memory by the auth hook, so ~60 GETs over 15 minutes cost no I/O.
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
   }
   return { ok: false, served, waitedMs: timeoutMs, attempt };
+}
+
+/**
+ * PHASE 3. Watch the served build against the branch head for `windowMs` (see
+ * watchStep). Returns the verdict: `held` (the head stayed live), `superseded`
+ * (a newer push — its own run watches), `revert`, or `unmeasured` (no tick had
+ * both readings: could-not-measure, a red).
+ */
+async function watchLiveVsHead(base, target, baselineHead, windowMs) {
+  const deadline = Date.now() + windowMs;
+  let state = { mismatches: 0 };
+  let ticks = 0;
+  let decided = 0;
+  let matched = 0;
+  let lastDecidedMatched = false;
+  log(`\n## Phase 3 — live-vs-head watch (${Math.round(windowMs / 60000)} min, every ${WATCH_INTERVAL_MS / 1000}s, head ${target.slice(0, 8)})`);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, Math.min(WATCH_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
+    ticks += 1;
+    const [probe, head] = await Promise.all([probeServedBuild(base), readBranchHead()]);
+    const step = watchStep(state, { served: probe?.served ?? null, head }, target, baselineHead);
+    state = step.state;
+    if (step.decided) {
+      decided += 1;
+      lastDecidedMatched = step.matched;
+    }
+    if (step.matched) matched += 1;
+    if (step.verdict === "superseded") {
+      log(`  tick ${ticks}: staging moved to ${step.head.slice(0, 8)} — its own run watches it. Watch ends.`);
+      return { verdict: "superseded", ticks, decided };
+    }
+    if (step.served) log(`  tick ${ticks}: ⚠ serving ${step.served}, head still ${target.slice(0, 8)} (${state.mismatches}/${WATCH_REVERT_TICKS})`);
+    if (step.verdict === "revert") return { verdict: "revert", served: step.served, ticks, decided };
+  }
+  const verdict = watchOutcome({ ticks, matched, lastDecidedMatched });
+  log(
+    `  ${ticks} ticks, ${decided} decided, ${matched} serving the target — ` +
+      (verdict === "held" ? "the head stayed live." : "NOT enough affirmative evidence that the head stayed live."),
+  );
+  return { verdict, ticks, decided, matched };
 }
 
 /**
@@ -1315,7 +1678,7 @@ function intFromEnv(name, fallback, min, max) {
  * run and produced no rate at all, which is the same "no measurement reads as a
  * verdict" defect one level up. A thrown sample still counts against the floor.
  */
-async function runJourneySample({ base, origin, turnTimeout, index, total }) {
+async function runJourneySample({ base, origin, turnTimeout, index, total, expectSha = "" }) {
   const scenarioId = uuid();
   log(`\n### Sample ${index}/${total} (scenario_id ${scenarioId})`);
   const failures = [];
@@ -1403,6 +1766,7 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
     const turnDiagnostics = turns.map((t) => t.d);
     const turnBodies = turns.map((t) => t.body);
     failures.push(...assertPromptProvenance(turnDiagnostics, turnBodies));
+    failures.push(...assertServedBuild(turnDiagnostics, expectSha));
   } catch (e) {
     const name = typeof e?.name === "string" && e.name.length > 0 ? e.name : "Error";
     log(`  turn threw: ${e?.stack ?? e}`);
@@ -1422,7 +1786,9 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
 async function main() {
   const base = (process.env.SMOKE_BASE_URL ?? "").replace(/\/$/, "");
   const origin = (process.env.SMOKE_ORIGIN ?? "").trim().replace(/\/$/, "");
-  const expectSha = process.env.SMOKE_EXPECT_SHA ?? "";
+  const explicitSha = process.env.SMOKE_EXPECT_SHA ?? "";
+  const eventSha = process.env.SMOKE_EVENT_SHA ?? "";
+  const headRequired = Boolean(process.env.SMOKE_HEAD_REPO);
   const freshnessTimeout = Number(process.env.SMOKE_FRESHNESS_TIMEOUT_MS ?? 900000);
   const turnTimeout = Number(process.env.SMOKE_TURN_TIMEOUT_MS ?? 180000);
 
@@ -1458,6 +1824,17 @@ async function main() {
   // and that path returns before Phase 2 — so the two maxima are effectively
   // exclusive. The job's timeout-minutes is set above their sum regardless.
   const budgetMs = intFromEnv("SMOKE_JOURNEY_BUDGET_MS", 720000, 30000, 3600000);
+  const settleMatches = intFromEnv("SMOKE_SETTLE_MATCHES", 3, 1, 10);
+  // Phase 3 window. 0 turns the watch off — local runs only: with a required head
+  // (CI) anything under a minute is refused, so the watch cannot be quietly disabled.
+  const watchMs = intFromEnv("SMOKE_WATCH_MS", 720000, 0, 1800000);
+  if (headRequired && watchMs < WATCH_INTERVAL_MS * WATCH_REVERT_TICKS) {
+    log(
+      `FATAL: SMOKE_WATCH_MS=${watchMs} with SMOKE_HEAD_REPO set — the watch must run at least ` +
+        `${WATCH_REVERT_TICKS} ticks (${(WATCH_INTERVAL_MS * WATCH_REVERT_TICKS) / 1000}s) to be able to see a revert.`,
+    );
+    process.exit(2);
+  }
 
   if (!base || !origin) {
     log("FATAL: SMOKE_BASE_URL and SMOKE_ORIGIN are required.");
@@ -1476,10 +1853,32 @@ async function main() {
   const failures = [];
   const samplingOptions = { floor, requested, minSamples };
 
+  // ---- WHICH COMMIT: the branch head, not the event's SHA (see resolveTarget) ----
+  // Read even for an explicit sha: it is the watch's baseline (see watchStep).
+  const headSha = headRequired ? await readBranchHead() : null;
+  const target = resolveTarget({ explicitSha, eventSha, headSha, headRequired });
+  if (target.source === "head_unreadable") {
+    failures.push(
+      `COULD NOT READ the head of ${process.env.SMOKE_HEAD_BRANCH || "staging"} — this run cannot tell which commit ` +
+        "it is measuring. Could-not-measure, never a pass.",
+    );
+    report(failures, null, samplingOptions, "the branch head could not be read");
+    return;
+  }
+  if (target.stale) {
+    log(
+      `\n⚠ STALE PUSH EVENT: this run was triggered for ${eventSha.slice(0, 8)} but the branch head is ` +
+        `${target.sha.slice(0, 8)}. A late duplicate push event can make Render deploy ${eventSha.slice(0, 8)} over ` +
+        "the head; this run measures the head, and Phase 3 watches for exactly that.",
+    );
+  }
+  const expectSha = target.sha ?? "";
+  log(`measuring: ${expectSha ? expectSha.slice(0, 8) : "(nothing)"} (${target.source})`);
+
   // ---- PHASE 1: did the build ship? ----
   if (expectSha) {
-    log(`\n## Phase 1 — deploy freshness (want ${expectSha.slice(0, 7)})`);
-    const fresh = await waitForBuild(base, expectSha, freshnessTimeout);
+    log(`\n## Phase 1 — deploy freshness (want ${expectSha.slice(0, 7)}, ${settleMatches} consecutive)`);
+    const fresh = await waitForBuild(base, expectSha, freshnessTimeout, settleMatches);
     if (!fresh.ok) {
       failures.push(
         `DEPLOY DID NOT SHIP: after ${Math.round(fresh.waitedMs / 1000)}s, ${base} is still serving ` +
@@ -1521,19 +1920,38 @@ async function main() {
       break;
     }
     const started = Date.now();
-    samples.push(await runJourneySample({ base, origin, turnTimeout, index: i, total: requested }));
+    samples.push(await runJourneySample({ base, origin, turnTimeout, index: i, total: requested, expectSha }));
     slowestSampleMs = Math.max(slowestSampleMs, Date.now() - started);
+  }
+
+  // ---- PHASE 3: does the head STAY live? (needs the head: CI only) ----
+  if (expectSha && watchMs > 0 && headRequired) {
+    const baselineHead = target.source === "head" ? expectSha : headSha;
+    const watch = await watchLiveVsHead(base, expectSha, baselineHead, watchMs);
+    if (watch.verdict === "revert") {
+      const msg = revertMessage({ target: expectSha, served: watch.served, renderServiceId: process.env.SMOKE_RENDER_SERVICE_ID });
+      failures.push(msg);
+      // A GitHub error annotation: shown on the run's summary page, so the red names its fix where it is read.
+      log(`::error title=STAGING LIVE ≠ HEAD::${msg}`);
+    } else if (watch.verdict === "unmeasured") {
+      failures.push(
+        `LIVE-VS-HEAD WATCH UNMEASURED: ${watch.ticks} ticks, ${watch.decided} decided, ${watch.matched} serving the ` +
+          "measured commit — not enough affirmative evidence that it stayed live. Could-not-measure, never a pass.",
+      );
+    }
+  } else if (expectSha && watchMs > 0) {
+    log(`\n## Phase 3 — SKIPPED (no SMOKE_HEAD_REPO: a local run cannot read the head)`);
   }
 
   report(failures, samples, samplingOptions);
 }
 
-function report(failures, samples, samplingOptions) {
+function report(failures, samples, samplingOptions, notAttemptedReason = "the deploy did not ship") {
   // PHASE 2 NEVER RAN. Reported as its own state rather than as an empty
   // sample set: "the deploy did not ship" and "five samples all passed" must
   // never share an output shape.
   if (samples === null) {
-    log(`\n## Draft sampling — NOT ATTEMPTED (the deploy did not ship; sampling the wrong build proves nothing)`);
+    log(`\n## Draft sampling — NOT ATTEMPTED (${notAttemptedReason}; sampling the wrong build proves nothing)`);
   } else {
     const summary = summariseSamples(samples);
     log("");

@@ -1,0 +1,4 @@
+Load gate exit: 1
+{"load":25.2392578125,"threshold":25}
+node_modules/.bin/eslint --config acceptance-evidence/s5-census/eslint.config.mjs acceptance-evidence/s5-census/eslint.config.mjs < /dev/null
+Load gate refused; process not launched.

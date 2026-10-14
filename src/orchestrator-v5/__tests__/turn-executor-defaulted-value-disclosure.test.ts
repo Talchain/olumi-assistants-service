@@ -181,7 +181,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
@@ -346,7 +345,7 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
  * A fix whose test cannot see it is not tested (CLAUDE.md trap 11).
  */
 
-const HEADLINE = 'Launch now scored highest against your goal in 62% of runs of this model.';
+const HEADLINE = 'Launch now was supported by 62% of runs of this model.';
 
 const GRAPH_WITH_OPTIONS: GraphStateIngress = {
   nodes: [

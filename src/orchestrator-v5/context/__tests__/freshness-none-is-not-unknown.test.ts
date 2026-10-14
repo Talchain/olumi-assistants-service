@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 /**
  * ⛔⛔ `none` AND `unknown` ARE DIFFERENT ANSWERS, AND FEEDING A DEGRADED READ'S
  * EMPTY ARRAY TO THE DERIVATION PUBLISHES A FALSE ABSENCE.
@@ -52,7 +53,7 @@ function runFact(graphHash: string): RunAnalysisHandlerFact {
       scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       leading_option_id: 'opt_a',
       summary: 'Ran analysis on your current scenario.',
-      enrichment: { analysis_status: 'computed' },
+      enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
       graph_hash_at_run: graphHash,
       computed_at: '2026-09-24T12:00:00.000Z',
     },

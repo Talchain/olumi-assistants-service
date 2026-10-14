@@ -89,6 +89,22 @@ const REGISTERED_STAMPERS = [
   // instruction: CQE supplies the percentage amount, the baseline question
   // supplies the bound subject, and the handler checks the exact tuple.
   'orchestrator-v5/routing/baseline-answer-mutation.ts',
+  // S-E GOALS S4 (D-07): a ceiling the user states in this message ("we only
+  // have a budget for £200,000") on a money quantity the model already holds.
+  // It is an absolute amount on that quantity's own scale, so it stamps 'level'
+  // only, and only when the node's held quantity_frame is absent or 'level'
+  // (otherwise it refuses). It has no branch that can produce a delta.
+  'orchestrator-v5/agent-lane/stated-limit.ts',
+  // S4 ceiling-stock (#2946): the user's OWN stated ceiling on a level quantity ("at most 1,900 riders"), written
+  // only from the typed pending the user confirmed (the approval token binds the figure; the writer recomputes the
+  // postimage from its own graph AND brief). An absolute amount on that quantity's own scale, so it stamps 'level'
+  // only; it has no branch that can produce a delta.
+  'orchestrator-v5/agent-lane/ceiling-stock.ts',
+  // Batch C: ruling 15 (several targets; DL scope decision 2) — the goal's OWN stated target written as its row beside the
+  // other targets (`withGoalTargetRows`), so the Run's same-draw joint covers it. It is written ONLY when the goal's held
+  // `goal_threshold_frame` is 'level' and its raw is the stored `goal_threshold_raw` (the goal panel's raw + row pair), so
+  // it stamps 'level' only and has no branch that can produce a delta.
+  'orchestrator-v5/agent-lane/admit-model.ts',
 ] as const;
 
 /**

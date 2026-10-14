@@ -55,8 +55,21 @@ describe('an old-shape add-option proposal is refused, never written', () => {
       return { status: 200, json: {} };
     };
     const caps = createAgentCapabilities(d, new ProposalStore());
-    const r = await caps.authoriseChange(ctx, { proposal_id: 'gmh_0123456789ab' } as never);
+    const r = await caps.authoriseChange({ ...ctx, typed_approval_of: 'gmh_0123456789ab' }, { proposal_id: 'gmh_0123456789ab' } as never);
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'unknown_proposal' }));
     expect(writes).toEqual([]);
+  });
+
+  it.each([undefined, 'gmh_abcdef012345', 'prop_abcdef012345'])('a missing or different server-bound approval (%s) cannot be supplied in model arguments', async (typed_approval_of) => {
+    const calls: string[] = [];
+    const caps = createAgentCapabilities(async (path) => {
+      calls.push(path);
+      throw new Error('An unapproved hold must never dispatch a read or write');
+    }, new ProposalStore());
+    const ref = 'gmh_0123456789ab';
+    const result = await caps.authoriseChange({ ...ctx, typed_approval_of, user_turn_text: 'Do not add anything.' },
+      { proposal_id: ref, typed_approval_of: ref } as never);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref });
+    expect(calls).toEqual([]);
   });
 });

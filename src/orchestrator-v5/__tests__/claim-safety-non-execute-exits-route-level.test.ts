@@ -1,3 +1,5 @@
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * G-CEE-1 — THE PERMISSION BELONGS TO THE DISPLAYED FACT, NOT TO WHETHER THIS
  * TURN RAN AN ANALYSIS (ROADMAP 1.233 finish-line criterion 2 + 1.349 P1-2).
@@ -272,17 +274,16 @@ function makeStore(): Record<string, unknown> {
       return { facts: facts.slice(0, limit), total_count: facts.length };
     },
     loadGraph: async () => persistedGraph,
-    loadGraphAndBriefText: async () => ({ graph: persistedGraph, briefText: null }),
+    loadGraphAndBriefText: async () => ({ revision: 7, graph: persistedGraph, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   };
 }
 
 vi.mock('../session/index.js', () => ({
-  getSessionStore: () => makeStore(),
+  getSessionStore: () => withScenarioRevision(makeStore()),
   resetSessionStoreForTests: () => undefined,
   SessionReadError: class SessionReadError extends Error {},
 }));
@@ -556,6 +557,9 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
   });
 
   describe('the EDIT-GRAPH RECOVERY exit', () => {
+    // A2: rollback-only persisted-invalid recovery copy. CAS ON refuses with 409.
+    beforeEach(() => __setUseAppendV6ForTest(false));
+    afterEach(() => __setUseAppendV6ForTest(true));
     // Edit intent, NO graph_state on the request, and a persisted graph that
     // cannot be parsed ⇒ `persisted_graph_invalid` recovery. "Add a risk …" is
     // explicitly documented in vague-edit-guard.ts as a shape the vague guard
@@ -1566,6 +1570,8 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     });
 
     it('the EDIT-GRAPH RECOVERY copy is untouched, to the byte', async () => {
+      // A2: the old recovery copy ships only on the rollback path.
+      __setUseAppendV6ForTest(false);
       // 2.388: `persisted_graph_invalid`, not absence — see UNPARSEABLE_GRAPH.
       persistedGraph = UNPARSEABLE_GRAPH;
       const { body } = await postTurn(app, 'Add a risk for coordination overhead', {
@@ -1757,3 +1763,5 @@ describe('T1 claim safety — no route exit may stamp a LITERAL permission', () 
     ).toEqual([]);
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

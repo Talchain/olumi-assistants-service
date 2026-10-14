@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ A CURRENT RESULT OFFERS THE PRODUCT'S OWN NEXT STEPS (Paul's staging test, 1 Oct 00:1xZ: "the chips are gone
  * (Run, pre-mortem…)"; DL #75 5922040401 + 5922121657; AIQ words 5922131997; CODEX control class 5922106400).
@@ -50,6 +51,8 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
     }));
@@ -89,8 +92,8 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
     const b = await ask('What do you make of this?');
     expect(b._agent.tool_calls, 'vacuity: the answer used no tool, so no other control exists').toEqual([]);
     expect(b.suggested_actions).toEqual([
-      { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?' },
-      { id: 'agent-next-what-would-change', label: 'What would change the result?', message: 'What would most likely change this result?' },
+      { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?' },
+      { id: 'agent-next-what-would-change', label: 'What would change this?', message: 'What would most likely change this result?' },
       { id: 'agent-next-strengthen', label: 'Strengthen the model', message: 'What would most strengthen this model?' },
     ]);
     for (const c of b.suggested_actions) expect(c.action_type, `${c.id} is plain text, never a typed action`).toBeUndefined();
@@ -98,7 +101,7 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
 
   it("RED: the Run button's turn ends on the next steps when its result reads back current (Paul: 'the Run, pre-mortem…')", async () => {
     const b = await ask('Run analysis.', { source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
-    expect(runs, 'vacuity: the Run fast path really ran').toBe(1);
+    expect(runs, 'vacuity: the Run loop really ran').toBe(1);
     expect(b.suggested_actions.map((c) => c.id)).toEqual(NEXT_IDS);
   });
 
@@ -175,6 +178,12 @@ describe('the helpers', () => {
     expect(stillValidOffers(NEXT_STEP_CHIPS, now(STALE))).toEqual([]);
     expect(stillValidOffers(NEXT_STEP_CHIPS, now(undefined))).toEqual([]);
     expect(stillValidOffers(NEXT_STEP_CHIPS, now(CURRENT, ['prop_x']))).toEqual([]);
+    // DL P2 on #2512: Widen offered in a next step's place survives a retry on an unchanged result (3 chips stay 3).
+    const { nextStepsWithWiden } = await import('../method-turn/widen-turn.js');
+    const withWiden = nextStepsWithWiden(NEXT_STEP_CHIPS, true);
+    expect(stillValidOffers(withWiden, now(CURRENT)).map((a) => a.id)).toEqual(withWiden.map((a) => a.id));
+    expect(withWiden.map((a) => a.id)).toContain('agent-next-widen');
+    expect(stillValidOffers(withWiden, now(STALE))).toEqual([]);
     expect(stillValidOffers([], now(CURRENT)), 'never offered → never replayed').toEqual([]);
   });
 

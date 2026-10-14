@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 /**
  * ⭐ THE USER IS ASKED FOR TODAY'S LEVEL OF A QUANTITY THEY LIMIT, WHEN THE MODEL HOLDS NONE OF THEIRS (DL ruling #72
  * 5863840239 (ii), condition 2).
@@ -17,7 +18,7 @@
  * and never when an option SETS the factor (that option is checked at the level it sets — the run card's rule,
  * `estimated-limit-card.ts`). Pure.
  */
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf, settingClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
 import { sayFigure } from './say-figure.js';
@@ -81,10 +82,11 @@ export function limitedLevelAsks(graph: {
     const os = (node.observed_state ?? null) as Record<string, unknown> | null;
     const raw = os?.raw_value;
     const unit = typeof os?.unit === 'string' ? os.unit.trim() : '';
-    const estimate = typeof raw === 'number' && Number.isFinite(raw) ? { value: raw, unit } : null;
+    const unverified = isUnverifiedUserMaterial(os);
+    const estimate = !unverified && typeof raw === 'number' && Number.isFinite(raw) ? { value: raw, unit } : null;
     // A level that is not Olumi's is not asked about: the user's own (stated or ratified), or an unsourced one — at
     // construction only the definitional "100 % of today" frame (`admit-model.ts`), which is no estimate of anything.
-    const whose = classifyValueSource(os?.source);
+    const whose = valueClassOf(os);
     if (estimate !== null && whose !== 'ai_drafted' && whose !== 'system_repaired') continue;
     const limits = rows.map(sayLimit).join(' and ');
     asks.push({
@@ -93,7 +95,9 @@ export function limitedLevelAsks(graph: {
       quantity,
       constraint_ids: rows.map((r) => r.constraint_id),
       estimate,
-      question: estimate !== null
+      question: unverified
+        ? `What is "${quantity}" today? Not confirmed from your brief`
+        : estimate !== null
         ? `What is "${quantity}" today? Your limit (${limits}) can only be checked against Olumi's estimate of ${sayFigure(estimate.value, estimate.unit)}, not a figure you gave, until you give yours.`
         : `What is "${quantity}" today? Your limit (${limits}) cannot be checked until the model has its current level.`,
     });
@@ -180,15 +184,16 @@ export function optionSetLimitAsks(graph: {
       const entry = mergeInterventionSourceObjects(option as Record<string, unknown>)[nodeId];
       if (label === '' || entry === null || typeof entry !== 'object') continue;
       const e = entry as Record<string, unknown>;
-      if (!OLUMIS.has(classifyValueSource(e.source)) || typeof e.raw_value !== 'number' || !Number.isFinite(e.raw_value)) continue;
+      if (!OLUMIS.has(settingClassOf(e)) || typeof e.raw_value !== 'number' || !Number.isFinite(e.raw_value)) continue;
       assumed.push({ option: label, value: e.raw_value, unit: typeof e.unit === 'string' && e.unit.trim() !== '' ? e.unit.trim() : nodeUnit });
     }
     if (assumed.length === 0) continue;
 
     const raw = os?.raw_value;
     const known = typeof raw === 'number' && Number.isFinite(raw);
-    const whose = classifyValueSource(os?.source);
-    const today = !known ? null : OLUMIS.has(whose) ? { value: raw as number, unit: nodeUnit } : undefined;
+    const whose = valueClassOf(os);
+    const unverified = isUnverifiedUserMaterial(os);
+    const today = unverified ? null : !known ? null : OLUMIS.has(whose) ? { value: raw as number, unit: nodeUnit } : undefined;
 
     const limits = rows.map(sayLimit).join(' and ');
     const said = assumed.map((a) => sayFigure(a.value, a.unit));
@@ -196,7 +201,9 @@ export function optionSetLimitAsks(graph: {
       ? `${said[0]} each under those options`
       : assumed.map((a, i) => `${said[i]} under "${a.option}"`).join(' and ');
     const under = names(assumed.map((a) => a.option));
-    const question = today === undefined
+    const question = unverified
+      ? `What is "${quantity}" today? Not confirmed from your brief`
+      : today === undefined
       ? `What would "${quantity}" be under ${under}? Your limit (${limits}) can only be checked against Olumi's assumed ` +
         `${figures}, not figures you gave, until you give yours.`
       : today === null

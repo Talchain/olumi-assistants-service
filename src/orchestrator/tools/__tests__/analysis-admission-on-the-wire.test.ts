@@ -239,15 +239,11 @@ describe('the claim-strength bound discriminates across real state classes', () 
   ] as const;
 
   /**
-   * ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES"): a fresh draft whose goal states a target it can't
-   * test yet (no today's level, a path resting only on defaulted links) is `exploratory` — no leader, no shares, no
-   * goal chance — with the reason on the mode's field. The SEMANTIC floor this spec is about still publishes its own
-   * reason on its own field. Draft 1 states no target, so its mode is the floor's alone. Draft 3's only goal row is a
-   * DEADLINE ("6 months", `deadline_metadata`): DR row 3's time, not a target, so its mode is the floor's alone too.
+   * DR row 4 (#2371) used to cap draft 2 (a target it can't test yet) at `exploratory`. RE-PINNED, RT-10 B′ R2 (Science
+   * #87 5999608477; DL e8 CONFIRMED, amending PTL #77 5914383843 for an untestable target): a target withholds only the
+   * claims against it, in the Run, so every fresh draft's mode is the semantic floor's alone again — the A1 claim this
+   * spec was written for. Draft 1 states no target; draft 3's only goal row is a DEADLINE (DR row 3).
    */
-  const CAPPED_BY_TARGET: ReadonlySet<string> = new Set([
-    'acceptance-evidence/draft-speed/live-draft-2-ev-fleet.json',
-  ]);
 
   it.each(FRESH_DRAFTS)(
     'FRESH DRAFT %s — admissible, and may NOT name a leader',
@@ -264,20 +260,19 @@ describe('the claim-strength bound discriminates across real state classes', () 
       // ⭐ THE 3 SEP P0 AS AN ASSERTION: executable is not the same question as
       // claimable, and on a fresh draft the two answers differ.
       expect(verdict.semantic_quality_sufficient).toBe(false);
-      const capped = CAPPED_BY_TARGET.has(file);
-      expect(verdict.permitted_analysis_mode).toBe(capped ? 'exploratory' : 'quantified_provisional');
+      expect(verdict.permitted_analysis_mode).toBe('quantified_provisional');
 
       // The withholding is not silent — it names the field and what would change it.
       const mode = verdict.reasons.find((r) => r.field === 'permitted_analysis_mode');
-      expect(mode?.code).toBe(capped ? 'TARGET_NOT_TESTABLE' : 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED');
+      expect(mode?.code).toBe('CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED');
       expect(mode?.message.length).toBeGreaterThan(0);
       expect(verdict.reasons.find((r) => r.field === 'semantic_quality_sufficient')?.code).toBe('CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED');
     },
   );
 
   it('WORKED SESSION — a user-stated baseline lifts the same graph to comparative_leader', () => {
-    // The semantic lift, with DR row 4 held off: his draft's target can't be tested yet (#2371), which caps the real
-    // draft at `exploratory` (`target-testability.test.ts`).
+    // The semantic lift, with the target held off so the row isolates the semantic predicate (#2371's target cap, which
+    // this once had to avoid, is retired by RT-10 B′ R2).
     const graph = withoutTarget(paulDraft());
     const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
 

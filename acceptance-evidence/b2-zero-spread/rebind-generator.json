@@ -1,0 +1,100 @@
+{
+  "label": "rebind-generator",
+  "source_head": "69ff73cf180efb4099c10446197661a33f9777da",
+  "setup": {
+    "initial_command": "git worktree add --detach /private/tmp/b2zs-staging-69ff 69ff73cf180efb4099c10446197661a33f9777da < /dev/null",
+    "initial_exit": 128,
+    "initial_error": "fatal: could not create directory of '/Users/paulslee/olumi-work/d2-cee/.git/worktrees/b2zs-staging-69ff': Operation not permitted",
+    "fallback_clone": "git clone --shared --bare /private/tmp/accel-er-b2scope-cee /private/tmp/b2zs-staging-git-69ff.git < /dev/null",
+    "worktree_command": "git --git-dir=/private/tmp/b2zs-staging-git-69ff.git worktree add --detach /private/tmp/b2zs-staging-69ff 69ff73cf180efb4099c10446197661a33f9777da < /dev/null",
+    "node_modules_command": "ln -s /private/tmp/accel-er-event-cee/node_modules /private/tmp/b2zs-staging-69ff/node_modules",
+    "upstream_git_metadata_changed": false
+  },
+  "gate_command": "node -e 'const load = require('\"'\"'os'\"'\"').loadavg()[0]; console.log(JSON.stringify({load, threshold:25})); process.exit(Number.isFinite(load) && load < 25 ? 0 : 1)' < /dev/null",
+  "gate_exit": 0,
+  "gate_output": "{\"load\":4.36083984375,\"threshold\":25}",
+  "generator_exit": 0,
+  "command": "node --import tsx /private/tmp/accel-er-b2scope-cee/src/routes/__tests__/fixtures/b2-zero-spread/generate-staging-control.ts < /dev/null",
+  "cwd": "/private/tmp/b2zs-staging-69ff",
+  "provenance": {
+    "source_head": "69ff73cf180efb4099c10446197661a33f9777da",
+    "code_root": "/private/tmp/b2zs-staging-69ff",
+    "execution_cwd": "/private/tmp/b2zs-staging-69ff",
+    "detached": true,
+    "tracked_changes_before": "",
+    "tracked_changes_after": "",
+    "code_imports": [
+      "/private/tmp/b2zs-staging-69ff/src/orchestrator-v5/goal-target/goal-chance-licence.ts",
+      "/private/tmp/b2zs-staging-69ff/src/orchestrator-v5/goal-target/goal-chance-range-agent.ts",
+      "/private/tmp/b2zs-staging-69ff/src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts",
+      "/private/tmp/b2zs-staging-69ff/src/orchestrator-v5/compose/goal-probability-transport.ts",
+      "/private/tmp/b2zs-staging-69ff/src/routes/canonical-analysis-view.ts"
+    ],
+    "code_sha256": {
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": "f78f4fe7ddf079a883f2aed7da2e75e99aa3e90c4980ce67b4922455b8593e5d",
+      "src/orchestrator-v5/goal-target/goal-chance-range-agent.ts": "6b837c2ae8d13126c4e697fba95d618884245d6bd59773053fd1ff92c59656ac",
+      "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": "bb08d0d63e65749607a5493565a528497c9e416aaa7324df99c6c271020ae2b4",
+      "src/orchestrator-v5/compose/goal-probability-transport.ts": "df40eb03db071bb3e63f4800e02390dc9701c096466b09a4d419d3632a2868c2",
+      "src/routes/canonical-analysis-view.ts": "d23820939130890363a7ba58b14e52a99e11f72e233785accdc8371bbf68d639"
+    },
+    "witness_sha256": {
+      "run.json": "efc9c5380431027aec9d7d902bc91d1a496af2c74258b8846d9ac4339ed2e2e5",
+      "read-graph-1791489457020.json": "b2a372adca05d3eb0baa91c9eb6b76a7cfa04cd7ce42328d8de8e80bfb5c47e4"
+    },
+    "generator": "/private/tmp/accel-er-b2scope-cee/src/routes/__tests__/fixtures/b2-zero-spread/generate-staging-control.ts",
+    "generator_sha256": "ea11003c9957cf674a7b8363563bd26e7fe94f25d59eca5bdff21323c9fe723d",
+    "output": "/private/tmp/accel-er-b2scope-cee/src/routes/__tests__/fixtures/b2-zero-spread/starter-point-staging.json",
+    "output_sha256": "3dbbdc4b02038cac8e965cf7c202c93c00a0e131397a9af4a7dee59b1f8a499d",
+    "option_cells": [
+      {
+        "option_id": "raise_prices_10",
+        "cell": {
+          "kind": "withheld",
+          "reasons": [
+            {
+              "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+              "message": "This comparison turns on the links from \u2018Price-rise customer churn\u2019 to \u2018monthly recurring revenue\u2019, from \u2018Support burden from starter tier\u2019 to \u2018monthly recurring revenue\u2019 and from \u2018Price rise\u2019 to \u2018Price-rise customer churn\u2019 and 1 more, whose strengths aren't sized in the model yet. Set them to see how much they matter."
+            },
+            {
+              "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+              "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least \u00a3126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in \u00a3/month does a change in Price-rise customer churn bring?"
+            }
+          ],
+          "face": "Chance not shown yet",
+          "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least \u00a3126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in \u00a3/month does a change in Price-rise customer churn bring?"
+        }
+      },
+      {
+        "option_id": "launch_starter_tier",
+        "cell": {
+          "kind": "range",
+          "display": "between about 95% and 99%",
+          "detail": {
+            "range": "between about 95% and 99%",
+            "depends_on": {
+              "kind": "link_strength",
+              "from_label": "Support burden from starter tier",
+              "to_label": "monthly recurring revenue",
+              "among": "unsized_links"
+            }
+          },
+          "face": "\u2018Launch starter tier\u2019: between about 95% and 99% chance of meeting your goal, in this model."
+        }
+      },
+      {
+        "option_id": "keep_current_pricing",
+        "cell": {
+          "kind": "withheld",
+          "reasons": [
+            {
+              "code": "reason_not_recorded",
+              "message": null
+            }
+          ],
+          "face": "Chance not shown yet",
+          "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least \u00a3126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in \u00a3/month does a change in Price-rise customer churn bring?"
+        }
+      }
+    ]
+  }
+}

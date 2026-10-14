@@ -25,7 +25,13 @@ import { detectUnreconciledStatedMagnitudes } from '../../../cee/provenance/mone
 
 const d = new URL('./fixtures/', import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, d), 'utf8'));
-const CONFIG_A = () => admitCandidateModel(load('faithful.json') as CandidateModel, load('widened.json'));
+const CONFIG_A = () => {
+  const model = load('faithful.json') as CandidateModel;
+  const quote = 'Our Pro price is £49.';
+  const factors = model.factors.map((f) => f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit'
+    ? { ...f, baseline_evidence: { quote } } : f);
+  return admitCandidateModel({ ...model, factors }, load('widened.json'), quote);
+};
 const CONFIG_B = () => admitCandidateModel(load('configB.json') as CandidateModel, {});
 
 const AGREES = 'We charge £49 a month for the Pro plan, keeping monthly churn under 4%.';

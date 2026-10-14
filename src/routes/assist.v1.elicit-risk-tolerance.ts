@@ -77,7 +77,7 @@ export default async function route(app: FastifyInstance) {
   const RISK_TOLERANCE_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_RISK_TOLERANCE_RATE_LIMIT_RPM") ?? 60;
   const FEATURE_VERSION = "risk-tolerance-1.0.0";
 
-  app.post("/assist/v1/elicit-risk-tolerance", async (req, reply) => {
+  app.post("/assist/v1/elicit-risk-tolerance", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

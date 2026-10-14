@@ -48,9 +48,11 @@
  */
 
 import { z } from "zod";
+import { DecisionFlipBlockV1Schema, type DecisionFlipBlockV1 } from "@talchain/schemas";
 import { config } from "../config/index.js";
 import {
   PLOT_RUN_TIMEOUT_MS,
+  PLOT_DECISION_FLIP_TIMEOUT_MS,
   PLOT_RUN_BRIEF_TIMEOUT_MS,
   PLOT_VALIDATE_TIMEOUT_MS,
   RETRY_BACKOFF_MS,
@@ -449,6 +451,8 @@ function cancellableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
 // ============================================================================
 
 export interface PLoTClientRunOpts {
+  /** One ephemeral candidate invocation must issue at most one engine request. Other callers retain their policy. */
+  retryPolicy?: 'no_retry';
   /** Turn-level AbortSignal for budget-aware retry. */
   turnSignal?: AbortSignal;
   /** Timestamp (Date.now()) when the turn started — used to compute remaining budget. */
@@ -460,6 +464,37 @@ export interface PLoTClientRunOpts {
 export interface PLoTClient {
   run(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<V2RunResponseEnvelope>;
   validatePatch(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<ValidatePatchResult>;
+  /**
+   * SCIENCE ROBUSTNESS (EXPERIMENT): "What would change this?" — the SAME /v2/run payload a Run sends, plus
+   * `decision_flip`. Optional so every existing `{run, validatePatch}` double stays valid; never throws except when the
+   * TURN aborts (the caller went away), so every other outcome is a typed result the caller maps to RC's honest limit.
+   */
+  decisionFlip?(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<DecisionFlipFetchResult>;
+}
+
+/**
+ * The decision-flip call's typed outcome. `block` has passed `DecisionFlipBlockV1Schema` (CEE is the validating
+ * boundary: PLoT forwards ISL's block verbatim behind a structural guard only — DL ruling #85 5948081549).
+ */
+export type DecisionFlipFetchResult =
+  | { ok: true; block: DecisionFlipBlockV1 }
+  | { ok: false; reason: 'timeout' | 'network' | 'unparsable' }
+  | { ok: false; reason: 'http_error'; status: number }
+  | { ok: false; reason: 'unavailable'; detail: string };
+
+/** Pure: a /v2/run decision-flip response body → its typed outcome. A block that fails the strict parse is unparsable. */
+export function parseDecisionFlipResponse(raw: unknown): DecisionFlipFetchResult {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'unparsable' };
+  const body = raw as { decision_flip?: unknown; decision_flip_unavailable?: unknown };
+  if (body.decision_flip !== undefined && body.decision_flip !== null) {
+    const parsed = DecisionFlipBlockV1Schema.safeParse(body.decision_flip);
+    return parsed.success ? { ok: true, block: parsed.data } : { ok: false, reason: 'unparsable' };
+  }
+  const un = body.decision_flip_unavailable as { reason?: unknown } | null | undefined;
+  if (un && typeof un === 'object' && typeof un.reason === 'string') {
+    return { ok: false, reason: 'unavailable', detail: un.reason.slice(0, 64) };
+  }
+  return { ok: false, reason: 'unparsable' };
 }
 
 class PLoTClientImpl implements PLoTClient {
@@ -491,7 +526,7 @@ class PLoTClientImpl implements PLoTClient {
       requestId,
       opts,
       {
-        skipRetryEntirely: briefBearing,
+        skipRetryEntirely: briefBearing || opts?.retryPolicy === 'no_retry',
         baseTimeoutMs: timeoutMs,
         // FIX 2 (this lane): the TIMEOUT class is not retried on /v2/run.
         // Fast-failing 5xx / network errors still get exactly one clamped
@@ -499,6 +534,36 @@ class PLoTClientImpl implements PLoTClient {
         skipRetryOnTimeout: true,
       },
     ) as Promise<V2RunResponseEnvelope>;
+  }
+
+  async decisionFlip(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<DecisionFlipFetchResult> {
+    validateRunPayload(payload);
+    const startTime = Date.now();
+    const { fetchSignal, clear, classifyAbort } = this.beginAttempt('decision_flip', PLOT_DECISION_FLIP_TIMEOUT_MS, requestId, opts);
+    log.info({ url: '/v2/run', request_id: requestId, timeout_ms: PLOT_DECISION_FLIP_TIMEOUT_MS }, 'PLoT decision-flip request');
+    try {
+      const response = await fetch(`${this.baseUrl}/v2/run`, {
+        method: 'POST',
+        headers: this.buildHeaders(requestId),
+        body: JSON.stringify(payload),
+        signal: fetchSignal,
+      });
+      if (!response.ok) return { ok: false, reason: 'http_error', status: response.status };
+      // The cap covers the BODY too: headers then a stalled body end as a typed timeout, never past it (Codex P2 #2542).
+      const result = parseDecisionFlipResponse(await response.json());
+      log.info({ request_id: requestId, elapsed_ms: Date.now() - startTime, ok: result.ok }, 'PLoT decision-flip response');
+      return result;
+    } catch (error) {
+      try {
+        classifyAbort(error, Date.now() - startTime); // rethrows a TURN abort unchanged; a timeout as PLoTTimeoutError
+      } catch (aborted) {
+        if (aborted instanceof PLoTTimeoutError) return { ok: false, reason: 'timeout' };
+        throw aborted;
+      }
+      return { ok: false, reason: 'network' };
+    } finally {
+      clear();
+    }
   }
 
   async validatePatch(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<ValidatePatchResult> {
@@ -597,7 +662,7 @@ class PLoTClientImpl implements PLoTClient {
                 ? '5xx'
                 : 'network',
           },
-          "PLoT retry skipped — brief-bearing run; retrying would double the LLM-backed decision-review chain",
+          "PLoT retry skipped — invocation policy forbids a second request",
         );
         throw firstError;
       }
@@ -722,7 +787,7 @@ class PLoTClientImpl implements PLoTClient {
    * timeout-vs-turn-abort discrimination in `classifyAbort`.
    */
   private beginAttempt(
-    operation: 'run' | 'validate_patch',
+    operation: 'run' | 'validate_patch' | 'decision_flip',
     timeoutMs: number,
     requestId: string,
     opts?: PLoTClientRunOpts,

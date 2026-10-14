@@ -1,0 +1,7 @@
+{
+  "mutant": "class3-off",
+  "test_exit": 1,
+  "killed": true,
+  "restored": true,
+  "source_sha256": "ca6d14b362c1f644ba46e9d37dfeabf7326843321b1aba6ca39a9dc3e7b5eb2a"
+}

@@ -125,7 +125,8 @@ function readNodeId(node: unknown): string | null {
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
-function isRetainedExcluded(node: unknown): boolean {
+/** Exported for rule R (`held-user-links.ts` `endsOfGraph`): its route structure is the graph the Run is SENT. */
+export function isRetainedExcluded(node: unknown): boolean {
   if (node === null || typeof node !== 'object') return false;
   // Strict equality against the single literal. Never a negation of 'included'.
   return (node as { analysis_participation?: unknown }).analysis_participation === RETAINED_EXCLUDED;

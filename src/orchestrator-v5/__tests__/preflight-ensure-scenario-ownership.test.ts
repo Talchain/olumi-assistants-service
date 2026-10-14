@@ -1,7 +1,9 @@
 /**
  * V5 pre-flight ownership — IDOR fail-closed (Lane C).
  *
- * Pins the full ownership quadrant for {@link preflightEnsureScenario}. The
+ * Historical ownership quadrant, now pinned by the production hook rows in
+ * scenario-ownership-rows.test.ts. This file retains creation-port availability
+ * checks for {@link preflightEnsureScenario}. The
  * `authoritativeUserId` (stored owner, from `ensureScenarioExists`) and the
  * caller-supplied `userId` are each nullable, so there are four quadrants:
  *
@@ -60,76 +62,8 @@ const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 const OWNER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const OTHER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-/**
- * Minimal SessionStore whose `ensureScenarioExists` reports a fixed stored
- * owner regardless of the caller-supplied user_id (mirrors the real RPC,
- * which returns the AUTHORITATIVE row owner, not the caller's claim).
- */
-function storeReturningOwner(storedOwner: string | null): SessionStore {
-  return {
-    ensureScenarioExists: vi.fn(async () => ({ user_id: storedOwner })),
-  } as unknown as SessionStore;
-}
-
-describe('preflightEnsureScenario — ownership quadrant (IDOR fail-closed)', () => {
-  it('ALLOW: stored owner null + caller null (guest scenario, anonymous caller)', async () => {
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      null,
-      REQUEST_ID,
-      storeReturningOwner(null),
-    );
-    expect(result).toEqual({ ok: true });
-  });
-
-  it('ALLOW: stored owner null + caller present (guest scenario, any caller)', async () => {
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      OTHER_ID,
-      REQUEST_ID,
-      storeReturningOwner(null),
-    );
-    expect(result).toEqual({ ok: true });
-  });
-
-  it('ALLOW: stored owner present + caller is the owner', async () => {
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      OWNER_ID,
-      REQUEST_ID,
-      storeReturningOwner(OWNER_ID),
-    );
-    expect(result).toEqual({ ok: true });
-  });
-
-  it('REFUSE: stored owner present + caller is a DIFFERENT user (cross-tenant)', async () => {
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      OTHER_ID,
-      REQUEST_ID,
-      storeReturningOwner(OWNER_ID),
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.reason).toBe('scenario_owned_by_other_user');
-  });
-
-  it('REFUSE (IDOR fail-closed): stored owner present + caller ABSENT (null)', async () => {
-    // The dangerous quadrant. Before the fix this returned { ok: true }
-    // because the ownership check was skipped whenever EITHER side was null,
-    // so any request omitting user_id bypassed ownership on an owned scenario.
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      null,
-      REQUEST_ID,
-      storeReturningOwner(OWNER_ID),
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.reason).toBe('scenario_requires_authenticated_owner');
-  });
-
-});
+// Ownership quadrants and healthy controls now run through the production hook
+// in scenario-ownership-rows.test.ts (the named moved preflight property rows).
 
 describe('preflightEnsureScenario — ownership oracle availability', () => {
   /** A configured store whose ownership RPC fails the way the real one does. */
@@ -149,15 +83,7 @@ describe('preflightEnsureScenario — ownership oracle availability', () => {
   // returning ok:false, the fail-closed assertions underneath are vacuous —
   // they would pass no matter what the code did.
 
-  it('POSITIVE CONTROL: a healthy oracle on a guest scenario is OPEN (ok:true)', async () => {
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      null,
-      REQUEST_ID,
-      storeReturningOwner(null),
-    );
-    expect(result).toEqual({ ok: true });
-  });
+
 
   it('POSITIVE CONTROL: no store CONFIGURED at all is still skipped-open (ok:true, skipped)', async () => {
     // No store injected → getSessionStore() throws (mocked at module scope).
@@ -233,15 +159,7 @@ describe('preflightEnsureScenario — a store that cannot answer is not a store 
   // Prove the probe can observe an OPEN verdict before asserting a CLOSED one.
   // Without this, the refusal assertion below would pass even if
   // preflightEnsureScenario refused unconditionally.
-  it('POSITIVE CONTROL: the same probe reports ok:true for a store that DOES answer', async () => {
-    const result = await preflightEnsureScenario(
-      SCENARIO_ID,
-      null,
-      REQUEST_ID,
-      storeReturningOwner(null),
-    );
-    expect(result).toEqual({ ok: true });
-  });
+
 
   it('REFUSE (fail closed): a configured store missing ensureScenarioExists', async () => {
     // The regression this pins: a `typeof store.ensureScenarioExists !==

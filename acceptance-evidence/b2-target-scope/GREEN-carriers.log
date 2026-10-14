@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  2 passed (2)
+      Tests  27 passed (27)
+   Start at  16:44:15
+   Duration  3.37s (transform 1.95s, setup 211ms, import 2.67s, tests 213ms, environment 0ms)
+

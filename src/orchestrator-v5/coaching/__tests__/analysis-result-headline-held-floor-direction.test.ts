@@ -27,7 +27,7 @@ const ENRICHMENT = BLOCK['enrichment'] as Json;
 const LEADER = BLOCK['leading_option_id'] as string;
 const DIRECTION = 'GOAL_DIRECTION_UNATTESTED';
 const THRESHOLD = 'GOAL_THRESHOLD_NOT_CONVERTIBLE';
-const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points';
+const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 const UNTESTED_CLAUSE = 'could not test whether any option reaches your goal';
 
 /** The served enrichment with its goal codes reduced to `keep`, on both carriers. */

@@ -18,6 +18,7 @@ import {
   scoreReturnSessionContinuity,
   type ReturnSessionMutant,
 } from '../scorer/return-session-continuity.js';
+import { relationshipPhrase } from '../../../src/orchestrator-v5/format/format-graph-for-context.js';
 
 const kase = loadReturnSessionContinuityCase();
 
@@ -171,7 +172,8 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
         exists: 0.87,
       }),
     ]);
-    expect(afterReload.routedUserMessage).toContain('moderate positive link');
+    // Derived through the production band table, not a literal (see the scorer).
+    expect(afterReload.routedUserMessage).toContain(relationshipPhrase(0.64));
     expect(afterReload.contextPack.analysis?.leading_option).toMatchObject({
       label: kase.analysis.leading_option_label,
       probability: kase.analysis.win_probabilities[kase.analysis.leading_option_id],

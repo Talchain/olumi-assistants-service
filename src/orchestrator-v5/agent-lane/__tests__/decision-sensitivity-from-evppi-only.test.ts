@@ -7,11 +7,14 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { analysisResultForAgent, NO_SINGLE_ASSUMPTION, withoutStrongestDriverClause } from '../decision-sensitivity.js';
+import { analysisResultForAgent, withoutStrongestDriverClause } from '../decision-sensitivity.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 
 const SERVED = (JSON.parse(readFileSync(new URL('./fixtures/served-levelless-pin2-turn3-result.json', import.meta.url), 'utf8')) as { analysis_result: Record<string, unknown> }).analysis_result;
 const ctx = { scenario_id: '3c2d1e0f-4a5b-4c6d-8e7f-9a0b1c2d3e4f', authenticated_user_id: 'user-a', request_id: 'r' };
 type Enr = { factor_sensitivity?: unknown; decision_brief?: { top_drivers?: unknown }; factor_evppi?: unknown };
+// Author's derivative: the served block with its robustness check removed, so the screen shows no robustness (S2i control).
+const NO_ROBUSTNESS = (() => { const { robustness: _r, ...e } = SERVED.enrichment as Record<string, unknown>; return { ...SERVED, enrichment: e }; })();
 
 describe('the run result the Agent reads (served levelless-reason-PIN2 turn 3)', () => {
   it('PRECONDITION: the served block really ranks the excluded option\'s factor "biggest" while every EVPPI is below resolution', () => {
@@ -20,14 +23,19 @@ describe('the run result the Agent reads (served levelless-reason-PIN2 turn 3)',
     expect((e.factor_evppi as { status: string }[]).every((r) => r.status === 'below_resolution')).toBe(true);
   });
 
-  it('RED: structural sensitivity is not handed to the Agent, and the true sentence is: no single assumption measurably changes which option leads', () => {
+  it('RED: structural sensitivity is not handed to the Agent, and none_measurable makes NO claim (RC 5950124321: no sentence to repeat)', () => {
     const out = analysisResultForAgent(SERVED) as { enrichment: Enr; decision_sensitivity: unknown };
     expect(out.enrichment.factor_sensitivity).toBeUndefined();
     expect(out.enrichment.decision_brief?.top_drivers).toBeUndefined();
-    expect(out.decision_sensitivity).toEqual({ status: 'none_measurable', say: NO_SINGLE_ASSUMPTION });
+    // S2i (DL GO): robustness ran on this Run, so the screen shows it and no absence status is handed to the Agent.
+    expect(out).not.toHaveProperty('decision_sensitivity');
+    expect(out.enrichment.factor_evppi).toBeUndefined();
+    expect(JSON.stringify(out)).not.toMatch(/single assumption/iu);
     expect(JSON.stringify(out)).not.toContain('"driver_label":"biggest"');
-    // EVPPI itself — the decision measure — is still there to read.
-    expect(Array.isArray(out.enrichment.factor_evppi)).toBe(true);
+    // CONTROL (no robustness on screen): none_measurable, and EVPPI itself — the decision measure — is still there to read.
+    const control = analysisResultForAgent(NO_ROBUSTNESS) as { enrichment: Enr; decision_sensitivity: unknown };
+    expect(control.decision_sensitivity).toEqual({ status: 'none_measurable' });
+    expect(Array.isArray(control.enrichment.factor_evppi)).toBe(true);
     // The input is never mutated (the user-facing blocks share it).
     expect(((SERVED.enrichment as Enr).decision_brief?.top_drivers as unknown[]).length).toBeGreaterThan(0);
   });
@@ -42,7 +50,10 @@ describe('the run result the Agent reads (served levelless-reason-PIN2 turn 3)',
 
   it('no EVPPI at all → no claim either way', () => {
     const { factor_evppi: _gone, ...e } = SERVED.enrichment as Record<string, unknown>;
-    expect((analysisResultForAgent({ ...SERVED, enrichment: e }) as { decision_sensitivity: unknown }).decision_sensitivity).toEqual({ status: 'not_measured' });
+    const { robustness: _r, ...bare } = e;
+    expect((analysisResultForAgent({ ...SERVED, enrichment: bare }) as { decision_sensitivity: unknown }).decision_sensitivity).toEqual({ status: 'not_measured' });
+    // S2i: with the served robustness check on screen, no absence status at all.
+    expect(analysisResultForAgent({ ...SERVED, enrichment: e })).not.toHaveProperty('decision_sensitivity');
   });
 
   it('the summary\'s structural "strongest driver" clause is dropped; the rest of the sentence stays', () => {
@@ -62,11 +73,28 @@ describe('the real runAnalysis hands the Agent the projection; the user-facing b
     let seen: unknown[] = [];
     const dispatch: InternalDispatch = async () => ({ status: 200, json: { analysis_ready: { status: 'ready', options: [], blockers: [] }, blocks: [SERVED] } });
     const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', (p) => { seen = p.blocks ?? []; });
-    const r = await caps.runAnalysis(ctx, { reason: 'compare the options' });
+    const r = await caps.runAnalysis(ctx, { reason: 'compare the options', effects_timing: null });
     const result = r.result as { enrichment: Enr; decision_sensitivity: unknown };
-    expect(result.decision_sensitivity).toEqual({ status: 'none_measurable', say: NO_SINGLE_ASSUMPTION });
+    // S2i (DL GO): robustness ran on this Run, so the screen shows it and no absence status is handed to the Agent.
+    expect(result).not.toHaveProperty('decision_sensitivity');
     expect(result.enrichment.factor_sensitivity).toBeUndefined();
     // CONTRAST: the block the product renders is the served one, unchanged.
     expect(((seen[0] as { enrichment: Enr }).enrichment.factor_sensitivity as unknown[]).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * RC 5950124321 (SCIENCE/DSK finding 4, served D1 journey15 06:42Z): "The comparison is fragile… Separately, no single
+ * assumption measurably changes which option leads" contradicted itself; EVPPI is flat in additive models and never varies
+ * links, so `none_measurable` licenses no claim. The instruction now says so, in RC's words.
+ */
+describe('the Agent is never told to say that no single assumption changes the answer', () => {
+  const contract: string = HOST_TOOL_CONTRACT;
+  it('RED: the instruction holds RC\'s clause and not the sentence', () => {
+    expect(contract).not.toMatch(/no single assumption measurably/iu);
+    expect(contract).toContain('otherwise (none_measurable or not measured) make no claim about which assumption matters most, and never that nothing would change the answer.');
+  });
+  it('CONTROL: the measured branch is unchanged (name most_sensitive, whose it is, offer to change it)', () => {
+    expect(contract).toContain('when its status is `measured`, name `most_sensitive`');
   });
 });

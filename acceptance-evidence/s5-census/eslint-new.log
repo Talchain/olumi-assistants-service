@@ -1,0 +1,3 @@
+Load gate exit: 0
+{"load":15.52685546875,"threshold":25}
+node_modules/.bin/eslint --config /tmp/s5-eslint.config.mjs scripts/ci/goal-record-census.mjs scripts/ci/goal-record-census.d.mts tests/contract/goal-record-census.guard.test.ts < /dev/null

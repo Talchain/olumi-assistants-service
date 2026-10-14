@@ -36,7 +36,9 @@ vi.mock('../../../transforms/analysis-ready.js', () => ({
   extractConstraintDropBlockers: vi.fn(() => []),
 }));
 
-vi.mock('../../../../schemas/cee-v3.js', () => ({
+vi.mock('../../../../schemas/cee-v3.js', async (importOriginal) => ({
+  // Partial mock: keep the real exports (e.g. EdgeV3) that other imported modules read at load time.
+  ...(await importOriginal<Record<string, unknown>>()),
   CEEGraphResponseV3: {
     safeParse: vi.fn(() => {
       if (zodShouldSucceed) {

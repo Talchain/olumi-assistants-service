@@ -175,8 +175,8 @@ export function flipThresholdFallbackBody(
 ): string {
   const body =
     currentDisplay !== null && flipDisplay !== null
-      ? `If ${factorLabel} moves from ${currentDisplay} to ${flipDisplay}, the leading option would change.`
-      : `If ${factorLabel} moves far enough, the leading option would change.`;
+      ? `If ${factorLabel} moves from ${currentDisplay} to ${flipDisplay}, the most-supported option would change.`
+      : `If ${factorLabel} moves far enough, the most-supported option would change.`;
   return truncateCardProse(body, FLIP_THRESHOLD_CARD_BODY_MAX);
 }
 

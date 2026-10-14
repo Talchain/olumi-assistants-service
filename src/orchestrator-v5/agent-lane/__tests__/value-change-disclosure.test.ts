@@ -136,9 +136,15 @@ describe('the route actually carries it to the user', () => {
     // cannot satisfy this and a moved line cannot break it.
     const decl = ROUTE.slice(ROUTE.indexOf('const owed = '));
     const body = decl.slice(0, decl.indexOf('];') + 2);
-    expect(body).toContain('disclosuresFor(result.tool_results)');
+    // The Run's methods note (Science 393023 (2)) is owed only when the reply has not said it, so the call reads the reply.
+    expect(body).toContain('disclosuresFor(result.tool_results, text)');
     expect(body).toContain('valueChangeDisclosures(stateFacts)');
-    expect(ROUTE).toContain('withDisclosures(narration.text, owed)');
+    // The same owed array reaches both ask selection and the final displayed reply. BYPASS1: on a host-written reply (or an
+    // unknown current state) it is `owed` itself; on the AI's own reply, only the lines the AI lacks (the AI holds the values).
+    expect(ROUTE).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
+    expect(ROUTE).toContain('const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed');
+    expect(ROUTE).toContain('withDisclosures(narrationText, owedShown)');
+    expect(ROUTE).toContain('withDisclosures(narrationText, [...owedShown, ...decisionLines])');
   });
 
   it('⛔⛔ AND `current_state_unknown` SUPPRESSES THE OTHER DISCLOSURES ENTIRELY — the composition order is what decides it', () => {

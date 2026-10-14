@@ -1,3 +1,8 @@
+import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
+import { ANALYSIS_REREAD_TIMEOUT_MS } from './session/analysis-read-deadline.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
+import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
+import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * Build a V5 TurnContext from an ingress payload.
  *
@@ -21,6 +26,7 @@
  * `TurnContext` continues to compile via structural subtyping.
  */
 
+import { goalScopeClaimInput, type GoalScopeClaimInput } from './compose/goal-scope-claim-input.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type {
   DecisionContext,
@@ -78,6 +84,8 @@ import {
 } from './context/reconcile-recent-mutation-facts.js';
 import {
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+  SCENARIO_ANALYSIS_FACT_CAP,
+  isoInstantOrderKey,
   readScenarioAnalysisClaimSafetyFact,
   reconcileScenarioAnalysisFacts,
   type DurableScenarioAnalysisFactRead,
@@ -340,6 +348,8 @@ export interface EnrichedTurnContext extends TurnContext {
    * scenarioBriefText behaviour).
    */
   readonly persistedGraph: unknown | null;
+  /** Same turn-start scenario read as persistedGraph; absent on legacy/degraded reads. */
+  readonly persistedRevision?: number;
   /**
    * F2 (Codex deep-review) — the discriminated result of the canonical
    * `scenarios.graph` read that produced {@link persistedGraph}. Consumed by
@@ -605,6 +615,9 @@ export interface BuildTurnContextOptions {
 }
 
 export interface RunAnalysisScenarioSnapshot {
+  /** Scenario revision from the same persisted read as the analysed graph (B2). */
+  readonly evaluatedScenarioRevision?: number;
+  readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
     readonly id: string;
@@ -742,8 +755,8 @@ export async function buildTurnContext(
     // one of the twenty derivation sites.
     //
     // WHY IT IS NEEDED. `deriveAnalysisFreshness` has accepted
-    // `analysisInvalidatedAt` since C8 and it is the ONLY input that can make a
-    // hash MATCH still read `stale` — a model restored to an earlier version
+    // `analysisInvalidatedAt` since C8 to make a hash MATCH still read `stale`
+    // after a restore — a model restored to an earlier version
     // can be byte-identical to the one the analysis ran against while the
     // analysis is no longer about the model the user is looking at. Measured at
     // this SHA: of the twenty production `deriveAnalysisFreshness` call sites,
@@ -826,11 +839,25 @@ export async function buildTurnContext(
       prior_turn_count: 0,
     });
   }
-  const {
-    facts: priorFacts,
-    factsWithTurn: priorFactsWithTurn,
-    readOk: factsReadOk,
-  } = priorFactsRead;
+  // Stored hot-window and durable Runs enter reasoning together with the persisted graph read above.
+  // Gate before reconciliation so every downstream selector receives the same fact bytes and row identities.
+  const gatedStoredFacts = new Map<HandlerFact, HandlerFact>();
+  const gateStoredFact = (fact: HandlerFact): HandlerFact => {
+    const existing = gatedStoredFacts.get(fact);
+    if (existing !== undefined) return existing;
+    if (fact.fact_type !== 'run_analysis') return fact;
+    const result = withReadTimeHorizonGate(fact.result, persistedScenarioStateRead.graph, fact.result.enrichment);
+    const gated = result === fact.result ? fact : { ...fact, result };
+    gatedStoredFacts.set(fact, gated);
+    return gated;
+  };
+  const priorFacts = priorFactsRead.facts.map(gateStoredFact);
+  const priorFactsWithTurn = priorFactsRead.factsWithTurn.map(entry => ({ ...entry, fact: gateStoredFact(entry.fact) }));
+  const factsReadOk = priorFactsRead.readOk;
+  const gatedDurableScenarioAnalysisFactRead = durableScenarioAnalysisFactRead.status === 'ok'
+    ? { ...durableScenarioAnalysisFactRead,
+      facts: durableScenarioAnalysisFactRead.facts.map(entry => ({ ...entry, fact: gateStoredFact(entry.fact) })) }
+    : durableScenarioAnalysisFactRead;
   /**
    * DID THE READ THAT PRODUCED `priorFacts` SUCCEED — ALL OF IT?
    *
@@ -875,7 +902,7 @@ export async function buildTurnContext(
     scenarioId: payload.scenario_id,
     hotWindowFacts: priorFacts,
     hotWindowFactsWithIdentity: priorFactsWithTurn,
-    durableRead: durableScenarioAnalysisFactRead,
+    durableRead: gatedDurableScenarioAnalysisFactRead,
   });
   const newestAnalysisFactRead = readScenarioAnalysisClaimSafetyFact(
     scenarioAnalysisFactSet,
@@ -1021,7 +1048,10 @@ export async function buildTurnContext(
     // have it replayed indefinitely — long after the store recovered.
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
-    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph },
+    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph,
+      currentScenarioRevision: scenarioState.read.status === 'ok_present' ? scenarioState.revision : undefined,
+      analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(scenarioAnalysisFactSet) },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See
@@ -1221,6 +1251,7 @@ export async function buildTurnContext(
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
     persistedGraphRead: canonicalGraphRead,
+    ...(scenarioState.revision !== undefined ? { persistedRevision: scenarioState.revision } : {}),
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
@@ -1832,6 +1863,9 @@ export async function loadDraftLossStands(
  * disclosure by accident — which is exactly how the false claim shipped: one
  * catch block covering every failure class, marking them all identically.
  */
+// One existing session-read budget for the best-effort UPDATE, capped by response headroom.
+export const GRAPH_FAILURE_MARK_TIMEOUT_MS = Math.min(ANALYSIS_REREAD_TIMEOUT_MS, TURN_RESPONSE_HEADROOM_MS);
+
 export async function markDraftGraphWriteFailed(
   scenarioId: string,
   turnId: string,
@@ -1839,10 +1873,32 @@ export async function markDraftGraphWriteFailed(
   requestId: string,
   disclosure: GraphWriteFailureDisclosure,
 ): Promise<void> {
+  // Failure marks are write-once. Classify a latched refusal before any broad
+  // draft catch can mark it as a lost draft; onSend reuses this same helper.
+  const refusal = readWriteRefusal();
+  if (refusal?.fence?.scenarioId === scenarioId && refusal.fence.turnId === turnId
+    && readSuccessfulDoorEntries() === 0) {
+    reason = 'model_write_ownership_refused';
+    disclosure = 'turn_dead_only';
+  }
   const store = tryGetSessionStore(requestId, scenarioId);
   if (!store?.markGraphWriteFailed) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
+    // Only an ownership refusal's mark is bounded (it gates the refusal response). Every other
+    // mark stays awaited to completion: a late draft_loss mark could otherwise land after a
+    // later successful graph commit has resolved losses, and stand unresolved.
+    if (reason !== 'model_write_ownership_refused') {
+      await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
+      return;
+    }
+    // A late completion/rejection can settle only the losing promise, never the response callback again.
+    await Promise.race([
+      store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Graph failure mark deadline exceeded')), GRAPH_FAILURE_MARK_TIMEOUT_MS);
+      }),
+    ]);
   } catch (e) {
     log.warn(
       {
@@ -1852,7 +1908,7 @@ export async function markDraftGraphWriteFailed(
       },
       'V5 build-turn-context — markGraphWriteFailed threw; the 500 is unchanged but the loss trace is missing',
     );
-  }
+  } finally { clearTimeout(timer); }
 }
 
 async function fetchPersistedScenarioState(
@@ -1862,6 +1918,7 @@ async function fetchPersistedScenarioState(
 ): Promise<{
   readonly graph: unknown | null;
   readonly briefText: string | null;
+  readonly revision?: number;
   readonly read: CanonicalGraphReadState;
 }> {
   // No store here means the store factory/configuration failed upstream. It is
@@ -1884,7 +1941,10 @@ async function fetchPersistedScenarioState(
       result.graph != null
         ? { status: 'ok_present', graph: result.graph }
         : { status: 'ok_absent' };
-    return { graph: result.graph, briefText: result.briefText, read };
+    return {
+      graph: result.graph, briefText: result.briefText, read,
+      ...(read.status === 'ok_present' && result.revision !== undefined ? { revision: result.revision } : {}),
+    };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -2076,6 +2136,7 @@ async function fetchScenarioAnalysisFacts(
       query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
       total_count: page.total_count,
       facts: page.facts,
+      ...(page.legacy_edit_facts === undefined ? {} : { legacy_edit_facts: page.legacy_edit_facts }),
     };
   } catch (error) {
     const rawCode = error instanceof SessionReadError ? error.code : undefined;
@@ -2106,7 +2167,7 @@ async function fetchScenarioAnalysisFacts(
     });
     return {
       status: 'degraded',
-      reason: contractInvalid ? 'contract_invalid' : 'unavailable',
+      reason: contractInvalid ? 'contract_invalid' : 'read_failed',
     };
   }
 }
@@ -2349,81 +2410,16 @@ async function fetchPriorFacts(
   }
 }
 
-/**
- * V5 ingress pre-flight: ensure the scenarios row exists, creating it on-
- * demand. Replaces the 2026-04-20 existence-only check (dbd59c9e) which
- * rejected valid traffic when the UI's INSERT race-landed after the first
- * V5 turn.
- *
- * Lives alongside buildTurnContext because this file is the declared
- * session-layer integration point (per the state-write invariant at
- * scripts/validate-state-write-invariant.sh — only session/, commit.ts,
- * and build-turn-context.ts are allowed to import the SessionStore).
- *
- * Behaviour matrix:
- *
- * Ownership is keyed on the STORED owner (the RPC's authoritative user_id),
- * never on whether the caller happened to supply one — that distinction is
- * what closes the IDOR-class hole (a caller omitting user_id must NOT skip
- * the check on an owned scenario).
- *
- *   Stored owner NON-null (an owned scenario):
- *     - Caller == owner → `{ ok: true }`.
- *     - Caller is a DIFFERENT user → cross-tenant attempt;
- *       `{ ok: false, reason: 'scenario_owned_by_other_user' }`, route 422.
- *     - Caller ABSENT (no user_id) → IDOR fail-closed;
- *       `{ ok: false, reason: 'scenario_requires_authenticated_owner' }`,
- *       route 422. An anonymous caller is not the owner.
- *
- *   Stored owner NULL (a guest scenario — VITE_AUTH_MODE=guest):
- *     - Any caller (anonymous or identified) → `{ ok: true }`. There is no
- *       ownership concept for an unowned scenario.
- *       ⚠ This openness is a deliberate product decision AND a real
- *       disclosure/mutation surface: anyone holding a guest scenario's UUID
- *       can read its conversation and append turns to it. It is NOT closed
- *       here because nothing on the guest wire distinguishes the legitimate
- *       guest from any other caller — the guest journey carries no cookie,
- *       no token and no header. Closing it needs a client-side credential
- *       (a UI change), not a CEE change. Do not re-describe this as "a
- *       product feature, not a leak": it is both, and the second half is
- *       what an earlier version of this comment taught readers to skip.
- *
- *   Store NOT CONFIGURED (`getSessionStore()` throws — no Supabase in this
- *   environment), any caller:
- *     - Skipped, turn proceeds (`{ ok: true, skipped }`). There is no
- *       persistence here, therefore no stored owner to protect.
- *
- *   Scenario row ABSENT (checked read-only, BEFORE the upsert):
- *     - No turn was ever admitted on it → CREATE, turn proceeds. This is the
- *       first-turn race the upsert exists for and it is preserved exactly.
- *     - A turn WAS once admitted on it → the scenario existed and its row is
- *       gone: `{ ok: false, reason: 'scenario_deleted' }`, route 422.
- *     See the block at the check itself for why absence alone cannot decide
- *     this and where the surviving evidence comes from.
- *
- *   Ownership RPC FAILS against a CONFIGURED store, any caller:
- *     - Fail CLOSED (`{ ok: false, reason: 'scenario_ownership_unverifiable' }`,
- *       route 422). We asked who owns this scenario and could not find out;
- *       proceeding would grant access we cannot justify.
- *       This previously failed OPEN, on the stated grounds that
- *       "`append_turn_atomic` is the last line of defence". That premise is
- *       false for ownership: append_turn_atomic (v1/v2/v3) reads `user_id`
- *       FROM the scenarios row to denormalise it onto the turn and never
- *       compares it to any caller identity — it guards scenario EXISTENCE,
- *       not ownership. So the open path removed the ownership check with
- *       nothing behind it, and did so exactly when the DB was unhealthy.
- *
- * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
- * on SessionStore and the migration file header for the production-
- * upgrade path (JWT-scoped client + auth.uid()).
- */
+/** CREATE/deleted-scenario fencing, called only by the HTTP ownership hook.
+ * Returns the authoritative stored owner from the existing upsert; this is not
+ * permission. The hook applies scenarioAccessDecision to that owner.
+ * Unknown scenarios still create; an absent row with a surviving admitted-turn
+ * fence still refuses as scenario_deleted. Store/upsert failures still refuse. */
 export type PreflightResult =
-  | { readonly ok: true; readonly skipped?: boolean }
+  | { readonly ok: true; readonly skipped?: boolean; readonly ownerUserId?: string | null }
   | {
       readonly ok: false;
       readonly reason:
-        | 'scenario_owned_by_other_user'
-        | 'scenario_requires_authenticated_owner'
         /** The store is configured but could not tell us who owns the row. */
         | 'scenario_ownership_unverifiable'
         /**
@@ -2589,44 +2585,9 @@ export async function preflightEnsureScenario(
     return { ok: false, reason: 'scenario_ownership_unverifiable' };
   }
 
-  // Ownership is enforced ONLY when the scenario has a stored owner. A null
-  // stored owner means a guest (unowned) scenario, which by design any caller
-  // may act on — that carve-out is a product feature (VITE_AUTH_MODE=guest),
-  // NOT the either-null skip that opened the IDOR hole below.
-  if (authoritativeUserId !== null) {
-    if (userId === null) {
-      // IDOR fail-closed: the scenario has a non-null owner but the caller
-      // presented NO identity. The previous `userId !== null &&` guard skipped
-      // the whole check here, so any request that simply omitted user_id could
-      // act on any owned scenario. Refuse — an anonymous caller is not the
-      // owner. (The JWT-derivation half — making identity un-spoofable on
-      // browser paths — is tracked separately in user-identity.ts.)
-      log.warn(
-        {
-          request_id: requestId,
-          scenario_id: scenarioId,
-          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
-        },
-        'V5 pre-flight: anonymous caller (no user_id) on an owned scenario — refusing turn (fail closed)',
-      );
-      return { ok: false, reason: 'scenario_requires_authenticated_owner' };
-    }
-
-    if (authoritativeUserId !== userId) {
-      log.warn(
-        {
-          request_id: requestId,
-          scenario_id: scenarioId,
-          caller_user_id_prefix: userId.slice(0, 8),
-          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
-        },
-        'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
-      );
-      return { ok: false, reason: 'scenario_owned_by_other_user' };
-    }
-  }
-
-  return { ok: true };
+  // HTTP ownership is decided once by plugins/scenario-ownership.ts.
+  // Return the authoritative upsert owner; CREATE and deleted-fence handling stay here.
+  return { ok: true, ownerUserId: authoritativeUserId };
 }
 
 /**
@@ -2647,7 +2608,7 @@ export async function loadPersistedScenarioState(
   scenarioId: string,
   requestId: string,
   sessionStore?: SessionStore,
-): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null; readonly revision?: number }> {
   try {
     const store = sessionStore ?? getSessionStore();
     return await store.loadGraphAndBriefText(scenarioId);
@@ -2778,6 +2739,7 @@ export async function loadScenarioAnalysisFactsForRead(
 ): Promise<{
   readonly hotWindow: PriorFactsReadResult;
   readonly factSet: ScenarioAnalysisFactSet;
+  readonly priorFactsWithTurn: readonly HandlerFactWithTurn[];
 }> {
   const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
   if (store === undefined) {
@@ -2785,6 +2747,7 @@ export async function loadScenarioAnalysisFactsForRead(
     return {
       hotWindow: { status: 'degraded', facts: [] },
       factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [] }),
+      priorFactsWithTurn: [],
     };
   }
   // C1: the hot-window facts depend ONLY on the turns, so they are read as soon as the turns land, inside
@@ -2797,6 +2760,7 @@ export async function loadScenarioAnalysisFactsForRead(
   const hotReadOk = readOk && priorTurnsRead.readOk;
   return {
     hotWindow: hotReadOk ? { status: 'ok', facts } : { status: 'degraded', facts: [] },
+    priorFactsWithTurn: factsWithTurn,
     factSet: reconcileScenarioAnalysisFacts({
       scenarioId,
       hotWindowFacts: facts,
@@ -2804,6 +2768,53 @@ export async function loadScenarioAnalysisFactsForRead(
       durableRead,
     }),
   };
+}
+
+interface ScenarioAnalysisAnchorFactsRead {
+  readonly facts: readonly HandlerFact[];
+  readonly total_count: number;
+  readonly malformed_row_count: number;
+  readonly capped: boolean;
+}
+
+/** Anchor-only loader returns a validated subset, never a reconciled reasoning carrier. */
+export async function loadScenarioAnalysisAnchorFactsForRead(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<ScenarioAnalysisAnchorFactsRead> {
+  const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (!store?.readScenarioRunAnalysisFactsFor) throw new Error('Analysis anchor store unavailable');
+  const page = await store.readScenarioRunAnalysisFactsFor(scenarioId, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT, { malformedRows: 'isolate-for-anchor' });
+  const isolated = page.isolated_malformed_rows;
+  const readCount = isolated?.read_count ?? page.facts.length;
+  const ids = [...(isolated?.ids ?? [])];
+  if (!Number.isSafeInteger(page.total_count) || page.total_count < 0
+    || readCount !== Math.min(page.total_count, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT)
+    || page.facts.length + ids.length !== readCount) {
+    throw new Error('Analysis anchor page contract invalid');
+  }
+  const facts: HandlerFact[] = [];
+  for (const entry of page.facts) {
+    const fact = entry.fact;
+    // An otherwise schema-valid row may still lack a recorded anchor or carry
+    // invalid time/identity metadata. It must not hide a valid older success.
+    if (fact.fact_type !== 'run_analysis' || fact.result.scenario_id !== scenarioId
+      || isoInstantOrderKey(entry.fact_created_at) === null
+      || typeof fact.result.graph_hash_at_run !== 'string' || fact.result.graph_hash_at_run.trim() === ''
+      || (fact.result.computed_at !== undefined && isoInstantOrderKey(fact.result.computed_at) === null)) {
+      ids.push(entry.fact_row_id);
+      continue;
+    }
+    facts.push(fact);
+  }
+  if (ids.length > 0) {
+    log.warn({ event: 'v5.decision_record.anchor_rows_isolated', request_id: requestId,
+      scenario_id: scenarioId, malformed_row_count: ids.length, malformed_row_ids: ids },
+    'Decision record anchor: malformed rows isolated');
+  }
+  return { facts, total_count: page.total_count, malformed_row_count: ids.length,
+    capped: page.total_count > SCENARIO_ANALYSIS_FACT_CAP };
 }
 
 export async function loadPriorFactsQuietly(
@@ -2846,7 +2857,7 @@ export async function loadPersistedGraphStrict(
 export async function loadPersistedScenarioStateStrict(
   scenarioId: string,
   sessionStore?: SessionStore,
-): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null; readonly revision?: number }> {
   const store = sessionStore ?? getSessionStore();
   return await store.loadGraphAndBriefText(scenarioId);
 }
@@ -2870,7 +2881,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // delegated to loadGraphAndBriefText and discarded the brief), so the snapshot
   // can surface it for the flag-gated run_analysis → PLoT brief leg with no extra
   // DB traffic and identical error semantics.
-  const { graph: persistedGraph, briefText } = await loadPersistedScenarioStateStrict(
+  const { graph: persistedGraph, briefText, revision } = await loadPersistedScenarioStateStrict(
     scenarioId,
     sessionStore,
   );
@@ -3082,6 +3093,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new AnalysisNotReadyError(
       refusedVerdict(admission),
       canonicalAnalysisReadyFrom(admission, sigmaFloor.graph),
+      sigmaFloor.graph,
     );
   }
   const verdict = admittedVerdict(admission);
@@ -3107,7 +3119,20 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // (the round-3 TOCTOU). Read-only: the persisted graph is never mutated.
   const options = mergeOptionInterventionObjects(parsedGraph.data.nodes, readiness.options);
 
+  const pendingStore = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (!pendingStore) {
+    throw new SessionReadError(`loadScenarioSnapshotForRunAnalysis(${scenarioId}): pending store unavailable`, {});
+  }
+  // A failed/corrupt read stops before PLoT; it cannot mint a licensed Run.
+  const scopeInput = goalScopeClaimInput(
+    await pendingStore.readMostRecentPendingActions(scenarioId, { validation: 'strict' }),
+    persistedGraph,
+  );
+
   return {
+    goalScopeClaimInput: scopeInput,
+    ...(typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
+      ? { evaluatedScenarioRevision: revision } : {}),
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,

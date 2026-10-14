@@ -1,3 +1,8 @@
+export { reencodedSiblingDiff } from './level-batch-frame.js';
+// Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
+export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
+import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
+import { readProductIdentityCarrier as readCarrier } from '../admission/identity-evaluations.js';
 /**
  * Agent lane — whole-candidate admission.
  *
@@ -18,9 +23,11 @@
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
 import { limitSinkBranch } from '../../graph/limit-sink-branch.js';
+import { inertRiskBranch } from '../../graph/inert-risk.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
 import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
+import { optionsCreating } from './option-creates.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
@@ -30,29 +37,55 @@ import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-adm
 import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
-import type { InterventionV3T } from '../../schemas/cee-v3.js';
+import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, InterventionV3T } from '../../schemas/cee-v3.js';
+import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
+import { log } from '../../utils/telemetry.js';
+import { admitInterventionRange } from '../intervention-range.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
+import { isRelativeChangePercentUnit, readPercentUnit } from './same-unit.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
+import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
+import type { LabelHeadReading } from './label-head-unit.js';
+import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
+export { bindStatedLinkSizes } from './stated-size-binding.js';
+import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
+export { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
+import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, hasBasis } from './convention-frame.js';
+import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
+import { untargetedGoalLevelAsk } from './untargeted-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
+import { admitGoalTargetBasis, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
+  canonicalProvenance,
   percentLevelFrame,
   type CandidateConstraint,
   type AdmittedConstraint,
+  type ConstraintAdmissionResult,
 } from './admit-constraint.js';
+
+import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
+import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
+import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
+import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
+import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
 
@@ -78,6 +111,17 @@ const MAX_LABEL = 80;
 export type CandidateNodeKind =
   | 'goal' | 'option' | 'factor' | 'risk' | 'outcome' | 'constraint' | 'decision';
 
+/** r5-stated-evidence-v1: construction-only UTF-16 spans; never persisted or copied into a range receipt. */
+export interface StatedOptionEvidence {
+  readonly quote: string;
+  readonly start: number;
+  readonly end: number;
+  readonly amount_start: number;
+  readonly option_quote: string;
+  readonly option_start: number;
+  readonly option_end: number;
+}
+
 /**
  * The decision the brief is asking about.
  *
@@ -95,6 +139,8 @@ export type CandidateNodeKind =
 export interface CandidateModel {
   readonly goal: {
     metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
+    kind?: 'event_by_date' | null;
+    deliverable?: string | null;
     /**
      * `false` means the brief named a DIRECTION and no number. Optional because the
      * originally banked candidate contract has no such field: a candidate from before
@@ -125,11 +171,26 @@ export interface CandidateModel {
      * the drafter saw no part-or-whole reading, exactly what an older candidate meant.
      */
     scope?: GoalScopeDeclaration | null;
+    /**
+     * Recovery Batch C (ruling 2): what the goal metric MEASURES. `change` = the metric is itself a change from today
+     * ("productivity, % change from today"), 0 today by definition; its target is `change_abs` in its own unit. Optional
+     * because the banked contract has no such field: absent means `level`, exactly what an older candidate meant.
+     */
+    quantity_frame?: 'level' | 'change' | null;
+    /**
+     * Recovery Batch C (ruling 11): the target's semantics as the drafter states them — reference, denominator, period,
+     * effect unit, whether effects are their size at the period's end, what else the goal requires, and an open question
+     * when the target reads more than one way. Validated by `admitGoalTargetBasis`; absent = none stated (older candidates).
+     */
+    basis?: DraftedGoalTargetBasis | null;
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
+    added_capacity?: { monthly_share_pct: number; lead_months_low: number; lead_months_high: number } | null;
     label: string;
     provenance: string;
+    /** Server-authored automatic draft widening; absent from the drafter's contract. */
+    draft_widening?: DraftOptionWideningT;
     /**
      * What this option DOES — the factor levels it sets. Optional because the
      * original banked contract has no such field; when it is absent the model
@@ -140,6 +201,13 @@ export interface CandidateModel {
       value: number;
       unit?: string;
       provenance: string;
+      estimate?: true;
+      basis?: string;
+      stated_evidence?: StatedOptionEvidence | null;
+      /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
+      range?: InterventionV3T['range'];
+      /** Internal: a setting the drafter called the user's that the verifier could not credit — UNKNOWN origin, never Olumi's. */
+      user_material_unverified?: true;
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -163,16 +231,17 @@ export interface CandidateModel {
      */
     is_status_quo?: boolean | null;
   }[];
-  readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
+  readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; baseline_evidence?: { readonly quote: string } | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   /**
    * ⭐ A QUANTITY OUTCOME OR A RISK'S EXPOSURE CARRIES THE FRAME A FACTOR DOES (DL #75 5916155976 (a); R3 5916156932 (b)):
    * `unit` + `plausible_max`, nullable. Without them no size into or out of the node can be read (`resolveMagnitudeFrame`
    * has nothing to read), so a goal fed by an outcome or a risk could never be sized in its own unit. Optional here: the
    * banked contract has neither field.
    * `analysis_participation` is never the drafter's (the strict schema has no such key): only
-   * `rerouteExtraParentsOfProductGoal` writes it, on Olumi's risk whose effect the model already carries (DL 5916217417).
+   * `rerouteExtraParentsOfProductGoal` writes it on a duplicate effect, and automatic draft widening writes it on
+   * a server-authored, zero-edge suggestion whose attachment is retained as metadata.
    */
-  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded' }[];
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded'; draft_widening?: DraftRiskWideningT }[];
   readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
@@ -202,10 +271,18 @@ export interface GoalScopeDeclaration {
 
 /** "`outcome` is `factors` multiplied together" — a definition the drafter states, by exact label. */
 export interface CandidateIdentity {
+  /** Transient admission reading; never persisted on an identity. */
+  readonly reading?: 'net' | 'gross';
   readonly outcome: string;
   readonly operation: string;
   readonly factors: readonly string[];
   readonly provenance: string;
+  /**
+   * L2: for a `sum` the brief DEFINES, the drafter's quote of the defining sentence. Optional: the sent schema has no such
+   * key yet (`AIE_TEXT_PENDING_DECLARED_SUM`, `runtime/build-model.ts`), so absent means none was quoted. Read only by
+   * `checkDeclaredSums`, which locates it in the brief itself; the drafter's quote alone is never authority.
+   */
+  readonly evidence?: { readonly quote: string } | null;
 }
 
 /**
@@ -257,14 +334,15 @@ export interface NonlinearIdentityCarrier {
 }
 
 /**
- * The persisted `sum` carrier on a limited spend tally (`findSumTallies`; same NodeV3 field). Always Olumi's reading:
- * no brief states it, so `stated_in_brief` is `false`. The product machinery (`readCarrier`, the sign test, F-LIMIT N1)
+ * The persisted `sum` carrier (same NodeV3 field): on a limited spend tally (`findSumTallies`), always Olumi's reading
+ * (`stated_in_brief: false`); or a sum the drafter DECLARED and admission checked whole (`checkDeclaredSums`, L2), the
+ * user's only where the brief's own sentence defines it. The product machinery (`readCarrier`, the sign test, F-LIMIT N1)
  * reads `product` only, so a sum is never judged as a product.
  */
 export interface SumIdentityCarrier {
   readonly operation: 'sum';
   readonly factor_ids: readonly string[];
-  readonly stated_in_brief: false;
+  readonly stated_in_brief: boolean;
 }
 
 /** A declaration that held structurally and bears on the goal — what the carrier persists. */
@@ -338,6 +416,17 @@ export interface ConstructedLevel {
   raw_value?: number;
   /** The factor's own unit, beside `raw_value`: its `observed_state.unit`, else the unit the construction declared for it. */
   unit?: string;
+  /**
+   * Present ONLY on a user-grounded total we COMPUTED (`build-model` `derived_total`: a stated baseline plus a stated
+   * change), never on a figure the user wrote. `InterventionV3.value_confidence`; outside the analysis hash. The
+   * not-modelled manifest credits no brief literal to a level below "high" (RT-4 class A, #2603).
+   */
+  value_confidence?: 'medium';
+  range?: InterventionV3T['range'];
+  estimate?: true;
+  basis?: string;
+  /** UNKNOWN origin, as `observed_state.user_material_unverified`: never the user's, never Olumi's (`settingProvenanceOf`). */
+  user_material_unverified?: true;
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -380,11 +469,13 @@ function constructedLevel(
   source: ConstructedLevelSource,
   factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
   declaredUnit: string | undefined,
+  derivedTotal = false,
 ): ConstructedLevel {
   const level: ConstructedLevel = {
     value: cap !== undefined ? figure / cap : figure,
     source,
     target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+    ...(derivedTotal && source === 'brief_extraction' ? { value_confidence: 'medium' as const } : {}),
   };
   const os = factor?.observed_state;
   const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
@@ -401,6 +492,8 @@ function constructedLevel(
 }
 
 export interface AdmittedNode {
+  /** A unit attested by this end's own noun in a bound user sentence; strict NodeV3 carrier. */
+  unit_reading?: { unit: string; source: 'user_stated' | 'olumi_reading'; source_quote: string };
   /** The full text, when the label had to be shortened to stay editable. */
   description?: string;
   /**
@@ -423,7 +516,7 @@ export interface AdmittedNode {
    * type was the reason three test files failed the typecheck ratchet while
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
-  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
+  observed_state?: { value: number; unit?: string; source?: string; extractionType?: 'explicit' | 'inferred' | 'range' | 'observed'; user_material_unverified?: true; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
   /**
    * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
    * on, for a factor with no baseline. The declared carrier; see the write site.
@@ -448,6 +541,8 @@ export interface AdmittedNode {
    * keyed to the level it read; `NodeV3.goal_level_reading`. Never the user's; its words are said.
    */
   goal_level_reading?: { level: number; level_unit: string; quote: string; lead: string; bound?: '<=' | '<' | '>=' | '>' };
+  /** Recovery Batch C: Olumi's validated reading of the target's semantics (`goal-target-basis.ts`); `NodeV3.goal_target_basis`. */
+  goal_target_basis?: GoalTargetBasis;
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -456,7 +551,10 @@ export interface AdmittedNode {
    * `structural-add-edge.ts:233` treats as CORRUPTION — so every write to the
    * scenario returned 500 until this was fixed.
    */
-  provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  provenance?: ProvenanceDisplay;
+  draft_widening?: DraftWideningT;
+  proposed_by?: 'olumi';
+  analysis_participation?: 'included' | 'retained_excluded';
   /**
    * `cee-v3.ts` option field. Written ONLY on the option the drafter DECLARED as the
    * status quo (`is_status_quo`) and that was wired as held — readiness's own first
@@ -535,9 +633,6 @@ export function slugId(label: string): string {
   return base.length > 0 ? base : 'node';
 }
 
-/** Same words, ignoring case and spacing — the test for "the same thing". */
-export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
-
 /** A copied question is 8 to 240 characters once its whitespace is collapsed; anything else is not taken as one. */
 const DECISION_QUESTION_MIN_CHARS = 8;
 const DECISION_QUESTION_MAX_CHARS = 240;
@@ -565,8 +660,10 @@ export function decisionEntityFor(
   model: Pick<CandidateModel, 'goal' | 'decision_question'>,
   brief: string | undefined,
   otherLabels: readonly string[],
-): { readonly label: string; readonly provenance: 'explicit' | 'inferred' } {
-  const fallback = { label: `Decision: ${model.goal.metric}`, provenance: 'inferred' as const };
+): { readonly label: string; readonly provenance: 'explicit' | 'inferred'; readonly display?: string } {
+  // USER VOCABULARY (Paul, 14 Oct; DL item 4): the card says "Question: <metric>" (`display`), while `label` stays the id key
+  // "Decision: <metric>", so the node id (`decision_<metric>`) is unchanged.
+  const fallback = { label: `Decision: ${model.goal.metric}`, display: `Question: ${model.goal.metric}`, provenance: 'inferred' as const };
   const copied = model.decision_question;
   if (typeof copied !== 'string' || typeof brief !== 'string') return fallback;
   const span = collapseWhitespace(copied);
@@ -721,17 +818,29 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
-}): Record<string, unknown> {
+}, verifiedCurrentLevel?: boolean, userMaterialUnverified = false): Record<string, unknown> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
   // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
   // the magnitude reader (`knownBaseline`) took the unauthored 0 as today's known level. Same author as
   // `estimatedObservedState` and `withdrawUnstatedBaselineStamps` (#2076). "Today is 100 % of today" is a definition,
-  // not an estimate, so a restated change keeps no author (review 5835754404 row 4a; MG 5852168578).
-  const definitional = f.unit === TODAY_UNIT && raw === TODAY_LEVEL;
-  const base = {
+  // not evidence for a user's measured level; construction attribution requires the verified receipt.
+  // Construction always passes a receipt verdict. The two typed human doors use this
+  // formatter after verifying the figure themselves (`figureTheUserWrote`), so they WRITE the attestation (DL 12 Oct): a
+  // type-less `brief_extraction` is the person's by its stamp alone (`stampOnly`) and the chance discloses it as unverified;
+  // the verified figure carries `explicit`, so its chance carries no such note.
+  const base = verifiedCurrentLevel === undefined ? {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : definitional ? {} : { source: 'cee_inference' }),
+    ...(f.provenance === 'explicit' ? { source: 'brief_extraction', extractionType: 'explicit' }
+      : f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {} : { source: 'cee_inference' }),
+  } : {
+    ...(f.unit ? { unit: f.unit } : {}),
+    // ⭐ The native quantity read needs the EXISTING extraction type: it is written ONLY after the public verifier (or the
+    // trusted affine conversion of a verified receipt) proved this exact quantity. Everything else keeps its staging bytes.
+    ...(verifiedCurrentLevel ? { source: 'brief_extraction', extractionType: 'explicit' }
+      : !userMaterialUnverified && f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {}
+        : { source: 'cee_inference', ...(userMaterialUnverified || f.provenance === 'ai_proposed' || f.provenance === 'inferred' ? { extractionType: 'inferred' } : {}) }),
+    ...(userMaterialUnverified ? { user_material_unverified: true as const } : {}),
   };
   const cap = f.plausible_max;
   // Already a proportion, or no usable range: leave it exactly as it was. A
@@ -1017,27 +1126,14 @@ function costRollupGoalEdges(
     if (goalIdentityParts.has(q.id)) continue;
     shapes.push({ q, levers: [...new Set(into.map((e) => e.from))], edge });
   }
-  // The precondition, to a fixed point: a roll-up whose edge is kept (asked) restores that edge for the others.
-  let drop = new Set(shapes.map((s) => s.q.id));
-  const onlyThrough = new Map<string, string[]>();
-  for (let changed = true; changed;) {
-    changed = false;
-    const kept = edges.filter((e) => !(e.to === goal.id && drop.has(e.from)));
-    for (const s of shapes) {
-      if (!drop.has(s.q.id)) continue;
-      const around = kept.filter((e) => e.from !== s.q.id && e.to !== s.q.id);
-      const stuck = s.levers.filter((l) => findMechanismPath(around, l, goal.id) === null);
-      if (stuck.length > 0) {
-        onlyThrough.set(s.q.id, stuck);
-        drop = new Set([...drop].filter((id) => id !== s.q.id));
-        changed = true;
-      }
-    }
-  }
+  // T4 A6: a cost limit does not establish that its causal edge is wrong.
+  // Preserve every such edge and surface Olumi's assumption for review.
+  const onlyThrough = new Map(shapes.map((s) => [s.q.id, s.levers.filter((l) =>
+    findMechanismPath(edges.filter((e) => e.from !== s.q.id && e.to !== s.q.id), l, goal.id) === null)]));
   const goalLabel = goal.label ?? goal.id;
   return {
-    pure_limits: shapes.filter((s) => drop.has(s.q.id)).map((s) => ({ node_id: s.q.id, label: s.q.label ?? s.q.id, dropped_edge_to: goal.id })),
-    asks: shapes.filter((s) => !drop.has(s.q.id)).map((s) => {
+    pure_limits: [],
+    asks: shapes.map((s) => {
       const direction = s.edge.effect_direction === 'negative' ? 'negative' : 'positive';
       return {
         node_id: s.q.id,
@@ -1105,7 +1201,7 @@ const unitKey = (u: unknown): string | null =>
 export function findSumTallies(
   nodes: readonly { id: string; kind?: string; label?: string; category?: string; observed_state?: unknown }[],
   edges: readonly { from: string; to: string; effect_direction?: string }[],
-  goalConstraints: readonly { node_id?: string; operator?: string; value_frame?: string; unit?: string }[],
+  goalConstraints: readonly { node_id?: string; operator?: string; value_frame?: string; unit?: string; provenance_unit_relabelled?: { pre_normalisation_unit?: unknown } }[],
 ): SumTally[] {
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const optionSet = new Set(edges.filter((e) => byId.get(e.from)?.kind === 'option').map((e) => e.to));
@@ -1121,8 +1217,13 @@ export function findSumTallies(
     if (into.some((e) => e.effect_direction === 'negative')) continue;
     if (!parents.every((p) => byId.get(p)?.kind === 'factor' && byId.get(p)?.category === 'controllable' && optionSet.has(p))) continue;
     const unitOf = (id: string): string | null => unitKey((byId.get(id)?.observed_state as { unit?: unknown } | undefined)?.unit);
-    const limitUnit = unitKey(limits[0]!.unit);
-    if (limitUnit === null || limits.some((c) => unitKey(c.unit) !== limitUnit) || !parents.every((p) => unitOf(p) === limitUnit)) continue;
+    // ⛔ The sum is in the TALLY's own unit. Admission may relabel a percent limit's unit ("% of upcoming sprint" → "%",
+    // `agent_lane_limit_pct_of_level_v1`), so the limit matches the tally by its stored unit OR the unit it was written in
+    // (served 96c6f5f4: comparing the parts with the relabelled "%" minted nothing; joint RCA 5929651862 item 2).
+    const tallyUnit = unitOf(q.id) ?? unitKey(limits[0]!.unit);
+    const limitIsTallys = (c: (typeof limits)[number]): boolean => unitKey(c.unit) === tallyUnit
+      || unitKey(c.provenance_unit_relabelled?.pre_normalisation_unit) === tallyUnit;
+    if (tallyUnit === null || !limits.every(limitIsTallys) || !parents.every((p) => unitOf(p) === tallyUnit)) continue;
     out.push({ node_id: q.id, label: q.label ?? q.id, factor_ids: nodes.filter((n) => parents.includes(n.id)).map((n) => n.id) });
   }
   return out;
@@ -1134,6 +1235,13 @@ const plusList = (labels: readonly string[]): string => labels.map((l) => `"${l}
 /** R3-2's one sentence for a minted `sum`: Olumi's reading, never the user's figure. */
 export function sumIdentitySentence(tally: string, operands: readonly string[]): string {
   return `Olumi reads "${tally}" as ${plusList(operands)}: Olumi's reading, not your figure; tell me if it includes other costs.`;
+}
+
+/** L2's one sentence for a carried DECLARED `sum`: the brief's definition said as fact, or Olumi's reading said as such. */
+export function declaredSumSentence(total: string, parts: readonly string[], statedInBrief: boolean): string {
+  return statedInBrief
+    ? `"${total}" is worked out as ${plusList(parts)}, the definition your brief gives.`
+    : `Olumi reads "${total}" as ${plusList(parts)}: Olumi's reading, not your figure; tell me if it includes anything else.`;
 }
 
 /**
@@ -1233,11 +1341,171 @@ function metricNamesScope(metric: string, modelled: string, alternative: string)
   return own.length > 0 && own.every((w) => said.has(w)) && !theirs.some((w) => said.has(w));
 }
 
+/** Words that say the WHOLE ("total", "all", "across every plan"). Folded exactly as a metric is ('across' → 'acros'). */
+const WHOLE_WORDS = scopeWords(['total', 'all', 'every', 'overall', 'whole', 'entire', 'combined', 'across', 'together'].join(' '));
+/**
+ * Words that say WHICH quantity a goal is, never which part of it: the measure and its money. Its PERIOD ("monthly",
+ * "MRR", "year") is read from the one unit alphabet (`periodNoun` / `periodAdverb`), never a list of its own.
+ */
+const MEASURE_WORDS = scopeWords([
+  'revenue', 'recurring', 'income', 'sale', 'turnover', 'profit', 'margin', 'ebitda', 'cash', 'cost', 'spend',
+  'bookings', 'booking', 'billing', 'subscription', 'subscriber', 'customer', 'user', 'member', 'client', 'account',
+  'churn', 'retention', 'growth', 'gross', 'net', 'value', 'order', 'conversion', 'signup', 'gbp', 'usd', 'eur', 'k', 'm', 'bn',
+].join(' '));
+const isPeriodWord = (w: string): boolean => periodNoun(w) !== null || periodAdverb(w) !== null;
+/**
+ * The generic part-nouns a whole is made of. They say the whole only beside a whole word ("across all plans"); alone they
+ * may name one part ("Product revenue", "Channel revenue": Codex buddy r2 P1).
+ */
+const PART_NOUNS = scopeWords(['plan', 'tier', 'product', 'segment', 'stream', 'source', 'line', 'channel', 'region', 'market'].join(' '));
+
+/**
+ * ⭐ A GOAL THAT NAMES NO PART READS AS THE TOTAL (Science d5 #87 6006584860 / 6007341975; DL 6 Oct). True when every word
+ * of the metric is a measure/period/money word, a whole word, or a part-noun beside a whole word: "MRR", "Total MRR",
+ * "monthly recurring revenue", "total revenue across all plans". Anything else may name a part ("Starter MRR", "Business
+ * customer MRR", "Product revenue", "… net of refunds …") and keeps C46's question (ask (a), non-blocking): asking is the
+ * safe side, and an untyped question never withholds (`scopeIssueBlocks`). PURE.
+ */
+export function metricReadsAsPlainTotal(metric: string): boolean {
+  const said = [...scopeWords(metric)];
+  const whole = said.some((w) => WHOLE_WORDS.has(w));
+  return said.length > 0 && said.every((w) => MEASURE_WORDS.has(w) || isPeriodWord(w) || WHOLE_WORDS.has(w) || (whole && PART_NOUNS.has(w))
+    || /^\d+(k|m|bn)?$/.test(w));
+}
+
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
 const quotedList = (items: readonly string[]): string => {
   const q = items.map((s) => `"${s}"`);
   return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
 };
+
+/** A declared `sum` that held whole (`checkDeclaredSums`), with its bound source and authorship. */
+export interface AcceptedDeclaredSum {
+  readonly outcome_id: string;
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+  /** Located brief sentence bound to the declared quantities. */
+  readonly quote?: string;
+}
+
+/** ISL's reconciliation tolerance for a stated level (`IDENTITY_RECONCILIATION_TOLERANCE`, robustness_analyzer_v2.py). */
+const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
+
+/**
+ * ⭐ L2 — A SUM THE DRAFTER DECLARES, CHECKED WHOLE, ONCE (DL brief L2, 12 Oct; AIE #94 6134029017 Q1).
+ *
+ * The capacity brief DEFINES "Total weekly support capacity … as the existing 80 tickets per week plus the additional
+ * specialist capacity". Run 5 sent that definition as two uncertain causal links (exists 0.8, ±0.5), so the shown chance
+ * understated it and the reply called the user's definition Olumi's assumption. A declared `sum` is carried on its total
+ * (`nonlinear_identity`, R3-2's carrier; ISL then works the total out from its parts and never reads those links'
+ * strengths) only when the WHOLE declared set holds against the admitted graph:
+ *  · the total and every part are distinct quantities in the model, each named once (a duplicate or unbound label
+ *    refuses), with at least two parts;
+ *  · every part reaches the total by ONE link that holds by definition (`holdsByDefinition`: ±1 per 1 in one unit at both
+ *    ends, its size still that definition) at +1, since ISL adds every operand at +1 (`_identity_term`); and no other
+ *    definitional link enters the total (a required part missing from the declaration refuses);
+ *  · the total and every part have a scale and a level today, and today's levels add up within ISL's own reconciliation
+ *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
+ *    constant is only ever a part with its own level: the candidate has no other place for one.
+ * DL L3b ruling: an explicit declaration with located, bound brief evidence retains original user authorship.
+ * This trusts the drafter's relation reading: a falsely declared denial can pass (accepted AI-misreading residual).
+ * No declaration means no declared sum. A quote CEE cannot locate or bind is rejected as before. Any failure writes
+ * nothing: the links stay as drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
+ */
+function checkDeclaredSums(
+  allDeclared: readonly CandidateIdentity[],
+  resolve: (label: string) => string | undefined,
+  nodes: readonly AdmittedNode[],
+  edges: readonly { from: string; to: string; strength?: { mean: number }; effect_direction?: string; provenance?: AdmittedEdge['provenance'] }[],
+  frameOf: (id: string) => number | undefined,
+  brief: string | undefined,
+): { accepted: AcceptedDeclaredSum[]; loss: RepairEntry[] } {
+  const accepted: AcceptedDeclaredSum[] = [];
+  const loss: RepairEntry[] = [];
+  const declared = allDeclared.filter((d) => d?.operation === 'sum');
+  if (declared.length === 0) return { accepted, loss };
+  const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
+  const unitOf = nodeUnitOf(nodes);
+  const QUANTITY = new Set<CandidateNodeKind>(['goal', 'outcome', 'factor']);
+  const INPUT = new Set<CandidateNodeKind>(['outcome', 'factor']);
+  /** Today's level in the node's own units: its stated figure, else its normalised level on its frame. */
+  const todayRaw = (id: string): number | undefined => {
+    const os = nodeOf.get(id)?.observed_state;
+    if (os === undefined) return undefined;
+    if (typeof os.raw_value === 'number' && Number.isFinite(os.raw_value)) return os.raw_value;
+    const level = typeof os.baseline === 'number' ? os.baseline : os.value;
+    const frame = frameOf(id);
+    return typeof level === 'number' && Number.isFinite(level) && frame !== undefined ? level * frame : undefined;
+  };
+  for (const d of declared) {
+    const factors = Array.isArray(d.factors) ? d.factors : [];
+    const totalId = resolve(d.outcome);
+    const reject = (why: string): void => {
+      loss.push({
+        field_path: `nodes[${totalId ?? slugId(String(d.outcome))}].nonlinear_identity_rejected`,
+        before: { outcome: d.outcome, operation: d.operation, factors: [...factors] },
+        after: null,
+        reason: `Olumi read "${d.outcome}" as ${quotedList(factors)} added together, but ${why}, so that was not used and nothing about it is assumed.`,
+        severity: 'warn',
+      } as RepairEntry);
+    };
+    if (totalId === undefined) { reject(`"${d.outcome}" is not in the model`); continue; }
+    if (!QUANTITY.has(nodeOf.get(totalId)!.kind)) { reject(`"${d.outcome}" is not a quantity in the model`); continue; }
+    const partIds: string[] = [];
+    let why: string | null = null;
+    for (const f of factors) {
+      const id = resolve(f);
+      if (id === undefined) { why = `"${f}" is not in the model`; break; }
+      if (!INPUT.has(nodeOf.get(id)!.kind)) { why = `"${f}" is not a quantity in the model`; break; }
+      if (id === totalId) { why = `"${f}" cannot be added into itself`; break; }
+      if (partIds.includes(id)) { why = `"${f}" is named twice`; break; }
+      partIds.push(id);
+    }
+    if (why === null && partIds.length < 2) why = 'a sum needs at least two different quantities';
+    if (why !== null) { reject(why); continue; }
+    const totalLabel = nodeOf.get(totalId)!.label;
+    const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
+    const definitional = edges.filter((e) => e.to === totalId && holdsByDefinition(e as Record<string, unknown>, unitOf));
+    const plusOne = (id: string): boolean => {
+      const links = edges.filter((e) => e.from === id && e.to === totalId);
+      const ne = links[0]?.provenance?.natural_effect;
+      return links.length === 1 && definitional.includes(links[0]!) && ne !== undefined && ne.amount / ne.per_source_change > 0
+        && links[0]!.effect_direction !== 'negative' && (links[0]!.strength?.mean ?? 0) > 0;
+    };
+    const notDefined = partIds.find((id) => !plusOne(id));
+    if (notDefined !== undefined) { reject(`"${labelOf(notDefined)}" is not linked into "${totalLabel}" one for one in the same unit`); continue; }
+    const missing = definitional.find((e) => !partIds.includes(e.from) && INPUT.has(nodeOf.get(e.from)?.kind as CandidateNodeKind));
+    if (missing !== undefined) { reject(`"${labelOf(missing.from)}" is also part of "${totalLabel}" by definition and is not among them`); continue; }
+    const unframed = [totalId, ...partIds].find((id) => { const f = frameOf(id); return f === undefined || !(f > 0) || !Number.isFinite(f); });
+    if (unframed !== undefined) { reject(`"${labelOf(unframed)}" has no scale to add it up on`); continue; }
+    const unlevelled = [totalId, ...partIds].find((id) => todayRaw(id) === undefined);
+    if (unlevelled !== undefined) { reject(`"${labelOf(unlevelled)}" has no figure today`); continue; }
+    const total = todayRaw(totalId)!;
+    const parts = partIds.map((id) => todayRaw(id)!);
+    const sum = parts.reduce((a, b) => a + b, 0);
+    const scale = Math.max(Math.abs(total), parts.reduce((a, b) => a + Math.abs(b), 0));
+    if (scale > 0 && Math.abs(total - sum) / scale > ISL_IDENTITY_RECONCILIATION_TOLERANCE) {
+      reject(`today "${totalLabel}" is ${sayFigure(total, '')} while those parts add up to ${sayFigure(sum, '')}`);
+      continue;
+    }
+    // Bind the drafter's declaration to its source; relation polarity remains the drafter's responsibility (DL L3b).
+    const quoted = d.evidence?.quote;
+    if (quoted === undefined || quoted === null) {
+      accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false });
+      continue;
+    }
+    const sentence = locatedBriefSentence(brief, quoted);
+    const figures = sentence === null ? [] : findStatedAmounts(sentence).map((a) => a.magnitude);
+    const names = (id: string): boolean => sentence !== null && (labelHoldsQuantity(sentence, labelOf(id))
+      || (id !== totalId && figures.includes(Math.abs(todayRaw(id)!))));
+    if (sentence === null || ![totalId, ...partIds].every(names)) {
+      reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
+      continue;
+    }
+    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: d.provenance === 'explicit', quote: sentence });
+  }
+  return { accepted, loss };
+}
 
 /**
  * ⛔ C46 STAGE 1 — CHECK A DECLARED PRODUCT, THEN ASK WHETHER ITS SIGN IS PROVABLE.
@@ -1295,7 +1563,7 @@ const quotedList = (items: readonly string[]): string => {
  * still an addend (item c), and so is a cause that drives a factor (finding 3 of 1047641f).
  */
 function markProductIdentities(
-  declared: readonly CandidateIdentity[],
+  allDeclared: readonly CandidateIdentity[],
   resolve: (label: string) => string | undefined,
   nodes: readonly AdmittedNode[],
   edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
@@ -1307,6 +1575,9 @@ function markProductIdentities(
   const accepted: AcceptedProductIdentity[] = [];
   const analyses: ProductIdentityAnalysis[] = [];
   const unlevelled: string[] = [];
+  // ⭐ CEE #4: an `accumulation` is admitted by its own writer (`accumulation-identity.ts`, which needs the held deadline),
+  // never refused here as "not a relationship Olumi can check". L2: nor is a `sum`, checked whole by `checkDeclaredSums`.
+  const declared = allDeclared.filter((d) => d?.operation !== 'accumulation' && d?.operation !== 'sum');
   if (declared.length === 0) return { marks, loss, accepted, analyses, unlevelled };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
@@ -1383,13 +1654,29 @@ function markProductIdentities(
   }
   const levelRefused = new Map<CandidateIdentity, string[]>();
   const levelled = (id: string): boolean => { const t = todayOf(id); return t !== undefined && t !== 0; };
+  /**
+   * ⭐ AN EVIDENCED CREATION-0 IS A LEVEL WHEN NOTHING STATES THE PRODUCT'S OWN (Science d5 #87 6008551439 (A), amending
+   * 6006376889 (b)). The refusal above exists because ISL withholds a product over a missing or zero part, so PLoT then
+   * withholds every option's goal chance with no question (R3 5898443502). ISL withholds a ZERO part only against a
+   * stated level on the product (its rule 3, AIQ #72 5881596876: "with no stated target … a zero operand is an ordinary
+   * level"). So a part at 0 today, or with no level, that an option CREATES (`optionsCreating`: its own creation verb,
+   * and its path reaches the part) is not refused under a product whose node states no level; construction holds a
+   * level-less one at 0 (`created_part_zero`, below), and ISL works the product out exactly.
+   */
+  const statusQuoOptions = new Set(nodes.filter((n) => n.kind === 'option' && (declaredStatusQuo.has(n.id) || n.is_baseline === true)).map((n) => n.id));
+  const createdAtZero = (part: string, d: CandidateIdentity): boolean => {
+    const t = todayOf(part);
+    const product = resolve(d.outcome);
+    if ((t !== undefined && t !== 0) || product === undefined || todayOf(product) !== undefined) return false;
+    return optionsCreating(nodes, edges, part, statusQuoOptions).length > 0;
+  };
   for (let changed = true; changed;) {
     changed = false;
     for (const d of declared) {
       if (d.provenance === 'explicit' || d.operation !== 'product' || levelRefused.has(d)) continue;
       const parts = [...new Set((Array.isArray(d.factors) ? d.factors : []).map((f) => resolve(f)).filter((id): id is string => id !== undefined))];
       const missing = parts.filter((id) => {
-        if (levelled(id)) return false;
+        if (levelled(id) || createdAtZero(id, d)) return false;
         if (kindOf.get(id) === 'factor') return true;
         // An outcome counts only when a product refused here was to give it its level: one no product declares is left
         // as before (the served MRR "Pro paying subscribers", journey C's tally), unmeasured against ISL.
@@ -1443,6 +1730,8 @@ function markProductIdentities(
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
     // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
     // options do today, so a Run re-judges it on the graph it analyses (an option added later included).
+    // No 5% current-level reconciliation here: accumulation carriers are attached later, so this reader cannot see S₀.
+    // The card/coherence readers compare price × S₀; price × the month-N operand is not today's goal level.
     accepted.push({ outcome_id: outcomeId, factor_ids: [...factorIds], stated_in_brief: d.provenance === 'explicit' });
 
     /**
@@ -1631,7 +1920,7 @@ function markProductIdentities(
         ? `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds up each effect separately.` +
           oppositeSentence + separateSentence + routesDisagreeSentence + differSentence + aroundSentence +
           ` If it adds them up, this model cannot show which option does better on "${labelOf(goalId)}": treat its ` +
-          'figures then as a rough approximation, not a decision.'
+          'figures then as a rough approximation, not a basis to decide on.'
         : `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds effects up, and its figures for ` +
           `"${outcomeLabel}" are then an approximation` +
           (oneWay
@@ -1736,11 +2025,9 @@ export interface NonlinearIdentityLeaderWithhold {
 
 type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown } & Record<string, unknown>;
 
-function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
-  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
-  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
-  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
-  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
+function isAccumulationCarrier(n: GraphNodeLike): boolean {
+  const c = n.nonlinear_identity as { operation?: unknown } | null | undefined;
+  return c !== null && typeof c === 'object' && c.operation === 'accumulation';
 }
 
 /**
@@ -1752,7 +2039,11 @@ export function nodesUnderANonlinearIdentity(graph: unknown): ReadonlySet<string
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return new Set();
   const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string');
-  const carried = nodes.filter((n) => readCarrier(n) !== null).map((n) => n.id as string);
+  // ⭐ CEE #3: an accumulation carrier's value is worked out by ISL too, never additively, so a limit on it is distrusted
+  // like a product's (the conservative direction: an over-withheld limit sentence, never a false one). C46's sign test
+  // (`readCarrier`) stays product-only: S_T rises with the stock and the inflow and falls with the churn rate, so its sign
+  // in each input is fixed, which is what the sign test exists to prove.
+  const carried = nodes.filter((n) => readCarrier(n) !== null || isAccumulationCarrier(n)).map((n) => n.id as string);
   if (carried.length === 0) return new Set();
   return new Set([...carried, ...nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string)]);
 }
@@ -2282,7 +2573,7 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
   const shape = loopLabels.length === 2 ? 'are linked both ways' : 'are linked in a loop';
   const yours = links.filter((l) => l.yours).map((l) => `"${l.from}" to "${l.to}"`);
   const built = links.filter((l) => !l.yours).map((l) => l.fromDecision
-    ? `the link from "${l.from}" to "${l.to}" is how the decision holds that option`
+    ? `the link from "${l.from}" to "${l.to}" is how the question holds that option`
     : `the link from "${l.from}" to "${l.to}" is what that option sets`);
   const yourPart = yours.length === 0 ? '' : ` You linked ${yours.join(' and ')};`;
   return `${quoted(loopLabels)} ${shape} (${chain(loopLabels)}).${yourPart} ${built.join('; ')}. A model cannot hold a loop, `
@@ -2328,8 +2619,6 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
  * change-versus-level classification whose corpus must come from served captures, not from
  * this file's author, so it is not guessed here.
  */
-export const TODAY_LEVEL = 100;
-export const TODAY_UNIT = '% of today';
 function restateSignedPercentChanges(model: CandidateModel): {
   model: CandidateModel;
   restated: { label: string; frame: number }[];
@@ -2634,11 +2923,68 @@ export function admitStatedGoalLevel(args: {
 }
 
 /**
+ * ⭐ A CURRENT LEVEL IS A FACT ABOUT TODAY — THE SCALE RULE ALONE (DL #85 5930770727, adopting R3 F5 D1 5930715560 (a):
+ * "A current level is a fact about today. It does NOT depend on the comparator; card it on its own").
+ *
+ * For a stated level beside a target when NO comparator is known — the user did not say how they put the target
+ * (`goal_is`) and the goal holds none (`goal_direction`). Which way the goal points is a question about the TARGET,
+ * never about where things stand today, so the level never waits on it: the shared rule (`admitGoalBaseline`) is asked
+ * on the floor reading, then on the ceiling reading, and either admitting is enough. Between them they cover every
+ * order of level and target, so the ONLY refusal left is rule 2 — a level off the target's own cap scale, said with
+ * the same sentence as the comparator paths (`offCapScaleSentence`). The normalised value is raw / cap either way.
+ *
+ * ⛔ NOT a direction ruling: nothing here says the goal is a floor or a ceiling, and nothing is sent that says so. A
+ * comparator the user states or the goal holds still goes through `admitStatedGoalLevel`, word for word.
+ */
+export function admitStatedGoalLevelOnScale(args: {
+  readonly metric: string;
+  readonly rawTarget: number;
+  readonly rawBaseline: number;
+  readonly cap: number;
+}): StatedGoalLevelVerdict {
+  const { metric, rawTarget, rawBaseline, cap } = args;
+  for (const ceiling of [false, true]) {
+    const admission = admitGoalBaseline({ rawTarget, rawBaseline, cap, ceiling });
+    if (admission.admitted) return { admitted: true, normalised: admission.normalised };
+  }
+  return { admitted: false, reason: offCapScaleSentence(metric, rawBaseline, rawTarget, cap) };
+}
+
+/**
  * Whether the candidate's current level of its goal is Olumi's, not the user's: "known" alone is not enough (verdict
  * 5824647383) — a level the model marks known but attributes to itself (`ai_proposed`/`inferred`) is Olumi's too.
  */
 function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
   return !(goal.baseline_known === true && (goal.baseline_provenance ?? goal.provenance) === 'explicit');
+}
+
+/**
+ * A bare percent ("%", "percent", "per cent", "percentage"). A qualified percent ("% of appointments", "percentage
+ * points") names a measure, never only a change's size.
+ */
+export function isBarePercent(unit: unknown): boolean {
+  const parts = readPercentUnit(unit);
+  return parts !== null && parts.base === null && parts.qualifiers === null;
+}
+
+/**
+ * A quantity that is itself a percentage: its name says it is a rate, ratio, share or margin of something ("churn rate",
+ * "win rate", "conversion", "gross margin", "retention"), or holds a percent sign. Such a metric is MEASURED in %.
+ */
+const PERCENTAGE_QUANTITY = /%|\b(?:rates?|ratios?|shares?|margins?|churn|retention|conversions?|percent(?:age)?s?|proportions?|uptime|utili[sz]ation|occupancy|attrition|turnover|yields?|accuracy|coverage|penetration)\b/i;
+
+/**
+ * ⛔ THE "%" OF A RELATIVE CHANGE, NEVER THE QUANTITY'S OWN UNIT (DL 0df0e1 founder trace Q1; AIE review on #87 6016108422 (1)).
+ * True ONLY when the percent unit (bare or qualified solely by change words and a reference level) is the size of a relative change
+ * on a quantity that is not a percentage: "increase productivity by at least 10%". A quantity measured in % keeps it
+ * as its unit: "cut churn rate by 10%" is a relative
+ * change of a % metric, and "win rate" or "conversion rate" are read in %. A level frame is never a change: its "%" is the
+ * level's own. Direction words must agree with the signed `value` (percent or stored fraction).
+ * Fail-closed toward the stored unit: any percentage-quantity word in the name keeps the "%".
+ */
+export function isChangeOwnPercent(goal: { readonly metric?: unknown; readonly unit?: unknown; readonly frame?: unknown; readonly value?: unknown }): boolean {
+  return goal.frame === 'change_rel' && isRelativeChangePercentUnit(goal.unit, goal.value)
+    && !(typeof goal.metric === 'string' && PERCENTAGE_QUANTITY.test(goal.metric));
 }
 
 /**
@@ -2680,9 +3026,63 @@ export function admitStatedGoalChange(
   readonly reading?: string;
 } {
   const frame = goal.frame === 'change_rel' ? 'change_rel' : 'change_abs';
-  const unit = goal.unit ? goal.unit : undefined;
+  /**
+   * ⛔ THE CHANGE'S "%" IS NEVER THE METRIC'S UNIT (DL 0df0e1 founder trace Q1, scenario 58bd5e71; PR A2). "Increase
+   * productivity by at least 10%" was drafted with unit "%", and this line copied it: productivity was stored as measured
+   * in %, so every later door refused the user's own level ("16 small" per sprint: `unit_mismatch`) and every Run asked
+   * for productivity "in %". A "%" that is solely the size of a relative change on a quantity that is not a percentage
+   * names the CHANGE (the contract above: the unit is the METRIC's, the unit of its current level), so it is not written
+   * as the goal's unit: the metric's unit is unknown until a level states it (`isChangeOwnPercent`). A quantity measured
+   * in % ("cut churn rate by 10%") keeps "%", and so does a level the user wrote in % (`notTheUsers === null` below).
+   */
+  const unit = goal.unit && !isChangeOwnPercent({ ...goal, value: raw }) ? goal.unit : undefined;
   const stored = frame === 'change_rel' ? raw / 100 : raw;
   const node: Partial<AdmittedNode> = { ...(unit ? { goal_threshold_unit: unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored };
+  /**
+   * ⭐ RECOVERY BATCH C (rulings 2–5, 9–11): the drafter's stated semantics, validated once. A basis never makes a base
+   * up: it only (a) lets a change QUANTITY be scored with no level today, (b) lets a relative change stand on Olumi's own
+   * starting value as `estimate_only`, and (c) says the reference and period beside the chance.
+   */
+  const quantityFrame = goal.quantity_frame === 'change' ? 'change' : 'level';
+  const basisArgs = { drafted: goal.basis, quantityFrame, targetFrame: frame, targetRaw: stored, horizonMonths: goal.horizon_months } as const;
+  const basisVerdict = admitGoalTargetBasis(basisArgs);
+  // ⛔ RE-SCOPE 2 (R5-5 (a)): a reading refused for its conditions persists that refusal in the stored reading's own
+  // `open_question` (`CONDITIONS_NOT_KEPT`), so no Run — before or after a reopen — shows a chance without them.
+  const refusedForConditions = conditionsRefusedBasis(basisArgs, basisVerdict);
+  const keptRefusal = refusedForConditions === undefined ? {} : { goal_target_basis: refusedForConditions };
+  const basis = 'basis' in basisVerdict ? basisVerdict.basis : null;
+  const withBasis = (n: Partial<AdmittedNode>): Partial<AdmittedNode> => (basis === null ? n : { ...n, goal_target_basis: basis });
+  if (quantityFrame === 'change') {
+    /**
+     * ⭐ A CHANGE QUANTITY (ruling 2, hiring): "productivity, % change from today" with `change_abs` +10 in its own unit. ISL
+     * scores the option's paired change against the status quo (`level_i = B + (option − SQ)`, B = 0 today by definition), so
+     * NO level today is needed or written. Its scale is the change's own (`%` → 0–100), so every effect stated in "% of today's
+     * productivity" is sized on that frame (`resolveMagnitudeFrame` reads `goal_threshold_cap`). Refused unless the basis is
+     * stated and valid (ruling 9: a missing denominator is still refused), and a relative change of a change is refused (the
+     * contract: no `change_rel` on a `change` quantity).
+     */
+    const changeNode: Partial<AdmittedNode> = {
+      ...(goal.unit ? { goal_threshold_unit: goal.unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored, quantity_frame: 'change',
+    };
+    const refusal = frame !== 'change_abs' ? 'frame' as const : 'refused' in basisVerdict ? basisVerdict.refused
+      : basis === null ? 'denominator' as const : !goal.unit ? 'frame' as const : null;
+    if (refusal !== null) return { node: { ...changeNode, ...keptRefusal }, withheld: goalTargetBasisRefusalWords(goal.metric, refusal) };
+    const resolvedChange = stored !== 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(stored), goal.unit, undefined) : null;
+    if (resolvedChange === null) {
+      return { node: changeNode, withheld: `A change of ${raw}${goal.unit ? ` ${goal.unit}` : ''} in "${goal.metric}" does not sit on a scale Olumi can read, so no chance of reaching it is shown.` };
+    }
+    return { node: {
+      ...changeNode,
+      goal_threshold_cap: resolvedChange.cap,
+      goal_threshold_cap_provenance: resolvedChange.provenance,
+      goal_threshold: stored / resolvedChange.cap,
+      goal_target_basis: basis!,
+    } };
+  }
+  // ⛔ Re-scope (r2 BLOCKING 2): a change of a LEVEL quantity whose reading is refused while the drafter retained conditions
+  // refuses the whole goal reading, with why (a change quantity's refusal above already writes no threshold and says why).
+  const conditionsRefused = goalReadingRefusedWords(goal.metric, basisVerdict, goal.basis);
+  if (conditionsRefused !== undefined) return { node: { ...node, ...keptRefusal }, withheld: conditionsRefused };
   const sign = raw > 0 ? '+' : '';
   const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
   const today = goal.baseline_value;
@@ -2707,7 +3107,19 @@ export function admitStatedGoalChange(
     }
     return null;
   })();
-  if (notTheUsers !== null && fromBrief?.kind !== 'adopt') {
+  /**
+   * ⭐ RECOVERY BATCH C (ruling 9; amendments 7 and 10): a RELATIVE change on Olumi's own starting value is no longer refused
+   * outright. With a valid basis it is admitted as `estimate_only`: the base is written as OLUMI'S (`cee_inference`, never
+   * the user's), and the licence labels the chance "Provisional estimate using Olumi's assumed starting value: B", adding that
+   * B's own uncertainty is not included. A missing base, a base stated for another quantity, or a missing denominator stays
+   * refused. A LEVEL target on Olumi's base stays withheld (amendment 7: `admitModel`'s level guard).
+   * ⛔ S3 T5 D3 (L2): a base the drafter typed `explicit` that the brief does not write for this goal is OLUMI's too (C's rule:
+   * human only by positive attestation), never dropped. "400 paying customers at £20" drafted as £8,000 today was refused
+   * because only an `ai_proposed` base reached this branch, so the saved goal held no base at all.
+   */
+  const estimateOnly = notTheUsers !== null && fromBrief?.kind !== 'adopt' && frame === 'change_rel' && basis !== null
+    && typeof today === 'number' && Number.isFinite(today) && notTheUsers !== 'stated for another quantity';
+  if (notTheUsers !== null && fromBrief?.kind !== 'adopt' && !estimateOnly) {
     // ⛔ AIQ 5894808343 (1), no-regret: the brief DID give a figure, so "was not stated" would be false.
     if (fromBrief?.kind === 'refused') {
       const gave = fromBrief.written.map((w) => `‘${w}’`).join(' and ');
@@ -2717,9 +3129,9 @@ export function admitStatedGoalChange(
     }
     return { node, withheld: notTheUsers };
   }
-  const level = notTheUsers === null ? today as number : (fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>).value;
+  const level = notTheUsers === null || estimateOnly ? today as number : (fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>).value;
   // ⛔ AIQ 5897443539 (run 0): a reading of a "%"-typed percentage change carries the level's unit read from the brief.
-  const readUnit = notTheUsers !== null && fromBrief?.kind === 'adopt' ? fromBrief.unit : undefined;
+  const readUnit = notTheUsers !== null && !estimateOnly && fromBrief?.kind === 'adopt' ? fromBrief.unit : undefined;
   const goalUnit = readUnit ?? goal.unit;
   const target = frame === 'change_rel' ? level * (1 + stored) : level + stored;
   const resolved = level > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(level, target), goalUnit, undefined) : null;
@@ -2728,16 +3140,25 @@ export function admitStatedGoalChange(
       `The current level of "${goal.metric}" (${level}) and a change of ${change} from it do not sit on a scale starting at ` +
       'zero, so no chance of reaching it can be shown. If either figure is wrong, say which and it can be corrected.' };
   }
+  // The level's unit is the metric's: read from the brief, or the unit the user wrote today's level in (a "%" level too).
+  const levelUnit = readUnit ?? (notTheUsers === null && goal.unit ? goal.unit : undefined);
   const withBase = {
     ...node,
-    ...(readUnit !== undefined ? { goal_threshold_unit: readUnit } : {}),
+    ...(levelUnit !== undefined ? { goal_threshold_unit: levelUnit } : {}),
     goal_threshold_cap: resolved.cap,
     goal_threshold_cap_provenance: resolved.provenance,
     goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
   };
   if (notTheUsers === null) {
     // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
-    return { node: { ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) } };
+    return { node: withBasis({ ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) }) };
+  }
+  if (estimateOnly) {
+    // OLUMI'S starting value, said as such by the licence (`estimate_only`); never `brief_extraction` / `user_stated`.
+    return { node: withBasis({
+      ...withBase,
+      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
+    }) };
   }
   // ⭐ AIQ (b): OLUMI'S READING of the brief's figure. Never `user_stated` (`cee_inference`); the reading carries the
   // brief's clause and the words, keyed to the level it read (`goalLevelReadingWords`: a level the user states or edits
@@ -2750,19 +3171,117 @@ export function admitStatedGoalChange(
   const unitText = typeof goalUnit === 'string' ? goalUnit : '';
   const words = goalLevelSentence(lead, { level, frame, stored, unit: unitText, bound }) ?? `${lead}.`;
   return {
-    node: {
+    node: withBasis({
       ...withBase,
       observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goalUnit ? { unit: goalUnit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
       goal_level_reading: { level, level_unit: unitText, quote: adopt.quote, lead, ...(bound !== null ? { bound } : {}) },
-    },
+    }),
     reading: words,
   };
 }
 
 
+/**
+ * ⭐ RECOVERY BATCH C (ruling 15; DL scope decision 2): SEVERAL TARGETS ARE STORED AS THE GOAL'S TARGETS. A level row the
+ * drafter typed `role: 'target'` is marked `role: 'goal_target'`, and the goal's own stated level target is written beside
+ * them as its own row (the goal panel's raw + row pair, `statedGoalTargetOf`), so the Run sends every target and ISL's
+ * same-draw joint covers each (`goal-targets-joint.ts`). A strict comparator is held as stated (`operator_as_stated`).
+ * Nothing changes for a model with no target rows: the result is returned as the SAME reference.
+ */
+function withGoalTargetRows(
+  result: ConstraintAdmissionResult, model: CandidateModel, nodes: readonly Partial<AdmittedNode>[],
+  nodeIdFor: (metric: string) => string | undefined,
+): ConstraintAdmissionResult {
+  const goal = nodes.find((n) => n.kind === 'goal');
+  // AIE C clause 3 (12 Oct): a target keeps its OWN frame. A change-frame target row is still one of the goal's targets
+  // (never re-read as a limit, never forced into a level); the joint names it and waits (`goal-targets-joint.ts`).
+  const targetNodes = new Set(model.constraints.filter((c) => c.role === 'target')
+    .map((c) => nodeIdFor(c.metric)).filter((id): id is string => id !== undefined && id !== goal?.id));
+  if (goal === undefined || typeof goal.id !== 'string' || targetNodes.size === 0) return result;
+  const marked = result.constraints.map((c) => (targetNodes.has(c.node_id) ? { ...c, role: 'goal_target' as const } : c));
+  if (!marked.some((c) => c.role === 'goal_target')) return result;
+  const raw = goal.goal_threshold_raw;
+  const op = model.goal.operator;
+  const stated = op === '>' || op === '<' ? op : undefined;
+  const held = op === '>' || op === '>=' ? '>=' : op === '<' || op === '<=' ? '<=' : undefined;
+  if (goal.goal_threshold_frame !== 'level' || typeof raw !== 'number' || !Number.isFinite(raw) || held === undefined) {
+    return { ...result, constraints: marked };
+  }
+  const id = `agent-lane:${goal.id}:${held}`;
+  if (marked.some((c) => c.constraint_id === id)) {
+    return { ...result, constraints: marked.map((c) => (c.constraint_id === id ? { ...c, role: 'goal_target' as const } : c)) };
+  }
+  const own: AdmittedConstraint = {
+    constraint_id: id, node_id: goal.id, operator: held, ...(stated !== undefined ? { operator_as_stated: stated } : {}),
+    value: raw, label: model.goal.metric,
+    ...(typeof goal.goal_threshold_unit === 'string' ? { unit: goal.goal_threshold_unit } : {}),
+    provenance: canonicalProvenance(model.goal.provenance), value_frame: 'level', role: 'goal_target',
+  };
+  return { ...result, constraints: [own, ...marked] };
+}
+
+/**
+ * ⭐ RECOVERY BATCH C, L2 — NO LAST-WINS (SYS3 trace #94 6115410093; PL 6115488243). The drafter may write one option's
+ * level on one factor twice: the user's stated addition (prepared into `derived_total`: a stated baseline plus the stated
+ * change, 6 + 2 = 8) and its own absolute duplicate (8, `ai_proposed`). Keying cells by factor let the LAST entry win, so
+ * the duplicate silently relabelled the user's total as Olumi's. One entry is kept per factor, by what it rests on.
+ *
+ * ⛔ A DRAFTER'S `explicit` LABEL IS NOT A USER FIGURE (independent check C-cee r1, item 2). Only an entry `bound` to the
+ * brief counts as the user's: the caller's L1/L3 binding (a derived total's baseline verified AND its addition written
+ * about that factor; an absolute level's own quote, quantity and role, `verifiedOptionSetting`). So:
+ *   · a bound derivation over a bound level over an unbound derivation over anything else — whatever their order;
+ *   · two BOUND entries that disagree are a conflict the user resolves: NO level is set, and the option is said to set
+ *     the factor to both figures (never a silent overwrite). Unbound entries never make a conflict;
+ *   · an unbound entry that is kept is Olumi's (`ai_proposed`), whatever the drafter called it; equal ranks keep the first.
+ * Returns each kept entry (by identity) mapped to the entry admitted for it. A factor written once passes through untouched.
+ */
+export function oneLevelPerFactor(
+  o: CandidateModel['options'][number], loss: RepairEntry[], ids: ReadonlyMap<string, string>,
+  bound: (iv: NonNullable<CandidateModel['options'][number]['interventions']>[number]) => boolean,
+): ReadonlyMap<NonNullable<CandidateModel['options'][number]['interventions']>[number], NonNullable<CandidateModel['options'][number]['interventions']>[number]> {
+  type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  const all = (o.interventions ?? []) as Iv[];
+  const boundOf = new Map<Iv, boolean>();
+  const isBound = (iv: Iv): boolean => {
+    if (!boundOf.has(iv)) boundOf.set(iv, iv.provenance === 'explicit' && bound(iv));
+    return boundOf.get(iv)!;
+  };
+  const rank = (iv: Iv): number => {
+    const derived = (iv as { derived_total?: unknown }).derived_total === true;
+    return isBound(iv) ? (derived ? 4 : 3) : derived ? 2 : 1;
+  };
+  const kept = new Map<Iv, Iv>();
+  const byFactor = new Map<string, Iv[]>();
+  for (const iv of all) {
+    const key = ids.get(iv.factor_label) ?? `unresolved:${iv.factor_label}`;
+    byFactor.set(key, [...(byFactor.get(key) ?? []), iv]);
+  }
+  for (const [key, group] of byFactor) {
+    if (group.length === 1 || key.startsWith('unresolved:')) { for (const iv of group) kept.set(iv, iv); continue; }
+    const users = group.filter((iv) => rank(iv) >= 3);
+    const values = [...new Set(users.map((iv) => iv.value))];
+    if (values.length > 1) {
+      const unit = group[0]!.unit ? ` ${group[0]!.unit}` : '';
+      loss.push({
+        field_path: `options[${o.label}].interventions.${key}.conflicting_user_levels`,
+        before: values, after: null,
+        reason: `“${o.label}” sets “${group[0]!.factor_label}” to both ${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}${unit}, `
+          + 'so no level was set: say which one you mean.',
+        severity: 'warn',
+      } as RepairEntry);
+      continue;
+    }
+    const best = Math.max(...group.map(rank));
+    const chosen = group.find((iv) => rank(iv) === best)!;
+    kept.set(chosen, best < 3 && chosen.provenance === 'explicit' ? { ...chosen, provenance: 'ai_proposed' } as Iv : chosen);
+  }
+  return kept;
+}
+
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
-function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
-  return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', raw_value: raw, cap };
+function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number, verified = false): NonNullable<AdmittedNode['observed_state']> {
+  // Recovery Batch B (DL 12 Oct): a level V2 verifies (`verifiedGoalLevel`) is typed `explicit`; otherwise as before.
+  return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', ...(verified ? { extractionType: 'explicit' as const } : {}), raw_value: raw, cap };
 }
 
 /**
@@ -2850,6 +3369,17 @@ export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
   };
 }
 
+/** Reachability only (readiness leaves inert risks out): the class a failed event slice used to fall into (B3 086e4624). */
+export function admittedReachesGoal(model: AdmittedModel): boolean {
+  return !validateGraphStructure(model as never, { leaveOutInertRisks: true }).violations
+    .some((v) => v.code === 'NO_PATH_TO_GOAL' || v.code === 'NO_GOAL');
+}
+
+/** Owned by construction, outside the drafter schema. The verdict that selected the prompt is never re-read. */
+export interface ConstructionAdmission {
+  readonly event_by_date_prompted?: boolean;
+}
+
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
@@ -2884,6 +3414,77 @@ export function admitCandidateModel(
    * about the link's source (`writtenRangeFor`, injected for the same reason). The size is then said with its range, as a
    * bound. Absent ⇒ none (the size reads as before).
    */
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
+  construction: ConstructionAdmission = {},
+): AdmittedModel {
+  // The flag replaces goal-token re-attestation for a draft that answered the event slice (typed drafter output, never
+  // text). A flagged brief drafted as an ordinary model, with no event goal, deliverable or added capacity
+  // (construction-acyclic: a price rise "with the next AI feature release"; sealedR-d3), takes the ordinary path as before.
+  const prompted = construction.event_by_date_prompted === true && (candidateModel.goal?.kind === 'event_by_date'
+    || (typeof candidateModel.goal?.deliverable === 'string' && candidateModel.goal.deliverable.trim() !== '')
+    || (Array.isArray(candidateModel.options) && candidateModel.options.some(o => o.added_capacity != null)));
+  // A failed event slice must not cost the user a working ordinary model. Validate the same reachability
+  // gate as Run, but return the untouched ordinary result: no new ledger entry, projection or event semantics.
+  const failedEvent = (detail: typeof EVENT_BY_DATE_REFUSALS[number]): AdmittedModel => {
+    try {
+      const ordinary = admitOrdinaryCandidateModel(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
+      if (admittedReachesGoal(ordinary)) {
+        log.info({ event: 'cee.event_by_date.fallback_kept', missing_piece: detail.slice("Olumi couldn't connect your options to the launch date yet: ".length, -1) },
+          'cee.event_by_date.fallback_kept');
+        return ordinary;
+      }
+    } catch {
+      // Malformed ordinary input cannot authorise a fallback.
+    }
+    return refusedEventByDate(detail);
+  };
+  if (prompted) {
+    try {
+      const refusal = eventByDateAdmissionRefusal(candidateModel);
+      if (refusal !== null) return failedEvent(refusal);
+    } catch {
+      return failedEvent(EVENT_BY_DATE_REFUSALS[1]);
+    }
+  }
+  if (!prompted && candidateModel.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidateModel.goal)) {
+    candidateModel = { ...candidateModel, goal: { ...candidateModel.goal, kind: null } };
+  }
+  if (prompted || (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal))) {
+    try {
+      const event = admitEventByDate(candidateModel);
+      const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
+        + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
+        || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
+      if (!hasContext) return withEventNumberLoss(event, brief ?? '');
+      // Limits can name a quantity even when no causal factor was drafted for it. Keep that named quantity, without a
+      // fabricated current value, and let the established constraint/scale admitters carry its limit and option settings.
+      const named = new Set([...candidateModel.factors, ...candidateModel.risks, ...candidateModel.outcomes].map(n => canonicalLabel(n.label)));
+      const limitFactors: CandidateModel['factors'][number][] = candidateModel.constraints
+        .filter(c => !named.has(canonicalLabel(c.metric)) && canonicalLabel(c.metric) !== canonicalLabel(candidateModel.goal.metric))
+        .map(c => ({ label: c.metric, role: 'observable', baseline_known: false, baseline_value: null,
+          unit: c.unit ?? null, provenance: c.provenance }));
+      const context = admitOnce(withQuantityFrames({ ...candidateModel, factors: [...candidateModel.factors, ...limitFactors] }),
+        widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
+      return withEventNumberLoss(carryEventReasoningContext(event, context, candidateModel, prompted), brief ?? '');
+    } catch (err) {
+      if (!prompted) throw err;
+      return failedEvent(EVENT_BY_DATE_REFUSALS[1]);
+    }
+  }
+  if (candidateModel.goal.kind === 'event_by_date' && candidateModel.factors.length === 0 && candidateModel.risks.length === 0
+    && candidateModel.outcomes.length === 0 && candidateModel.links.length === 0) throw new Error('event_goal_needs_redraft');
+  return admitOrdinaryCandidateModel(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
+}
+
+/** The existing ordinary path, also used internally by construction before its bounded repair is complete. */
+export function admitOrdinaryCandidateModel(
+  candidateModel: CandidateModel,
+  widened: WidenerAdditions = {},
+  brief?: string,
+  goalLevelStated: (value: number, unit: unknown) => boolean = () => false,
+  targetFigureWrittenAgain: (value: number, unit: unknown) => boolean = () => false,
+  goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null = () => null,
+  sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean = () => false,
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
   candidateModel = withQuantityFrames(candidateModel);
@@ -2937,6 +3538,98 @@ export function admitCandidateModel(
   };
 }
 
+/** Preserve the reasoning around an event forecast without silently adding another term to its defined capacity sum. */
+function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel, candidate: CandidateModel, prompted = false): AdmittedModel {
+  const goal = context.nodes.find(n => n.kind === 'goal');
+  const ids = new Map<string, string>();
+  for (const n of context.nodes) {
+    if (n.kind === 'goal' || n.kind === 'decision') continue;
+    if (n.kind === 'option') {
+      const index = candidate.options.findIndex(o => canonicalLabel(o.label) === canonicalLabel(n.description ?? n.label));
+      if (index >= 0) ids.set(n.id, `event_option_${index + 1}`);
+    } else ids.set(n.id, `event_context_${context.nodes.indexOf(n) + 1}`);
+  }
+  const remapPath = (path: string): string => {
+    for (const [before, after] of ids) path = path.replaceAll(`[${before}]`, `[${after}]`).replaceAll(`${before}::`, `${after}::`).replaceAll(`::${before}`, `::${after}`);
+    return path;
+  };
+  const nodes = event.nodes.map(n => {
+    const old = context.nodes.find(c => ids.get(c.id) === n.id && c.kind === 'option');
+    if (!old?.interventions) return n;
+    const settings = Object.fromEntries(Object.entries(old.interventions).flatMap(([target, setting]) => {
+      const mapped = ids.get(target);
+      return mapped ? [[mapped, { ...setting, ...(setting.target_match ? { target_match: { ...setting.target_match, node_id: mapped } } : {}) }]] : [];
+    }));
+    return { ...n, ...(prompted && old.description ? { description: old.description } : {}), interventions: { ...n.interventions, ...settings } };
+  });
+  for (const n of context.nodes) {
+    const id = ids.get(n.id);
+    if (!id || n.kind === 'option') continue;
+    const identity = n.nonlinear_identity;
+    nodes.push({ ...n, id, ...(identity ? { nonlinear_identity: { ...identity, factor_ids: identity.factor_ids.map(f => ids.get(f) ?? f) } } : {}) });
+  }
+  const edges = context.edges.flatMap(e => {
+    const from = ids.get(e.from), to = ids.get(e.to);
+    return from && to ? [{ ...e, from, to }] : [];
+  });
+  const omittedGoalLinks: RepairEntry[] = context.edges.filter(e => e.to === goal?.id || e.from === goal?.id).map(e => {
+    const from = context.nodes.find(n => n.id === e.from)?.label ?? e.from;
+    const to = context.nodes.find(n => n.id === e.to)?.label ?? e.to;
+    return { field_path: `edges[${e.from}::${e.to}].event_forecast_not_modelled`, before: e, after: null, severity: 'warn',
+      reason: `The link from "${from}" to "${to}" is not used to work out the deadline chance yet. Its stated factors and risks are kept; this forecast currently uses team capacity.` } as RepairEntry;
+  });
+  const omittedIdentities: RepairEntry[] = (candidate.identities ?? []).filter(i => canonicalLabel(i.outcome) === canonicalLabel(candidate.goal.metric))
+    .map(i => ({ field_path: `nodes[event_goal].nonlinear_identity`, before: i, after: null, severity: 'warn',
+      reason: `The stated relationship between "${i.outcome}" and ${i.factors.map(f => `"${f}"`).join(', ')} is not used to work out the deadline chance yet; this forecast currently uses team capacity.` } as RepairEntry));
+  const unattachedLimits: RepairEntry[] = context.goal_constraints.filter(c => !ids.has(c.node_id)).map(c => ({
+    field_path: `goal_constraints[${c.constraint_id}].event_forecast_not_modelled`, before: c, after: null, severity: 'warn',
+    reason: `The limit on "${c.label ?? c.node_id}" is not used by this deadline forecast because its quantity cannot be attached to the team-capacity model.` } as RepairEntry));
+  const withheldLinks: RepairEntry[] = context.withheld.map(l => ({ field_path: `edges[${l.from}::${l.to}].event_forecast_not_modelled`, before: l,
+    after: null, severity: 'warn', reason: `The link from "${l.from}" to "${l.to}" is not used. ${l.detail}` } as RepairEntry));
+  const contextLoss = context.loss.filter(l => !goal || !l.field_path.startsWith(`nodes[${goal.id}]`))
+    .map(l => ({ ...l, field_path: remapPath(l.field_path) }));
+  const carried: AdmittedModel = { ...event, nodes, edges: [...event.edges, ...edges],
+    goal_constraints: context.goal_constraints.flatMap(c => { const id = ids.get(c.node_id); return id ? [{ ...c, node_id: id }] : []; }),
+    inference_classes: { ...event.inference_classes, ...Object.fromEntries(Object.entries(context.inference_classes)
+      .flatMap(([id, value]) => ids.has(id) ? [[ids.get(id)!, value]] : [])) },
+    loss: [...event.loss, ...contextLoss, ...omittedGoalLinks, ...omittedIdentities, ...unattachedLimits, ...withheldLinks], withheld: context.withheld };
+  return prompted ? retainEventContextForReview(carried, candidate) : carried;
+}
+
+/** Keep the reasoning sketch visible, without adding its unsupported terms to the option-level capacity forecast. */
+function retainEventContextForReview(model: AdmittedModel, candidate: CandidateModel): AdmittedModel {
+  const limitIds = model.goal_constraints.map(c => c.node_id);
+  const protectedIds = new Set([...limitIds, ...limitSinkBranch(model.nodes, model.edges, limitIds)]);
+  const excluded = new Set(model.nodes.filter(n => n.id.startsWith('event_context_') && !protectedIds.has(n.id)).map(n => n.id));
+  if (excluded.size === 0) return model;
+  const loss: RepairEntry[] = model.nodes.filter(n => excluded.has(n.id)).map(n => ({
+    field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: n, after: 'retained_excluded', severity: 'warn',
+    reason: `"${n.label}" is kept as reasoning context; this deadline forecast uses option-level added capacity.`,
+  } as RepairEntry));
+  const nodes = model.nodes.map(n => {
+    if (excluded.has(n.id)) return { ...n, analysis_participation: 'retained_excluded' as const };
+    if (n.kind !== 'option' || !n.interventions) return n;
+    const held = Object.entries(n.interventions).filter(([id]) => excluded.has(id));
+    if (held.length === 0) return n;
+    const option = candidate.options[Number(n.id.slice('event_option_'.length)) - 1];
+    const descriptions = held.map(([id, setting]) => {
+      const factor = model.nodes.find(f => f.id === id)!;
+      const original = option?.interventions?.find(iv => canonicalLabel(iv.factor_label) === canonicalLabel(factor.description ?? factor.label));
+      const value = original?.value ?? setting.raw_value ?? setting.value;
+      const unit = original?.unit ?? setting.unit ?? factor.observed_state?.unit ?? '';
+      // ONE PROVENANCE AUTHORITY: "Your stated setting" only for the person's own setting (`provenanceOf`).
+      const author = settingProvenanceOf(setting, factor).origin === 'human' ? 'Your stated setting' : 'Drafted option setting';
+      const detail = `${author}: ${factor.description ?? factor.label} = ${value}${unit ? ` ${unit}` : ''}. Kept for review; the deadline forecast uses this option's added-capacity estimate.`;
+      loss.push({ field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: { factor, setting, original },
+        after: { description: detail }, severity: 'warn', reason: detail } as RepairEntry);
+      return detail;
+    });
+    return { ...n, description: [n.description ?? n.label, ...descriptions].join('\n'),
+      interventions: Object.fromEntries(Object.entries(n.interventions).filter(([id]) => !excluded.has(id))) };
+  });
+  return { ...model, nodes, loss: [...model.loss, ...loss] };
+}
+
 function admitOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions,
@@ -2953,7 +3646,10 @@ function admitOnce(
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
-  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const { model: draftedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  // Authenticate before framing or writing levels: an estimate never competes with the user's current figure.
+  const model = { ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) };
+  const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -2975,13 +3671,90 @@ function admitOnce(
     if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
       capByLabel.set(f.label, f.plausible_max);
     }
-    // ⛔ ONLY A KNOWN BASELINE. An AI estimate (`baseline_known: false`) must never
-    // derive its own frame: a guess that sets the scale it is then read against
-    // is a guess dressed as a measurement.
-    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value, f.provenance);
+    // T4 A3: a coordinate frame is not evidence for the estimate. Derive it only
+    // for an already named unit, keep the inferred source and disclose the frame.
+    if (f.baseline_known || (typeof f.unit === 'string' && f.unit.trim() !== ''
+      && typeof f.baseline_value === 'number' && f.baseline_value >= 0)) {
+      noteMagnitude(f.label, f.baseline_value, f.baseline_known ? f.provenance : 'ai_proposed');
+    }
   }
   for (const o of model.options) {
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
+  }
+  /**
+   * ⭐ OLUMI'S CONVENTION FRAME, RESCUE-ONLY (Science §(s) + §(u) + §(v); DL "B", Science accepted 8 Oct; `convention-
+   * frame.ts`). A bounded rate or a non-negative level gets the convention's DETERMINISTIC frame instead of the drafter's
+   * own guess ONLY where that turns a sized link from not representable (|β| > 1 on the frames it has today) into
+   * representable — never a search for a frame that passes: each end is either today's frame or the formula's. Nothing
+   * else moves, so every draft without such a link is byte-identical to before. A ceiling the USER wrote wins; a rate the
+   * user constrained keeps today's frame. Every rescued link is logged by id, and each re-framed factor is said once.
+   */
+  type Candidate = { label: string; unit: string; frame: number; drafted: number | null; widened_by?: number };
+  const candidates = new Map<string, Candidate>();
+  for (const f of model.factors) {
+    // Science §(v)(1): an Olumi-ESTIMATED level is framed by the same convention (it stays labelled as Olumi's), and the
+    // frame also covers that level's own spread.
+    if (typeof f.baseline_value !== 'number') continue;
+    const level = f.baseline_value;
+    // #2842 review r2 #3: the SAME fold `assignIds` uses, so a constraint written on an alias still counts.
+    const sameLabel = (x: string): boolean => canonicalLabel(x) === canonicalLabel(f.label);
+    const constrained = model.constraints.filter((c) => sameLabel(c.metric));
+    const cls = conventionClassOf(f.label, f.unit, level);
+    // ⛔ #2842 review P1-6: a percent limit is read on PLoT's [0, 100] rung unless the target's frame is 100
+    // (`withholdUnprovablePercentFrames`), so a convention frame on a CONSTRAINED rate would turn the user's own limit
+    // ("keep churn under 8%") into "could not be checked". Such a rate keeps today's frame until that reader carries it.
+    if (cls === 'bounded_rate' && constrained.length > 0) continue;
+    if (typeof f.plausible_max === 'number' && briefWritesFigure(brief, f.plausible_max, cls, f.unit)) continue;
+    const settings = [
+      ...model.options.flatMap((o) => (o.interventions ?? []).filter((iv) => sameLabel(iv.factor_label)).flatMap((iv) => {
+        const additional = (iv as { value_kind?: unknown }).value_kind === 'additional';
+        // #2842 review r2 #1: a stated range on the setting counts by its ends too.
+        const range = (iv as { range?: { low?: unknown; high?: unknown } }).range;
+        const ends = additional ? [] : [range?.low, range?.high].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+        return [additional ? level + iv.value : iv.value, ...ends];
+      })),
+      ...constrained.map((c) => c.value),
+    ];
+    // #2842 review r2 #6: a label that FOLDS onto another entity (factor + outcome alias) is one admitted node whose frame
+    // this label-level reading cannot see: never re-framed (fail closed).
+    const folded = [model.goal.metric, ...model.factors.map((x) => x.label), ...model.outcomes.map((x) => x.label), ...model.risks.map((x) => x.label)]
+      .filter((x) => sameLabel(x)).length > 1;
+    if (folded) continue;
+    const c = conventionFrameFor({ label: f.label, unit: f.unit, level, settings,
+      ...(f.baseline_known ? {} : { spread_upper: estimatedSpreadUpper(level) }) });
+    if (c === undefined || c.frame === capByLabel.get(f.label)) continue;
+    candidates.set(f.label, { label: f.label, unit: f.unit as string, frame: c.frame, drafted: f.plausible_max ?? null,
+      ...(c.widened_by !== undefined ? { widened_by: c.widened_by } : {}) });
+  }
+  const unitOfLabel = (label: string): string | undefined =>
+    [...model.factors, ...model.outcomes, ...model.risks].find((n) => canonicalLabel(n.label) === canonicalLabel(label))?.unit ?? undefined;
+  // #2848 buddy r2 #1: sizing, sign resolution and the basis carrier are all keyed by the endpoint PAIR, so a pair drawn
+  // twice cannot say which size a rescue (or a dropped basis) belongs to. Such a pair never seeds; it is still protected.
+  const pairKey = (l: { from: string; to: string }) => `${canonicalLabel(l.from)}::${canonicalLabel(l.to)}`;
+  const pairCount = new Map<string, number>();
+  for (const l of model.links) pairCount.set(pairKey(l), (pairCount.get(pairKey(l)) ?? 0) + 1);
+  const sizedLinks = model.links.flatMap((l) => (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
+    && Number.isFinite(l.effect_amount) && Number.isFinite(l.effect_per_source_change) && l.effect_amount !== 0 && l.effect_per_source_change !== 0
+    && (l.direction === 'positive' || l.direction === 'negative')
+    // #2842 review r2 #7 (Science §(v)(2)): a flow → stock size is never rescued, whichever end would move.
+    && !(isFlowUnit(unitOfLabel(l.from)) && !isFlowUnit(unitOfLabel(l.to)))
+    ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change,
+      // Science's condition 3: only a size carrying its §(p) basis may SEED a rescue; every size is protected (no harm).
+      seed: pairCount.get(pairKey(l)) === 1 && hasBasis(l.basis) && Math.sign(l.effect_amount / l.effect_per_source_change) === (l.direction === 'positive' ? 1 : -1) }] : []));
+  // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
+  // link into it can be rescued only by narrowing its source).
+  const rangeOf = (label: string): number | undefined => {
+    const c = capByLabel.get(label);
+    if (c !== undefined) return c;
+    const x = [...model.outcomes, ...model.risks].find((n) => n.label === label)?.plausible_max;
+    return typeof x === 'number' && Number.isFinite(x) && x > 1 ? x : undefined;
+  };
+  const rescue = rescueConventionFrames(sizedLinks, rangeOf, new Map([...candidates].map(([k, v]) => [k, v.frame])));
+  const conventionFrames: Candidate[] = [];
+  for (const label of rescue.applied) {
+    const cf = candidates.get(label)!;
+    capByLabel.set(label, cf.frame);
+    conventionFrames.push(cf);
   }
   /**
    * ⛔ A LEVEL ABOVE THE STATED RANGE WIDENS THE RANGE; IT IS NEVER KEPT RAW BESIDE NORMALISED
@@ -3006,7 +3779,11 @@ function admitOnce(
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
-    if (capByLabel.has(label) || largest <= 1) continue;
+    const unframedEstimate = model.factors.some((f) => f.label === label && !f.baseline_known
+      && (f.plausible_max === null || f.plausible_max === undefined)
+      && typeof f.unit === 'string' && f.unit.trim() !== ''
+      && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value) && f.baseline_value >= 0);
+    if (capByLabel.has(label) || (largest <= 1 && !unframedEstimate)) continue;
     const frame = defaultFrameFor(largest);
     capByLabel.set(label, frame);
     defaultedFrames.push({ label, frame });
@@ -3032,7 +3809,40 @@ function admitOnce(
   const goalScope = unstatedGoalScope(model.goal);
 
   // Fixed traversal order => deterministic ids.
-  const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
+  /**
+   * The drafter cites a brief sentence that WRITES this figure (`findStatedAmounts`, the same amount reader the verifier
+   * starts from): a claim about what the user wrote, verified or not. A quote that does not carry the figure is context
+   * ("Staffing is fixed…"), never the user's claim, so an estimate that cites it stays Olumi's.
+   */
+  // ⭐ Recovery Batch C, L3: the quote must bind THIS factor's figure in its quantity and typed frame, not merely contain it.
+  // ⭐ Recovery Batch B, S4 V2 origin (DL ruling (b)): with no binding quote, a figure the brief itself writes in the
+  // factor's frame is still the user's, role unverified (`briefWritesFactorFigure`), never Olumi's estimate.
+  // ⭐ Recovery Batch B, Row5 (DL 12 Oct): a range the brief states for a factor rides L6's carrier (`observed_state.range`).
+  // The user's own range beside their own figure (`briefStatedLevelRange`, `isStatedLevelRange`) first; else, per the DL's
+  // ruling (13:1xZ), a third party's range carried with its attribution (`briefAttributedLevelRange`; source
+  // `brief_extraction`, the quote naming that party), only when it contains the stored figure. A drafted midpoint beside it
+  // stays Olumi's (`levelRangePointBasis`). It changes no compute: the analysis wire copy drops it (`withoutStatedLevelRanges`).
+  const withStatedLevelRange = <T extends Record<string, unknown>>(os: T, f: CandidateModel['factors'][number]): T => {
+    const own = briefStatedLevelRange(f, brief);
+    if (own !== undefined) {
+      const range = { low: own.low, high: own.high, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: own.quote };
+      if (isStatedLevelRange(range, os)) return { ...os, range };
+    }
+    const theirs = briefAttributedLevelRange(f, brief);
+    const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+    if (theirs === undefined || typeof figure !== 'number' || !(theirs.low <= figure && figure <= theirs.high)) return os;
+    return { ...os, range: { low: theirs.low, high: theirs.high, meaning: 'min_max' as const, source: 'brief_extraction', source_quote: theirs.quote } };
+  };
+  const quotesBrief = (f: CandidateModel['factors'][number]): boolean => {
+    const quote = f.baseline_evidence?.quote;
+    const value = f.baseline_value;
+    return (typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
+      && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f, brief))
+      || briefWritesFactorFigure(f, brief);
+  };
+  const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
+  /** `display`, when set, is what the node shows; `label` stays the key its id slugs from and links resolve by. */
+  const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,
       kind: 'goal',
@@ -3063,6 +3873,13 @@ function admitOnce(
         const raw = model.goal.value;
         const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
         if (!stated) {
+          // GEN #3: the user's stated level holds no figure without a target's scale, and is ASKED, never dropped silently.
+          const unscaled = untargetedGoalLevelAsk(model.goal, goalLevelStated, brief);
+          if (unscaled !== null) {
+            loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].observed_state.magnitude_question`,
+              before: { value: unscaled.value, unit: unscaled.unit, quote: unscaled.quote }, after: null, reason: unscaled.question,
+              severity: 'warn' } as RepairEntry);
+          }
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -3071,7 +3888,7 @@ function admitOnce(
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
         // target takes the path below, unchanged.
         if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
-          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, goalLevelFromBrief(model));
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)));
           if (change.reading !== undefined) {
             loss.push({
               field_path: `nodes[${slugId(model.goal.metric)}].goal_level_reading`,
@@ -3160,16 +3977,30 @@ function admitOnce(
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap);
+            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, verifiedGoalLevel(model, brief));
           } else {
             withheld(verdict.reason);
           }
         }
+        // Recovery Batch C (rulings 18, 22; amendment 5): a LEVEL target's stated period and reference, held for the words
+        // and the horizon verdict. An invalid or absent basis changes nothing here: the level path is exactly as before.
+        const levelBasisArgs = {
+          drafted: model.goal.basis, quantityFrame: model.goal.quantity_frame === 'change' ? 'change' : 'level',
+          targetFrame: 'level', targetRaw: raw, horizonMonths: model.goal.horizon_months,
+        } as const;
+        const levelBasis = admitGoalTargetBasis(levelBasisArgs);
+        // ⛔ Recovery Batch C re-scope (r2 BLOCKING 2): goal conditions are never silently dropped. A reading refused while
+        // the drafter retained conditions beside the target would lose them here (the plain sentence names none), so the
+        // whole goal reading is refused instead: no threshold (no chance), and why is said. The user's level is kept.
+        const conditionsRefused = goalReadingRefusedWords(model.goal.metric, levelBasis, model.goal.basis);
+        if (conditionsRefused !== undefined) withheld(conditionsRefused);
+        // ⛔ RE-SCOPE 2 (R5-5 (a)): the refusal itself persists (the stored reading's `open_question`, `CONDITIONS_NOT_KEPT`).
+        const levelRefusal = conditionsRefusedBasis(levelBasisArgs, levelBasis);
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
           goal_threshold_raw: raw,
-          ...(resolved !== null
+          ...(resolved !== null && conditionsRefused === undefined
             ? {
                 goal_threshold_cap: resolved.cap,
                 goal_threshold_cap_provenance: resolved.provenance,
@@ -3177,17 +4008,21 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
+          ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis }
+            : levelRefusal !== undefined ? { goal_target_basis: levelRefusal } : {}),
         };
       })(),
     },
-    ...model.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance })),
+    ...model.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance,
+      ...(o.draft_widening !== undefined ? { node: { draft_widening: o.draft_widening } } : {}),
+    })),
     ...model.factors.map((f) => ({
       label: f.label,
       kind: 'factor' as const,
       provenance: f.provenance,
       node: {
         category: f.role,
-        // A baseline is written ONLY when the candidate says one is known.
+        // A baseline's author comes from the receipt, independently of the drafter's entity provenance.
         //
         // ⭐ `observed_state.source` IS A DIFFERENT CLAIM FROM `provenance.source`,
         // and both are required. `provenance.source` says who put this ENTITY in
@@ -3195,14 +4030,17 @@ function admitOnce(
         // it is the latter that `src/cee/provenance/money-invariant.ts:211` reads
         // to decide whether to audit the figure against the brief. Correcting only
         // the entity stamp left the figure unaudited; measured, not assumed.
-        ...(f.baseline_known && typeof f.baseline_value === 'number'
-          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }) }
+        // A factor the drafter tagged an estimate BUT quoted the brief for is a user CLAIM the receipt gate could not verify
+        // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
+        ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
+          ? { observed_state: withStatedLevelRange(framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
+            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
         ...((): Record<string, unknown> => {
-          const os = estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
-          return os === null ? {} : { observed_state: os };
+          const os = verifiedLevels.has(f) || quotesBrief(f) ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          return os === null ? {} : { observed_state: withStatedLevelRange(os, f) };
         })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
@@ -3240,7 +4078,7 @@ function admitOnce(
         ...((): Record<string, number> => {
           const c = capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
-          if (f.baseline_known && typeof f.baseline_value === 'number') {
+          if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
             const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
@@ -3258,6 +4096,8 @@ function admitOnce(
       const node = {
         ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
         ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
+        ...(r.draft_widening !== undefined ? { draft_widening: r.draft_widening, proposed_by: 'olumi' as const,
+          analysis_participation: 'retained_excluded' as const } : {}),
       };
       return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
     }),
@@ -3310,7 +4150,7 @@ function admitOnce(
   // whose label might slug to the same token.
   const decision = decisionEntityFor(model, brief, entities.map((e) => e.label));
   const DECISION_LABEL = decision.label;
-  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: decision.provenance });
+  entities.unshift({ label: DECISION_LABEL, ...(decision.display !== undefined ? { display: decision.display } : {}), kind: 'decision', provenance: decision.provenance });
 
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
@@ -3324,16 +4164,17 @@ function admitOnce(
     // A factor with NO baseline value gets no observed_state at all — an absent
     // value is the honest record; a zero would be a measurement. (An ESTIMATED
     // value is kept, stamped as Olumi's: `estimatedObservedState`.)
-    const label = shortLabel(e.label);
-    if (label !== e.label) {
+    const shown = e.display ?? e.label;
+    const label = shortLabel(shown);
+    if (label !== shown) {
       loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
         layer: 'cee',
         field_path: `nodes[${id}].label`,
-        before: e.label,
+        before: shown,
         after: label,
         reason:
-          `The label was ${e.label.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
+          `The label was ${shown.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
           'text is preserved on the node description and here.',
         severity: 'info',
       });
@@ -3342,10 +4183,17 @@ function admitOnce(
       id,
       kind: e.kind,
       label,
-      ...(label !== e.label ? { description: e.label } : {}),
-      provenance: displayProvenanceFor(e.provenance),
+      ...(label !== shown ? { description: shown } : {}),
+      provenance: isUnverifiedUserMaterial(e.node?.observed_state)
+        ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
+  }
+
+  // #2842 follow-up: a factor framed by Olumi's rescue convention says so on its own record, so a surface can disclose it.
+  for (const cf of conventionFrames) {
+    const node = nodes.find((n) => n.id === ids.get(cf.label)) as { observed_state?: Record<string, unknown> } | undefined;
+    if (node?.observed_state !== undefined) node.observed_state = { ...node.observed_state, frame_source: 'olumi_convention' };
   }
 
   // The scope choice, recorded with both readings: its `after` IS the assumption the build says, and
@@ -3478,6 +4326,28 @@ function admitOnce(
     } as RepairEntry);
   }
 
+  for (const l of rescue.rescued) {
+    loss.push({
+      field_path: `edges[${ids.get(l.from) ?? l.from}::${ids.get(l.to) ?? l.to}].convention_frame_rescue`,
+      before: null,
+      after: { frames: l.frames },
+      reason: 'Olumi\'s drafted size for this link did not fit the ranges its two ends had; read on Olumi\'s standard '
+        + 'range for ' + l.reframed.map((x) => `"${x}"`).join(' and ') + ' it does, so it is kept as Olumi\'s estimate.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+  for (const c of conventionFrames) {
+    loss.push({
+      field_path: `nodes[${ids.get(c.label) ?? c.label}].observed_state.cap`,
+      before: c.drafted,
+      after: c.frame,
+      reason: `${conventionFrameWords(c.label, c.unit, c.frame)}. That is Olumi's scale for reading sizes on it`
+        + (c.widened_by !== undefined ? `, widened to cover ${sayFigure(c.widened_by, c.unit)},` : ',')
+        + ' not a forecast or a limit; every figure for it is stored unchanged.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
   for (const w of widenedFrames) {
     loss.push({
       field_path: `nodes[${ids.get(w.label) ?? w.label}].observed_state.frame_widened`,
@@ -3548,7 +4418,33 @@ function admitOnce(
       actsOn.add(factorId);
     }
     const bundle: Record<string, ConstructedLevel> = {};
-    for (const iv of o.interventions ?? []) {
+    // ⭐ Recovery Batch C, L2 (SYS3 #94 6115410093; PL 6115488243): ONE level per factor, never the last entry written.
+    // ⛔ Only an entry bound to the brief is the user's (C-cee r1 item 2): a derived total whose baseline the brief states
+    // (L1, `verifiedLevels`) and whose addition it writes about this factor; an absolute level by its own quote (L3).
+    const boundToBrief = (iv: NonNullable<CandidateModel['options'][number]['interventions']>[number]): boolean => {
+      const owners = model.factors.filter((f) => f.label === iv.factor_label);
+      if (owners.length !== 1) return false;
+      const factor = owners[0]!;
+      if ((iv as { derived_total?: unknown }).derived_total === true) {
+        const base = factor.baseline_value;
+        return verifiedLevels.has(factor) && typeof base === 'number' && Number.isFinite(iv.value - base)
+          && sizeWritten(Math.abs(iv.value - base), factor.unit ?? iv.unit, {
+            target: [factor.label],
+            others: [model.goal.metric, ...model.factors.map((f) => f.label), ...model.outcomes.map((x) => x.label), ...model.risks.map((x) => x.label)]
+              .filter((q) => q !== factor.label),
+          });
+      }
+      const alone = { ...o, interventions: (o.interventions ?? []).filter((other) => other === iv || other.factor_label !== iv.factor_label) };
+      return verifiedOptionSetting(model, alone, iv, brief);
+    };
+    const kept = oneLevelPerFactor(o, loss, ids, boundToBrief);
+    for (const drafted of o.interventions ?? []) {
+      const iv = kept.get(drafted);
+      if (iv === undefined) {
+        const conflicted = ids.get(drafted.factor_label);
+        if (conflicted !== undefined) actsOn.add(conflicted);
+        continue;
+      }
       const factorId = ids.get(iv.factor_label);
       if (factorId === undefined) {
         unresolved.push({
@@ -3587,7 +4483,13 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
+        (iv as { derived_total?: unknown }).derived_total === true);
+      if (iv.estimate === true) bundle[factorId]!.estimate = true;
+      if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
+      if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
+      const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
+      if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
@@ -3675,8 +4577,116 @@ function admitOnce(
    * `explicit` that no sentence carries is Olumi's estimate, never the user's. ONE predicate, read by the normalising
    * frame below AND by link sizing (CODEX CEE BUDDY 5922482284: an unwritten £100m tagged `explicit` once set the frame).
    */
+  // Fi is an ADDED door: the strict label-based sizeWritten check below is unchanged (its retirement is its own PR).
+  // The candidate effect fields are defined in each endpoint's own unit (D1).
+  // Read those same units for C1; a unitless end may adopt only its own stated label-head unit below.
+  const magnitudeNodeFor = (n: AdmittedNode): MagnitudeNode => ({
+    label: n.label, kind: n.kind, scale_frame: n.scale_frame,
+    observed_state: n.observed_state as MagnitudeNode['observed_state'],
+    goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit,
+    ...(n.quantity_frame !== undefined ? { quantity_frame: n.quantity_frame } : {}),
+    unit: unitById.get(n.id) ?? null, option_levels: optionLevelsById.get(n.id) ?? [],
+    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
+    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
+  });
+  // Validate the converter's prospective STORED tuple, including percentage points.
+  const prospectiveEffects = resolvable.map(l => {
+    const source = nodeOf.get(l.from), target = nodeOf.get(l.to);
+    if (source === undefined || target === undefined || l.direction === 'unknown') return undefined;
+    const sized = sizeLink({ direction: l.direction, effect_amount: l.effect_amount,
+          effect_per_source_change: l.effect_per_source_change, user_stated: true },
+        magnitudeNodeFor(source), magnitudeNodeFor(target)).natural_effect;
+    // Unit adoption needs a typed raw tuple even when the missing unit/frame kept the sizer from emitting one.
+    // No value or frame is inferred; final sizing still owns conversion and any unresolved-frame question.
+    return sized ?? (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
+      ? { amount: l.effect_amount, amount_unit: naturalAmountUnitOf(magnitudeNodeFor(target)),
+        per_source_change: l.effect_per_source_change,
+        per_source_change_unit: sourceUnitWords(magnitudeNodeFor(source), resolveMagnitudeFrame(magnitudeNodeFor(source))) } : undefined);
+  });
+  const bindingNodes = nodes.map(n => {
+    const own = n.observed_state?.unit ?? (n.kind === 'goal' ? n.goal_threshold_unit : undefined) ?? unitById.get(n.id);
+    return { id: n.id, label: n.label, kind: n.kind, observed_state: n.observed_state,
+      goal_threshold_raw: n.goal_threshold_raw, goal_threshold_unit: n.goal_threshold_unit, unit: own,
+      ...(typeof own === 'string' ? { effect_unit: naturalAmountUnitOf(magnitudeNodeFor(n)),
+        change_unit: sourceUnitWords(magnitudeNodeFor(n), resolveMagnitudeFrame(magnitudeNodeFor(n))) } : {}) };
+  });
+  // Only a role-aware reader's located level is claimed here. Target/current/setting
+  // occurrences are claimed by nonEffectQuantitySpans in the binding reader.
+  const claimedLevelSpans = levelReading.value?.kind === 'adopt' && levelReading.value.span !== undefined ? [levelReading.value.span] : [];
+  const passThroughs: PassThroughBinding[] = [];
+  // A switch is also named by the options that set it (Science 6008844683 (c)): "Launch starter tier" sets ‘launched’.
+  const settersOf = new Map<string, string[]>();
+  for (const o of model.options) for (const i of o.interventions ?? []) {
+    const id = ids.get(i.factor_label);
+    if (id !== undefined) settersOf.set(id, [...(settersOf.get(id) ?? []), o.label]);
+  }
+  const centreRanges = new Map<number, StatedRangeEnd>();
+  const signRefused: { readonly through: PassThroughBinding; readonly said: 1 | -1 | null }[] = [];
+  const directSignRefused: { readonly link: number; readonly sentence: string }[] = [];
+  const labelUnits = new Map<string, LabelHeadReading>();
+  const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
+    from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
+  })), bindingNodes, brief, claimedLevelSpans, { passThroughs, settersOf, centreRanges, signRefused, directSignRefused, labelUnits });
+  for (const [id, reading] of labelUnits) {
+    unitById.set(id, reading.unit);
+    const node = nodeOf.get(id);
+    if (node !== undefined) node.unit_reading = { unit: reading.unit, source: 'user_stated', source_quote: reading.source_quote };
+  }
+  // ⛔ A direct bind drawn the other way from the user's sentence is never theirs, and that is SAID (DL #2644 pilot).
+  for (const r of directSignRefused) {
+    const link = resolvable[r.link]!;
+    const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+    loss.push({
+      field_path: `edges[${link.from}->${link.to}].stated_sign`,
+      before: { direction: link.direction },
+      after: null,
+      reason: `“${r.sentence}” is not recorded as your figure for ‘${label(link.from)}’ → ‘${label(link.to)}’: that link is drawn to `
+        + 'run the other way from what you wrote. Check which way it runs.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  // ⛔ A pass-through whose path runs the other way from the user's sentence is never typed, and that is SAID (Desk 6b Q3).
+  for (const { through: r, said } of signRefused) {
+    const into = resolvable[r.link]!;
+    const onward = resolvable[r.onward]!;
+    const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+    // Desk 6b: a verb Olumi cannot read gets its own words, never the false "drawn to run the other way".
+    const why = said === null
+      ? `Olumi can't tell from it which way it moves ‘${label(onward.to)}’. Say whether it adds to ‘${label(onward.to)}’ or takes away from it.`
+      : `the links ‘${label(into.from)}’ → ‘${label(into.to)}’ → ‘${label(onward.to)}’ are drawn to run the other way from what you wrote. `
+        + 'Check which way each of them runs.';
+    loss.push({
+      field_path: `edges[${into.from}->${onward.to}].pass_through_sign`,
+      before: { via: label(into.to) },
+      after: null,
+      reason: `“${r.sentence}” is not recorded through ‘${label(into.to)}’: ${why}`,
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  const boundByLink = new Map([...boundSizeSentences].map(([index, sentence]) => [resolvable[index]!, sentence]));
+  // The range the bound sentence writes around the user's figure (`centreRangeAt`), read where the size is.
+  const centreByLink = new Map([...centreRanges].map(([index, range]) => [resolvable[index]!, range]));
+  /**
+   * ⭐ (B) THE MEDIATOR'S ONWARD LINK IS THE DEFINITION THE BOUND SENTENCE IMPLIES (Science d5 #87 6008551439 (B)): ±1 per
+   * 1, its typed sign, written as if the drafter had said it holds by definition, so the ONE definitional check
+   * (`definitionalLink`) types it on its own natural size. Olumi's reading, never the user's. The mediator is measured in
+   * the onward quantity's unit (Science 6006425419's gauge: a pound of ‘MRR lost’ is a pound of MRR).
+   */
+  for (const t of passThroughs) {
+    const onward = resolvable[t.onward]!;
+    resolvable[t.onward] = { ...onward, definitional: true, effect_amount: t.sign, effect_per_source_change: 1, effect_provenance: 'ai_proposed' };
+    const statedUnit = prospectiveEffects[t.link]?.amount_unit;
+    if (!unitById.has(onward.from) && typeof statedUnit === 'string') unitById.set(onward.from, statedUnit);
+  }
+  // A link whose pass-through ran the other way from the sentence is not the user's by the door either (Desk 6b Q3).
+  const signRefusedLinks = new Set([...signRefused.map((r) => resolvable[r.through.link]!), ...directSignRefused.map((r) => resolvable[r.link]!)]);
   const userSizeEarned = (l: CandidateLink): boolean => {
     if (l.provenance_source === 'user_specified') return true;
+    if (boundByLink.has(l)) return true;
+    if (signRefusedLinks.has(l)) return false;
+    // ⚠ The `sizeWritten` door is RETIRED by Science 6008581742, in its own PR: Fi does not yet bind every sentence it
+    // covers ("cuts churn by 6 points" is not read as percentage points; a three-word noun such as "each qualified investor
+    // conversation" is not located), so retiring it here would demote real user figures.
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
@@ -3728,19 +4738,47 @@ function admitOnce(
     goal.scale_frame = niceFrameAtLeast(top);
     return goal.id;
   })();
-  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
-    label: n.label,
-    kind: n.kind,
-    scale_frame: n.scale_frame,
-    observed_state: n.observed_state as MagnitudeNode['observed_state'],
-    goal_threshold_cap: n.goal_threshold_cap,
-    goal_threshold_unit: n.goal_threshold_unit,
-    unit: unitById.get(n.id) ?? null,
-    option_levels: optionLevelsById.get(n.id) ?? [],
-    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
-    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
-  }]));
+  /**
+   * ⭐ G1b PASS-THROUGH (DL 0df0e1 bench: 5 of 77 drafts): a PART drafted as a definition of its TOTAL (±1 per 1 in one
+   * unit, `definitional: true`: the drafter's word, or (B)'s pass-through above) is sized on the two frames. A part whose
+   * frame is wider than its total's (raw draw a37cb d1: the drafter's £500,000 ‘MRR lost to price-rise churn’ against
+   * MRR's £187,500) gave |β| 2.67: D8 set the definition aside as a placeholder, `definitionalLink` refused it, and the
+   * first Run asked the user to size a definition. A frame is a choice of units, never a claim (S5t), and a part is never
+   * larger than its total: the part is measured on its total's frame, so the definition is typed on its own natural size
+   * and the construction refit (`refitFramesForStatedEffects`) fits every exact size around it.
+   * Only an OUTCOME or a RISK part (the refit widens those again where a user's size into it needs it; it never widens a
+   * factor, and a goal's threshold is framed on its own: Codex buddy r1 P1/P2), that holds nothing a frame normalises (no
+   * level of its own, no option level, no limit), and no Olumi-sized link into it that the narrower frame would push past
+   * ±1 (D8 would set THAT aside instead). Frames only narrow, so the pass over a chain of parts settles.
+   */
+  for (let moved = true, passes = 0; moved && passes <= resolvable.length; passes += 1) {
+    moved = false;
+    for (const l of resolvable) {
+      if (l.definitional !== true || typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number'
+        || l.effect_per_source_change === 0 || Math.abs(l.effect_amount / l.effect_per_source_change) !== 1) continue;
+      const part = nodeOf.get(l.from);
+      const total = nodeOf.get(l.to);
+      if (part === undefined || total === undefined || (part.kind !== 'outcome' && part.kind !== 'risk')
+        || part.observed_state !== undefined || optionLevelsById.has(part.id)
+        || model.constraints.some((c) => nodeIdForMetric(c.metric) === part.id)) continue;
+      const partFrame = resolveMagnitudeFrame(magnitudeNodeFor(part));
+      const totalFrame = resolveMagnitudeFrame(magnitudeNodeFor(total));
+      if (partFrame === undefined || totalFrame === undefined || !(partFrame > totalFrame)) continue;
+      const pushedPastOne = resolvable.some((x) => {
+        if (x === l || x.to !== part.id || userSizeEarned(x) || typeof x.effect_amount !== 'number'
+          || typeof x.effect_per_source_change !== 'number' || x.effect_per_source_change === 0) return false;
+        const from = nodeOf.get(x.from);
+        const sourceFrame = from === undefined ? undefined : resolveMagnitudeFrame(magnitudeNodeFor(from));
+        return sourceFrame !== undefined && Math.abs(x.effect_amount / x.effect_per_source_change) * sourceFrame / totalFrame > 1;
+      });
+      if (pushedPastOne) continue;
+      part.scale_frame = totalFrame;
+      moved = true;
+    }
+  }
+  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map(n => [n.id, magnitudeNodeFor(n)]));
   const sizing = new Map<string, LinkSizing>();
+  const basisDroppedBySign = new Set<string>();
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
     const source = magnitudeNodeById.get(l.from);
@@ -3749,17 +4787,40 @@ function admitOnce(
     const levelUnit = target.observed_state?.unit ?? target.unit ?? target.goal_threshold_unit;
     const user_stated = userSizeEarned(l);
     // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
+    // The bound sentence's range AROUND the figure first ("about 150, between 80 and 250"; d5 6009282279), else A4's end.
     const range = user_stated && l.provenance_source !== 'user_specified'
-      ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
+      ? centreByLink.get(l) ?? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
         source: source.label,
         sourceUnit: source.unit,
         others: quantityLabels.filter((q) => q !== source.label),
       })
       : null;
+    // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
+    // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside
+    // as `sign_conflict`). Never a user's size: their sign wins and a conflict there is asked, exactly as before.
+    // ⭐ SCIENCE §(u)(b) OPTION E (Science 8 Oct, after #2848 buddy r1 broke a verb-list guard): nothing reads the basis.
+    // A resolved conflict DROPS the drafter's basis (it may state the sign we just overrode), so the size is basis-less:
+    // it never seeds a rescue and never counts as basis-bearing (§(p)(1)). Logged by link id below.
+    const userClaimed = user_stated || signRefusedLinks.has(l) || l.provenance_source === 'user_specified'
+      || (l.effect_provenance ?? l.provenance) === 'explicit';
+    const signed = olumiSignedSize(l, userClaimed);
+    if (signed.resolved) {
+      if (hasBasis(l.basis)) basisDroppedBySign.add(`${l.from}::${l.to}`);
+      loss.push({
+        field_path: `edges[${l.from}::${l.to}].effect_amount`,
+        before: { effect_amount: l.effect_amount ?? null, effect_per_source_change: l.effect_per_source_change ?? null },
+        after: { effect_amount: signed.amount, effect_per_source_change: signed.per, basis_dropped: hasBasis(l.basis) },
+        reason: `Olumi's drafted size for this link was written with a sign against the link's own direction (${l.direction}); `
+          + 'the direction is the sign, so the size is read as the same amount in that direction, without its basis.',
+        severity: 'info',
+      } as RepairEntry);
+    }
     const statement = {
+      // A corrected estimate sign cannot prove the drafter's original definition.
+      definitional: l.definitional === true && !signed.resolved,
       direction: l.direction,
-      effect_amount: l.effect_amount,
-      effect_per_source_change: l.effect_per_source_change,
+      effect_amount: signed.amount,
+      effect_per_source_change: signed.per,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
     };
@@ -3771,7 +4832,18 @@ function admitOnce(
       ? framed : sizeLink(statement, source, unframed));
   }
 
-  const linkResult = admitCandidateLinks(resolvable, sizing);
+  const linkResult = admitCandidateLinks(resolvable, sizing, basisDroppedBySign);
+  // Reviewed Fi writer: carry the very sentence C2/W3/C1/SIGN-1 validated, through
+  // the existing stored statement field. User edits retain their own provenance.
+  for (const [link, sentence] of boundByLink) {
+    if (link.provenance_source === 'user_specified') continue;
+    const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
+    const ends = labelUnits.has(link.from) || labelUnits.has(link.to)
+      ? { source: nodeOf.get(link.from)?.label ?? '', target: nodeOf.get(link.to)?.label ?? '' } : undefined;
+    if (edge !== undefined && hasUserStatedSize(edge) && edge.provenance?.natural_effect !== undefined
+      && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends)
+        || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends))) edge.provenance.source_quote = sentence;
+  }
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
   // canonical structural constant and are deliberately NOT marked `defaulted`
@@ -3801,7 +4873,7 @@ function admitOnce(
     ),
   ];
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
-  const constraintResult = admitCandidateConstraints(
+  const constraintResult = withGoalTargetRows(admitCandidateConstraints(
     model.constraints,
     nodeIdForMetric,
     // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
@@ -3813,7 +4885,7 @@ function admitOnce(
         ...(typeof n.label === 'string' ? { label: n.label } : {}),
       };
     },
-  );
+  ), model, nodes, nodeIdForMetric);
 
   /**
    * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on
@@ -4195,6 +5267,26 @@ function admitOnce(
     } as RepairEntry);
   };
 
+  // ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out
+  // of this analysis — the Run proceeds — and said so, with the one question that brings it in.
+  // Everything left out with it is named in the same line (DL condition 3; CODEX P2: the WHOLE branch, not one hop, in words
+  // that stay true when one cause feeds two left-out risks): nothing is left out unsaid.
+  const sayLeftOut = (n: { id: string; label?: string }, goal: { label?: string }, withIt: readonly string[]): void => {
+    const named = withIt.map((c) => `"${c}"`);
+    const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+    const alsoOut = named.length === 0 ? ''
+      : named.length === 1 ? `, and so is ${list}, which feeds only what is left out` : `, and so are ${list}, which feed only what is left out`;
+    loss.push({
+      field_path: `nodes[${n.id}].left_out_of_analysis`,
+      before: n.label,
+      after: n.label,
+      reason:
+        `"${n.label}" is kept in the model but left out of this analysis, because nothing says which way it moves `
+        + `"${goal.label}"${alsoOut}. Say whether it raises or lowers "${goal.label}" and it will count.`,
+      severity: 'warn',
+    } as RepairEntry);
+  };
+
   /**
    * ⛔ NO LOOP IS REGISTERED THAT ONE OF OLUMI'S OWN LINKS CLOSES (`breakLoops`).
    *
@@ -4285,7 +5377,11 @@ function admitOnce(
   };
 
   const riskRepairs: AdmittedEdge[] = [];
-  const brokenEdges = acyclic(allEdges, true);
+  // Widening risks are retained hypotheses, never unsized causal effects. Keep their attachments as metadata only.
+  const wideningRiskIds = new Set(nodes.filter((n) => n.kind === 'risk'
+    && n.draft_widening?.provenance === 'ai_suggested_widen').map((n) => n.id));
+  const brokenEdges = acyclic(wideningRiskIds.size === 0 ? allEdges
+    : allEdges.filter((e) => !wideningRiskIds.has(e.from) && !wideningRiskIds.has(e.to)), true);
   // The level a withheld self-link carried goes with it, as a withheld link's projection entries do: left on the
   // node it reached the Run as a level on an option (`advertising_investment: 0.2`). The node's bundle is the one
   // `interventionsByOption` holds, so both read the same. A repair (the second pass) never closes a self-link.
@@ -4299,13 +5395,17 @@ function admitOnce(
   let finalEdges: AdmittedEdge[] = brokenEdges;
 
   if (goalForReach !== undefined) {
+    // RC3 a′'s `relies_on` stamp is SERVER-authored by the More-risks hold/apply door on a stored GraphV3. This fresh
+    // drafter CandidateModel path accepts no stamp and never re-admits that stored graph; neither register nor the
+    // Run loader calls it. Only server-authored draft widening metadata exempts a new zero-edge suggestion here.
     const hasOutgoingNow = new Set(brokenEdges.map((e) => e.from));
     // A risk whose own link was withheld as direction-unknown was answered
     // "I cannot say which way" — not left unconnected.
     const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
-    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id))) {
+    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id)
+      && !wideningRiskIds.has(n.id))) {
       const lostToLoop = loopWithheld.filter((w) => w.from === r.id).map((w) => `"${labelById.get(w.to) ?? w.to}"`);
-      riskRepairs.push({
+      riskRepairs.push(markPlaceholder({
         from: r.id,
         to: goalForReach.id,
         effect_direction: 'negative',
@@ -4314,8 +5414,7 @@ function admitOnce(
         // The same structured provenance every other machine-authored edge
         // carries — a repaired link is a hypothesis, and must read as one.
         provenance: { source: 'cee_hypothesis' },
-        defaulted: true,
-      } as AdmittedEdge);
+      } as AdmittedEdge));
       loss.push({
         field_path: `edges[${r.id}->${goalForReach.id}]`,
         before: null,
@@ -4372,11 +5471,25 @@ function admitOnce(
     // terminal and its ancestors, when a lever reaches it, end at the limit — readiness accepts them, so they are never
     // said to be unconnected (the Agent raised that as "connect downtime to the cost goal", a false cause).
     const sinkBranch = limitSinkBranch(nodes, edgesNow, constraintResult.constraints.map((c) => c.node_id));
+    const leftOut = inertRiskBranch(nodes, edgesNow, constraintResult.constraints.map((c) => c.node_id));
     for (const n of nodes) {
       // A pure limit left with no edge out ends at its limit by construction (above): readiness holds it as a valid
       // terminal. One that still feeds something is judged like any other node.
       if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id) || sinkBranch.has(n.id)
         || (pureLimits.some((p) => p.node_id === n.id) && !edgesNow.some((e) => e.from === n.id))) continue;
+      // The risk itself is said; a cause drawn only into it is left out with it and comes back when the risk does.
+      if (leftOut.has(n.id)) {
+        if (n.kind === 'risk') {
+          // Every non-risk node of the left-out branch upstream of this risk, however many hops (the branch is closed).
+          const upstream = new Set<string>(); const walk = [n.id];
+          while (walk.length > 0) {
+            const at = walk.pop()!;
+            for (const e of edgesNow) if (e.to === at && leftOut.has(e.from) && !upstream.has(e.from)) { upstream.add(e.from); walk.push(e.from); }
+          }
+          sayLeftOut(n, goalForReach, nodes.filter((c) => c.kind !== 'risk' && upstream.has(c.id)).map((c) => c.label ?? c.id));
+        }
+        continue;
+      }
       sayUnreached(n, goalForReach);
     }
     finalEdges = edgesNow;
@@ -4388,7 +5501,7 @@ function admitOnce(
       field_path: `nodes[${label}].category`,
       before: 'controllable',
       after: 'external',
-      reason: `No option in this decision changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
+      reason: `No option in this model changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
       severity: 'info',
     } as RepairEntry);
   }
@@ -4463,6 +5576,26 @@ function admitOnce(
       carriers.set(a.outcome_id, { operation: 'product', factor_ids: [...a.factor_ids], stated_in_brief: a.stated_in_brief });
     }
   }
+  // ⭐ L2: a SUM the drafter declared, checked whole against the FINAL structure (`checkDeclaredSums`) and carried on its
+  // total with the bound declaration's authorship. A declared product wins its node; a declared sum
+  // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
+  const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
+    finalEdges, (id) => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); }, brief);
+  loss.push(...declaredSums.loss);
+  const declaredCarried: AcceptedDeclaredSum[] = [];
+  for (const s of declaredSums.accepted) {
+    if (carriers.has(s.outcome_id)) continue;
+    carriers.set(s.outcome_id, { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: s.stated_in_brief });
+    declaredCarried.push(s);
+    loss.push({
+      field_path: `nodes[${s.outcome_id}].sum_identity`,
+      before: null,
+      after: { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: s.stated_in_brief },
+      reason: declaredSumSentence(labelById.get(s.outcome_id) ?? s.outcome_id, s.factor_ids.map((id) => labelById.get(id) ?? id), s.stated_in_brief)
+        + (s.quote !== undefined ? ` Brief quote: “${s.quote}”` : ''),
+      severity: 'info',
+    } as RepairEntry);
+  }
   // ⭐ R3-2: a limited spend tally fed only by its same-unit levers is held as their SUM (`findSumTallies`), on the FINAL
   // structure, as Olumi's reading — said once in `open_questions` (`sumIdentityOpenQuestions`). A declared product wins.
   const sums = findSumTallies(levers.nodes, finalEdges, constraintResult.constraints).filter((t) => !carriers.has(t.node_id));
@@ -4476,9 +5609,106 @@ function admitOnce(
       severity: 'info',
     } as RepairEntry);
   }
+  // ⭐ RCA item 2 (DL ruling (ii) 5929790081; SEMANTIC MODEL SPEC A2): a minted sum's parts are its DEFINITION, never
+  // causal guesses. Each part → total link is +1 per 1 in the shared unit: β = the part's frame ÷ the total's frame (one
+  // unit of the part is one unit of the total), certain (exists 1), at the spread floor and `definitional`. The sizer's
+  // domain judgement is NOT applied: it assumes Olumi's spread (σ = β/2), and whether the parts can overrun the total is
+  // exactly what the limit on the total checks. Even a Run that does not evaluate the identity then adds the parts up
+  // exactly, and the limit is scored on the parts (`placeholder-parts.ts`). No frame on either end → left as it was.
+  /** Per total, the parts whose links are now its DEFINITION (minted by R3-2 or declared, L2). */
+  const definedParts = new Map<string, ReadonlySet<string>>();
+  if (sums.length > 0) {
+    const partsOf = new Map(sums.map((t) => [t.node_id, new Set(t.factor_ids)] as const));
+    finalEdges = finalEdges.map((e) => {
+      if (partsOf.get(e.to)?.has(e.from) !== true) return e;
+      const source = magnitudeNodeById.get(e.from);
+      const target = magnitudeNodeById.get(e.to);
+      if (source === undefined || target === undefined) return e;
+      const [partFrame, totalFrame] = [resolveMagnitudeFrame(source), resolveMagnitudeFrame(target)];
+      const unit = target.unit ?? source.unit;
+      if (typeof partFrame !== 'number' || typeof totalFrame !== 'number' || !(partFrame > 0) || !(totalFrame > 0) || typeof unit !== 'string') return e;
+      const beta = partFrame / totalFrame;
+      if (!(beta > 0 && beta <= 1)) return e;
+      const { defaulted: _projection, ...edge } = e;
+      // The identity is OLUMI'S reading (`stated_in_brief: false`), so the link's source is too: a drafter's `explicit`
+      // (`brief_extraction`) would read, once `defaulted` is gone, as a user-stated material parameter (MG sweep N1).
+      const { reasoning: _guess, basis: _guessBasis, source: _drafted, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
+      const natural_effect = { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: source.unit ?? unit,
+        strength_mean: beta, strength_mean_frame: 'edge_strength' as const };
+      return { ...edge, strength: { mean: beta, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
+        provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, natural_effect, definitional: true as const } };
+    });
+    for (const [total, parts] of partsOf) definedParts.set(total, parts);
+  }
+  // ⭐ L2: a carried DECLARED sum's parts are its definition too, at existence 1 and the spread floor, as R3-2's. The size is
+  // the one admission already checked (`holdsByDefinition`: ±1 per 1 in one unit, β on the two frames), kept as it is so
+  // the frame fits after admission move it like any other link. Bound explicit declarations retain user authorship
+  // and their `source_quote`. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
+  if (declaredCarried.length > 0) {
+    const declaredOf = new Map(declaredCarried.map((s) => [s.outcome_id, s] as const));
+    finalEdges = finalEdges.map((e) => {
+      const declared = declaredOf.get(e.to);
+      if (declared === undefined || !declared.factor_ids.includes(e.from)) return e;
+      const { defaulted: _projection, ...edge } = e;
+      const { reasoning: _guess, basis: _guessBasis, source: _drafted, source_quote: _drafterQuote, olumi_fit_candidate: _fit,
+        mean_projected: _projected, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
+      return { ...edge, strength: { mean: e.strength.mean, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
+        provenance: { ...provenance, source: declared.stated_in_brief ? 'brief_extraction' : 'cee_hypothesis',
+          magnitude: declared.stated_in_brief ? 'user_stated' as const : 'olumi_estimate' as const, definitional: true as const,
+          ...(declared.quote !== undefined ? { source_quote: declared.quote } : {}) } };
+    });
+    for (const s of declaredCarried) definedParts.set(s.outcome_id, new Set(s.factor_ids));
+  }
+  if (definedParts.size > 0) {
+    // The sizer asked about each part's size BEFORE it became a definition ("Nobody has said, so Olumi uses a placeholder
+    // …"); that question is no longer true and is never shown (CODEX 5930239704, MG sweep C1). Only the rewritten edges.
+    const defined = new Set(finalEdges.filter((e) => e.provenance?.definitional === true && definedParts.get(e.to)?.has(e.from) === true)
+      .map((e) => `edges[${e.from}::${e.to}]`));
+    for (let i = loss.length - 1; i >= 0; i--) {
+      const at = /^(edges\[.*\])\.(?:magnitude_question|set_aside_estimate|magnitude_unconvertible)$/.exec(loss[i]!.field_path);
+      if (at !== null && defined.has(at[1]!)) loss.splice(i, 1);
+    }
+  }
+  /**
+   * ⭐ A PRODUCT PART AN OPTION CREATES IS 0 TODAY — OLUMI'S READING, SAID ONCE (Science d5 #87 6007736377 (i); DL 6 Oct,
+   * Acceptance G1 draft 11 on CEE 231affbe). The brief's "each starter subscriber costs about £6 a month in support" was
+   * declared as the user's product ‘Starter-tier support cost’ = ‘Starter subscribers’ × ‘Support cost per starter
+   * subscriber’. ‘Starter subscribers’ is an outcome, so no control can give it a level, and it had none. ISL refused
+   * EVERY Run (`identity_operand_missing`; a stated identity's refusal stands), and the user was asked a level they could
+   * not save, after every Run. A part with no level today that an option CREATES (`optionsCreating`: the option's own
+   * creation verb, and its path reaches the part) is 0 today: Olumi's reading (`cee_inference`, never the user's), said
+   * once among what was done with the brief, where the user can correct it. The same holds for Olumi's own product (served
+   * witness draw 6 on b501eda4: #416 withheld every option's chance over the same part). Only on a product whose node has
+   * no level of its own: with one, ISL's ratio needs every part above 0 (`identity_zero_level`), so the part is left to
+   * the ask. A part with any level, or one no option creates, is untouched.
+   */
+  const levelled = (n: AdmittedNode | undefined): boolean => typeof n?.observed_state?.value === 'number' && Number.isFinite(n.observed_state.value);
+  const statusQuoIds = new Set(levers.nodes.filter((n) => n.kind === 'option' && (declaredStatusQuoIds.has(n.id) || n.is_baseline === true)).map((n) => n.id));
+  const createdZero = new Map<string, { label: string; options: string[] }>();
+  for (const [carrierId, carrier] of carriers) {
+    if (carrier.operation !== 'product' || levelled(levers.nodes.find((n) => n.id === carrierId))) continue;
+    for (const partId of carrier.factor_ids) {
+      const part = levers.nodes.find((n) => n.id === partId);
+      if (part === undefined || levelled(part) || createdZero.has(partId)) continue;
+      const options = optionsCreating(levers.nodes, finalEdges, partId, statusQuoIds);
+      if (options.length > 0) createdZero.set(partId, { label: part.label, options });
+    }
+  }
+  for (const [id, z] of createdZero) {
+    const quoted = z.options.map((o) => `‘${o}’`);
+    const by = quoted.length === 1 ? quoted[0]! : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+    loss.push({
+      field_path: `nodes[${id}].created_part_zero`,
+      before: null,
+      after: { value: 0, created_by: [...z.options] },
+      reason: `‘${z.label}’ is 0 today, since ${by} would start it.`,
+      severity: 'info',
+    } as RepairEntry);
+  }
+  const atZero = (n: AdmittedNode): AdmittedNode => (createdZero.has(n.id) ? { ...n, observed_state: { value: 0, source: 'cee_inference' } } : n);
   const admittedNodes = carriers.size === 0
     ? levers.nodes
-    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...n, nonlinear_identity: carriers.get(n.id)! } : n));
+    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...atZero(n), nonlinear_identity: carriers.get(n.id)! } : atZero(n)));
 
   return {
     nodes: admittedNodes,

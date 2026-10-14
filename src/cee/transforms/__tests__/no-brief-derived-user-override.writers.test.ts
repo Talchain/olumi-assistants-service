@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import ts from "typescript";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
 
@@ -76,6 +77,19 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // untruth 2.714 was reverted for, one seam downstream.
   "orchestrator-v5/tools/handlers/set-factor-value.ts":
     "the stamp site — user_override for a user-consented structured edit; stamps panel_elicited instead when CEE has VERIFIED the value is a named participant's panel answer",
+  // ── E5 hiring times (Batch B, 12 Oct 2026; strings ACKed by AIE 6122738619). Reviewed against the one truth condition.
+  // A figure is stamped user_override ONLY when its role is `stated`: the number is in the user's own quoted words,
+  // bound to a verified human statement (`quoteStatedFor`), and it is written ONLY by `applyHiringTimes` after the user
+  // PRESSES that card (`typed_approval_of` = the card; a typed "yes" authorises nothing), which shows their quote AND the
+  // modelled figure. Olumi's and derived figures carry user_assumption + reviewed_by_user {intent: 'confirm'}; a missing
+  // or mismatched stamp reads as unknown, never as theirs. The value arrives through an operation the user consented to.
+  "orchestrator-v5/goal-target/hiring-times.ts":
+    "E5 stamp site — user_override only for a role 'stated' hiring figure in the user's verified quote, written only after the user presses that card (quote and figure shown); Olumi's/derived figures stamp user_assumption",
+  // F1b 52f8cd (schemas 0.73.0, lease #85 5945475375): a READER. `VALUE_WRITE_USER_SOURCE` pins set-factor-value's own
+  // stamp (equal to USER_EDIT_SOURCE, bound by run-input-residual.test) so the Run input digest can recognise a factor
+  // whose authorship is EXACTLY that writer's output. It compares `observed_state.source`; it writes nothing.
+  "orchestrator-v5/tools/handlers/run-input-residual.ts":
+    "reader — compares observed_state.source with set-factor-value's stamp to recognise the value writer's exact output (Run input authorship digest); performs no write",
   // Comment only. Contains no write of any kind: it is a pure verifier that
   // reads the collab store and either returns a server-owned value or refuses.
   // The literal appears in its header, explaining the attribution untruth the
@@ -187,7 +201,9 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // field the withdrawal does not reach. They map to `null` (defer), so the
   // only stamps this module will act on are those a genuine user-edit writer
   // wrote — i.e. precisely the ones the entries above establish as truthful.
-  "cee/transforms/provenance-display.ts":
+  // ONE PROVENANCE AUTHORITY (Batch C): the display tables moved VERBATIM from `cee/transforms/provenance-display.ts`
+  // (now a re-export shim with no literal) into `cee/provenance/provenance-of.ts`; the same reader-only justification holds.
+  "cee/provenance/provenance-of.ts":
     "reader only — maps the stamp to the display vocabulary (from_brief/ai_inferred/user_set) that reaches the LLM context; the literal is a lookup key, the module has no write path, and the two synthesised-from-extractionType literals DEFER so it can only act on a genuine user-edit writer's stamp",
   // ── The analysis-admission census. Reviewed 21 Sep 2026 against this guard's
   // ── one truth condition, while registering it for the provenance-widening
@@ -258,6 +274,16 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // (`admit-model.ts`). Executed in `agent-lane/__tests__/goal-current-level-from-chat.test.ts`.
   "orchestrator-v5/agent-lane/goal-current-level.ts":
     "a stamp site — USER_EDIT_SOURCE on the goal's current level ONLY after the user stated it in chat (user_stated required, and the figure present in the user's own typed words) AND approved the exact held proposal (authorise_change); never read from the brief",
+  // ── P45 #4b (8 Oct 2026): identity part levels through the identity door.
+  //
+  // HOW THE VALUE REACHES THE STAMP: the user types a part's figure in chat; the route/Agent proposes the
+  // identity card carrying that figure (refused unless the exact figure is in the user's typed words); the
+  // writer stamps it ONLY when the user approves that exact held card (authorise_change on the stored,
+  // content-hashed proposal). Never read from the brief. Executed in identity-confirm-part-figure.test.ts.
+  "orchestrator-v5/system-events/identity-confirm-edit.ts":
+    "a stamp site — USER_EDIT_SOURCE on an identity part's level ONLY when the user typed the figure and approved the exact held identity card; never read from the brief",
+  "orchestrator-v5/agent-lane/runtime/agent-capabilities.ts":
+    "reader only — compares a part's saved observed_state.source with the identity writer's stamp to tell whether the user's figure is already saved; performs no write",
   "orchestrator-v5/admission/analysis-admission.ts":
     "comment only, and NOT a writer — the literal appears once in censusConfidenceParameters' docblock naming the control the ratified arm differs from; the module is a pure counter with no write path (proven on a deep-frozen graph across four arms) and derives no authorship rule of its own, delegating every authorship decision to earnsAuthorshipCredit. ⚠ Unlike the reader entries above its failure direction is NOT safe — a permissive mis-read would license comparative_leader — so the delegation, not the direction, is what makes it sound",
 };
@@ -332,4 +358,57 @@ describe("2.714 revert — the user_override writer set is DERIVED and pinned", 
     const revertedModule = files.map((f) => relative(SRC_ROOT, f));
     expect(revertedModule).not.toContain("cee/transforms/stated-value-honour.ts");
   });
+});
+
+// The original guard's observed_state literal cannot see edge sizing writers.
+// Science Fi, 5 Oct 2026, explicitly reviews a second provenance class here:
+// user_stated MEANS attested by C2 + W3 + C1 + SIGN-1; never user_override.
+// Derive actual object writes and sizeLink call sites with TypeScript's AST,
+// including shorthand user_stated. Comments and schema declarations are not writes.
+const REVIEWED_EDGE_SIZE_WRITERS: Readonly<Record<string, string>> = {
+  'cee/draft/records/projector.ts': 'existing records projector: effectForEdge requires a grounded stated quantity and unambiguous endpoint units/roles before sizeLink receives user_stated true; an existing independent writer, not changed by Fi',
+  'cee/magnitude/link-effect.ts': 'existing converter: emits user_stated magnitude only for its caller-earned user_stated size, preserving the natural effect',
+  'cee/magnitude/frame-defaulted-links.ts': 'existing converter caller: explicitly passes user_stated false; only projects Olumi sizes',
+  'orchestrator-v5/system-events/link-effect-edit.ts': 'existing user edit: a user_specified structured link effect, checked against the endpoints and converted unchanged',
+  'orchestrator-v5/agent-lane/admit-model.ts': 'Fi reviewed by Science 5 Oct 2026: user edit wins; existing strict label door unchanged OR one C2 sentence/link pair under W3, equal node units under C1, and SIGN-1/direction checks; stores that exact sentence as provenance.source_quote through the existing user_stated size path, never changes any value/sign/unit or stamps user_override',
+};
+
+function writesEdgeUserSize(file: string): boolean {
+  const text = readFileSync(file, 'utf8');
+  if (!text.includes('sizeLink') && !text.includes('user_stated')) return false;
+  const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
+  let found = false;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'sizeLink') found = true;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isPropertyAccessExpression(n.left) && n.left.name.text === 'magnitude'
+      && ts.isStringLiteral(n.right) && n.right.text === 'user_stated') found = true;
+    if (ts.isObjectLiteralExpression(n)) {
+      const names = n.properties.flatMap(p => p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) ? [p.name.text] : []);
+      for (const p of n.properties) {
+        if (!p.name || (!ts.isIdentifier(p.name) && !ts.isStringLiteral(p.name))) continue;
+        if (p.name.text === 'magnitude' && ts.isPropertyAssignment(p)
+          && ts.isStringLiteral(p.initializer) && p.initializer.text === 'user_stated') found = true;
+        if (p.name.text === 'user_stated' && names.includes('effect_amount') && names.includes('direction')) found = true;
+      }
+    }
+    if (!found) ts.forEachChild(n, visit);
+  };
+  visit(tree);
+  return found;
+}
+
+describe('Science Fi — edge user_stated sizing writers are DERIVED and reviewed', () => {
+  it('pins every actual magnitude stamp or converter sizing door, including shorthand', () => {
+    const files = walkTypeScript(SRC_ROOT);
+    expect(files.length).toBeGreaterThan(100);
+    const writers = files.filter(writesEdgeUserSize).map(f => relative(SRC_ROOT, f)).sort();
+    expect(writers.length).toBeGreaterThan(0);
+    expect(writers).toEqual(Object.keys(REVIEWED_EDGE_SIZE_WRITERS).sort());
+    for (const justification of Object.values(REVIEWED_EDGE_SIZE_WRITERS)) {
+      expect(typeof justification).toBe('string');
+      expect(justification.trim().length).toBeGreaterThanOrEqual(20);
+    }
+  }, 60_000);
 });

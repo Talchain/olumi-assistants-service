@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../../src/orchestrator-v5/context/analysis-projection-policy.js';
 /**
  * V5 P0 golden-path repair — end-to-end HTTP boundary test for the
  * deterministic value-update path AND for stale-after-mutation
@@ -423,7 +424,8 @@ const SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR = {
     scenario_id: SCENARIO_ID,
     leading_option_id: 'opt_a',
     summary: 'Prior analysis run.',
-    enrichment: { analysis_status: 'computed' },
+    // Model a healthy Run produced by the current stamped producer.
+    enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
     // graph_hash_at_run is OVERRIDDEN per-test with the live hash of
     // the test's graph_state (or, for the post-mutation persistence
     // test, the pre-mutation live hash). Tests do not consume this

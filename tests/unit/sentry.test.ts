@@ -22,6 +22,7 @@ const mockGetCurrentScope = vi.fn(() => ({ setTag: mockSetTag }));
 
 vi.mock('@sentry/node', () => ({
   init: mockInit,
+  httpIntegration: vi.fn((opts: unknown) => ({ name: 'Http', opts })),
   setTag: mockSetTag,
   getCurrentScope: mockGetCurrentScope,
   withIsolationScope: mockWithIsolationScope,
@@ -59,7 +60,9 @@ describe('sentry middleware', () => {
     it('initialises with correct config when SENTRY_DSN is set', async () => {
       process.env.SENTRY_DSN = 'https://test@sentry.io/123';
       process.env.NODE_ENV = 'test';
-      process.env.CEE_BUILD_HASH = 'abc123';
+      // S-H: release is the full build SHA from src/version.ts only
+      // (CEE_BUILD_HASH no longer overrides it).
+      process.env.GIT_COMMIT_SHA = '0123456789abcdef0123456789abcdef01234567';
       const { initSentry } = await import('../../src/middleware/sentry.js');
       initSentry();
 
@@ -67,7 +70,7 @@ describe('sentry middleware', () => {
       const config = mockInit.mock.calls[0][0];
       expect(config.dsn).toBe('https://test@sentry.io/123');
       expect(config.environment).toBe('test');
-      expect(config.release).toBe('abc123');
+      expect(config.release).toBe('0123456789abcdef0123456789abcdef01234567');
       expect(config.tracesSampleRate).toBe(0.5);
       expect(typeof config.beforeSend).toBe('function');
     });

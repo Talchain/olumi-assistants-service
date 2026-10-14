@@ -54,7 +54,7 @@ const RAW: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: false };
 /** The naming clause this slice adds. */
 const NAMES_ALTERNATIVE = /would lead instead/i;
 /** The pre-repair concrete sentence — must survive every withholding case. */
-const CONCRETE_SENTENCE = /is the most likely single factor to change which option leads/i;
+const CONCRETE_SENTENCE = /has a tipping point on its own that would change the most-supported option/i;
 
 function concreteSummary(entries: readonly FlipEntry[]): FlipSummary {
   const summary = summariseFlipEntries(entries);
@@ -242,7 +242,7 @@ describe('deterministic what_would_flip answer — carries the attested alternat
     );
     expect(text).not.toMatch(NAMES_ALTERNATIVE);
     expect(text).not.toContain('Expand the team would lead instead');
-    expect(text).toMatch(/are the most likely single factors/i);
+    expect(text).toMatch(/each have a tipping point on their own/i);
   });
 
   it('POSITIVE CONTROL — an entry with NO alternative_winner_id still resolves via the existing path, byte-identical to the pre-repair answer', () => {

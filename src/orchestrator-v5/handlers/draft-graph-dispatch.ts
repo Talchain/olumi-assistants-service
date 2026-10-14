@@ -1,3 +1,5 @@
+import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
+import { toOutboundGraph } from '../goal-target/outbound-graph.js';
 /**
  * V5 pre-Sonnet dispatch for draft_graph turns.
  *
@@ -65,7 +67,8 @@ import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
 import { OPTION_FRAMING_WARNING_ID } from '../../cee/draft/records/option-framing-recovery.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
-import { loadMostRecentPendingActions } from '../build-turn-context.js';
+import { GraphStaleWriteError, loadMostRecentPendingActions, loadPersistedScenarioStateStrict } from '../build-turn-context.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import {
   appendLapseNotice,
   emitHoldLapseTelemetry,
@@ -82,6 +85,7 @@ import {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
@@ -377,7 +381,7 @@ export function draftResultToOlumiResponse(
   const draftGraphField =
     graphPersisted && result.graphOutput
       ? {
-          nodes: (result.graphOutput.nodes ?? []) as unknown[],
+          nodes: (toOutboundGraph(result.graphOutput).nodes ?? []) as unknown[],
           edges: (result.graphOutput.edges ?? []) as unknown[],
           node_count: finalNodeCount,
           edge_count: finalEdgeCount,
@@ -587,6 +591,15 @@ export async function dispatchDraftGraph(
 ): Promise<DispatchDraftGraphResult> {
   const { payload, requestId, request } = params;
   const startedAt = Date.now();
+
+  // Bind the write before the provider only when hash or revision CAS needs
+  // a base. With both off, preserve the draft path without a strict read.
+  const draftBase = config.features.graphCas.requiresExpectedHash || useAppendV6()
+    ? await loadPersistedScenarioStateStrict(payload.scenario_id)
+    : undefined;
+  const expectedGraphCasHashes = draftBase !== undefined && config.features.graphCas.requiresExpectedHash
+    ? computeExpectedGraphCasHashes(draftBase.graph)
+    : undefined;
 
   // C2 — the brief the pipeline drafts from. `payload.message` except on
   // the explicit-generate path, where route-v2 assembled the real brief
@@ -928,6 +941,7 @@ export async function dispatchDraftGraph(
       turnId: payload.turn_id,
       turnClass: 'direct_answer',
     });
+    prepareHorizonBasisForWrite(draftGraphForCommit, draftBase?.graph, payload.scenario_id);
     const postDraftGraphHash = ((): string | null => {
       try {
         return computeAnalysisAffectingGraphHash(
@@ -1110,6 +1124,7 @@ export async function dispatchDraftGraph(
     const commitStartedAt = Date.now();
     const framingNotice = draftOptionFramingNotice(draftResult);
     const modelBuildingReceipt = draftModelBuildingReceipt(draftResult.modelBuildingNotices);
+    const expectedRevision = draftBase?.revision;
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -1155,16 +1170,11 @@ export async function dispatchDraftGraph(
         llm_calls_used: 1 + m2LlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
-        // A3 graph CAS observe-mode: the draft path is DELIBERATELY
-        // uninstrumented — no expectedGraphIdentityHash / expectedGraph
-        // AnalysisHash are threaded (undefined). This path performs no
-        // server-side persisted-graph read (it never runs buildTurnContext),
-        // and manufacturing an expected base from request input would violate
-        // the trusted-base rule (graph-cas-conflict.ts). The CAS hook
-        // therefore categorises draft writes as `first_write` on fresh
-        // scenarios and `no_expected`/`not_instrumented` on redrafts — that
-        // IS the coverage metric for this path, not a gap to "fix" by
-        // trusting the request.
+        // Only graph writes carry the base; null is known first-draft absence.
+        ...(draftBase !== undefined ? { storedGraphForHorizonBasis: draftBase.graph } : {}),
+        ...(draftGraphForCommit != null && expectedGraphCasHashes !== undefined && draftBase !== undefined
+          ? { ...expectedGraphCasHashes, baseGraphForInvariants: draftBase.graph }
+          : {}),
         graph: draftGraphForCommit ?? undefined,
         briefText: briefTextForCommit,
         // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
@@ -1186,6 +1196,7 @@ export async function dispatchDraftGraph(
         // V5 Conversation Context Reliability: persist the user's brief.
         userMessage: payload.message,
         contentGraph: draftResult.graphOutput,
+        ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;
@@ -1429,6 +1440,9 @@ export async function dispatchDraftGraph(
       ...(diagnosticTrace !== undefined ? { diagnosticTrace } : {}),
     };
   } catch (err) {
+    // Preserve the store's typed CAS refusal for the route's existing 409
+    // refresh/reconfirm contract, rather than turning it into an infra retry.
+    if (err instanceof GraphStaleWriteError) throw err;
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.
     log.error(

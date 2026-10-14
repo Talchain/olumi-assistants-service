@@ -11,6 +11,7 @@ import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { countCollidingOptionLabels } from "../orchestrator-v5/routing/option-effect-write.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config, isProduction } from "../config/index.js";
+import { isProductionDeployment } from "../config/env-resolver.js";
 import { safeEqual } from "../utils/hash.js";
 import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
 import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
@@ -86,6 +87,13 @@ export type DraftGraphResponse =
 // (enforceRateBuckets, draft tier) — see src/cee/config/limits.ts. The former
 // inline bucket twin was removed in favour of the single derived limiter.
 
+/**
+ * raw_output (the unrepaired stage-1 draft) is honoured outside production, or with admin auth.
+ */
+export function isRawOutputPermitted(requested: boolean, adminAuthorized: boolean): boolean {
+  return requested && (!(isProduction() || isProductionDeployment()) || adminAuthorized);
+}
+
 export default async function route(app: FastifyInstance) {
   const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
 
@@ -104,7 +112,7 @@ export default async function route(app: FastifyInstance) {
     return Boolean((adminKey && safeEqual(providedKey, adminKey)) || (adminKeyRead && safeEqual(providedKey, adminKeyRead)));
   }
 
-  app.post("/assist/v1/draft-graph", async (req, reply) => {
+  app.post("/assist/v1/draft-graph", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 
@@ -460,7 +468,7 @@ export default async function route(app: FastifyInstance) {
 
     // Gate raw_output: only honoured in non-production or with admin auth
     const rawOutputRequested = baseInput.raw_output === true;
-    const rawOutputAllowed = rawOutputRequested && (!isProduction() || isAdminAuthorized(req));
+    const rawOutputAllowed = isRawOutputPermitted(rawOutputRequested, isAdminAuthorized(req));
     if (rawOutputRequested && !rawOutputAllowed) {
       log.warn({ requestId, event: "cee.raw_output.suppressed" }, "raw_output=true suppressed in production without admin auth");
     }

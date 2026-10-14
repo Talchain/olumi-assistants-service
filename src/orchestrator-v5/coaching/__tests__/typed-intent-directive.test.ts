@@ -219,17 +219,17 @@ describe('resolveApplicableProtocol — cites science ONLY where the bundle says
   it('pins the ONE cell where exact-token matching under-serves the live stage mapper', () => {
     // ⭐ AN HONEST KNOWN GAP, PINNED SO IT CANNOT MOVE SILENTLY.
     //
-    // `mapStageToDecisionStage` (handlers/edit-graph-dispatch.ts:754-767) maps
+    // `mapStageToDecisionStage` (dsk/stage-edge.ts) maps
     // `analyse → evaluate`, and DSK-P-003 is stage_applicability
     // ["evaluate","decide"] — so under the live mapper, `challenge_assumption`
     // on an ANALYSE turn WOULD be citable. This arm's exact-token gate does
-    // not see it, and deliberately so: reusing the mapper needs an export from
-    // a file under a live three-way conflict, and copying it would create a
-    // second authority for one question.
+    // not see it, and deliberately so: the mapper is now exported
+    // (dsk/stage-edge.ts), but switching this route-v2 arm onto it changes which
+    // turns cite a protocol, and copying it would create a second authority.
     //
     // The gap is recorded here as an EXACT SET rather than left invisible, so
     // the suite REDs if it grows OR shrinks (the known-dropped-set discipline).
-    // Whoever exports the shared mapper deletes this test with the gate.
+    // Moving the arm onto the shared mapper deletes this test with the gate.
     const KNOWN_UNDER_SERVED: ReadonlyArray<readonly [string, string]> = [
       ['challenge_assumption', 'analyse'],
     ];

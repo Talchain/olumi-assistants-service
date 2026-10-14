@@ -37,9 +37,9 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 type Rec = Record<string, unknown>;
 const SCENARIO = 'a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r-a2' };
-const BRIEF_A = 'Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, '
+const BRIEF_A = 'Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn UNDER 4%, '
   + 'should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
-const BRIEF_AT_MOST = BRIEF_A.replace('under 4%', 'at most 4%');
+const BRIEF_AT_MOST = BRIEF_A.replace('UNDER 4%', 'at most 4%');
 
 /** The live 22 Sep builder capture (`fixtures/faithful.json`): `monthly churn < 4 %`, explicit — not authored here. */
 const captured = (JSON.parse(readFileSync(new URL('./fixtures/faithful.json', import.meta.url), 'utf8')) as { constraints: CandidateConstraint[] }).constraints;
@@ -229,25 +229,26 @@ async function plotLimit(rows: Rec[], pinChurnAt?: number): Promise<Rec> {
   return limit!;
 }
 
-describe('R4 — CEE\'s own read-back keeps the field; the PLoT-bound request carries "<=" only', () => {
+describe('R4 — CEE\'s own read-back keeps the field; the PLoT-bound request carries the stated "<" (Batch C)', () => {
   it('R4: the stored bytes read back into the Agent\'s view with operator "<=" AND operator_as_stated "<"', async () => {
     const { stored } = await build(BRIEF_A, '<');
     const churn = (await agentLimits(stored)).find((l) => l.on === 'Monthly churn');
     expect(churn).toMatchObject({ operator: '<=', operator_as_stated: '<', value: 4 });
   });
 
-  it('R4: the PLoT-bound row (by constraint_id) is {operator "<=", value 4} with NO operator_as_stated', async () => {
+  it('R4: the PLoT-bound row (by constraint_id) is {operator "<", value 4} with NO operator_as_stated', async () => {
     const limit = await plotLimit([strictRow]);
-    expect(limit).toMatchObject({ operator: '<=', value: 4, unit: '%' });
+    // Batch C: ruling 16 — the strict comparator the user stated reaches the engine (PLoT #448, ISL batchC).
+    expect(limit).toMatchObject({ operator: '<', value: 4, unit: '%' });
     expect(limit).not.toHaveProperty('operator_as_stated');
   });
 
-  it('R4 (disclosed, not modelled): an option that PINS churn at exactly 4% still meets "<= 4" on the engine — the one case where "<" and "<=" differ', async () => {
-    // Over continuous draws P(X < 4) = P(X <= 4). A level pinned exactly at the threshold is the exception: the engine
-    // (PLoT/ISL, untouched) still receives "<=" and counts exactly 4% as meeting the limit. This row pins that the wire
-    // is unchanged for that case; the difference is disclosed here and at `withholdStatedOperator`, not modelled.
+  it('R4 (Batch C): an option that PINS churn at exactly 4% is sent "< 4", so the engine scores the tie as NOT met', async () => {
+    // Over continuous draws P(X < 4) = P(X <= 4). A level pinned exactly at the threshold is the one case they differ: before
+    // Batch C the engine received "<=" and counted exactly 4% as meeting the limit. It now receives "<" (`wireGoalConstraints`).
     const limit = await plotLimit([strictRow], 0.04);
-    expect(limit).toMatchObject({ operator: '<=', value: 4 });
+    // Batch C: ruling 16 — preserve strict comparisons on the wire.
+    expect(limit).toMatchObject({ operator: '<', value: 4 });
     expect(limit).not.toHaveProperty('operator_as_stated');
   });
 });

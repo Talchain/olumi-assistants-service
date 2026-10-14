@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
 /**
  * Compose a successful OlumiResponse for A2 turn classes.
  *
@@ -101,6 +102,10 @@ function stripEdgeContinuityLabels<T>(snapshot: T): T {
   const projected = { ...(snapshot as Record<string, unknown>) };
   delete projected.from_label;
   delete projected.to_label;
+  // S5t-W: the refit's rescale record is S7's internal carrier (build-run-delta.ts `frameRefitMove`), never wire.
+  delete projected.frame_refit;
+  // P48: the other links this write changed (the sized gauge), for `changed_since_run` only — never wire.
+  delete projected.also_changed_links;
   return projected as T;
 }
 
@@ -369,6 +374,15 @@ export interface ComposeToolCallInput {
   readonly priorTurnFactsForLensHistory?: readonly HandlerFact[];
 
   /**
+   * ⭐ A5 (lease `output/rc-00351a/A5-LEASE.md`, reader 3): the scenario's authoritative Run history, newest first in
+   * persisted order (`run-ledger.ts` `lensReplayRunsFor`). When present the LENS REPLAY reads it INSTEAD of
+   * `priorTurnFactsForLensHistory`, so a Run after 20 quiet rows still knows the lens shown last time. Never merged:
+   * `deriveJudgementSignals` takes Run boundaries from array position and keeps `priorTurnFactsForLensHistory` alone
+   * (Codex #2572). Ignored without `priorTurnFactsForLensHistory` (the fresh-branch scoping rule above).
+   */
+  readonly lensReplayRuns?: readonly HandlerFact[];
+
+  /**
    * §2.1 row 4 — the factor id this turn's `what_would_flip` proposal targets
    * ("Test <factor> at <N>"), as selected by `selectFlipProposal` in the turn
    * executor and surfaced by `buildFlipProposalEmit`.
@@ -405,6 +419,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.analysisReadyStatus,
     input.analysisReady,
     input.freshness,
+    input.lensReplayRuns,
   );
 
   return {
@@ -469,6 +484,7 @@ function buildBlocksFromFacts(
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
   analysisReady?: unknown,
   freshness?: FreshnessDerivation,
+  lensReplayRuns?: readonly HandlerFact[],
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -488,7 +504,7 @@ function buildBlocksFromFacts(
     priorTurnFactsForLensHistory === undefined
       ? null
       : derivePreviousAnalysisLens(
-          priorTurnFactsForLensHistory,
+          lensReplayRuns ?? priorTurnFactsForLensHistory,
           liveLensExecutorAvailability(),
         );
 
@@ -959,6 +975,27 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // withheld leader. Both claim projections already pass unknown keys through.
   // Its members avoid INTERNAL_ENRICHMENT_KEYS by construction (no hash member).
   'run_provenance',
+  // schemas 0.80.0 (science census 6 Oct 2026, §2d C3/C5) — PLoT's dominant
+  // factor and its tipping-point status. PLoT emits all three top-level on
+  // every /v2/run (`dominant_factor` from `trust/factor-dominance.ts`: rank 1
+  // of its canonical driver order, only when that factor clears the dominance
+  // rule; the status pair classifies the post-denormalised `flip_thresholds[]`),
+  // and this list was where they died. The DGAI readers already exist on the
+  // served route: `useResultsSectionData` reads `report.dominant_factor` (the
+  // Reasoning tab's "<factor> dominates the model" insight) and
+  // `report.flip_thresholds_status` / `_reason` (the tornado's status note and
+  // the tipping-point gate).
+  //
+  // Withheld ruling `pass_through` for all three: none names an option. The
+  // dominant factor is a claim about the MODEL, ranked by STRUCTURAL influence
+  // (it can survive a goal-identity withhold, and can disagree with a
+  // sensitivity-ranked Driver 1), so the CONSUMER gates it on its own driver
+  // authority before calling a factor dominant (DGAI: the card's clear Driver
+  // 1). The status note's own copy says "the comparison", not "the leading
+  // option", on a withheld run (DGAI `flipThresholdStatusNote`).
+  'dominant_factor',
+  'flip_thresholds_status',
+  'flip_thresholds_status_reason',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
@@ -1781,10 +1818,12 @@ function buildLifecycleBlocksFromPrior(
     return [];
   }
 
-  const priorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
+  const selectedPriorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
     requestId: lifecycle.requestId,
     scenarioId: lifecycle.scenarioId,
   });
+  const priorFact = selectedPriorFact === null ? null : { ...selectedPriorFact,
+    result: withReadTimeHorizonGate(selectedPriorFact.result, persistedGraph, selectedPriorFact.result.enrichment) };
   if (priorFact === null) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'rebuild_failed',
@@ -1841,6 +1880,7 @@ function buildLifecycleBlocksFromPrior(
   if (selectCanonicalAnalysisState({
     priorFacts,
     currentGraphHash: freshness.current_graph_hash,
+    currentScenarioRevision: undefined,
   }).contradictions.includes('fact_status_success_but_degraded_newer')) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'skipped_shadowed',

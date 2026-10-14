@@ -1,3 +1,5 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⛔ THE UNCHECKED-LIMIT CLAUSE IS PINNED ON THE WIRE (AI Quality, programme-docs #63 5826106622).
  *
@@ -11,6 +13,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { asSent } from './helpers/as-sent.js';
 
 const SCENARIO = '6b2d8f3c-4e5a-4b7c-9d0e-1f2a3b4c5d6e';
 const store = {
@@ -31,25 +34,28 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
  * provisional view (`give_provisional_view`), rendered after the leader gate, and it must be one the user can take or
  * a tool can propose — never one that cannot help (the futile-step failure the prohibition was measured against).
  */
-const CLAUSE =
-  'When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own '
-  + 'provisional view by calling give_provisional_view once: what you would do, your reasoning from the model\u2019s facts and the '
-  + 'user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a '
-  + 'change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it '
-  + 'beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, '
-  + 'ranks or favours an option.';
+/**
+ * ⛔ CHANGED EXPECTATION (AIE one-pass packet 94ad9c8f…, the whole HOST_TOOL_CONTRACT entry replaced once): the unchecked limit is
+ * explained plainly and preserved, and the provisional view is said in the reply. The futile-step rule stays on the wire in
+ * give_provisional_view's own `confirm_step` schema ("Never a step that cannot help"), asserted on the Agent's call below.
+ */
+const CLAUSE = 'When the run says a limit cannot be checked in this model yet, explain that limitation plainly and preserve it.';
+/** The C5 sentence the packet replaced: it must not reach the model beside its replacement. */
+const RETIRED_C5 = 'Never write that view in your reply text';
 /** The prohibition Paul's ruling replaced — it must not reach the model beside the clause that replaced it. */
 const REPLACED = 'do not suggest any step, input or model change to make it checkable';
-/** The rule it follows — its placement is part of what was measured. */
-const ANCHOR = 'When the result is fragile or a near tie, say that this uncertainty is itself the finding.';
+/** The rule it follows in the packet's whole entry — its placement is part of what was measured. */
+const ANCHOR = 'This availability grants no permission to name or rank a driver or an option.';
 
 describe('the unchecked-limit clause reaches the model on every reply-writing call', () => {
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown>;
       modelBodies.push(body);
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'That limit cannot be checked in this model yet.' }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -63,8 +69,8 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: { nodes: [{ id: 'g', kind: 'goal', label: 'MRR' }, { id: 'f', kind: 'factor', label: 'Monthly churn' }], edges: [{ from: 'f', to: 'g' }] },
-      graph_hash: 'h1',
-      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
+      graph_hash: 'h1', analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -73,13 +79,19 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
   beforeEach(() => { modelBodies = []; });
 
   it('RED: the explicit Run’s one interpreting call carries the clause, right after the fragile/near-tie rule', async () => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const r = await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
-    } });
+    } }));
     expect(r.statusCode).toBe(200);
-    expect(modelBodies, 'exactly one interpreting call').toHaveLength(1);
-    expect(modelBodies[0]!['tool_choice']).toBe('none');
-    const instructions = String(modelBodies[0]!['instructions']);
+    expect(modelBodies, 'one pre-tool Run call and one Explain call').toHaveLength(2);
+    for (const body of modelBodies) {
+      expect(String(body.instructions)).toContain(`${ANCHOR} ${CLAUSE}`);
+      expect(String(body.instructions)).not.toContain(REPLACED);
+      expect(String(body.instructions)).not.toContain(RETIRED_C5);
+    }
+    const explain = modelBodies.filter(body => body.tool_choice === 'none');
+    expect(explain).toHaveLength(1);
+    const instructions = String(explain[0]!.instructions);
     expect(instructions).toContain(`${ANCHOR} ${CLAUSE}`);
     expect(instructions.split(CLAUSE), 'stated once, not repeated').toHaveLength(2);
     expect(instructions).not.toContain(REPLACED);
@@ -92,7 +104,10 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
     expect(agentCall, 'the Agent made its own call').toBeDefined();
     expect(String(agentCall!['instructions'])).toContain(`${ANCHOR} ${CLAUSE}`);
     expect(String(agentCall!['instructions'])).not.toContain(REPLACED);
-    // The tool the clause names is offered on this call.
-    expect((agentCall!['tools'] as { name?: string }[]).map((t) => t.name)).toContain('give_provisional_view');
+    expect(String(agentCall!['instructions'])).not.toContain(RETIRED_C5);
+    // The view's tool is offered on this call, and its one confirming step may never be one that cannot help.
+    const tool = (agentCall!['tools'] as { name?: string; parameters?: { properties?: { confirm_step?: { description?: string } } } }[])
+      .find((t) => t.name === 'give_provisional_view');
+    expect(tool?.parameters?.properties?.confirm_step?.description).toContain('Never a step that cannot help');
   });
 });

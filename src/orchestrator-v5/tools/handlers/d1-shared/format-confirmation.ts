@@ -5,18 +5,20 @@
  *   - Percentages: no space before "%".  "5%" not "5 %".
  *   - Currency: no space between symbol and number. "£50,000" not "£ 50,000".
  *   - Other units: single space.          "12 months", "800 customers".
- *   - Edge strengths: never raw decimals — always band words via
- *     `edgeBandFromMagnitude` (the ONE edge-strength table, the canvas's own cuts; do not duplicate).
+ *   - Edge strengths: never raw decimals — sizing-aware words through
+ *     `edgeStrengthWords` (the ONE edge-strength table, the canvas's own cuts; do not duplicate).
  */
 
 import {
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from '../../../format/influence-bands.js';
-import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../../format/edge-strength-words.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
 import { sayLimitInFrame } from '../../../agent-lane/limit-frame.js';
 import { sayFigureAsWritten } from '../../../agent-lane/say-figure.js';
+import { acceptedOlumiEstimateSentence } from '../../../agent-lane/rerun-explanation.js';
+import type { LinkSizing } from '../../../../cee/magnitude/link-sizing.js';
 import {
   durationNotEvaluatedSentence,
   UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE,
@@ -585,19 +587,34 @@ export interface EdgeAdjustmentInput {
   readonly toLabel: string;
   readonly beforeMean: number;
   readonly afterMean: number;
+  /** Internal edge identities carry sizing into the receipt; means remain for legacy direct callers. */
+  readonly beforeEdge?: unknown;
+  readonly afterEdge?: unknown;
   /** Explicit persisted directions are required to describe zero honestly. */
   readonly beforeDirection?: 'positive' | 'negative';
   readonly afterDirection?: 'positive' | 'negative';
+  /** Science 393023 LICENCE ruling 3: the link was a placeholder (nobody sized it), so its prior band is never named. */
+  readonly beforeUnsized?: boolean;
 }
 
 /**
- * Decision-language edge adjustment confirmation. Uses `edgeBandFromMagnitude`
+ * Decision-language edge adjustment confirmation. Uses `edgeStrengthWords`
  * for strength and surfaces direction reversal explicitly. Never emits
  * the raw mean.
  */
 export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
-  const beforeBand = describeBandWithDirection(input.beforeMean);
-  const afterBand = describeBandWithDirection(input.afterMean);
+  const beforeBand = edgeStrengthWords(input.beforeEdge ?? {
+    strength: { mean: input.beforeMean },
+    ...(input.beforeUnsized === true ? { sizing: 'placeholder' } : {}),
+  }, 'direction');
+  const afterBand = edgeStrengthWords(input.afterEdge ?? { strength: { mean: input.afterMean } }, 'direction');
+  if (afterBand === 'not sized yet') {
+    return `The link between ${input.fromLabel} and ${input.toLabel} is not sized yet.`;
+  }
+  // A placeholder's default is not a size: say what it is now, never "from <the default's band>".
+  if (beforeBand === 'not sized yet') {
+    return `Set the link between ${input.fromLabel} and ${input.toLabel} to ${afterBand}; nobody had sized it before.`;
+  }
 
   const beforeDirection =
     input.beforeDirection ?? (input.beforeMean < 0 ? 'negative' : 'positive');
@@ -651,7 +668,7 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
   if (beforeBand === afterBand) {
     const link = `Adjusted the link between ${input.fromLabel} and ${input.toLabel}.`;
     // ⚠ THE BAND NOUN DOES NOT READ AS A PREDICATE COMPLEMENT AT NEAR-ZERO.
-    // `describeBandWithDirection` returns the literal 'no material influence'
+    // `edgeStrengthWords` returns the literal 'no material influence'
     // below NEAR_ZERO_INFLUENCE_THRESHOLD, so "its strength is still no
     // material influence" is not English — the same trap
     // `formatEdgeStrengthUnchanged` already special-cases forty lines below,
@@ -691,36 +708,46 @@ export function formatEdgeStrengthUnchanged(input: {
   readonly fromLabel: string;
   readonly toLabel: string;
   readonly mean: number;
+  /** The saved edge, so an approval's post-state sizing governs the receipt. */
+  readonly edge?: unknown;
+  /** Science 393023 LICENCE ruling 3: a placeholder's default is not a size, so no band is named for it. */
+  readonly unsized?: boolean;
 }): string {
   const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
-  if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+  const band = edgeStrengthWords(input.edge ?? {
+    strength: { mean: input.mean },
+    ...(input.unsized === true ? { sizing: 'placeholder' } : {}),
+  }, 'direction');
+  // Batch A (PL 6114713464): accurate, a review may still be recorded. A′ (AIE #94 6115788987): unchanged is said of THIS
+  // link, never the whole model.
+  if (band === 'not sized yet') return `${link} has not been sized yet. Its values are unchanged. Give a figure, or ask Olumi to estimate it.`;
+  if (band === 'no material influence') {
     return `${link} already has no material influence.`;
   }
-  return `${link} is already ${describeBandWithDirection(input.mean)}.`;
+  return `${link} is already ${band}.`;
 }
 
 /**
- * Receipt for an explicit `confirm_current` edge-strength act. Unlike an
- * ordinary numeric no-op, confirmation changes provenance: the human has
- * adopted the current model value as their judgement. It deliberately repeats
- * neither a number nor a direction; the strict expected-before check proves
- * which current value was confirmed, and omitting both avoids reconstructing
- * either one from display state (especially at zero, whose direction is not
- * recoverable from sign).
+ * Receipt for an explicit `confirm_current` edge-strength act. It deliberately repeats neither a number nor a
+ * direction; the strict expected-before check proves which current value was confirmed, and omitting both avoids
+ * reconstructing either one from display state (especially at zero, whose direction is not recoverable from sign).
+ *
+ * ⛔ WHOSE FIGURE IT IS follows the link's STORED sizing after the write (`linkSizing`, 52f8cd's one predicate), never
+ * the act (R3 5942069984: an Accept read "as your judgement" while the stored link stayed Olumi's estimate):
+ *   · `olumi_accepted` → RC's `accept_olumi_estimate` sentence, the one the rerun's line says too: still Olumi's figure;
+ *   · `user`           → the user's own judgement;
+ *   · anything else, or no link read → no authorship claim at all.
  */
 export function formatEdgeStrengthConfirmed(input: {
   readonly fromLabel: string;
   readonly toLabel: string;
+  readonly sizing: LinkSizing | undefined;
 }): string {
-  return (
-    `Confirmed the current strength of the link between ${input.fromLabel} ` +
-    `and ${input.toLabel} as your judgement.`
-  );
-}
-
-function describeBandWithDirection(mean: number): string {
-  const abs = Math.abs(mean);
-  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'no material influence';
-  const band = edgeBandFromMagnitude(abs);
-  return mean < 0 ? `${band} (negative)` : band;
+  // Batch A ruling 3: confirming a placeholder says it is still not sized.
+  // Batch A ruling 3 (PL 6114713464): values unchanged is not "nothing changed" — the review itself is recorded.
+  // A′ (AIE #94 6115788987): unchanged is said of THIS link, never the whole model.
+  if (input.sizing === 'placeholder') return `Your review of the link between ${input.fromLabel} and ${input.toLabel} is recorded. It has not been sized yet. Its values are unchanged. Give a figure, or ask Olumi to estimate it.`;
+  if (input.sizing === 'olumi_accepted') return acceptedOlumiEstimateSentence(input.fromLabel, input.toLabel);
+  const confirmed = `Confirmed the current strength of the link between ${input.fromLabel} and ${input.toLabel}`;
+  return input.sizing === 'user' ? `${confirmed} as your judgement.` : `${confirmed}.`;
 }

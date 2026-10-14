@@ -1,0 +1,8 @@
+{
+  "src/routes/agent-v1-turn.ts": "cf185186a5aed43898f84ee725ba9e32e1d11cabaee3c12714e0b353faca0088",
+  "src/orchestrator-v5/session/store.ts": "b86b8326329ca7e1983bac9c1ce90507f95480e38466579a3581094f0849c0d6",
+  "src/orchestrator-v5/session/supabase-store.ts": "d4e5eaa3801e0a45fc9daeb2e36040e3ebc7d98afb01b5e47bf91c2a15d66eb9",
+  "src/orchestrator-v5/agent-lane/turn-context/guidance-history.ts": "daa7873371fc70d929c3d3683bb3674ad8e05ff4221b3d7ab698f3f5bff4d2de",
+  "src/orchestrator-v5/agent-lane/turn-context/guidance-wire.ts": "ee9dc9268764cc49be61603643f1b183e710ec691b98ffab4ba2dfa4e73883da",
+  "supabase/migrations/20261004142707_agent_guidance_answer_history.sql": "f0c092a1c11d7090ff27e1f58f60ad1863450f2791b73e2d5c61a9fa775431a6"
+}

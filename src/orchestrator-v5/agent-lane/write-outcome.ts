@@ -25,9 +25,12 @@
  *      match and survive.
  */
 
+import { MODEL_READ_FAILED_MESSAGE, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import type { ToolResult } from './runtime/agent-tools.js';
-import { proposalsAwaitingApproval } from './approval-chips.js';
+import { eventByDateRefusalDetail } from '../goal-target/event-by-date-model.js';
+import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
+import type { PressBlocker } from './press-next-step.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -62,7 +65,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   partially_applied: 'only part of it was saved',
   not_applied: 'none of it was applied',
   model_changed_while_proposing: 'the model changed while it was being put together',
-  model_already_exists: 'a model already exists for this decision',
+  model_already_exists: 'a model already exists for this scenario',
   read_only_preview: 'this preview cannot change the model',
   approve_on_card: 'a typed “yes” cannot adopt an Olumi suggestion — press the displayed adoption card to include it',
   // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
@@ -72,7 +75,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
   construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
-  registration_refused: 'it could not be saved to this decision — ask me to try again',
+  registration_refused: 'it could not be saved to this scenario — ask me to try again',
   option_name_ambiguous: 'the model uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
   /**
    * ⛔ EVERY CODE A WRITE TOOL RETURNS HAS WORDS (fix/agent-never-shows-instructions-or-codes). Until now these fell
@@ -81,13 +84,13 @@ const REFUSAL_WORDS: Record<string, string> = {
    * (`withheld_on_chip_turn`) and `buildModelFromBrief` (`construction_unavailable`, `empty_brief`). A compound part's
    * `reason` reads through this same map (`unresolved_effect_relationship` is the option-level writer's refusal).
    */
-  not_found: 'Olumi could not read this decision’s model, so nothing was changed — ask me to try again',
+  not_found: 'Olumi could not read this scenario’s model, so nothing was changed — ask me to try again',
   unsupported_compound: 'this proposal mixes changes that cannot be applied together, so nothing was changed — ask me to propose them one at a time',
   unparsable_arguments: 'the request could not be read, so nothing was changed — ask me again',
   unknown_tool: 'that change cannot be made here, so nothing was changed',
   withheld_on_chip_turn: 'a suggestion button cannot approve a change — approving has its own button',
   construction_unavailable: 'building a model is not available right now — ask me to try again later',
-  empty_brief: 'there was no description of the decision to build it from — tell me what you are deciding',
+  empty_brief: 'there was no brief to build it from — tell me about the question you are working on',
   unresolved_effect_relationship: 'the option does not act on that factor, so no level could be set for it',
 };
 
@@ -98,6 +101,45 @@ const REFUSAL_WORDS: Record<string, string> = {
  * `model_not_readable_after_write` mean the read-back itself failed. The user read "Partly saved: the change was
  * refused (not_verified)." for an option that DID land. Said as what is true: sent, not confirmed, and how to check.
  */
+export const DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE = 'The link was saved, but the scenario changed before its accepted estimate detail could be saved. Check the saved link and try accepting its estimate again.';
+
+export const RANGE_SAVED_LEVELS_CONFLICT_MESSAGE = "The range was saved, but the scenario changed before the option levels could be saved. Check the saved range and try setting the option levels again.";
+export const VALUES_SAVED_REMAINING_CONFLICT_MESSAGE = "The earlier values were saved, but the scenario changed before the remaining values could be saved. Check the saved values and try setting the remaining values again.";
+export const VALUES_SAVED_REMAINING_REFUSED_MESSAGE = "The earlier values were saved, but the remaining values could not be saved. Check the saved values and try setting the remaining values again.";
+export const VALUES_SAVED_RANGE_CONFLICT_MESSAGE = "The values were saved, but the scenario changed before their range could be saved. Check the saved values and try setting their range again.";
+export const VALUES_SAVED_RANGE_REFUSED_MESSAGE = "The values were saved, but their range could not be saved. Check the saved values and try setting their range again.";
+export const TARGET_SAVED_LEVEL_CONFLICT_MESSAGE = "The target was saved, but the scenario changed before today's level could be saved. Check the saved target and try setting today's level again.";
+export const DRAWN_LINK_ESTIMATE_REFUSED_MESSAGE = "The link was saved, but its accepted estimate detail could not be saved. Check the saved link and try accepting its estimate again.";
+
+export const RANGE_SAVED_LEVELS_UNCONFIRMED_MESSAGE = "The range was saved, but Olumi could not confirm whether the option levels were saved. Check the saved model before trying to set the option levels again.";
+export const VALUES_SAVED_REMAINING_UNCONFIRMED_MESSAGE = "The earlier values were saved, but Olumi could not confirm whether the remaining values were saved. Check the saved model before trying to set the remaining values again.";
+export const VALUES_SAVED_RANGE_UNCONFIRMED_MESSAGE = "The values were saved, but Olumi could not confirm whether their range was saved. Check the saved model before trying to set their range again.";
+export const TARGET_SAVED_LEVEL_UNCONFIRMED_MESSAGE = "The target was saved, but Olumi could not confirm whether today's level was saved. Check the saved model before trying to set today's level again.";
+export const VALUES_SAVED_READ_UNCONFIRMED_MESSAGE = "The values were saved, but Olumi could not read the model afterwards. Check the saved model before making another change.";
+
+export const PARTIAL_WRITE_MESSAGES: Readonly<Record<string, string>> = {
+  link_saved_estimate_not_saved: DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE,
+  range_saved_levels_unconfirmed: RANGE_SAVED_LEVELS_UNCONFIRMED_MESSAGE,
+  values_saved_remaining_values_unconfirmed: VALUES_SAVED_REMAINING_UNCONFIRMED_MESSAGE,
+  values_saved_range_unconfirmed: VALUES_SAVED_RANGE_UNCONFIRMED_MESSAGE,
+  target_saved_level_unconfirmed: TARGET_SAVED_LEVEL_UNCONFIRMED_MESSAGE,
+  values_saved_read_unconfirmed: VALUES_SAVED_READ_UNCONFIRMED_MESSAGE,
+
+  range_saved_levels_not_saved: RANGE_SAVED_LEVELS_CONFLICT_MESSAGE,
+  values_saved_remaining_values_not_saved: VALUES_SAVED_REMAINING_CONFLICT_MESSAGE,
+  values_saved_remaining_values_refused: VALUES_SAVED_REMAINING_REFUSED_MESSAGE,
+  values_saved_range_not_saved: VALUES_SAVED_RANGE_CONFLICT_MESSAGE,
+  values_saved_range_refused: VALUES_SAVED_RANGE_REFUSED_MESSAGE,
+  target_saved_level_not_saved: TARGET_SAVED_LEVEL_CONFLICT_MESSAGE,
+  link_saved_estimate_refused: DRAWN_LINK_ESTIMATE_REFUSED_MESSAGE,
+};
+
+/** These two partial outcomes retain their specific receipts instead of generic fixed copy. */
+function isPartialWriteResult(r: ToolResult): boolean {
+  return r.mutated === true && (PARTIAL_WRITE_MESSAGES[String(r.outcome)] !== undefined
+    || r.outcome === 'range_saved_levels_refused' || r.outcome === 'target_saved_level_refused');
+}
+
 const UNCONFIRMED_WORDS: Record<string, string> = {
   not_verified: 'The change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.',
   not_confirmed: 'The change was sent, but it could not be confirmed: Olumi could not read the model back afterwards. Ask me to check whether it was recorded.',
@@ -110,6 +152,12 @@ const UNCONFIRMED_WORDS: Record<string, string> = {
  * Agent (it reads the result's `refusal` and `detail`); the user reads one plain sentence with a next step.
  */
 const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
+/**
+ * R2 T1 words: an unapproved change is waiting, not failed. AIE AMENDED (#94 6128697025): the button alone, always ("or type
+ * its words" is gone: the typed binding matches the card's message, which the button may not show).
+ */
+export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card.';
+export const APPROVAL_REQUIRED_BUTTON_WORDS = 'Not saved yet: press the approval button on the card.';
 const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
 const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
 
@@ -132,6 +180,12 @@ const AGENT_IMPERATIVE = /^(?:[-•*>\s]*)(?:Offer\b|Say (?:so|that|it|plainly)\
 const AGENT_ID = /\bnever the id\b|\bproposal[ _]id\b/i;
 const CODE_TOKEN = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
 const QUOTED = /"[^"]*"|“[^”]*”/g;
+/**
+ * A label quoted so the boundary below holds it aside WHOLE (M1 Accept receipt, Codex pre-review 3 P2): straight quotes,
+ * or curly ones when the label itself holds a straight quote (`Size of "the user" base` would otherwise end the span early
+ * and drop the sentence). A label holding both kinds keeps straight quotes, its own `”` read as text.
+ */
+export const quoteLabelForUser = (label: string): string => (label.includes('"') && !label.includes('”') ? `“${label}”` : `"${label.replace(/"/g, '”')}"`);
 /** A quoted span, held aside while the sentence is judged: private-use delimiters no label or rule can contain. */
 const HELD_SPAN = /(\d+)/g;
 
@@ -181,7 +235,7 @@ export interface NotSavedValue {
   readonly unit: string;
   /** The figure not saved was the user's own (`user_stated`); else Olumi's suggestion. */
   readonly yours: boolean;
-  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' };
+  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' | 'unverified_brief' };
   /** The model could not be read after the refusal: what it holds now is not said (never inferred). */
   readonly unconfirmed?: true;
 }
@@ -199,6 +253,7 @@ function notSavedValueLine(x: NotSavedValue, why: string): string {
   if (x.still === undefined) return `${head} The model still has no figure for it.`;
   // A figure this approval does not write is said the estate's way: exact, else "about" (`sayFigureRead`; AIQ 5924240860).
   const held = sayFigureRead(x.still.value, x.still.unit);
+  if (x.still.owner === 'unverified_brief') return `${head} Not confirmed from your brief`;
   const still = x.still.owner === 'yours' ? `your figure of ${held}`
     : x.still.owner === 'brief' ? `the figure from your brief, ${held}`
       : x.still.owner === 'olumi_accepted' ? `Olumi\u2019s estimate of ${held}, which you accepted` : `Olumi\u2019s estimate of ${held}`;
@@ -224,6 +279,12 @@ function partsLine(r: ToolResult): string | null {
     const rec = typeof p.recorded_count === 'number' ? p.recorded_count : null;
     const req = typeof p.requested_count === 'number' ? p.requested_count : null;
     const versions = versionPhrase(versionsOf(p));
+    // A keep changes no figure: what was saved is the user's acceptance of Olumi's estimate (#2436).
+    if (p.ok === true && p.part === 'values' && p.kept === true) {
+      // A mixed keep's S-D receipt already states each edited and accepted figure.
+      if (Array.isArray(r.user_edits) && r.user_edits.length > 0) return '';
+      return rec === 1 ? `Recorded that you accept Olumi\u2019s estimate${versions}.` : `Recorded that you accept Olumi\u2019s ${rec ?? ''} estimates${versions}.`.replace('  ', ' ');
+    }
     if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
     // A reason nobody has worded is left out rather than shown as a code.
     const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
@@ -244,7 +305,7 @@ function partsLine(r: ToolResult): string | null {
   if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
     bits.push('Not saved: option levels (stopped before they were written).');
   }
-  return bits.join(' ');
+  return bits.filter((b) => b !== '').join(' ');
 }
 
 /**
@@ -311,17 +372,27 @@ function contextAskOf(r: ToolResult | undefined): string | null {
  */
 const OPEN_QUESTIONS_SHOWN = 2;
 
-/** The questions the build parked instead of modelling — what to examine next, not answers. */
-function openQuestionsLine(r: ToolResult): string {
+/**
+ * The questions the build parked instead of modelling — what to examine next, not answers.
+ *
+ * ⭐ EBD (DL, 12 Oct): EACH ASK ONCE PER REPLY. A question this reply already says before this line (`alreadySaid`: the Agent's
+ * words and the owed lines, e.g. the first analysis's blocked line, which is readiness's ask) is not shown again; the count
+ * of the rest is unchanged. Paul's first reply said the deadline question there, here, and in the readiness line.
+ */
+function openQuestionsLine(r: ToolResult, alreadySaid = ''): string {
   const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
-  const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
-  const rest = qs.length - OPEN_QUESTIONS_SHOWN;
+  const next = typeof r.displayed_next_question === 'string' ? r.displayed_next_question : null;
+  const shownCount = next === null ? OPEN_QUESTIONS_SHOWN : 1;
+  const shownQs = (next === null ? qs.slice(0, shownCount) : [next]).filter((q) => alreadySaid === '' || !alreadySaid.includes(q.trim()));
+  const shown = shownQs.map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
-  // alone is true on every surface: the UI's disclosure lists all of them (`_agent.open_questions`); raw text says how many.
-  const more = rest > 0 ? ` (${OPEN_QUESTIONS_SHOWN} of ${qs.length} shown.)` : '';
-  return ` Questions this model does not answer yet: ${shown}${more}`;
+  // names the omitted items even if an earlier sentence is dropped; the disclosure lists all (`_agent.open_questions`).
+  const more = rest > 0 ? ` ${rest} more question${rest === 1 ? ' remains' : 's remain'} unresolved.` : '';
+  if (shown === '' && more === '') return '';
+  return ` Questions this model does not answer yet: ${shown === '' ? more.trim() : `${shown}${more}`}`;
 }
 
 /** Every question a build parked, in the producer's order. */
@@ -336,11 +407,14 @@ export function openQuestionsForReply(r: ToolResult | undefined): string[] {
 }
 
 /**
+ * ⛔ THE SAVE INDICATOR OWNS "SAVED" (P50, Paul's audit #14; DGAI #2609): a build line never says the model was saved or
+ * its version. What remains is what approval changes, plus the build's own disclosures.
+ *
  * ⛔ A SAVED BUILD MUST NOT READ AS SAVED FIGURES (Paul's test on served `d5d5839`, #69 5832088673).
  * The reply said "These are starting assumptions, not measurements. Shall I record them?" and Olumi
  * then said "The model was saved as version 1." The build really was saved; the figures were not —
  * but the line read as if they had been recorded before he agreed. So when the SAME turn leaves a
- * proposal awaiting approval after the build, the line says what was saved and what was not.
+ * proposal awaiting approval after the build, the line says what approval changes.
  *
  * Derived from the turn's own tool results by the approve chip's own rule (`proposalsAwaitingApproval`),
  * never from the model's prose. An authorisation refused before it named any proposal (a call withheld
@@ -360,25 +434,52 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
   return waiting.every((t) => FIGURE_PROPOSERS.includes(t)) ? 'figures' : 'change';
 }
 
+/** The established range-only partial warning, shared with the approval-facing field. */
+export function partialRangeLevelsWarning(ranges: readonly { factor: string; range: number }[]): string {
+  const rangesText = ranges.map(f => `${f.factor} 0 to ${f.range}`).join(', ');
+  return `Partly saved: this approval attached a range (${rangesText}), but none of the levels were recorded. Read the model again before describing it.`;
+}
+
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', exactlyOneCardWaits = false): string {
+  const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
+  if (isPartialWriteResult(r)) {
+    if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
+      && r.refusal === 'not_verified' && typeof r.detail === 'string') return r.detail;
+    const disclosure = Array.isArray(r.reencoded_siblings)
+      ? (r.reencoded_siblings as { detail: string }[]).map(c => c.detail).join(' ') : '';
+    if (typeof r.follow_up === 'string' && disclosure === '') return withoutAgentDirections(r.follow_up).text;
+    if (String(r.outcome).startsWith('range_saved_levels_')
+      && r.refusal === 'partially_applied' && Array.isArray(r.ranges_added_for_analysis)) {
+      const warning = partialRangeLevelsWarning(r.ranges_added_for_analysis as { factor: string; range: number }[]);
+      return disclosure === '' ? warning : withoutAgentDirections(`${warning} ${disclosure}`).text;
+    }
+    if (partialMessage !== undefined) return disclosure === '' ? partialMessage : withoutAgentDirections(`${partialMessage} ${disclosure}`).text;
+  }
+  // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
+  // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
+  // turn then withdrew it (Codex #2781 r4 P2): the words follow the approve chip's own rule (`pending`), never the refusal.
+  // It speaks for that change only (r5 P2): an earlier approval this turn may have saved, so no turn-wide "nothing changed";
+  // a withdrawn change has no line of its own.
+  if (name === 'authorise_change' && r.ok === false && r.refusal === NOT_ON_NARRATION) {
+    return pending !== null ? 'The change above is waiting for your approval.' : '';
+  }
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
     if (r.ok === true && r.mutated === true) {
-      const at = typeof v === 'number' ? ` as version ${v}` : '';
-      const saved = pending === null
-        ? `The model was saved${at}.`
-        // ⛔ MG sweep (#70 5851155478 b, DL 5851162511 item 3): "The figures above are not recorded until you approve
-        // them" was FALSE on Paul's path — Olumi's 300 subscribers and 7% churn were already saved and run on. Say what
-        // is saved (Olumi's estimates, beside the user's own figures) and what approval changes (they become the user's
-        // starting assumptions) — true whether a proposed figure is already in the model or not yet.
-        : `I saved the model I drafted${at}. ${pending === 'figures'
-          // F3 (DL 5851710093): the goal clause outranks this line, so it says the same two truths in fewer words.
-          ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
-          : 'What I proposed above is not made until you approve it.'}`;
-      return `${saved}${leftOutLine(r)}${contextFactorsLine(r)}${openQuestionsLine(r)}`;
+      // MG sweep (#70 5851155478 b; DL 5851162511 item 3): say what approval changes (Olumi's estimates become the user's
+      // starting assumptions), true whether a proposed figure is already in the model or not. F3 (DL 5851710093): short.
+      const approval = pending === null ? '' : pending === 'figures'
+        ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
+        : 'What I proposed above is not made until you approve it.';
+      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r, alreadySaid)]
+        .map((line) => line.trim()).filter((line) => line !== '').join(' ');
+    }
+    if (r.refusal === 'event_goal_unadmitted') {
+      const detail = eventByDateRefusalDetail(r.detail);
+      if (detail !== null) return detail;
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;
@@ -414,10 +515,17 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
       + 'if the model has changed since, you will be asked to confirm again.';
   }
+
   const code = String(r.refusal ?? '');
   const unconfirmed = UNCONFIRMED_WORDS[code];
-  if (unconfirmed !== undefined) return unconfirmed;
+  // A capability's own unconfirmed receipt (the link set's, AIE packet 2b19ae59) is said instead of the generic words; a
+  // re-encoded sibling disclosure keeps them beside it.
+  if (unconfirmed !== undefined) {
+    return typeof r.follow_up === 'string' && !Array.isArray(r.reencoded_siblings) ? withoutAgentDirections(r.follow_up).text : unconfirmed;
+  }
   const mutated = r.mutated === true;
+  // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
+  if (code === 'approval_required' && !mutated) return exactlyOneCardWaits ? APPROVAL_REQUIRED_WORDS : APPROVAL_REQUIRED_BUTTON_WORDS;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
 }
 
@@ -435,7 +543,13 @@ export function narrateWriteOutcome(
   toolCalls: readonly { name: string }[],
   toolResults: readonly ToolResult[],
   /** False for a guest, whose saves are never versioned: a save without a version is then not an anomaly. */
-  opts: { readonly versioned?: boolean } = {},
+  opts: {
+    readonly versioned?: boolean;
+    /** EBD (DL, 12 Oct): what the reply already says before the status line; a question in it is not shown again. */
+    readonly alreadySaid?: string;
+  } = {},
+  /** R2 T1: exactly one card waits, so typed card words bind; otherwise "approval_required" names the button only. */
+  exactlyOneCardWaits = false,
 ): WriteOutcomeNarration {
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
@@ -443,6 +557,18 @@ export function narrateWriteOutcome(
 
   const stripped: string[] = [];
   let out = text;
+  // An earlier write is confirmed. Strip whole-operation failure claims
+  // only for a structured partial outcome; ordinary refusals keep their words.
+  const hasPartialWrite = writes.some(w => isPartialWriteResult(w.result));
+  if (hasPartialWrite) {
+    for (const claim of [
+      REVISION_CONFLICT_MESSAGE,
+      MODEL_READ_FAILED_MESSAGE,
+      UNCONFIRMED_WORDS.not_confirmed!,
+    ]) {
+      if (out.includes(claim)) { stripped.push(claim); out = out.replaceAll(claim, ''); }
+    }
+  }
   /**
    * ⛔ THE SERVER OWNS EVERY COMPLETION CLAIM ON EVERY TURN — not only when
    * nothing landed. Independent pre-read of #1712/#1720 (PR #1720 comment
@@ -453,12 +579,15 @@ export function narrateWriteOutcome(
    * from the structured results below. Non-write reasoning is kept.
    */
   {
-    out = text
+    out = out
       .split('\n')
       .map((line) => {
         const sentences = line.split(/(?<=[.!?])\s+/);
         const kept = sentences.filter((s) => {
-          if (assertsCompletedWrite(s)) { stripped.push(s.trim()); return false; }
+          if (assertsCompletedWrite(s) || (hasPartialWrite
+            && /\bnothing (?:was|has been) saved\b|\bcould not read (?:the )?model back\b/i.test(s))) {
+            stripped.push(s.trim()); return false;
+          }
           return true;
         });
         return kept.length === sentences.length ? line : kept.join(' ');
@@ -469,9 +598,9 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? '', exactlyOneCardWaits));
   const status = lines.length > 0
-    ? lines.join(' ')
+    ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
   return { text: out, status, stripped };
 }
@@ -531,4 +660,13 @@ export function staleResultLine(analysisState: unknown, analysisReady: unknown):
   return mayRun
     ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
     : 'The analysis on screen was computed before this change.';
+}
+
+/** ⭐ COACH (DL coaching-on-press): a stale result's ONE next step is this same line while it says "run it again" (the Run
+ * control's own verdict). Where the Run may not run, the line has no step to take: another blocker holds the Run and owns
+ * the step (Codex buddy r1), so nothing is typed here. Only from `run_state`, never from a result that could not be bound. */
+export function staleBlockerOf(analysisState: unknown, analysisReady: unknown): PressBlocker | null {
+  if ((analysisReady as { may_run?: unknown } | undefined)?.may_run !== true) return null;
+  const say = staleResultLine(analysisState, analysisReady);
+  return say === null ? null : { kind: 'stale', say };
 }

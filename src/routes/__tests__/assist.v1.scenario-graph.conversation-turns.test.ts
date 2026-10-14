@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ⭐ "THE CHAT SURVIVES A RELOAD" — THE CEE READ (DL lease #75 5907582591; Canvas boundary 5907308286; AIQ 5907360564).
  *
@@ -41,6 +42,16 @@ vi.mock("../../utils/telemetry.js", () => ({
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
+const { estimateAnalysis } = vi.hoisted(() => ({ estimateAnalysis: { value: null as unknown } }));
+vi.mock("../scenario-graph-analysis-read.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../scenario-graph-analysis-read.js")>();
+  return {
+    ...actual,
+    readScenarioAnalysis: (...args: Parameters<typeof actual.readScenarioAnalysis>) =>
+      estimateAnalysis.value === null ? actual.readScenarioAnalysis(...args) : Promise.resolve(estimateAnalysis.value),
+  };
+});
+
 // ── The store double ────────────────────────────────────────────────────────
 // `ensureScenarioExists` is the UPSERT. It is a spy here so the suite can
 // assert not just the RESPONSE but whether the row-creating call was reached
@@ -52,7 +63,10 @@ const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
 
 const readRecent = vi.fn();
+const readCommittedTurn = vi.fn(async (_s: string, _t: string): Promise<{ run_narration: { status: string; run_key: string } | null } | null> => null);
 const store = {
+  readCommittedTurn,
+  readMostRecentPendingActions: async () => [],
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -103,6 +117,7 @@ const GRAPH_NO_LAYOUT = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
   return app;
@@ -126,12 +141,14 @@ async function read(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  estimateAnalysis.value = null;
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
   // The signed-in owner is the default caller. Cases about a DIFFERENT user
   // override this explicitly — see the note on the mock.
   resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
   getScenarioOwner.mockResolvedValue(null);
   loadGraphAndBriefText.mockResolvedValue({
     graph: GRAPH_NO_LAYOUT,
@@ -157,6 +174,47 @@ const NEWEST_FIRST = [
 beforeEach(() => { readRecent.mockResolvedValue(NEWEST_FIRST); });
 
 describe("the conversation, when asked", () => {
+  it.each([true, false])("r12 reload: replaces a licensed estimate point with or without a scored-goal snapshot (%s), preserving risk bytes", async scored => {
+    const graph = { nodes: [
+      { id: "raise", kind: "option", label: "Raise to £59" },
+      { id: "keep", kind: "option", label: "Keep at £49" },
+      { id: "revenue", kind: "goal", label: "Revenue goal" },
+    ], edges: [] };
+    // Historical labels may come from the graph; a legacy licence binds its named option and exact value itself.
+    const result = { type: "analysis_result", computed_against_hash: "0123456789abcdef", ...(scored ? { input_snapshot: { goal_node_id: "revenue" } } : {}),
+      enrichment: { inference_warnings: [{
+      code: "GOAL_CHANCE_LICENSED", form: "each", option_ids: ["raise", "keep"],
+      pct_by_option: { raise: 67, keep: 30 }, olumi_estimate_link_count: 1,
+      target: { comparator: "at_least", value: 1000, unit: "£" },
+    }] } };
+    const state = { run_state: { kind: "complete_current", computed_at: "2026-09-30T08:00:30.000Z" }, leader_claim: { permitted: true } };
+    estimateAnalysis.value = {
+      analysis_state: state,
+      analysis_result: result, current_read: { analysis_ready: { status: "ready", may_run: true }, result },
+      analysis_constraint_verdict_state: null,
+    };
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: "Improve revenue." });
+    // AMENDED (reload Run identity, 14 Oct): a reloaded answer is re-gated against the current Run only when the narration
+    // stored WITH it names that Run. This row narrates the current Run (its 67%), so it is stored with that Run's narration.
+    const { runExplanationKeyForRecord } = await import("../../orchestrator-v5/agent-lane/run-explanation.js");
+    const runKey = runExplanationKeyForRecord(SCENARIO, state, result);
+    expect(runKey).toMatch(/^[0-9a-f]{16}$/);
+    readCommittedTurn.mockResolvedValue({ run_narration: { status: "ready", run_key: runKey! } });
+    const bare = "‘Raise to £59’: about 67% in this model.";
+    const preserved = "The chance of supplier failure is 10%.\n\tSupplier delivery has about 67% probability.  Keep this spacing.";
+    const labelled = "‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
+    readRecent.mockResolvedValue([row(1, "What was the recorded chance?", `${bare}\n${preserved}\n${labelled}`)]);
+    const app = await buildApp();
+    const response = await read(app, SCENARIO, { include_conversation_turns: true });
+    expect(response.statusCode).toBe(200);
+    const text = response.json().conversation_turns[0].assistant_message as string;
+    expect(text).not.toContain(bare);
+    expect(text).toContain(labelled);
+    expect(text.split(labelled).length - 1).toBe(1);
+    expect(text).toContain(preserved);
+    await app.close();
+  });
+
   it("RED: include_conversation_turns → the turns oldest first, text only, capped at 50, as stored", async () => {
     const app = await buildApp();
     const res = await read(app, SCENARIO, { include_conversation_turns: true });
@@ -206,6 +264,7 @@ describe("the conversation, when asked", () => {
     resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     getScenarioOwner.mockResolvedValue(OWNER);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const app = await buildApp();
     const res = await read(app, SCENARIO, { include_conversation_turns: true });
     expect(res.statusCode).not.toBe(200);
@@ -305,5 +364,75 @@ describe("the restore returns only the Agent's answer rows — what the user saw
   it("DRIFT PIN: the prefix is the one the Agent route writes on its answer rows", () => {
     const src = readFileSync(new URL("../agent-v1-turn.ts", import.meta.url), "utf8");
     expect(src).toContain(`return \`${AGENT_ANSWER_REQUEST_HASH_PREFIX}\${digest}\`;`);
+  });
+});
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));
+
+/**
+ * ⛔ AN EARLIER ANSWER NEVER ACQUIRES A NEWER RUN'S WORDS (capacity witness, staging 351eeda0, 14 Oct; judge row 6).
+ * After a second Run, the reload rewrote the first Run's "about 37%" as the second Run's "about 64%": the egress gate ran
+ * every stored answer against the CURRENT Run. The corpus is the witness's own: each row's bytes come from the read where
+ * its own Run was current, proven equal to the stored row by md5 (`_source`), with the run_narration stored beside it.
+ */
+describe("the reload keeps each answer's own Run's words", () => {
+  const FX = JSON.parse(readFileSync("tests/fixtures/reload-run-identity/capacity-post2996-20261014.json", "utf8")) as Record<string, any>;
+  const SID: string = FX.scenario_id;
+  const rows = (FX.rows as Record<string, any>[]).map((r, i) => ({ id: `00000000-0000-4000-8000-00000000000${i}`, scenario_id: SID,
+    user_id: null, handler_id: null, turn_id: r.turn_id, created_at: r.created_at, request_hash: r.request_hash,
+    user_message: r.user_message, assistant_message: r.assistant_message }));
+  const stored = (id: string): string => (FX.rows as Record<string, any>[]).find(r => r.turn_id === id)!.assistant_message;
+  const RUN1 = "a3e3933c-47c5-4eda-9779-a471dd170bc5", RUN2 = "8ac9acfa-e312-425b-850e-47f8d1540bf1", BUILT = "3db16588-be9b-4257-9157-323bf2797ddd";
+  const reloadOnRun2 = async (storedRows = rows) => {
+    estimateAnalysis.value = { ...FX.run2, analysis_constraint_verdict_state: null };
+    scenarioExists.mockResolvedValue(true);
+    loadGraphAndBriefText.mockResolvedValue({ graph: FX.run2.graph, briefText: "capacity" });
+    readRecent.mockResolvedValue([...storedRows].reverse());
+    readCommittedTurn.mockImplementation(async (_s: string, t: string) =>
+      ({ run_narration: (FX.rows as Record<string, any>[]).find(r => r.turn_id === t)?.run_narration ?? null }));
+    const app = await buildApp();
+    const res = await read(app, SID, { include_conversation_turns: true });
+    await app.close();
+    expect(res.statusCode).toBe(200);
+    return new Map((res.json().conversation_turns as { turn_id: string; assistant_message: string }[]).map(t => [t.turn_id, t.assistant_message]));
+  };
+
+  it("precondition: the current Run's key is the one the writer stored with Run 2's answer, and Run 1's differs", async () => {
+    const { runExplanationKeyForRecord } = await import("../../orchestrator-v5/agent-lane/run-explanation.js");
+    expect(runExplanationKeyForRecord(SID, FX.run2.analysis_state, FX.run2.analysis_result)).toBe("7be47e1859051a85");
+    expect(runExplanationKeyForRecord(SID, FX.run1.analysis_state, FX.run1.analysis_result)).toBe("4748ec658ba3d702");
+    // Served (the defect): both older answers came back in Run 2's words.
+    for (const id of [BUILT, RUN1]) {
+      expect(FX.served_reload_after_run2[id]).not.toBe(stored(id));
+      expect(stored(id)).toContain("about 37% chance of meeting your goal");
+      expect(FX.served_reload_after_run2[id]).toContain("about 64% chance of meeting your goal");
+    }
+  });
+
+  it("after Run 2, every earlier answer reloads byte for byte as stored; Run 2's own answer too", async () => {
+    const shown = await reloadOnRun2();
+    expect([...shown.keys()]).toEqual([BUILT, RUN1, RUN2]);
+    for (const id of [BUILT, RUN1, RUN2]) expect(shown.get(id)).toBe(stored(id));
+  });
+
+  it("an old answer's stored text was already egress-gated for its own Run when written: re-gating it there changes nothing", async () => {
+    const { withEstimateGoalPointsAtEgress } = await import("../../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js");
+    const userAuthoredTexts = (FX.rows as Record<string, any>[]).map(r => r.user_message as string);
+    for (const [id, run] of [[RUN1, FX.run1], [RUN2, FX.run2]] as const) {
+      expect(withEstimateGoalPointsAtEgress({ assistant_text: stored(id) }, { analysisResult: run.analysis_result, graph: run.graph,
+        current: true, userAuthoredTexts }).assistant_text).toBe(stored(id));
+    }
+  });
+
+  it("an answer stored WITH the current Run's narration is still re-gated against it: a wrong figure there is corrected", async () => {
+    const wrong = stored(RUN2).replace("about 64% chance of meeting your goal", "about 50% chance of meeting your goal");
+    expect(wrong).not.toBe(stored(RUN2));
+    const shown = await reloadOnRun2(rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: wrong } : r));
+    expect(shown.get(RUN2)).toContain("about 64% chance of meeting your goal");
+    expect(shown.get(RUN2)).not.toContain("about 50%");
+    expect(shown.get(RUN1)).toBe(stored(RUN1));
   });
 });

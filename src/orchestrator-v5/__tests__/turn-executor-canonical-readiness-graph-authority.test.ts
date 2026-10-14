@@ -34,7 +34,6 @@ vi.mock('../session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => (global as Record<string, unknown>).__test_persisted_graph ?? null,
     loadGraphAndBriefText: async () => ({
       graph: (global as Record<string, unknown>).__test_persisted_graph ?? null,
@@ -94,7 +93,7 @@ const REQUEST_2OPT: GraphStateIngress = {
     { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
     { id: 'opt_a', kind: 'option', label: 'A' },
     { id: 'opt_b', kind: 'option', label: 'B' },
-    { id: 'f1', kind: 'factor', label: 'Execution quality', category: 'controllable' },
+    { id: 'f1', kind: 'factor', label: 'Execution quality', category: 'controllable', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
   ],
   edges: [
     { from: 'dec_1', to: 'opt_a', ...INTERVENTION_EDGE },
@@ -194,12 +193,12 @@ describe('TurnExecutor — canonical readiness uses the freshness graph authorit
     const control = await run(REQUEST_2OPT, 'req-graph-authority-control');
 
     // Served readiness follows persisted bytes, not the identical request graph.
-    expect(stale.analysisReady?.status).toBe('needs_user_mapping');
+    expect(stale.analysisReady?.status).toBe('needs_user_input');
     expect(control.analysisReady?.status).toBe('ready');
 
     // Diagnostic canonical state: readiness comes from the PERSISTED graph.
     // The same status authority now owns both diagnostic and wire projections.
-    expect(stale.canonicalState?.status).toBe('needs_user_mapping');
+    expect(stale.canonicalState?.status).toBe('needs_user_input');
     expect(control.canonicalState?.status).toBe('ready');
 
     // A stale request cannot reintroduce a user-visible Run action.

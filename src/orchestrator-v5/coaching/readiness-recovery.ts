@@ -72,6 +72,7 @@ export interface ReadinessRecoveryInput {
   readonly status?: unknown;
   readonly blockers?: ReadonlyArray<unknown> | undefined;
   readonly options?: ReadonlyArray<unknown> | undefined;
+  readonly readiness_issues?: ReadonlyArray<unknown> | undefined;
 }
 
 export interface ReadinessRecoveryNode {
@@ -444,6 +445,16 @@ export function projectReadinessRecovery(
   }
 
   if (status === 'needs_user_input') {
+    const currentLevelIssue = analysisReady?.readiness_issues?.find((issue): issue is Record<string, unknown> =>
+      issue !== null && typeof issue === 'object' && !Array.isArray(issue)
+      && (issue as Record<string, unknown>).code === 'MISSING_FACTOR_LEVEL'
+      && firstBlocker?.factor_id !== undefined
+      && (issue as Record<string, unknown>).factor_id === firstBlocker.factor_id
+      && firstBlocker.option_id === undefined && firstBlocker.option_label === undefined
+      && readString((issue as Record<string, unknown>).message) !== null);
+    if (currentLevelIssue !== undefined) {
+      return project('provide_value', null, blockerFactorLabel, currentLevelIssue.message as string);
+    }
     if (firstBlocker) {
       const blockerOptionLabel = resolveLabel(
         nodes,
@@ -602,6 +613,8 @@ export function buildReadinessRecoveryChip(
         message: `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}which options should affect the unresolved factors.`,
       };
     case 'provide_value': {
+      // A current-level ask has no option-effect slot to bind or configure.
+      if (recovery.optionLabelFull === null) return null;
       const asked = deriveAskedEffectPair(analysisReady);
       if (asked !== null) {
         // FULL labels for the replayed message (it must name real entities);

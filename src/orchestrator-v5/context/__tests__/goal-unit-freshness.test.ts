@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { deriveAnalysisFreshness } from '../freshness.js';
@@ -25,7 +26,7 @@ const fact = (inputSnapshot: unknown = { goal: {
   fact_type: 'run_analysis', fact_version: 1, noop: false,
   result: {
     scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', summary: 'Analysed.', leading_option_id: null,
-    graph_hash_at_run: HASH, computed_at: AT, enrichment: { analysis_status: 'computed' },
+    graph_hash_at_run: HASH, computed_at: AT, enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
     ...(inputSnapshot === undefined ? {} : { input_snapshot: inputSnapshot }),
   },
 } as unknown as HandlerFact);

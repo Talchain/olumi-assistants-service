@@ -1,0 +1,116 @@
+src/orchestrator-v5/admission/__tests__/t1b-two-bands-size-the-path.test.ts:13:import { goalCertaintyDecisions } from '../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/admission/__tests__/t1b-two-bands-size-the-path.test.ts:108:  // unit" there on the base code too, so only the wrong unit asks; certainty's `sizedLinkTest` also reads the mean.
+src/orchestrator-v5/admission/__tests__/target-testability.test.ts:21:import { olumiGuessedGoalLink, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/construction-g1b-price-count-pass-through.test.ts:20:import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/method-turn/__tests__/structural-challenge-goal-chance.test.ts:11:import { readStoredGoalCertainty } from '../../../tools/handlers/run-goal-certainty.js';
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:30:import { placeholderMovedOptions } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:32:import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:145:    const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: 'scored' } } as never)!
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:3: * (`placeholderPartsFinding`, #2268). Both read the sizer's own unit words (`targetUnitWords` / `naturalAmountUnitOf`),
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:10:import { OLUMI_GUESS_LIMIT_REASON, PLACEHOLDER_PARTS_REASON, placeholderPartsFinding } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:44:    expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:53:    expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)).toEqual({ reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' });
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:55:    expect(placeholderPartsFinding('subs', nodesOf(theirs), edgesOf(theirs), OPTIONS)).toBeNull();
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:60:    expect(placeholderPartsFinding('churn', nodesOf(before), edgesOf(before), OPTIONS)?.reason, 'CONTROL').toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:65:    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toBeNull();
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:75:    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toEqual({ reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' });
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:77:    expect(placeholderPartsFinding('churn', nodesOf(his), edgesOf(his), OPTIONS)).toBeNull();
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:81:    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:88:    expect(placeholderPartsFinding('churn', nodesOf(g2), edgesOf(g2), [{ interventions: { retain: 1 } }])?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:33:import { placeholderMovedOptions, targetMovedOnlyThroughPlaceholderParts, sizedLinkTest } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:35:import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:54:    expect(sizedLinkTest(nodes)(edge)).toBe(true);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:208:    const checks = limitChecksForAgent(graph, { per_limit: [row], joint: { state: row.state } } as never)!;
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:219:    const check = limitChecksForAgent(graph, { per_limit: [row], joint: { state: 'unscored', reason: row.reason } } as never)!
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:341:    const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: row.state } } as never)!
+src/orchestrator/context/__tests__/olumi-guess-one-predicate.test.ts:4: * (`target-testability.ts`) and B6 (`placeholderPartsFinding`) read `olumiGuessedLink` over `asAnalysed`'s graph, so the
+src/orchestrator/context/__tests__/olumi-guess-one-predicate.test.ts:18:} from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:18:import { limitUnitsOf, placeholderMovedOptions, PLACEHOLDER_PARTS_REASON, OLUMI_GUESS_LIMIT_REASON } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:20:import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:31:const agentSays = (g: Rec) => limitChecksForAgent(g, { per_limit: [{ constraint_id: limitId(g), state: 'scored' }], joint: { state: 'scored' } } as never)!
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:54:  it('RED: the Agent\'s limit sentence (`limitChecksForAgent`) says the link is Olumi\'s ESTIMATE — never that Olumi hasn\'t sized it', () => {
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:7: * Olumi's guess: false certainty. The rule, in the ONE per-option limit predicate (`placeholderPartsFinding`, read by
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:20:} from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:22:import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:76:    const [row] = limitChecksForAgent(FIX.served.graph, FIX.served.analysis_limit_verdicts as never) ?? [];
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:98:    const [row] = limitChecksForAgent(olumiLevel(), { per_limit: [{ constraint_id: LIMIT, state: 'unscored', reason: OLUMI_GUESS_LIMIT_REASON }], joint: { state: 'unscored' } } as never) ?? [];
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:138:    const [row] = limitChecksForAgent(g, { per_limit: [{ constraint_id: LIMIT, state: 'scored' }], joint: { state: 'scored' } } as never) ?? [];
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:36:import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:362:  const checks = limitChecksForAgent(graph, { per_limit: result.constraint_verdict.per_limit, joint: result.constraint_verdict.joint }) ?? [];
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts:32:vi.mock('../../../agent-lane/goal-certainty.js', async (importOriginal) => {
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts:33:  const real = await importOriginal<typeof import('../../../agent-lane/goal-certainty.js')>();
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts:134:    const { goalCertaintyOfStoredResult } = await vi.importActual<typeof import('../../../agent-lane/goal-certainty.js')>(
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts:135:      '../../../agent-lane/goal-certainty.js',
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round5-fixture.test.ts:4:import { unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:18:import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:81:    expect(limitChecksForAgent(withChurnLevel('user'), rows)!.map((c) => c.say)).toEqual([
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:89:    expect(limitChecksForAgent(withChurnLevel('user_assumption'), rows)![0]!.say).toBe(`‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}`);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:98:    expect(limitChecksForAgent(adopted, rows)![0]!.say).toBe(`‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}${CHURN_B6}`);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:104:    expect(limitChecksForAgent(FX.graph, { per_limit: [{ constraint_id: 'unknown:limit', state: 'unscored' }], joint: { state: 'withheld' } })).toBeUndefined();
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:108:    for (const c of limitChecksForAgent(FX.graph, FX.limit_verdicts as never)!) expect(c.say).not.toMatch(/would let|give us|tell me|if you/i);
+src/orchestrator-v5/tools/handlers/__tests__/approved-band-sizes-a-placeholder.test.ts:25:import { placeholderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/tools/handlers/__tests__/approved-band-sizes-a-placeholder.test.ts:26:import { olumiSizedLink } from '../../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-figures-placeholder-path.test.ts:24:import { placeholderGoalPaths, placeholderGoalWarning } from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round4-path-licence.test.ts:4:import * as certainty from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round4-path-licence.test.ts:99:    const ls = readFileSync(new URL('../../../agent-lane/goal-certainty.ts', import.meta.url), 'utf8');
+src/orchestrator-v5/agent-lane/__tests__/link-effect-natural-sentences.test.ts:11:import { nodeUnitOf, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round6-fallback-tail.test.ts:3:import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round8-final-ruling.test.ts:21:import { unsizedLeaderGoalPaths, legacyLeaderGoalLinks, placeholderGoalWarning } from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round8-final-ruling.test.ts:267:  scan('src'); expect([...new Set(found)]).toEqual(['src/orchestrator-v5/agent-lane/goal-certainty.ts']);
+src/orchestrator-v5/tools/handlers/__tests__/mc-p0-round9-buddy.test.ts:9:import { unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/no-leader-sentence-reads-limit-rows.route.test.ts:70:    const { limitAskIdsOf } = await import('../limit-checks.js');
+src/orchestrator-v5/agent-lane/__tests__/goal-certainty-earned.test.ts:15:import { goalCertaintyDecisions, goalCertaintyOfStoredResult } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/goal-certainty-earned.test.ts:19:  readFileSync(new URL('../../__tests__/fixtures/served-strict-journey-5411da8-goal-certainty.json', import.meta.url), 'utf8'),
+src/orchestrator-v5/agent-lane/__tests__/link-size-ask.test.ts:13:import { sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/link-size-ask.test.ts:35:    const sized = sizedLinkTest(FX.graph.nodes);
+src/orchestrator-v5/agent-lane/__tests__/link-size-ask.test.ts:59:    expect(sizedLinkTest(sized.nodes)(sized.edges.find(isAngel)!)).toBe(true);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:17:    const { limitChecksForAgent } = await import('../limit-checks.js');
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:18:    const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:34:    vi.doMock('../../../orchestrator/context/placeholder-parts.js', async (orig) => ({
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:36:      placeholderPartsFinding: () => { throw new Error('boom'); },
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:38:    const { limitChecksForAgent } = await import('../limit-checks.js');
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:39:    const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:45:    vi.doUnmock('../../../orchestrator/context/placeholder-parts.js');
+src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts:99:import { readStoredGoalCertainty } from "../../orchestrator-v5/tools/handlers/run-goal-certainty.js";
+src/orchestrator-v5/agent-lane/__tests__/run2-unitless-factor-percent-ask.test.ts:3:import { placeholderAskWords, placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:3:import { sizedLinkTest, limitUnitsOf, userStatedLinkUnitsOf } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:5:import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:33:    const sized = sizedLinkTest(s.graph.nodes, limitUnitsOf(s.graph.goal_constraints), s.graph.edges);
+src/orchestrator-v5/agent-lane/__tests__/percent-change-unit-current-level.test.ts:22:import { placeholderAskWords } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/no-dead-end-product-reading.test.ts:17:import { unsizedLeaderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/run-result-says-unearned-certainty.test.ts:14:import { goalCertaintyOfStoredResult } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/run-result-says-unearned-certainty.test.ts:19:  readFileSync(new URL('../../__tests__/fixtures/served-strict-journey-5411da8-goal-certainty.json', import.meta.url), 'utf8'),
+src/orchestrator-v5/agent-lane/__tests__/change-goal-adopts-level-unit.test.ts:25:import { placeholderAskWords } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts:27:import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:14:import { PARTS_IDENTITY_UNMODELLED_REASON, placeholderPartsFinding, sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:87:    for (const o of options) expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, g.edges, [o])).toBeNull();
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:92:    expect(placeholderPartsFinding(DRAFT_TOTAL, nodes, g.edges, [optionsOf(g)[0]])).toMatchObject({ reason: PARTS_IDENTITY_UNMODELLED_REASON });
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:98:    expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, edges, [optionsOf(g)[0]])).toMatchObject({ reason: PARTS_IDENTITY_UNMODELLED_REASON });
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:121:    for (const o of optionsOf(g)) expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, g.edges, [o])).toBeNull();
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:122:    const sized = sizedLinkTest(g.nodes);
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:129:    const sized = sizedLinkTest(g.nodes);
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:131:    expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, edges, [optionsOf(g)[0]])).not.toBeNull();
+src/orchestrator-v5/agent-lane/__tests__/placeholder-first-ask.test.ts:9:import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/placeholder-first-ask.test.ts:12:import { placeholderAskWords } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:5: * The run result's `limit_checks` says HOW each limit was checked (`limit-checks.ts`). What the user could give so it is
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:17:import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:36:   * the churn row's ask is MG's level question word for word, then the link-size question (`limit-checks.ts`).
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:47:    const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:54:    const rows = limitChecksForAgent(FX.graph, scored)!;
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:70:    const rows = limitChecksForAgent(g, FX.limit_verdicts)!;
+src/orchestrator-v5/agent-lane/__tests__/construction-unsupported-mechanism.test.ts:16:import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-off-scale-is-not-a-level-ask.test.ts:9: * The rule (`limit-checks.ts`): an `unscored` row whose reason is a scale precondition (`OFF_SCALE_LIMIT_REASONS`)
+src/orchestrator-v5/agent-lane/__tests__/limit-off-scale-is-not-a-level-ask.test.ts:15:import { limitChecksForAgent, OFF_SCALE_LIMIT_REASONS } from '../limit-checks.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-off-scale-is-not-a-level-ask.test.ts:36:      const rows = limitChecksForAgent(FX.graph, withChurn('unscored', reason))!;
+src/orchestrator-v5/agent-lane/__tests__/limit-off-scale-is-not-a-level-ask.test.ts:50:    const churn = limitChecksForAgent(FX.graph, withChurn('unscored', 'no_score_returned'))!.find((r) => r.constraint_id === CHURN)!;
+src/orchestrator-v5/agent-lane/__tests__/limit-off-scale-is-not-a-level-ask.test.ts:56:    const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
+src/orchestrator-v5/agent-lane/__tests__/no-dead-end-mediator.test.ts:15:import { legacyLeaderGoalLinks, placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/no-dead-end-definitional-part.test.ts:18:import { unsizedLeaderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/construction-change-percent-unit.test.ts:17:import { placeholderAskWords } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/rt18-b-gate.test.ts:16:import { placeholderAskWords, placeholderGoalWarning } from '../goal-certainty.js';
+src/orchestrator-v5/system-events/__tests__/link-effect-size-by-chat.test.ts:12:import { nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/construction-rate-count-product.test.ts:14:import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/fixtures/relative-change-percent-checks.ts:16:import { placeholderAskWords } from '../../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/current-level-answer.route.test.ts:7:import { placeholderAskWords } from '../goal-certainty.js';
+src/orchestrator-v5/agent-lane/__tests__/goal-level-keeps-users-unit.test.ts:51:import { nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/coaching/__tests__/structural-challenge-compare.test.ts:20:import { goalCertaintyOfStoredResult } from '../../agent-lane/goal-certainty.js';

@@ -43,7 +43,7 @@ import type { GraphV3T, EdgeV3T, NodeV3T, OptionV3T } from "../schemas/cee-v3.js
  * canonical and instructs consumers to derive from it rather than re-declare it.
  * `DecisionStage` is a legacy V4 + DSK-bundle vocabulary that survives ONLY
  * behind a named edge: `mapStageToDecisionStage`
- * (`orchestrator-v5/handlers/edit-graph-dispatch.ts:754`) is the single
+ * (`dsk/stage-edge.ts`) is the single
  * translation point, and `stage-vocabulary-convergence.test.ts` pins that it
  * stays the only one and that no fourth vocabulary is minted.
  */

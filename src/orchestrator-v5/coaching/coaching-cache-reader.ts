@@ -31,7 +31,7 @@ import {
   isoInstantOrderKey,
   type ScenarioAnalysisFactSet,
 } from '../context/reconcile-scenario-analysis-facts.js';
-import { selectRunAnalysisFact } from '../context/freshness.js';
+import { orderRunAnalysisFacts, selectRunAnalysisFact } from '../context/freshness.js';
 import {
   EMPTY_COACHING_CACHE,
   isCoachingSignalId,
@@ -94,15 +94,15 @@ function extractSelectedDecisionReview(
 }
 
 /**
- * Walk facts newest-first for the most recent enrichment.coaching_signal_id.
- * Returns null for edit-handler turns (their fact shape has no enrichment).
- * Same correctness note as `extractLatestDecisionReview` — forward walk
- * over newest-first `priorFacts`.
+ * Newest usable signal metadata under the shared Run ordering. Signal state
+ * is independent of analysis quality, so keep partial/degraded Runs and do
+ * not apply the claim-bearing selector's refusal filter. The attested scenario
+ * source already excludes no-op rows. Sidecar merging still uses produced_at.
  */
 function extractLatestCoachingSignalFromFacts(
   facts: readonly HandlerFact[],
 ): LastCoachingSignal | null {
-  for (const fact of facts) {
+  for (const { fact } of orderRunAnalysisFacts(facts, { requireSuccessfulStatus: false })) {
     if (fact.fact_type !== 'run_analysis') continue;
     const enrichment = fact.result.enrichment;
     if (enrichment === undefined) continue;
@@ -112,7 +112,8 @@ function extractLatestCoachingSignalFromFacts(
     if (
       isCoachingSignalId(rawSignal) &&
       typeof rawTurn === 'string' &&
-      typeof rawAt === 'string'
+      typeof rawAt === 'string' &&
+      isoInstantOrderKey(rawAt) !== null
     ) {
       return { signal_id: rawSignal, turn_id: rawTurn, produced_at: rawAt };
     }

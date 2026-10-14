@@ -22,6 +22,7 @@
  * Every model call to anything but OpenAI throws; route-v2's LLM router throws if touched at all.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -83,7 +84,6 @@ const store = {
   readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
   invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
-  storeDraftGraph: vi.fn(async (sid: string, g: unknown) => { graphOf.set(sid, g); }),
   loadGraph: vi.fn(async (sid: string) => graphOf.get(sid) ?? null),
   loadGraphAndBriefText: vi.fn(async (sid: string) => ({ graph: graphOf.get(sid) ?? null, briefText: null })),
   hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
@@ -243,14 +243,16 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(openAiCalls, 'one model call').toBe(1);
     const tools = ((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name);
     expect(tools).not.toContain('get_canonical_state');
-    const given = JSON.stringify((bodies[0]!['input'] ?? []) as unknown[]);
+    // T1 (b): read the request as sent before the instructions moved into input[0] (`helpers/as-sent.ts`), so the
+    // instructions' own mention of the state item is never counted as one.
+    const given = JSON.stringify((asSent(bodies[0]!)['input'] ?? []) as unknown[]);
     expect(given).toMatch(/CURRENT MODEL STATE/);
     expect(given).toContain('fac_price');
     expect(t._agent.tool_calls).toEqual([]);
     // The next turn is given its OWN state; the earlier one is not carried in the history.
     script = [(body) => { bodies.push(body); return say('Still price.'); }];
     await turn({ message: 'And now?' });
-    expect((JSON.stringify(bodies[1]!['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
+    expect((JSON.stringify(asSent(bodies[1]!)['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
   }, 120_000);
 
   /**
@@ -367,23 +369,26 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const ttlOffered = (await heldOnLatestRow())[0]!.expires_at_turn_count;
     await turn({ message: 'What would that change?' });
     expect((await heldOnLatestRow()).map((p) => p.chip_id), 'the question turn\'s answer row carries the hold').toEqual([approve.id.slice('agent-approve-proposal:'.length)]);
-    // Canonical #1933 condition 2: carried by the product's own survival rule, so the turn count runs down.
-    expect((await heldOnLatestRow())[0]!.expires_at_turn_count, 'one carried turn spends one turn of the hold').toBe(ttlOffered - 1);
+    // ⭐ S-D (lane EDIT-PANEL, Paul 7 Oct; supersedes Canonical #1933 condition 2, which counted ROWS and dropped Paul's
+    // held risk unsaid, D-08): a held proposal stays held until approved or declined — a carried turn refreshes it.
+    expect((await heldOnLatestRow())[0]!.expires_at_turn_count, 'a carried turn never runs the hold down').toBeGreaterThanOrEqual(ttlOffered);
     const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t3._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
   }, 120_000);
 
-  it('[i] a typed "yes" — the Agent authorises the held proposal by its id and it applies', async () => {
+  it('[i] a typed approval card — the exact held proposal applies and the next turn sees current readiness', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeOptionC(54);
     const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
     expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
     let seenByModel = '';
-    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(body['input']); return say('Added.'); }];
-    const t2 = await turn({ message: 'Yes, add it.' });
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    script = [(body) => { seenByModel = JSON.stringify(asSent(body)['input']); return say('Added.'); }];
+    await turn({ message: 'Can the analysis run now?' });
     // (B) the Agent is told what the model needs NOW, from the stored graph after the write — in plain words.
-    expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness_after/);
+    expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness/);
     expect(seenByModel).toMatch(/\\"may_run\\":true/);
     expect(t2._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
@@ -428,15 +433,39 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text, 'nothing was written, so no readiness line').not.toMatch(/The analysis can/);
   }, 120_000);
 
-  it('[c2] the model moves after the offer → the next answer row does NOT carry the stale hold (it could only be refused)', async () => {
+  it('[c2] the model moves after the offer → the hold is re-checked against it: still sound → re-pinned and carried, and its card applies it on the moved model', async () => {
+    // ⭐ S-D (lane EDIT-PANEL, Paul 7 Oct; supersedes "the next answer row does NOT carry the stale hold"): a held proposal
+    // stays held until approved or declined. A moved model re-referees it (HOLD-WIPE's own rule) instead of dropping it
+    // unsaid — D-08 lost Paul's held risk exactly this way.
     graphOf.set(SCENARIO, seedGraph());
-    await proposeOptionC(54);
+    const approve = approveChipOf(await proposeOptionC(54))!;
     expect(await heldOnLatestRow()).toHaveLength(1);
     const g = graphNow();
     graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'opt_b' ? { ...x, interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } } : x)) });
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const movedHash = computeAnalysisAffectingGraphHash(graphNow() as never);
     script = [() => say('It would test the lower price before rollout.')];
-    await turn({ message: 'What would that change?' });
-    expect(await heldOnLatestRow(), 'a hold pinned to a model that has since moved is not carried forward').toEqual([]);
+    const t2 = await turn({ message: 'What would that change?' });
+    const held = (await heldOnLatestRow()) as unknown as { chip_id: string; preconditions: { graph_hash?: string } }[];
+    expect(held.map((p) => p.chip_id), 'still held').toEqual([approve.id.slice('agent-approve-proposal:'.length)]);
+    expect(held[0]!.preconditions.graph_hash, 're-pinned to the moved model').toBe(movedHash);
+    expect(approveChipOf(t2)?.id, 'its card is offered again').toBe(approve.id);
+    const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t3._agent.tool_calls[0], JSON.stringify(t3._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(newOption(), 'applied on the moved model').toBeDefined();
+  }, 120_000);
+
+  it('[c2b] the model moves so the hold no longer referees (its factor is gone) → it lapses, and the reply SAYS so', async () => {
+    graphOf.set(SCENARIO, seedGraph(2));
+    await proposeOptionC(54);
+    expect(await heldOnLatestRow()).toHaveLength(1);
+    const g = graphNow();
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.filter((x) => x.id !== 'fac_price').map((x) => (x.kind === 'option' ? { ...x, interventions: {} } : x)),
+      edges: g.edges.filter((e) => e.from !== 'fac_price' && e.to !== 'fac_price') });
+    script = [() => say('Noted.')];
+    const t2 = await turn({ message: 'What would that change?' });
+    expect(await heldOnLatestRow(), 'not carried').toEqual([]);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/The held change to add the option 'Test £54 at release' no longer fits the model as it now stands, so it has lapsed; say the word if you still want it\./);
   }, 120_000);
 
   it('[c3] another writer lands the SAME option id, linked from the decision, while the confirm is in flight → the product refuses the stale hold (200), the hold is retired, and the Agent does NOT claim it', async () => {
@@ -646,10 +675,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const bothSentences = (text: string, label: string) => {
     // Quote-agnostic first: the defect is the sentence being DROPPED.
-    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the decision and acting on "?${esc(label)}"?\\.`));
+    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the question and acting on "?${esc(label)}"?\\.`));
     expect(text, text).toMatch(new RegExp(`Its level for "?${esc(label)}"? is Olumi's estimate, for you to correct\\.`));
     // Then the exact sentences: each label quoted, as the user's data.
-    expect(text, text).toContain(`Added "Test £54 at release", linked from the decision and acting on "${label}".`);
+    expect(text, text).toContain(`Added "Test £54 at release", linked from the question and acting on "${label}".`);
     expect(text, text).toContain(`Its level for "${label}" is Olumi's estimate, for you to correct.`);
   };
   for (const label of ['Size of the user base', 'cost_per_hire']) {
@@ -1656,7 +1685,9 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const GF = 'Existing Pro customers grandfathered';
   const GF_FAC = 'fac_existing_pro_customers_grandfathered';
   /** Today's £49, exactly as admission frames a baseline the brief states (`framedObservedState`): raw kept, on 0–100. */
-  const STATED_49 = { value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' };
+  // The typed door verified £49 against Paul's words, so it writes the attestation beside the stamp (`explicit`, DL 12 Oct).
+  const STATED_49 = { value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction',
+    extractionType: 'explicit' };
   /**
    * Journey A's add, as served: the option acts on a NEW graded price (Olumi's £59 for the option — left for its own
    * level write, as today) and a NEW switch. `today` is what the Agent gives for the price, if anything.

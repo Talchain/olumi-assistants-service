@@ -204,9 +204,32 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_direction',
   'goal_sense_reading',
   'goal_level_reading',
+  // Recovery Batch C: Olumi's validated reading of the target's semantics; written only by construction (`goal-target-basis.ts`)
+  // and the approved answer to its open question (`goal-reading-write.ts`, which removes that one member).
+  'goal_target_basis',
+  'goal_scope',
   'goal_horizon_months',
+  // The S4 deadline door and the one-off door are the only writers of these pipeline-owned fields.
+  'goal_horizon_reference_date',
+  'goal_horizon_stated_months',
+  'goal_stock_reading',
+  // §(ad): the user unlock is parked; no producer may forge a horizon attestation.
+  'horizon_basis',
+  'horizon_basis_source',
+  'horizon_basis_months',
   // The deadline in the brief's own words (PJ-E-A2 part 2): the same G1 class, written only by construction.
   'goal_deadline_as_stated',
+  // ⛔ An option's LIFECYCLE AUTHORITY (F1 T6; CODEX overflow #2467 5935234950 P1-1). `proposed_by` is written only by
+  // construction (`olumi-option-marker.ts`, after admission), `analysis_participation` only by the adoption door and the
+  // option-status writer, `option_status` only by the option-status writer. A producer that could add a node carrying
+  // them would forge the adoption inference (`isUnadoptedOlumiSuggestion`): an option "Olumi suggested and the user took
+  // out", which "put it back" would then include. Stripped from an AI add (`stripPipelineOwnedFromAddOperations`) and
+  // refused anywhere else on the add path, like every other name here.
+  'proposed_by',
+  'option_status',
+  'analysis_participation',
+  // RC3: only a server-validated widen press may leave an option precondition out of the Run.
+  'relies_on',
 ];
 
 /**
@@ -241,6 +264,9 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
  * `threshold-source-j2.test.ts`.
  */
 export const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
+  // event_risk.v1 slice 2a: only CEE's validated hold stamp may author this block; and the approved card of Olumi's range for
+  // a risk root (`risk-occurrence.ts`, through the atomic level door), never a producer.
+  'event_risk',
   ...CEE_ANALYSIS_OWNED_ROOTS,
   ...provenanceOwnedSegments(),
 ]);
@@ -335,7 +361,7 @@ function ownKeysLower(value: unknown): string[] {
  * unchanged.
  */
 export const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
-  ...Object.keys(InterventionV3.shape).map((k) => k.toLowerCase()),
+  ...Object.keys(InterventionV3.shape).filter((k) => k !== 'range').map((k) => k.toLowerCase()),
   'cap',
 ]);
 
@@ -375,6 +401,8 @@ export const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
  */
 const InterventionSpecScreen = z
   .object(InterventionV3.shape)
+  // A valid shape is not consent. Only the dedicated server-bound approval writes a range.
+  .omit({ range: true })
   .partial()
   .extend({ cap: z.unknown().optional() })
   .strict();
@@ -403,6 +431,51 @@ const InterventionSpecScreen = z
  * from the schema's own `.shape`, never mirrored.
  */
 type PayloadContext = 'outside' | 'factor_map' | 'spec';
+
+/** Generic writers never supply range consent, including when the referee is off or shadowing. */
+export function hasInterventionRangeWrite(operations: readonly { readonly value?: unknown }[]): boolean {
+  const contains = (value: unknown, path: readonly string[]): boolean => {
+    const i = path.indexOf('interventions');
+    if (i !== -1 && path[i + 2] === 'range') return true;
+    // A spec's other members (including arbitrary category labels) are data, not range writes.
+    if (i !== -1 && path.length > i + 2) return false;
+    if (Array.isArray(value)) return value.some(v => contains(v, path));
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) =>
+      contains(child, [...path, ...key.toLowerCase().split(/[./]/).filter(Boolean)]));
+  };
+  return operations.some(op => contains(op.value, []));
+}
+
+/**
+ * RC3: generic node mutations cannot author, rebind or clear the server's
+ * precondition stamp, irrespective of referee mode. Check the actual applied
+ * payload and every pointer/key spelling, including whole-object merges.
+ * An interventions factor id or category label is data, not a stamp field.
+ */
+export function hasReliesOnRiskWrite(operations: readonly {
+  readonly op: string;
+  readonly path?: string;
+  readonly field?: string;
+  readonly value?: unknown;
+}[]): boolean {
+  const segments = (key: string): string[] => key.toLowerCase().split(/[./]/).filter(Boolean);
+  const contains = (value: unknown, path: readonly string[]): boolean => {
+    const intervention = path.indexOf('interventions');
+    if (path.some((segment, i) => segment === 'relies_on' && (intervention === -1 || i !== intervention + 1))) return true;
+    // Below an intervention member the keys may be arbitrary category labels.
+    if (intervention !== -1 && path.length > intervention + 2) return false;
+    if (Array.isArray(value)) return value.some(child => contains(child, path));
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) => contains(child, [...path, ...segments(key)]));
+  };
+  return operations.some(op => {
+    if (op.op !== 'add_node' && op.op !== 'update_node') return false;
+    const pointerField = op.path?.startsWith('/nodes/') ? segments(op.path).slice(2) : [];
+    return contains(undefined, op.field === undefined ? pointerField : segments(op.field))
+      || contains(op.value, []);
+  });
+}
 
 /**
  * The key whose VALUE is the factor map — the one boundary where the screen

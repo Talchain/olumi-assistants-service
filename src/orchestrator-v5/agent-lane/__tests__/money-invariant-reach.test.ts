@@ -36,8 +36,11 @@ const widened = JSON.parse(readFileSync(new URL('widened.json', d), 'utf8'));
 const BRIEF_AGREES = 'We charge £49 a month for the Pro plan, keeping monthly churn under 4%.';
 const BRIEF_DISAGREES = 'We charge £79 a month for the Pro plan, keeping monthly churn under 4%.';
 
-const valuedNodes = () =>
-  admitCandidateModel(faithful, widened).nodes.filter((n) => n.observed_state !== undefined);
+const valuedNodes = () => {
+  const candidate = structuredClone(faithful);
+  candidate.factors[0]!.baseline_evidence = { quote: 'Our Pro price is £49.' };
+  return admitCandidateModel(candidate, widened, 'Our Pro price is £49.').nodes.filter((n) => n.observed_state !== undefined);
+};
 
 const run = (nodes: unknown[], briefText: string) =>
   detectUnreconciledStatedMagnitudes({ nodes: nodes as never, options: [], briefText });

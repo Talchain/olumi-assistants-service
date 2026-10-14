@@ -12,6 +12,7 @@ import {
   emitContextTruncation,
   type ContextTruncationRecord,
 } from "../../orchestrator-v5/context/context-budget-telemetry.js";
+import { endsOfGraph, heldLinkOf } from "../../orchestrator-v5/goal-target/held-user-links.js";
 
 // ============================================================================
 // Robustness Band Mapping
@@ -36,6 +37,7 @@ function mapRobustnessBandV2(raw: string | null): string | null {
  * Preserves: node IDs, labels, kinds. Edges as from→to with strength.
  */
 export function compactGraph(graph: GraphV3T): GraphV3Compact {
+  const endsOf = endsOfGraph(graph);
   const nodes: CompactNode[] = graph.nodes.map((node) => ({
     id: node.id,
     label: node.label ?? node.id,
@@ -46,7 +48,9 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
     from: edge.from,
     to: edge.to,
     strength_mean: edge.strength?.mean ?? 0,
-    exists_probability: edge.exists_probability ?? 1,
+    // Hold-at-1.0 (d5 #87 6008807178): the existence the Run USES. The EDIT view below keeps the stored value on purpose:
+    // a patch the model writes from it must never persist the Run-time hold.
+    exists_probability: heldLinkOf(edge, endsOf(edge)) !== null ? 1 : edge.exists_probability ?? 1,
   }));
 
   return { nodes, edges };

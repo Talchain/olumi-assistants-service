@@ -15,7 +15,7 @@ export const READY_GRAPH = {
   nodes: [
     { id: 'dec_x', kind: 'decision', label: 'Choose an option' },
     { id: 'goal_x', kind: 'goal', label: 'Outcome', goal_threshold: 0.8 },
-    { id: 'fac_delivery', kind: 'factor', label: 'Delivery reliability' },
+    { id: 'fac_delivery', kind: 'factor', label: 'Delivery reliability', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     { id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_delivery: 1 } },
     { id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_delivery: 0 } },
   ],

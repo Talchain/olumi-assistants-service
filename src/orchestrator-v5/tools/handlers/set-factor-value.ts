@@ -28,7 +28,7 @@
 import { z } from 'zod';
 
 import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator';
-import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
@@ -59,7 +59,7 @@ import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 // than restated so the two cannot answer "is this factor's recorded scale
 // usable?" differently — see the derivation beside its call site below.
 import { findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
-import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
+import { preserveSiblingQuantities } from '../../agent-lane/level-batch-frame.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
 import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
@@ -867,6 +867,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       // `delete`, for the reason given for `elicited_from` above. The NODE-LEVEL
       // spelling is withdrawn below, beside `provenance`.
       delete (merged as { extractionType?: unknown }).extractionType;
+      // #2848: `frame_source: 'olumi_convention'` says OLUMI chose this cap. A write that changes the cap makes it
+      // someone else's, so the marker (and the factor-detail disclosure it drives) goes with the old cap.
+      if (after.cap !== undefined && after.cap !== priorObserved.cap) {
+        delete (merged as { frame_source?: unknown }).frame_source;
+      }
       /**
        * ⛔⛔ AND THE FALSIFIED SCALE DECLARATION — see the long note above the merge.
        *
@@ -941,19 +946,6 @@ export function createSetFactorValueHandler(): HandlerFn {
       // the node-level spelling to decide. See the block above.
       delete (node as { extractionType?: unknown }).extractionType;
 
-      // 1.16 item A2 — preserve option-intervention absolutes across the
-      // cap change. Runs inside the mutation clone so the rewritten
-      // option NODES flow through the same nodes-stamping persistence
-      // merges as the factor mutation itself.
-      if (capChanged) {
-        rescaledInterventionCount = renormaliseOptionInterventionsForCapChange(
-          clone,
-          targetId,
-          before.cap,
-          after.cap,
-        );
-      }
-
       // ⭐ A LEVEL THAT ARRIVES AFTER CONSTRUCTION SIZES OLUMI'S OWN LINKS ON IT (C, DL #70 5849216942). Admission sized
       // them once, when this factor held no level, so they kept the ±0.5 default. Served (`f-20260926T190952Z`): churn
       // got 5% from the approved starting point, both links stayed ±0.5, and every option was withheld as out of
@@ -968,6 +960,15 @@ export function createSetFactorValueHandler(): HandlerFn {
 
       return { before, after };
     });
+
+    const preserved = preserveSiblingQuantities(rawGraph, result.mutatedGraph, []);
+    if (preserved.kind === 'refused') {
+      throw new D1HandlerError('GRAPH_INVARIANT_VIOLATED', preserved.reason, {
+        details: { reason: preserved.reason }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+    Object.assign(result.mutatedGraph, preserved.graph);
+    rescaledInterventionCount = preserved.reencoded.length;
 
     // ⚠ COMPARED ON THE FOLDED KEY, NOT STRICTLY. `noop` is a THIRD reader of the
     // "are these the same unit?" question that `unitComparisonKey` owns; leaving it
@@ -1133,6 +1134,84 @@ export function createSetFactorValueHandler(): HandlerFn {
       mutated_graph: result.mutatedGraph,
     };
     });
+  };
+}
+
+/**
+ * ⭐⭐ SD-1 (domain 2, github-07; DL 0df0e1 6 Oct; Codex buddy on DGAI #2543): THE SINGLE WRITER'S REVIEW ACT — a
+ * `factor_value_edit` `confirm_current` its caller has matched against the PERSISTED figure
+ * (`system-events/factor-value-edit.ts` `confirmMatchesPersisted`).
+ *
+ * Nothing is resolved and no figure is written: `observed_state` keeps every byte and gains
+ * `reviewed_by_user = { intent: 'confirm', at }` — exactly the write `reviewOnly` makes above. It exists because
+ * `reviewOnly` is reached only when a SET's resolution reproduces the stored figure with STRICT equality, so a confirm
+ * on a value-only factor (the set adds `raw_value`), a capped float drift (.3/3 → .0999…) or an equal-pair percent
+ * (3.2 / 3.2 / % resolved to .032) fell through to a SET (`user_override`) or was refused. A confirm is never a set.
+ *
+ * The user's own figure (`user_override`) and an approved adoption keep their bytes and gain nothing — `reviewOnly`'s
+ * rule, for its reason (a review on them would forge the adoption marker). The receipt is the review path's own:
+ * `noop`, "already set to …", no staleness sentence.
+ *
+ * Hash and version: `reviewed_by_user` is EXCLUDED from the analysis-affecting hash (`context/graph-hash.ts:115`), so
+ * the Run stays current. It is persisted, and `graph_identity_hash` is an exclude-list projection ("a newly persisted
+ * field is identity-relevant by construction", `context/graph-identity.ts` header), so identity moves and the write
+ * is versioned like any other committed turn.
+ */
+export function recordFactorReview(
+  rawGraph: unknown,
+  targetId: string,
+  at: string,
+): {
+  readonly assistant_text: string;
+  readonly handler_facts: HandlerFact[];
+  readonly llm_calls_used: 0;
+  readonly mutated_graph: unknown;
+} {
+  let label = '';
+  const result = applyAndValidateMutation(rawGraph, (clone) => {
+    const node = clone.nodes.find((n) => n.id === targetId);
+    if (!node || node.observed_state === undefined) {
+      throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${targetId} has no figure to review.`, {
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+    const before = snapshotObservedState(node);
+    const reviewedSource = (node.observed_state as { source?: unknown }).source;
+    if (reviewedSource !== USER_EDIT_SOURCE && reviewedSource !== APPROVED_ADOPTION_SOURCE) {
+      node.observed_state = {
+        ...(node.observed_state as NonNullable<typeof node.observed_state>),
+        reviewed_by_user: { intent: 'confirm', at },
+      } as typeof node.observed_state;
+    }
+    label = node.label;
+    return { before, after: before };
+  });
+  const fact: SetFactorValueHandlerFact = {
+    fact_type: 'set_factor_value',
+    fact_version: 1,
+    noop: true,
+    result: {
+      target_id: targetId,
+      status: 'noop',
+      before: result.before as Record<string, unknown>,
+      after: result.before as Record<string, unknown>,
+    },
+  };
+  const factCheck = SetFactorValueHandlerFactSchema.safeParse(fact);
+  if (!factCheck.success) {
+    throw new HandlerResultInvalidError('SetFactorValueHandlerFact failed schema validation', factCheck.error);
+  }
+  const shown = resolveExistingRawValue(result.before);
+  const after = shown.kind === 'resolved'
+    ? (result.before.unit !== undefined ? { raw_value: shown.raw, unit: result.before.unit } : { raw_value: shown.raw })
+    : null;
+  return {
+    assistant_text: after === null
+      ? `${label} is unchanged.`
+      : formatFactorValueUnchanged({ label, after }),
+    handler_facts: [factCheck.data],
+    llm_calls_used: 0,
+    mutated_graph: result.mutatedGraph,
   };
 }
 

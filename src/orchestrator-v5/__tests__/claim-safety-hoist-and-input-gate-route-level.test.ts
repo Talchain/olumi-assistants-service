@@ -320,7 +320,6 @@ vi.mock('../session/index.js', () => ({
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     invalidateScoped: async () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
@@ -1099,6 +1098,7 @@ describe('G-CEE-1 — the PERSISTED analysis summary in the MODEL INPUT (P6 deci
     // The live leaking substring, and the whole sentence it came from.
     expect(bytes).not.toContain('17 percentage points');
     expect(bytes).not.toContain('currently leads');
+    expect(bytes).not.toContain('scored highest');
     expect(bytes).not.toContain(HISTORIC_LEADER_SUMMARY);
 
     // And the DESIGNATION beside it. `Chose "<leader label>"` is the analysis's

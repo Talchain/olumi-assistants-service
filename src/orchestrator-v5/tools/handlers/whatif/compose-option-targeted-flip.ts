@@ -219,7 +219,7 @@ function composeAddressedText(
  */
 function composeAlreadyLeadingText(target: TargetOption): string {
   return (
-    `${target.label} is already the leading option on this analysis, so no single-factor change is ` +
+    `${target.label} is already the most-supported option in this model, so no single-factor change is ` +
     'needed to put it there. Would you like to see what could change that instead?'
   );
 }

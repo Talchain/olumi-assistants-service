@@ -658,12 +658,12 @@ export const NEAR_ZERO_WIN_PROBABILITY_THRESHOLD = 0.005;
  * display projection stays number-free outside the percent strings.
  */
 export const NEAR_ZERO_WIN_PROBABILITY_NOTE =
-  'near-zero win probability: this option almost never came out best across the sampled ' +
-  'simulation runs — at least one alternative scored better in almost every sampled run. ' +
-  'That can mean it is consistently outperformed (for example reliably mid-ranked, so ' +
-  'rarely the single best) rather than broken; a near-zero win probability is a real ' +
-  'result, not an error. Do not invent a specific reason it lost — the analysis only ' +
-  'establishes that other options scored better on the sampled runs.';
+  'near-zero win probability: in this model, almost no sampled simulation runs supported ' +
+  'this option — in almost every sampled run another option did better on the goal. ' +
+  'That can mean other options are consistently stronger on the goal (for example it is ' +
+  'reliably mid-ranked, so rarely the one a run supports) rather than broken; a near-zero ' +
+  'win probability is a real result, not an error. Do not invent a specific reason for ' +
+  'it — the analysis only establishes that runs supported other options.';
 
 /**
  * ROADMAP 2.54 (a) — true when the raw probability is valid and renders as
@@ -945,15 +945,15 @@ const GOAL_FIT_BASIS_PHRASES: Readonly<Record<string, string>> = {
  * Lane 30 — the definition sentence rendered ONCE (never per option) when
  * per-option `target_fit` values are present. It binds the two percent
  * vocabularies apart so the LLM cannot conflate them: `win_probability`
- * = "wins most often" (beats the alternatives), `target_fit` = "meets your
+ * = "how often runs supported it" (over the alternatives), `target_fit` = "meets your
  * target" (the modelled probability of goal attainment). The live defect
  * (scenario 90385279) was exactly this conflation — an 89% win probability
  * narrated as target attainment when the scored target-fit was 29.3%.
  */
 export const TARGET_FIT_DEFINITION =
   'each option\'s target_fit is the modelled probability it meets your target; ' +
-  'win_probability only says how often the option beats the alternatives — ' +
-  'an option can win most often yet still be unlikely to meet the target';
+  'win_probability only says how often runs supported the option over the alternatives — ' +
+  'an option can be supported by the most runs yet still be unlikely to meet the target';
 
 /**
  * Lane 30 — the DISCLOSED-absence line. Rendered whenever an analysis is

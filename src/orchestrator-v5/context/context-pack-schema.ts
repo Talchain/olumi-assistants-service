@@ -763,7 +763,7 @@ export const ContextPackRunDeltaSchema = z
  * schema above and this type ever disagree about the shape, the assignment
  * stops compiling instead of drifting quietly.
  */
-export type ContextPackRunDelta = Omit<RunDelta, 'flip_thresholds' | 'endpoints' | 'input_coverage' | 'input_changes'>;
+export type ContextPackRunDelta = Omit<RunDelta, 'flip_thresholds' | 'endpoints' | 'input_coverage' | 'input_changes' | 'win_probabilities_unavailable' | 'goal_chances'>;
 
 export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
   z
@@ -771,6 +771,8 @@ export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
       status: z.literal('set'),
       value: z.number(),
       unit: z.string().optional(),
+      /** RT-10 B′ R3: the held comparator ("at most 400" = `<=`); absent where none is held. */
+      operator: z.enum(['<=', '<', '>=', '>']).optional(),
     })
     .strict(),
   z.object({ status: z.literal('unset') }).strict(),

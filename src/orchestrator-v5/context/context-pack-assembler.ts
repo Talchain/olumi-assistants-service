@@ -39,6 +39,8 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
+import { projectModelFacingRunDelta } from './model-facing-run-delta.js';
+import { isGoalSnapshotStaleReason } from './freshness.js';
 import { eligibleInvestigationPriority, type InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
@@ -125,6 +127,7 @@ import {
   type AnalysisStateSummary,
   type CanonicalAnalysisState,
   type CoachingStatePack,
+  type SelectCanonicalAnalysisStateInput,
 } from './canonical-analysis-state.js';
 
 // Recent turns cap for the conversation projection — the verbatim memory window.
@@ -863,6 +866,11 @@ export interface AssembleContextPackInput {
    * mirrors `prior_facts_read_ok` rather than inventing a second vocabulary.
    */
   readonly priorFactsReadOk?: boolean;
+  /** Existing durable invalidation marker from the same context read. */
+  readonly analysisInvalidatedAt?: string | null;
+  readonly currentScenarioRevision?: number;
+  readonly priorFactsWithTurn?: SelectCanonicalAnalysisStateInput['priorFactsWithTurn'];
+  readonly legacyEditFacts?: SelectCanonicalAnalysisStateInput['legacyEditFacts'];
   /**
    * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
    * scenario, threaded by the turn-executor from
@@ -1696,6 +1704,10 @@ function deriveContextPackAnalysisState(
     priorFacts: input.priorFacts,
     currentGraphHash,
     currentGraph: rawGraph,
+    currentScenarioRevision: input.currentScenarioRevision,
+    analysisInvalidatedAt: input.analysisInvalidatedAt,
+    priorFactsWithTurn: input.priorFactsWithTurn,
+    legacyEditFacts: input.legacyEditFacts,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // diagnostic / coaching-pack canonical state consistent with the wire
     // verdict. Same raw graph the hash is derived from. undefined when off.
@@ -1849,8 +1861,7 @@ export function assembleContextPackWithSummary(
   // AND-gates that against each run's own persisted verdict, so this can only
   // ever withhold a leader id, never promote one.
   const runDeltaBuild =
-    input.priorFacts === undefined || analysisStateSummary?.freshness_reason === 'goal_unit_changed'
-      || analysisStateSummary?.freshness_reason === 'goal_snapshot_unverified'
+    input.priorFacts === undefined || isGoalSnapshotStaleReason(analysisStateSummary?.freshness_reason)
       ? null
       : buildRunDelta({
           priorFacts: input.priorFacts,
@@ -1862,13 +1873,8 @@ export function assembleContextPackWithSummary(
   const runDeltaForPack: ContextPackRunDelta | null = (() => {
     if (runDeltaBuild === null || runDeltaBuild.kind !== 'ok') return null;
     // SC-24's pair members stay OFF the prompt too (see `ContextPackRunDeltaSchema`): an input row has no author.
-    const {
-      flip_thresholds: _flipThresholdsNotComputed,
-      endpoints: _endpoints, input_coverage: _inputCoverage, input_changes: _inputChanges,
-      ...rest
-    } = runDeltaBuild.delta;
-    void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges;
-    return rest;
+    // 0.70.0: the typed reason for empty win shares stays off the prompt too (RC's bound UI sentence; parity guard).
+    return projectModelFacingRunDelta(runDeltaBuild.delta);
   })();
   // Plain/direct arrays predate the durable carrier. They may still provide a
   // useful bounded projection, but cannot establish that scenario history is

@@ -12,7 +12,9 @@
  *         driver" clause built from them;
  *   (ii)  `decision_sensitivity` is added, read ONLY from `factor_evppi` by CEE's own reader
  *         (`selectFactorEvppiPriority`): a factor above resolution → `measured`; every row below resolution →
- *         `none_measurable` with the one true sentence; anything else → `not_measured` (no claim);
+ *         `none_measurable` with NO sentence (RC 5950124321: EVPPI is flat in additive models and never varies links, so
+ *         "no single assumption changes which option leads" read as nothing would; it makes no claim); anything else →
+ *         `not_measured` (no claim);
  *   (iii) a factor no compared option acts on is therefore never ranked: nothing structural is left to rank;
  *   (iv)  LIMITS ARE NOT THE GOAL: every option row it keeps, in every carrier, has PLoT's limits-only joint
  *         `probability_of_joint_goal` renamed `all_limits_hold_probability` (with `limits_note`), and the brief's
@@ -24,9 +26,16 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
-import { runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
-
-export const NO_SINGLE_ASSUMPTION = 'No single assumption measurably changes which option leads.';
+import { goalChanceDriverAvailabilityForAgent, goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
+import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
+import { robustnessComputed } from './goal-chance-driver-egress.js';
+import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
+import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import {
+  GOAL_CHANCE_COMPANION_KEYS, GOAL_CHANCE_DRIVER_RECORD_KEYS, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES,
+  runWithheldGoalFigures,
+} from '../../orchestrator/context/option-result-source.js';
 
 /**
  * WHOSE RANGE (AIQ ruling #72 5867782904, words ACK 5870069785; Core Stabilisation Plan §7). ISL echoes each
@@ -37,7 +46,7 @@ export const NO_SINGLE_ASSUMPTION = 'No single assumption measurably changes whi
 export type RangeSource = 'olumi_assumed' | 'yours';
 const RANGE_OF: Readonly<Record<string, RangeSource>> = { template: 'olumi_assumed', user: 'yours' };
 export const olumiAssumedRangeSay = (label: string): string =>
-  `Within the range Olumi assumed for ${label}, ${label} could change which option leads. Do you know ${label} more precisely?`;
+  `Within the range Olumi assumed for ${label}, ${label} could change how the options compare. Do you know ${label} more precisely?`;
 
 export type DecisionSensitivity =
   | {
@@ -45,7 +54,7 @@ export type DecisionSensitivity =
     readonly most_sensitive: { readonly factor_id: string; readonly label: string; readonly range?: RangeSource };
     readonly say?: string;
   }
-  | { readonly status: 'none_measurable'; readonly say: typeof NO_SINGLE_ASSUMPTION }
+  | { readonly status: 'none_measurable' }
   | { readonly status: 'not_measured' };
 
 const recordOf = (x: unknown): Record<string, unknown> | undefined =>
@@ -78,24 +87,114 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
       ...(range === 'olumi_assumed' ? { say: olumiAssumedRangeSay(label) } : {}),
     };
   }
-  if (d.reason === 'all_below_resolution') return { status: 'none_measurable', say: NO_SINGLE_ASSUMPTION };
+  if (d.reason === 'all_below_resolution') return { status: 'none_measurable' };
   return { status: 'not_measured' };
 }
 
+/**
+ * The first usable crossing in producer order, read by the existing parser and display predicate.
+ * Values are already in display units: preserve their supplied precision, never calculate or round a replacement.
+ * This factor fact names no option and has no EVPPI dependency. Its enclosing selected analysis result carries the
+ * existing computed_against_hash / Run identity; callers consume canonical currentness, never infer it from this fact.
+ * No rows are not_evaluated, all attested no-flip rows are no_flip_in_range, and unusable/unsafe rows are unresolved.
+ * These are local projection outcomes, not a new shared status-transport contract.
+ */
+export type TippingPoint =
+  | {
+    readonly status: 'found';
+    readonly factor_id: string;
+    readonly label: string;
+    readonly direction: 'increase' | 'decrease';
+    readonly unit: string | null;
+    readonly current_value: number;
+    readonly threshold: number;
+    readonly current_display: string;
+    readonly threshold_display: string;
+    readonly say: string;
+  }
+  | { readonly status: 'no_flip_in_range' }
+  | { readonly status: 'unresolved' }
+  | { readonly status: 'not_evaluated' };
+
+const inUnit = (value: number, unit: string | null): string => {
+  const n = String(value);
+  if (unit === null || unit.trim() === '') return n;
+  const suffix = unit.trim();
+  // Compact the one-character percent suffix only; the shared display predicate already licensed the values.
+  return classifyUnitScaleClass(suffix) === 'percent' && suffix.length === 1 ? `${n}${suffix}` : `${n} ${suffix}`;
+};
+
+export function tippingPointOf(enrichment: unknown): TippingPoint {
+  const e = recordOf(enrichment);
+  if (e === undefined) return { status: 'not_evaluated' };
+  const rows = readTopLevelFlipRows(e);
+  if (rows.length === 0) return { status: 'not_evaluated' };
+  const first = rows.find((r) => r.kind === 'flip_pair' && r.current_value !== null && r.flip_value !== null
+    && flipRowScaleIsDisplaySafe({ value_scale: r.value_scale }, r.current_value, r.flip_value));
+  if (first === undefined) {
+    return rows.every((r) => r.kind === 'attested_no_flip') ? { status: 'no_flip_in_range' } : { status: 'unresolved' };
+  }
+  const current = inUnit(first.current_value!, first.unit);
+  const threshold = inUnit(first.flip_value!, first.unit);
+  return {
+    status: 'found',
+    factor_id: first.factor_id,
+    label: first.factor_label,
+    direction: first.direction!,
+    unit: first.unit,
+    current_value: first.current_value!,
+    threshold: first.flip_value!,
+    current_display: current,
+    threshold_display: threshold,
+    say: `${first.factor_label} is a factor that could change this: the comparison could change if it ${first.direction === 'increase' ? 'rises above' : 'falls below'} ${threshold}.`,
+  };
+}
+
+/**
+ * ⭐ S2i (DL GO, Wave B2–B7): NO ABSENCE TO SAY BESIDE A SCREEN THAT SHOWS ONE. Every served Run of Waves B1–B7 and W3 (14)
+ * handed the Agent `decision_sensitivity: not_measured | none_measurable` and `tipping_point: not_evaluated` beside a
+ * screen naming each option's driver (a licensed driver, or a range's "depends most on") or a robustness check that ran,
+ * and each wave served a new wording of "nothing established which assumption matters most / sensitivity was not
+ * measured". The instruction to make no claim (RC 5950124321) did not hold, and the egress removes only the forms it
+ * knows. So on such a screen neither status is handed: `decision_sensitivity` unless `measured` (with the raw
+ * `factor_evppi` rows it is read from), and `tipping_point` when `not_evaluated`. A `measured` sensitivity and every
+ * tipping-point FINDING (`no_flip_in_range`, `unresolved`, a threshold) still are. `goal_chance_driver_availability` is
+ * not gated: it covers only the options with a point chance, so beside another option's range it is still true.
+ * `screenGraph` names the screen's labels for callers that do not pass `graph` (Explain, saved-run facts): it decides
+ * this gate only, never which facts are shown.
+ */
+function screenShowsSensitivity(block: Record<string, unknown>, graph: unknown, current: boolean): boolean {
+  const facts = goalChanceFactsForAgent(block, graph, current);
+  return Object.keys(facts.goal_chance_driver_display ?? {}).length > 0
+    || Object.keys(facts.goal_chance_range_display ?? {}).length > 0
+    || robustnessComputed(block);
+}
+
 /** The run's `analysis_result` block as the Agent reads it: (i)–(iii) above. Never mutates its input. */
-export function analysisResultForAgent(result: unknown): unknown {
+export function analysisResultForAgent(result: unknown, graph?: unknown, current = true, screenGraph?: unknown): unknown {
   const block = recordOf(result);
   if (block === undefined) return result;
   const enrichment = recordOf(block.enrichment);
+  const goalFacts = goalChanceFactsForAgent(block, graph, current);
+  const displays = goalFacts.goal_chance_display ?? {};
+  // A Run with no GOAL_CHANCE_LICENSED record (served before #2625) keeps the run-wide rule it was built under.
+  const legacyRun = !runHasGoalChanceLicenceRecord(block);
   const out: Record<string, unknown> = { ...block };
   if (typeof block.summary === 'string') out.summary = withoutStrongestDriverClause(block.summary);
+  // S2l (Codex r1 P1): "beside a range" is the range the Agent is SHOWN, by the predicate the withheld reader uses for its
+  // range opening (a validated record with a resolved line for an option it does not bar); a malformed record shows nothing.
+  const rangeShown = Object.keys(goalChanceFactsForAgent(block, graph ?? screenGraph, true).goal_chance_range_display ?? {}).length > 0;
+  if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings, rangeShown);
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
+    const outcomeHidden = keptOutcomeOptionIds(enrichment);
+    // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 reaches the Agent as displayed.
+    const shown = nearestFiveGoalChancesForAgent(block);
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, withheld);
+      const projected = optionRowsForAgent(value, outcomeHidden, shown, displays, legacyRun ? withheld : undefined);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -130,10 +229,31 @@ export function analysisResultForAgent(result: unknown): unknown {
       }
       rest.results = results;
     }
+    if ('inference_warnings' in rest) rest.inference_warnings = warningsForAgent(rest.inference_warnings, rangeShown);
     out.enrichment = rest;
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
-  out.decision_sensitivity = decisionSensitivityOf(enrichment);
+  const shown = screenShowsSensitivity(block, graph ?? screenGraph, current);
+  const sensitivity = decisionSensitivityOf(enrichment);
+  const projected = recordOf(out.enrichment);
+  if (!shown || sensitivity.status === 'measured') out.decision_sensitivity = sensitivity;
+  else if (projected !== undefined && 'factor_evppi' in projected) {
+    const { factor_evppi: _absenceSource, ...withoutEvppi } = projected;
+    out.enrichment = withoutEvppi;
+  }
+  // CEE-owned facts stay outside enrichment's producer-prose filter. The licence, not EVPPI, owns this claim scope.
+  Object.assign(out, goalFacts);
+  if (goalFacts.goal_chance_display !== undefined) {
+    const availability = goalChanceDriverAvailabilityForAgent(block);
+    if (availability !== undefined) {
+      const options = availability.options.filter((o) => Object.hasOwn(displays, o.option_id));
+      out.goal_chance_driver_availability = { ...availability, options,
+        status: options.some((o) => o.status === 'available') ? 'available'
+          : options.every((o) => o.status === 'none_licensed') ? 'none_licensed' : 'not_recorded' };
+    }
+  }
+  const tipping = tippingPointOf(enrichment);
+  if (!(shown && tipping.status === 'not_evaluated')) out.tipping_point = tipping;
   return out;
 }
 
@@ -142,20 +262,51 @@ export function analysisResultForAgent(result: unknown): unknown {
  * together — never the goal's target) becomes `all_limits_hold_probability`; under #416's withhold no row keeps a
  * `probability_of_goal`. Not an array → unchanged.
  */
-function optionRowsForAgent(value: unknown, withheld: boolean): { rows: unknown; renamed: boolean } {
+function optionRowsForAgent(
+  value: unknown, outcomeHidden: ReadonlySet<string> = new Set(), shown: ReadonlyMap<string, number> = new Map(),
+  displays: Readonly<Record<string, string>> = {},
+  /** Legacy Run (no licence record): the run-wide withhold alone decides, as before #2625. */
+  legacyWithheld?: boolean,
+): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
   const rows = value.map((row) => {
     const r = recordOf(row);
     if (r === undefined) return row;
     let next: Record<string, unknown> = r;
+    // ⭐ F1b [R1] (DL 5931658539 item 1, (ii)): an outcome a withhold KEPT for the panel never reaches the model — the UI
+    // shows it deterministically, and the LLM cannot rank what it never sees. The sample counts stay.
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    if (outcomeHidden.has(EVERY_OPTION) || (id !== undefined && outcomeHidden.has(id))) {
+      const outcome = recordOf(next.outcome);
+      const { expected_outcome: _expected, ...others } = next;
+      next = others;
+      if (outcome !== undefined) {
+        const kept: Record<string, unknown> = { ...outcome };
+        for (const k of ['mean', 'std', 'p10', 'p50', 'p90'] as const) delete kept[k];
+        next = { ...next, outcome: kept };
+      }
+    }
     if ('probability_of_joint_goal' in next) {
       const { probability_of_joint_goal: joint, ...others } = next;
       next = { ...others, all_limits_hold_probability: joint };
       renamed = true;
     }
-    if (withheld && 'probability_of_goal' in next) {
+    const chancePermitted = legacyWithheld !== undefined ? !legacyWithheld : id !== undefined && Object.hasOwn(displays, id);
+    const projectedChance = chancePermitted && id !== undefined && typeof next.probability_of_goal === 'number'
+      ? goalChancePointForAgent(next.probability_of_goal, displays[id], shown.get(id)) : undefined;
+    if ((!chancePermitted || projectedChance === undefined) && 'probability_of_goal' in next) {
       const { probability_of_goal: _withheld, ...others } = next;
+      next = others;
+    }
+    if (projectedChance !== undefined) {
+      next = { ...next, probability_of_goal: projectedChance };
+    }
+    // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
+    // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.
+    if (GOAL_CHANCE_COMPANION_KEYS.some((k) => k in next)) {
+      const others: Record<string, unknown> = { ...next };
+      for (const k of GOAL_CHANCE_COMPANION_KEYS) delete others[k];
       next = others;
     }
     return next;
@@ -163,8 +314,57 @@ function optionRowsForAgent(value: unknown, withheld: boolean): { rows: unknown;
   return { rows, renamed };
 }
 
+/**
+ * ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal-chance licence's main-driver claims never reach the Agent, in either carrier
+ * (`enrichment.inference_warnings`, or a kept Run's `inference_warnings`). The rest of every record is untouched.
+ */
+function warningsForAgent(value: unknown, rangeShown: boolean): unknown {
+  if (!Array.isArray(value)) return value;
+  // ⛔ S2l (Science 393023, served B9 unseen b9-1): beside a range the screen TESTS the target for the ranged options, so the
+  // producer's unscoped not-testable `message` ("can't yet test them against your target", naming a ranged option's links)
+  // is false of this Run. The Agent keeps the scoped fact (`option_ids`, `withheld_claims`, the scoped `say`), never the
+  // unscoped words. With no range shown (none, or a malformed record: Codex r1 P1) the message is true and stays.
+  const ranged = rangeShown && value.some((w) => recordOf(w)?.code === 'GOAL_CHANCE_RANGE');
+  // ⛔ S1 review r1 #4: the GOAL_CHANCE_RANGE record's figures never reach the model raw (ruling 1 §6: no comparison of
+  // ranges); the Agent reads only its ruled display (`goalChanceRangeDisplayForAgent`, PR-S2).
+  return value.filter((w) => recordOf(w)?.code !== 'GOAL_CHANCE_RANGE').map((w) => {
+    const full = recordOf(w);
+    if (full === undefined) return w;
+    // ⭐ S-E GOALS S6 (Codex r1 P2, #2753): `per_option` is the PANEL's per-option prose; the Agent speaks the target
+    // warning only through its `say` (Science R3), so the model never reads the panel's words.
+    const { per_option: _panelOnly, ...r } = full;
+    if (ranged && r.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && 'message' in r) {
+      const { message: _unscoped, ...scoped } = r;
+      return scoped;
+    }
+    if (!GOAL_CHANCE_DRIVER_RECORD_KEYS.some((k) => k in r)) return 'per_option' in full ? r : w;
+    const kept: Record<string, unknown> = { ...r };
+    for (const k of GOAL_CHANCE_DRIVER_RECORD_KEYS) delete kept[k];
+    return kept;
+  });
+}
+
 /** What the Agent is told about the limits-only figure (AIQ 5887531086: its own fact, in the UI's register). */
 export const ALL_LIMITS_HOLD_NOTE =
   '`all_limits_hold_probability` is how often ALL the user\u2019s limits hold together in the model runs. It does NOT include '
   + 'the goal\u2019s target: never call it a chance of reaching the goal, a goal fit or a target fit, and never combine it with '
   + 'the goal. Say it, if at all, as "all your limits hold in N% of model runs (this does not include the goal\u2019s target)".';
+
+/**
+ * The options whose OUTCOME a goal-figure withhold kept for the panel (`withheld_claims` present, without `outcome`; F1b
+ * B2), or {@link EVERY_OPTION}. Their outcome figures are removed from the Agent's view (DL 5931658539 item 1 (ii)).
+ */
+const EVERY_OPTION = '*';
+function keptOutcomeOptionIds(enrichment: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const warnings = Array.isArray(enrichment.inference_warnings) ? enrichment.inference_warnings : [];
+  for (const w of warnings) {
+    const r = recordOf(w);
+    if (r === undefined || typeof r.code !== 'string' || !GOAL_FIGURES_WITHHELD_CODES.has(r.code)) continue;
+    if (!Array.isArray(r.withheld_claims) || (r.withheld_claims as unknown[]).includes('outcome')) continue;
+    // No option list = every option (fail closed).
+    if (!Array.isArray(r.option_ids)) { out.add(EVERY_OPTION); continue; }
+    for (const id of r.option_ids) if (typeof id === 'string') out.add(id);
+  }
+  return out;
+}

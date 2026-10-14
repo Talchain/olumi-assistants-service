@@ -413,8 +413,9 @@ export const GoalConstraintSchema = z.object({
    * beside `">="`. Absent means the operator is as stated.
    *
    * ⛔ NOT A WIDER `operator` ENUM: `GraphV3.safeParse` fails the WHOLE graph on an unknown operator (Canonical
-   * 5860723311), and PLoT's preflight refuses anything but `>=`/`<=`. The engine still gets `operator` only; the
-   * PLoT wire copy withholds this field (`run-analysis.ts`, `withholdStatedOperator`).
+   * 5860723311), so a reader on an older pin must still parse the stored row. Recovery Batch C (ruling 16): PLoT and ISL
+   * now score `>` / `<` exactly, so the PLoT wire copy sends THIS comparator in `operator` when the pair is consistent
+   * (`run-analysis.ts`, `wireGoalConstraints`); the stored row is unchanged.
    *
    * ⚠ DECLARED, NOT LEFT TO PASSTHROUGH: this is a plain `z.object`, so an undeclared stamp is deleted at the first
    * `GraphV3` parse hop — every later D1 edit (`apply-graph-mutation.ts`) writes the parsed rows. An older reader
@@ -528,6 +529,30 @@ export const GoalConstraintSchema = z.object({
       pre_normalisation_unit: z.string(),
     })
     .optional(),
+  /**
+   * ⭐ RECOVERY BATCH C (ruling 15; DL scope decision 2): `goal_target` = this row is one of the GOAL'S TARGETS (marketing:
+   * conversion above 15% AND at least 20 new customers), not a limit. Absent = a limit, exactly as every row before C. The
+   * Run sends every row, so ISL's same-draw joint covers each target (and any limit, which the headline then names); the
+   * licence reads this marker to say each target's own chance and the joint (`goal-targets-joint.ts`). CEE metadata: the
+   * PLoT wire copy never carries it (`wireGoalConstraints`). Declared because this object strips undeclared keys.
+   */
+  role: z.enum(["goal_target"]).optional(),
+  /** M1b: a retained original or isolated proposed limit, bound to the pending equivalence question. Never a default. */
+  retained_unresolved_limit: z.union([z.object({
+    state: z.literal('unscored'),
+    role: z.enum(['original', 'proposed']),
+    reason: z.literal('retained_limit_equivalence_unresolved'),
+    previous_constraint_id: z.string().min(1),
+    proposed_constraint_ids: z.array(z.string().min(1)).min(1),
+    question: z.literal('Do these describe the same limit?'),
+  }), z.object({
+    state: z.literal('unscored'),
+    role: z.literal('original'),
+    reason: z.literal('retained_limit_quantity_unresolved'),
+    previous_constraint_id: z.string().min(1),
+    proposed_constraint_ids: z.array(z.string()).length(0),
+    question: z.literal('What forecast and basis should be used to evaluate this retained limit?'),
+  })]).optional(),
   /** Deadline metadata for temporal constraints */
   deadline_metadata: z.object({
     deadline_date: z.string().optional(),

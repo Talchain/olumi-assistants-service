@@ -107,6 +107,25 @@ describe('authorisation applies the STORED proposal', () => {
     expect(s.authorise(req(p.proposal_id)).status).toBe('integrity_failed');
   });
 
+  it('a likely range uses B3 typed consent on the exact stored option/factor operations', () => {
+    const store = new ProposalStore();
+    const proposal = store.put(createProposal(content({
+      operations: [{ op: 'set_option_intervention', path: 'opt_lift::fac_downtime', value: {
+        raw: 10, normalised: 0.25, unit: 'days', likely_range: { low: 5, high: 20 },
+      } }],
+      public_label: 'Lift-and-shift sets Migration downtime to 10 days, likely between 5 and 20 days',
+    })));
+    expect(store.authorise(req(proposal.proposal_id)).status).toBe('approval_required');
+    expect(store.authorise({ ...req(proposal.proposal_id), typed_approval_of: 'prop_wrong' }).status).toBe('approval_required');
+    const approved = store.authorise({ ...req(proposal.proposal_id), typed_approval_of: proposal.proposal_id });
+    expect(approved.status).toBe('execute');
+    if (approved.status === 'execute') {
+      expect(approved.proposal).toBe(proposal);
+      expect(approved.proposal.operations[0]!.path).toBe('opt_lift::fac_downtime');
+    }
+    expect(store.authorise({ ...req(proposal.proposal_id), typed_approval_of: proposal.proposal_id, scenario_id: 'other' }).status).toBe('not_authorised');
+  });
+
   it('is bounded', () => {
     const s = new ProposalStore();
     for (let i = 0; i < MAX_PROPOSALS + 10; i++) s.put(createProposal(content({ public_label: 'p' + i })));

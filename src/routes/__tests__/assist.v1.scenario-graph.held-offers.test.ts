@@ -1,0 +1,626 @@
+import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
+/** R2: the opt-in /graph read serves only CEE-authorised original held offers. */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import Fastify, { type FastifyInstance } from "fastify";
+
+const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
+const OWNER = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
+const OTHER_USER = "9e8d7c6b-5a49-4382-b716-0c5d4e3f2a1b";
+
+// `vi.hoisted` because `vi.mock` factories are lifted above ordinary consts,
+// and this route's import chain (route-v2-preflight → build-turn-context)
+// reads `config` at module-init time — early enough to lose the race.
+//
+// The mock SPREADS THE REAL CONFIG rather than hand-listing the sections this
+// suite happens to touch: a `vi.mock` factory REPLACES the module, so a
+// hand-listed stub silently drops every config key added since it was written
+// (CLAUDE.md trap 12 — the flags-mock allowlist defect, verbatim). Only
+// `requireUserJwt` is pinned, because it is the one field whose value this
+// suite is actually asserting about. The Agent lane is enabled only for the local turn witnesses.
+const { mockConfig } = vi.hoisted(() => ({ mockConfig: { value: null as unknown } }));
+vi.mock("../../config/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../config/index.js")>();
+  mockConfig.value = {
+    ...actual.config,
+    auth: { ...actual.config.auth, requireUserJwt: false },
+    proxy: { ...actual.config.proxy, agentLaneEnabled: true, agentLanePreview: false },
+  };
+  return { ...actual, config: mockConfig.value };
+});
+
+vi.mock("../../utils/telemetry.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+  TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
+}));
+
+// ── The store double ────────────────────────────────────────────────────────
+// `ensureScenarioExists` is the UPSERT. It is a spy here so the suite can
+// assert not just the RESPONSE but whether the row-creating call was reached
+// at all — the difference between "answers 404" and "answers 404 without
+// having created the scenario first", which is the whole of pin (1).
+const scenarioExists = vi.fn();
+const loadGraphAndBriefText = vi.fn();
+const ensureScenarioExists = vi.fn();
+const getScenarioOwner = vi.fn();
+
+const readRecent = vi.fn();
+const readCommittedTurn = vi.fn();
+const append = vi.fn(async (_write: Record<string, unknown>) => ({ id: 'answer-row' }));
+const store = {
+  readMostRecentPendingActions: vi.fn(async () => latest),
+  scenarioExists,
+  loadGraphAndBriefText,
+  ensureScenarioExists,
+  getScenarioOwner,
+  readRecent,
+  readCommittedTurn,
+  append,
+};
+vi.mock("../../orchestrator-v5/session/index.js", () => ({
+  getSessionStore: () => store,
+}));
+
+/**
+ * IDENTITY IS NOW CARRIED BY THE VERIFIED TOKEN SUBJECT, NOT BY THE BODY.
+ *
+ * These cases previously established ownership by putting `user_id` in the
+ * request body. That is no longer an ownership input on this route, so the
+ * carrier changes and every assertion stays.
+ *
+ * ⚠ THE OVERRIDES BELOW ARE LOAD-BEARING, NOT TIDINESS. Without them the
+ * cross-user refusal cases would still PASS — because an unverified caller is
+ * refused whatever id they name — and would therefore have stopped
+ * discriminating between "someone else's scenario" and "no identity at all".
+ * A guard that passes for a reason unrelated to what it names is the failure
+ * mode these positive controls exist to prevent, so each cross-user case now
+ * states the OTHER user as a VERIFIED subject.
+ *
+ * `importOriginal` spread, never a hand-listed factory: a factory REPLACES the
+ * module and every other export in the pre-flight import chain would silently
+ * vanish.
+ */
+const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
+vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, resolveUserIdentity };
+});
+
+import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
+
+/** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
+const GRAPH_NO_LAYOUT = {
+  nodes: [
+    { id: "n1", label: "Take the job", kind: "option" },
+    { id: "n2", label: "Commute time", kind: "factor" },
+  ],
+  edges: [{ from: "n1", to: "n2", weight: 0.4 }],
+  options: [{ id: "n1", label: "Take the job" }],
+};
+
+
+async function buildApp(): Promise<FastifyInstance> {
+  const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
+  await scenarioGraphRoute(app);
+  await app.ready();
+  return app;
+}
+
+// `await`ed inside on purpose: an un-awaited `app.inject()` is Light-my-Request's
+// chainable builder, not a response, and returning it would type every caller's
+// `.statusCode` / `.json()` as an error the BUILD gate cannot see (it excludes
+// tests — CLAUDE.md trap 2's refinement; `Typecheck Drift` is what catches it).
+async function read(
+  app: FastifyInstance,
+  scenarioId: string,
+  body: Record<string, unknown> = {},
+) {
+  return await app.inject({
+    method: "POST",
+    url: `/assist/v1/scenarios/${scenarioId}/graph`,
+    payload: body,
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
+  scenarioExists.mockResolvedValue(true);
+  // The signed-in owner is the default caller. Cases about a DIFFERENT user
+  // override this explicitly — see the note on the mock.
+  resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+  ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
+  getScenarioOwner.mockResolvedValue(null);
+  loadGraphAndBriefText.mockResolvedValue({
+    graph: GRAPH_NO_LAYOUT,
+    briefText: "Should I take the job?",
+  });
+});
+
+
+
+import { agentProposals, HELD_OFFER_ROWS_READ_CAP } from '../../orchestrator-v5/agent-lane/held-approval-offers.js'
+import { createProposal, computeProposalId, hasCardOnlyOperations, ProposalStore, MAX_PROPOSALS, type ProposalOperation, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js'
+import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js'
+import { deadlineCardSubjectOf } from '../../orchestrator-v5/agent-lane/proposal-object/still-applies.js'
+import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js'
+import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js'
+import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js'
+import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js'
+import { agentV1TurnRoute } from '../agent-v1-turn.js'
+
+// Only the client is fake: both read paths and the strict vendored projection are real.
+let table: Record<string, unknown>[] = []
+let realStore: SupabaseSessionStore
+const selections: string[] = []
+const fakeClient = {
+  from: () => {
+    let columns: string[] = []; const eqs: [string, unknown][] = []
+    let limit = Infinity
+    const chain = {
+      select: (s: string) => { selections.push(s); columns = s.split(',').map(c => c.trim()); return chain },
+      eq: (k: string, v: unknown) => { eqs.push([k, v]); return chain },
+      not: () => chain, order: () => chain, abortSignal: () => chain,
+      limit: (n: number) => { limit = n; return chain },
+      then: (resolve: (v: unknown) => void) => resolve({ data: table
+        .filter(r => eqs.every(([k, v]) => r[k] === v)).slice(0, limit)
+        .map(r => Object.fromEntries(columns.map(c => [c, r[c]]))), error: null }),
+    }
+    return chain
+  },
+}
+const carrierPatchOf = (pa: PendingAction) => {
+  if (pa.action.kind !== 'apply_proposed_change') throw new Error('fixture is not a proposal carrier')
+  return pa.action.inline_patch
+}
+const proposalOf = (pa: PendingAction) => carrierPatchOf(pa).agent_proposal as StructuredProposal
+const sharedSnapshot = () => ({ size: agentProposals.size(), outstanding: agentProposals.outstanding(SCENARIO, OWNER),
+  // Include every scenario and settlement/order map, so even an LRU bump is observable.
+  internals: JSON.stringify(agentProposals, (_key, value) => value instanceof Map ? [...value] : value) })
+const answerRow = (pa: PendingAction, turnId = 'held-turn') => ({
+  id: '11111111-1111-4111-8111-111111111111', scenario_id: pa.scenario_id, user_id: OWNER,
+  turn_id: turnId, turn_class: 'direct_answer', handler_id: null,
+  request_hash: 'agent_turn:' + 'a'.repeat(64), response_emitted: true, llm_calls_used: 0, duration_ms: 1,
+  created_at: new Date().toISOString(), user_message: 'Make this change', assistant_message: 'Approve this change?', pending_actions: [pa],
+})
+let latest: PendingAction[] = []
+let serial = 0
+let chip: { id: string; label: string; message: string; detail: string }
+let offered: PendingAction
+beforeEach(() => {
+  serial += 1
+  const graphHash = computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT)
+  expect(graphHash).not.toBeNull()
+  if (graphHash === null) throw new Error('fixture has no current graph identity')
+  const proposal = createProposal({ scenario_id: SCENARIO, user_id: OWNER,
+    base_graph_identity_hash: graphHash,
+    operations: [{ op: 'add_edge', path: 'n1::n2', value: serial }],
+    provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label: 'The held change',
+  })
+  chip = { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Record this link', message: 'Yes, record that.', detail: 'The exact offered card.' }
+  offered = parsePendingAction(proposalPendingAction(proposal, chip, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() }))!
+  expect(offered).not.toBeNull()
+  latest = [offered]
+  store.readMostRecentPendingActions.mockImplementation(async () => latest)
+  table = [answerRow(offered)]
+  selections.length = 0
+  realStore = new SupabaseSessionStore(fakeClient as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 })
+  readRecent.mockImplementation((sid: string, cap?: number) => realStore.readRecent(sid, cap))
+  readCommittedTurn.mockImplementation((sid: string, tid: string) => realStore.readCommittedTurn(sid, tid))
+  append.mockClear()
+
+})
+afterEach(() => {
+  // Isolate shared process memory without changing its production API.
+  for (const [id] of (agentProposals as unknown as { items: Map<string, unknown> }).items) agentProposals.discard(id)
+  vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+})
+const heldRead = async (request: Record<string, unknown> = { include_conversation_turns: true }) => {
+  const app = await buildApp()
+  try {
+    const res = await read(app, SCENARIO, request)
+    expect(res.statusCode).toBe(200)
+    return res.json()
+  } finally { await app.close() }
+}
+
+const cardOnlyRange = { likely_range: { low: 5, high: 20 } }
+const cardOnlyMechanisms = { unmodelled_mechanisms: [{ mechanism: 'Recruitment delay', basis: 'May slow delivery' }] }
+const cardOnlyLevel = (value: Record<string, unknown>, path = 'n1::n2'): ProposalOperation => ({
+  op: 'set_option_intervention', path, value: { raw: 10, normalised: 0.25, ...value },
+})
+// The class is ownership of either key, including an explicitly empty mechanisms array.
+const cardOnlyCases: { name: string; operations: ProposalOperation[] }[] = [
+  { name: 'likely_range only', operations: [cardOnlyLevel(cardOnlyRange)] },
+  { name: 'unmodelled_mechanisms EMPTY', operations: [cardOnlyLevel({ unmodelled_mechanisms: [] })] },
+  { name: 'unmodelled_mechanisms POPULATED', operations: [cardOnlyLevel(cardOnlyMechanisms)] },
+  { name: 'both card-only keys', operations: [cardOnlyLevel({ ...cardOnlyRange, ...cardOnlyMechanisms })] },
+  { name: 'multiple levels, one card-only', operations: [cardOnlyLevel({}, 'n3::n2'), cardOnlyLevel(cardOnlyRange)] },
+  { name: 'compound card-only plus add_edge', operations: [cardOnlyLevel(cardOnlyRange), { op: 'add_edge', path: 'n1::n2', value: 0.4 }] },
+]
+const installCardOnlyOffer = (name: string, operations: ProposalOperation[]) => {
+  const { proposal_id: _id, ...content } = proposalOf(offered)
+  const proposal = createProposal({ ...content, operations, public_label: `Held card-only change: ${name}` })
+  const { proposal_id, ...hashedContent } = proposal
+  expect(proposal_id).toBe(computeProposalId(hashedContent))
+  expect(hasCardOnlyOperations(proposal.operations)).toBe(true)
+  chip = { ...chip, id: `agent-approve-proposal:${proposal_id}` }
+  offered = parsePendingAction(proposalPendingAction(proposal, chip, {
+    scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso,
+  }))!
+  expect(offered).not.toBeNull()
+  latest = [offered]
+  const turnId = `card-only-${name}`
+  table = [answerRow(offered, turnId)]
+  return { proposal, turnId }
+}
+describe('R2 card-only held offers mirror the exact offered chip click', () => {
+  it.each(cardOnlyCases.flatMap(row => ['cold', 'warm'].map(temperature => ({ ...row, temperature }))))(
+    '$name / $temperature → exact turn, proposal and approve/amend identities', async ({ name, operations, temperature }) => {
+      const { proposal, turnId } = installCardOnlyOffer(name, operations)
+      const request = { proposal_id: proposal.proposal_id, scenario_id: SCENARIO,
+        authenticated_user_id: OWNER, current_graph_identity_hash: proposal.base_graph_identity_hash }
+      const authority = new ProposalStore()
+      authority.put(proposal)
+      expect(authority.authorise(request).status).toBe('approval_required')
+      expect(authority.authorise({ ...request, typed_approval_of: proposal.proposal_id }).status).toBe('execute')
+      if (temperature === 'warm') agentProposals.put(proposal)
+      expect(agentProposals.size()).toBe(temperature === 'warm' ? 1 : 0)
+      expect(agentProposals.get(proposal.proposal_id)).toEqual(temperature === 'warm' ? proposal : undefined)
+      const before = sharedSnapshot()
+      const body = await heldRead()
+      expect(sharedSnapshot()).toEqual(before)
+      expect(body.held_proposal_offers).toEqual([{ turn_id: turnId, proposal_id: proposal.proposal_id,
+        suggested_actions: [chip, { id: 'agent-amend-proposal', label: 'Change something first',
+          message: 'Before you apply it, I want to change some of it.' }] }])
+      expect(body.held_proposal_offers[0].suggested_actions.map((a: { id: string }) => a.id))
+        .toEqual([`agent-approve-proposal:${proposal.proposal_id}`, 'agent-amend-proposal'])
+      expect(readCommittedTurn).toHaveBeenCalledWith(SCENARIO, turnId)
+      expect(selections.some(s => s.includes('pending_actions'))).toBe(true)
+      expect((await realStore.readRecent(SCENARIO))[0]).not.toHaveProperty('pending_actions')
+    })
+  it.each(cardOnlyCases.flatMap(row => ['stale graph hash', 'another caller', 'already applied warm'].map(control => ({ ...row, control }))))(
+    '$name / $control → no offer', async ({ name, operations, control }) => {
+      const { proposal } = installCardOnlyOffer(name, operations)
+      if (control === 'stale graph hash') loadGraphAndBriefText.mockResolvedValue({ graph: { ...GRAPH_NO_LAYOUT, edges: [] }, briefText: 'Changed' })
+      if (control === 'another caller') resolveUserIdentity.mockResolvedValue({ mode: 'verified', userId: OTHER_USER })
+      if (control === 'already applied warm') { agentProposals.put(proposal); agentProposals.markApplied(proposal.proposal_id) }
+      const before = sharedSnapshot()
+      const body = await heldRead()
+      expect(sharedSnapshot()).toEqual(before)
+      expect(body).not.toHaveProperty('held_proposal_offers')
+      expect(body.graph).toBeDefined()
+      expect(body.conversation_turns.map((turn: { turn_id: string }) => turn.turn_id)).toEqual([`card-only-${name}`])
+    })
+})
+describe('R2 /graph server-validated held offers (only when conversation requested)', () => {
+  it('(c) executable held proposal → exact original approve plus shared amend', async () => {
+    expect(await realStore.readRecent(SCENARIO)).toHaveLength(1)
+    expect((await realStore.readRecent(SCENARIO))[0]).not.toHaveProperty('pending_actions')
+    expect((await heldRead()).held_proposal_offers).toEqual([{ turn_id: 'held-turn',
+      proposal_id: chip.id.slice('agent-approve-proposal:'.length), suggested_actions: [chip,
+        { id: 'agent-amend-proposal', label: 'Change something first', message: 'Before you apply it, I want to change some of it.' }] }])
+  })
+  it('(d) graph moved → field absent', async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: { ...GRAPH_NO_LAYOUT, edges: [] }, briefText: 'Changed' })
+    expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+  })
+  it('(e) another verified caller on a readable guest graph → field absent', async () => {
+    resolveUserIdentity.mockResolvedValue({ mode: 'verified', userId: OTHER_USER })
+    expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+  })
+  it('(f) already executed on this unchanged graph → field absent', async () => {
+    expect((await heldRead()).held_proposal_offers).toHaveLength(1)
+    agentProposals.put(proposalOf(offered))
+    agentProposals.markApplied(chip.id.slice('agent-approve-proposal:'.length))
+    expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+  })
+  it('(g) authorise throws → field absent, graph and conversation still read', async () => {
+    vi.spyOn(ProposalStore.prototype, 'authorise').mockImplementation(() => { throw new Error('authority unreadable') })
+    const body = await heldRead()
+    expect(body).not.toHaveProperty('held_proposal_offers'); expect(body.graph).toEqual(GRAPH_NO_LAYOUT)
+    expect(body.conversation_turns).toHaveLength(1)
+  })
+  it('not requested → absent even with an executable held proposal', async () => {
+    expect(await heldRead({})).not.toHaveProperty('held_proposal_offers')
+    expect(await heldRead({ include_conversation_turns: 'true' })).not.toHaveProperty('held_proposal_offers')
+  })
+  it('requested, nothing executable → absent, never null or []', async () => {
+    latest = []; expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+  })
+  it.each(['expired wall clock', 'expired turn count', 'superseded carrier'])('%s → absent', async kind => {
+    expect((await heldRead()).held_proposal_offers).toHaveLength(1) // warm cache must not revive expired/dropped authority
+    latest = kind === 'superseded carrier' ? [] : [{ ...offered,
+      ...(kind === 'expired wall clock' ? { expires_at_iso: new Date(Date.now()-1).toISOString() } : { expires_at_turn_count: 0 }) }]
+    expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+  })
+  it('latest authority read throws → graph unavailable and no held field', async () => {
+    store.readMostRecentPendingActions.mockRejectedValue(new Error('unreadable'))
+    const app = await buildApp()
+    try {
+      const res = await read(app, SCENARIO, { include_conversation_turns: true })
+      expect(res.statusCode).toBe(503); expect(res.json()).not.toHaveProperty('held_proposal_offers')
+    } finally { await app.close() }
+  })
+})
+
+// A real turn route, with the internal Run result and provider response fixed locally.
+// No network or model is contacted. The approval hydration/carrier path is production code.
+async function runTurn(sid = SCENARIO, approveId?: string) {
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [{ type: 'message',
+    content: [{ type: 'output_text', text: 'The run is provisional.' }] }] }), { status: 200 })))
+  const app = Fastify()
+  await installOwnershipHarness(app, () => resolveUserIdentity())
+  app.post('/assist/v1/scenarios/:id/graph', { config: { scenarioId: { from: 'params', key: 'id' } } }, async () => ({ graph: GRAPH_NO_LAYOUT,
+    graph_hash: computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT) }))
+  app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async () => ({ response_version: 2, assistant_text: 'ran',
+    suggested_actions: [], insights: [], graph_hash: computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT),
+    blocks: [{ type: 'analysis_result', data: { marker: 'local-run' } }],
+    analysis_ready: { status: 'ready', options: [], blockers: [] } }))
+  await app.register(agentV1TurnRoute); await app.ready()
+  try {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message',
+      scenario_id: sid, message: approveId ? 'Yes, record that.' : 'Run analysis.', source: 'chip',
+      chip: approveId ? { id: `agent-approve-proposal:${approveId}` } : { id: 'agent-run-analysis', action_type: 'run_analysis' } } })
+    expect(r.statusCode).toBe(200)
+    return r.json()
+  } finally { await app.close() }
+}
+
+describe('R2 graph read isolation from the turn approval authority', () => {
+  it.each(['served', 'stale hash', 'other caller', 'executed', 'authority throws', 'malformed carrier'])('(h) shared snapshot unchanged: %s', async branch => {
+    if (branch === 'stale hash') loadGraphAndBriefText.mockResolvedValue({ graph: { ...GRAPH_NO_LAYOUT, edges: [] }, briefText: 'Changed' })
+    if (branch === 'other caller') resolveUserIdentity.mockResolvedValue({ mode: 'verified', userId: OTHER_USER })
+    if (branch === 'executed') { agentProposals.put(proposalOf(offered)); agentProposals.markApplied(proposalOf(offered).proposal_id) }
+    if (branch === 'authority throws') vi.spyOn(ProposalStore.prototype, 'authorise').mockImplementation(() => { throw new Error('authority unreadable') })
+    // A corrupt offered-row carrier with valid latest authority must also leave memory untouched.
+    if (branch === 'malformed carrier') table[0].pending_actions = [{ ...offered, action: { kind: 'apply_proposed_change' } }]
+    const before = sharedSnapshot()
+    const body = await heldRead()
+    expect(sharedSnapshot()).toEqual(before)
+    if (branch === 'served') expect(body.held_proposal_offers?.[0]?.proposal_id).toBe(proposalOf(offered).proposal_id)
+    else expect(body).not.toHaveProperty('held_proposal_offers')
+  })
+  it('(i) graph read → next turn has no-read parity for exact offers and answer carrier', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }) // byte-stable lifetimes for control and graph-read turns
+    // Same content on a distinct scenario gives an independent no-graph-read control.
+    const controlSid = 'b6ccf5cf-aab0-4f01-b889-e0d6c072067c'
+    const { proposal_id: _id, ...content } = proposalOf(offered)
+    const controlProposal = createProposal({ ...content, scenario_id: controlSid })
+    const controlChip = { ...chip, id: `agent-approve-proposal:${controlProposal.proposal_id}` }
+    const controlCarrier = proposalPendingAction(controlProposal, controlChip, { scenario_id: controlSid, emitted_at_iso: offered.emitted_at_iso })
+    store.readMostRecentPendingActions.mockImplementation(async (sid?: string) => sid === controlSid ? [controlCarrier] : latest)
+    const control = await runTurn(controlSid)
+    const controlWrite = append.mock.calls.at(-1)?.[0] as unknown as { pending_actions: PendingAction[] }
+    // S-D slice 2 offers Not now on the proposing turn, after amend.
+    expect(control.suggested_actions.map((a: { id: string }) => a.id)).toEqual([controlChip.id, 'agent-amend-proposal', `agent-decline-proposal:${controlProposal.proposal_id}`])
+    const controlAnswerCarrier = controlWrite.pending_actions.find(pa => pa.chip_id === controlChip.id)
+    expect(controlAnswerCarrier).toBeDefined()
+    append.mockClear()
+    await heldRead()
+    const body = await runTurn()
+    expect(body.suggested_actions).toEqual([chip, { id: 'agent-amend-proposal', label: 'Change something first', message: 'Before you apply it, I want to change some of it.' },
+      { id: `agent-decline-proposal:${proposalOf(offered).proposal_id}`, label: 'Not now', message: 'Not now.' }])
+    const answer = append.mock.calls.at(-1)?.[0] as unknown as { pending_actions: PendingAction[] }
+    const carried = answer?.pending_actions.find(pa => pa.chip_id === chip.id)
+    expect(carried).toBeDefined()
+    expect(proposalOf(carried!)).toEqual(proposalOf(offered))
+    expect(carrierPatchOf(carried!).approve_detail).toBe(chip.detail)
+    const normalize = (pa: PendingAction) => JSON.stringify(pa, (key, value) =>
+      key === 'id' ? '<pending-id>' : typeof value === 'string'
+        ? value.replaceAll(controlSid, SCENARIO).replaceAll(controlProposal.proposal_id, proposalOf(offered).proposal_id) : value)
+    expect(normalize(carried!)).toEqual(normalize(controlAnswerCarrier!))
+    expect(body.suggested_actions).toEqual(control.suggested_actions.map((a: { id: string }) => ({ ...a,
+      id: a.id.replace(controlProposal.proposal_id, proposalOf(offered).proposal_id) })))
+  })
+  it('(j) pre-expiry graph read → expired next graph and next turn refuse by identity', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.parse(offered.expires_at_iso) - 1)
+    await heldRead()
+    vi.setSystemTime(Date.parse(offered.expires_at_iso) + 1)
+    expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+    const next = await runTurn()
+    expect(next.suggested_actions.map((a: { id: string }) => a.id)).not.toContain(chip.id)
+    const approval = await runTurn(SCENARIO, proposalOf(offered).proposal_id)
+    expect(approval._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change',
+      proposal_id: proposalOf(offered).proposal_id, refusal: 'unknown_proposal', mutated: false }))
+    expect(agentProposals.outstanding(SCENARIO, OWNER).map(p => p.proposal_id)).not.toContain(proposalOf(offered).proposal_id)
+    expect(append.mock.calls.flatMap(call => ((call[0] as unknown as { pending_actions?: PendingAction[] })?.pending_actions ?? [])).map(pa => pa.chip_id)).not.toContain(chip.id)
+  })
+  it('(k) capacity: graph-read scenario B cannot evict scenario A mid-approval', async () => {
+    const scenarioA = 'c6ccf5cf-aab0-4f01-b889-e0d6c072067c'
+    const { proposal_id: _id, ...content } = proposalOf(offered)
+    for (let i = 0; i < MAX_PROPOSALS; i++) agentProposals.put(createProposal({ ...content, scenario_id: scenarioA, public_label: `A ${i}` }))
+    const before = sharedSnapshot(); const ids = agentProposals.outstanding(scenarioA, OWNER)
+    expect(agentProposals.size()).toBe(MAX_PROPOSALS)
+    await heldRead()
+    expect(agentProposals.outstanding(scenarioA, OWNER)).toEqual(ids)
+    expect(sharedSnapshot()).toEqual(before)
+  })
+})
+
+describe('R2 committed carrier read failure and bounded newest-offer identity', () => {
+  it('committed read throws → no controls, graph and conversation still readable', async () => {
+    readCommittedTurn.mockRejectedValue(new Error('durable row unavailable'))
+    const before = sharedSnapshot(); const body = await heldRead()
+    expect(body).not.toHaveProperty('held_proposal_offers')
+    expect(body.graph).toEqual(GRAPH_NO_LAYOUT); expect(body.conversation_turns).toHaveLength(1)
+    expect(sharedSnapshot()).toEqual(before)
+  })
+  it('store without committed reader → no controls', async () => {
+    const ref = store as { readCommittedTurn?: typeof readCommittedTurn }; const saved = ref.readCommittedTurn
+    delete ref.readCommittedTurn
+    try { expect(await heldRead()).not.toHaveProperty('held_proposal_offers') }
+    finally { ref.readCommittedTurn = saved }
+  })
+  it('newest originally offered carrier wins, carried-only rows skipped, no older reads', async () => {
+    const p = proposalOf(offered)
+    const carryOnly = proposalPendingAction(p, chip, { scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso }, false)
+    // One instant for the three rows: `answerRow` stamps `new Date()` per row, and on a slow runner (#2966 CI, 12 Oct) distinct
+    // milliseconds let the reload's issued-turn reader (`issuedTurnIdsForProposalRecords`, which skips tied timestamps) read
+    // the newest row a third time. The exact read list below is the held-offer reader's, on a fixed clock.
+    const at = new Date().toISOString()
+    table = [answerRow(carryOnly, 'newest-carried'), answerRow(offered, 'newest-offer'), answerRow(offered, 'older-offer')].map(r => ({ ...r, created_at: at }))
+    const body = await heldRead()
+    expect(body.held_proposal_offers[0]).toMatchObject({ turn_id: 'newest-offer', proposal_id: p.proposal_id })
+    expect(body.held_proposal_offers[0].suggested_actions.map((a: { id: string }) => a.id)).toEqual([chip.id, 'agent-amend-proposal'])
+    expect(readCommittedTurn.mock.calls).toEqual([[SCENARIO, 'newest-carried'], [SCENARIO, 'newest-offer']])
+    expect(selections.some(s => s.includes('pending_actions'))).toBe(true)
+  })
+  it('fixed cap stops before an older offer', async () => {
+    const carryOnly = proposalPendingAction(proposalOf(offered), chip, { scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso }, false)
+    // One shared answer time, fixed: each row's `created_at` was its own `new Date()`, so on a slow runner (CI, #2971) the
+    // rows spanned more than one millisecond, and the S-D issuing-turn search (`issuedTurnIdsForProposalRecords`, the
+    // graph read's proposal_fields) then found a unique earliest row and read it too: a 9th read of 'carry-0', on
+    // staging 22393d76 as well. Same-time rows leave that search ambiguous (no read), as on a fast machine.
+    const at = new Date().toISOString()
+    table = [...Array.from({ length: HELD_OFFER_ROWS_READ_CAP }, (_, i) => answerRow(carryOnly, `carry-${i}`)), answerRow(offered)]
+      .map(row => ({ ...row, created_at: at }))
+    expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
+    expect(readCommittedTurn).toHaveBeenCalledTimes(HELD_OFFER_ROWS_READ_CAP)
+    expect(readCommittedTurn.mock.calls.map(c => c[1])).not.toContain('held-turn')
+  })
+})
+
+/**
+ * ⭐ S-D RELOAD (lane EDIT-PANEL, design §4): a held product proposal comes back on the opt-in read with what it
+ * assumes and its exact card (`proposal_fields`), so a reload keeps it editable and approvable. Bound to THIS graph.
+ */
+describe('S-D reload: proposal_fields on the opt-in graph read', () => {
+  const gmHold = (pin: string): PendingAction => parsePendingAction({
+    id: '22222222-2222-4222-8222-222222222222', scenario_id: SCENARIO, chip_id: 'gmh_abcdefabcdef',
+    action: { kind: 'apply_proposed_change', proposal_ref: 'gmh_abcdefabcdef',
+      inline_patch: { handler_id: 'graph_management_held_v1', apply_wiring: 'held_execute_v1', operations: [
+        { op: 'add_node', path: 'risk_x', value: { id: 'risk_x', kind: 'risk', label: 'Long commute' } },
+        { op: 'add_edge', path: 'risk_x::n2', value: { from: 'risk_x', to: 'n2', strength: { mean: 0.5, std: 0.125 }, exists_probability: 0.8,
+          effect_direction: 'positive', defaulted: true, provenance: { source: 'cee_hypothesis' } } },
+      ] },
+      public_label: 'Approve 2 changes', public_message: "Yes, add risk 'Long commute' and link 'Long commute' to 'Commute time'." },
+    preconditions: { graph_hash: pin }, expires_at_turn_count: 24, expires_at_iso: '2099-01-01T00:00:00.000Z',
+    emitted_at_iso: new Date().toISOString(),
+  })!;
+
+  it('RED: the held risk returns with its placeholder link, its missing level and its exact card; absent without the opt-in', async () => {
+    const pin = computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT)!;
+    latest = [gmHold(pin)];
+    readRecent.mockResolvedValue([]);
+    const app = await buildApp();
+    try {
+      const res = await read(app, SCENARIO, { include_conversation_turns: true });
+      expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+      const fields = res.json().proposal_fields;
+      expect(fields?.graph_hash).toBe(pin);
+      expect(fields?.proposals.map((p: { proposal_id: string }) => p.proposal_id)).toEqual(['gmh_abcdefabcdef']);
+      expect(fields.proposals[0].revision).toBe('22222222-2222-4222-8222-222222222222');
+      expect(fields.proposals[0].approve_action).toEqual(expect.objectContaining({ id: 'agent-approve-proposal:gmh_abcdefabcdef',
+        message: "Yes, add risk 'Long commute' and link 'Long commute' to 'Commute time'." }));
+      expect(fields.proposals[0].fields).toEqual([expect.objectContaining({ field_id: 'link_strength:risk_x::n2', from_label: 'Long commute',
+        to_label: 'Commute time', current: { band: 'strong', source: 'placeholder' } })]);
+      expect(fields.proposals[0].missing).toEqual([{ node_id: 'risk_x', label: 'Long commute', kind: 'risk', what: 'level_today' }]);
+      const plain = await read(app, SCENARIO, {});
+      expect(plain.json().proposal_fields, 'the Agent’s own internal reads stay byte-identical').toBeUndefined();
+    } finally { await app.close(); latest = []; }
+  });
+
+  it('S-B × S-D (#2751 × #2743): the same opt-in reload carries BOTH proposal_fields and the action bar; the internal read neither', async () => {
+    const pin = computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT)!;
+    latest = [gmHold(pin)];
+    readRecent.mockResolvedValue([]);
+    const app = await buildApp();
+    try {
+      const body = (await read(app, SCENARIO, { include_conversation_turns: true })).json();
+      expect(body.proposal_fields?.proposals.map((p: { proposal_id: string }) => p.proposal_id)).toEqual(['gmh_abcdefabcdef']);
+      expect(body.action_bar).toEqual(expect.objectContaining({ v: 1, revision: expect.objectContaining({ graph_hash: pin }) }));
+      const plain = (await read(app, SCENARIO, {})).json();
+      expect(plain.proposal_fields).toBeUndefined();
+      expect(plain.action_bar, 'the Agent’s own internal reads carry no bar').toBeUndefined();
+    } finally { await app.close(); latest = []; }
+  });
+
+  it('CONTROL: a hold pinned to another model is not served as editable here', async () => {
+    latest = [gmHold('f'.repeat(16))];
+    readRecent.mockResolvedValue([]);
+    const app = await buildApp();
+    try {
+      const res = await read(app, SCENARIO, { include_conversation_turns: true });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().proposal_fields).toBeUndefined();
+    } finally { await app.close(); latest = []; }
+  });
+});
+
+/**
+ * ⭐ COLD RELOAD (#3024 follow-up, Codex r2): a held Agent card is projected on the opt-in read by the ONE rule
+ * (`heldCardAppliesAt`), never by the whole-graph hash. After an unrelated change it is still the card the user can press;
+ * once its own goal moved (here a rename, which leaves the hash unchanged) it is not served, although no turn has run since.
+ */
+describe('COLD RELOAD: a held deadline card on the opt-in graph read follows its own subject, not the whole-graph hash', () => {
+  const GOAL_GRAPH = { ...GRAPH_NO_LAYOUT, nodes: [...GRAPH_NO_LAYOUT.nodes, { id: 'g1', label: 'Ship on time', kind: 'goal' }] }
+  /** An unrelated change: a new factor linked to another factor (the goal untouched). */
+  const unrelated = <G extends typeof GOAL_GRAPH>(g: G) => ({ ...g, nodes: [...g.nodes, { id: 'n3', label: 'Salary', kind: 'factor' }],
+    edges: [...g.edges, { from: 'n3', to: 'n2', strength: { mean: 0.5, std: 0.125 } }] })
+  const deadlineHold = () => {
+    const base = computeAnalysisAffectingGraphHash(GOAL_GRAPH)!
+    const proposal = createProposal({ scenario_id: SCENARIO, user_id: OWNER, base_graph_identity_hash: base,
+      operations: [{ op: 'set_goal_deadline', path: 'g1',
+        value: { deadline: '2027-01-14', expected_deadline: null, expected_goal: deadlineCardSubjectOf(GOAL_GRAPH, 'g1') } }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Set the deadline',
+    })
+    const card = { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Set the deadline', message: 'Yes, set that date.', detail: '14 January 2027' }
+    const hold = parsePendingAction(proposalPendingAction(proposal, card, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() }))!
+    expect(hold).not.toBeNull()
+    return { proposal, hold }
+  }
+  const fieldsOn = async (graph: unknown) => {
+    const { proposal, hold } = deadlineHold()
+    latest = [hold]; table = [answerRow(hold)]
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: 'Should I take the job?' })
+    const body = await heldRead()
+    return { id: proposal.proposal_id, ids: (body.proposal_fields?.proposals ?? []).map((p: { proposal_id: string }) => p.proposal_id), body }
+  }
+
+  it('CONTROL: on the model it was made against, the card is projected', async () => {
+    const r = await fieldsOn(GOAL_GRAPH)
+    expect(r.ids).toEqual([r.id])
+  })
+
+  it('RED→GREEN: after an UNRELATED change (the hash moved), the waiting card is still projected, on the current hash', async () => {
+    const moved = unrelated(GOAL_GRAPH)
+    expect(computeAnalysisAffectingGraphHash(moved)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(moved)
+    expect(r.ids).toEqual([r.id])
+    expect(r.body.proposal_fields.graph_hash).toBe(computeAnalysisAffectingGraphHash(moved))
+  })
+
+  it('NEGATIVE: its goal RENAMED (the hash unchanged, no turn since) → the card is not served', async () => {
+    const renamed = { ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) }
+    expect(computeAnalysisAffectingGraphHash(renamed)).toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(renamed)
+    expect(r.ids).not.toContain(r.id)
+  })
+
+  it('ADVERSARIAL (equal value, different identity): its goal renamed and ANOTHER goal now carries its old label → not served', async () => {
+    const decoy = { ...GOAL_GRAPH, nodes: [...GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)),
+      { id: 'g2', label: 'Ship on time', kind: 'goal' }] }
+    expect(deadlineCardSubjectOf(decoy, 'g2'), 'the decoy holds the card’s exact recorded subject').toEqual(deadlineCardSubjectOf(GOAL_GRAPH, 'g1'))
+    const r = await fieldsOn(decoy)
+    expect(r.ids).not.toContain(r.id)
+  })
+
+  it('NEGATIVE: an unrelated change AND its goal renamed → not served', async () => {
+    const both = unrelated({ ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) })
+    expect(computeAnalysisAffectingGraphHash(both)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(both)
+    expect(r.ids).not.toContain(r.id)
+  })
+})
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

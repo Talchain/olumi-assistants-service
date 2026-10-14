@@ -16,6 +16,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { ANALYSIS_PROJECTION_VERSION } from '../../src/orchestrator-v5/context/graph-identity.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../../src/orchestrator-v5/context/analysis-projection-policy.js';
 
 import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
@@ -225,7 +227,7 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     // resolvable). The locked DEFAULT template is still produced by the
     // handler when winner data is too thin; the regression-fixture test
     // below ("template fallback when winner data is missing") covers that.
-    expect(response.assistant_text).toMatch(/^Option A scored highest against your goal in/);
+    expect(response.assistant_text).toMatch(/^Option A was supported by/);
     expect(telemetry.response_emitted).toBe(true);
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.llm_calls_used).toBe(1); // classifier only
@@ -274,11 +276,13 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
       coaching_signal_id,
       coaching_signal_turn_id,
       coaching_signal_produced_at,
+      [RUN_ANALYSIS_PROJECTION_KEY]: projectionVersion,
       ...enrichmentWithoutCoaching
     } = fact.result.enrichment;
     void coaching_signal_id;
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
+    expect(projectionVersion).toBe(ANALYSIS_PROJECTION_VERSION);
     // Asserted (not merely assumed) so this test cannot hide an ABSENT verdict:
     // a missing one fails the read side CLOSED and would silently suppress
     // every leader-presuming block on a healthy run.

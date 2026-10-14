@@ -79,8 +79,11 @@
  * and acyclicity.
  */
 
+import { retainedLimitOnlyNodeIds } from '../graph/retained-limit.js';
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
-import type { GraphV3T } from "../schemas/cee-v3.js";
+import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
+import { draftedTeamPartOf } from '../orchestrator-v5/goal-target/event-by-date-model.js';
+import { NodeV3, type GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
 
@@ -98,7 +101,8 @@ export type StructuralViolationCode =
   | 'NO_DECISION'
   | 'FEWER_THAN_TWO_OPTIONS'
   | 'OPTION_NO_FACTOR_EDGES'
-  | 'OPTION_NOT_LINKED_TO_DECISION';
+  | 'OPTION_NOT_LINKED_TO_DECISION'
+  | 'PRECONDITION_RISK_LINKED';
 
 export interface StructuralViolation {
   code: StructuralViolationCode;
@@ -274,6 +278,10 @@ export const VIOLATION_COPY: Record<
     preview: 'This change would leave an option that is not connected from the decision. Link the decision to it.',
     current: 'An option is not connected from the decision. Link the decision to it.',
   },
+  PRECONDITION_RISK_LINKED: {
+    preview: "A risk tied to one option is left out of the Run; this model can't link it yet.",
+    current: "A risk tied to one option is left out of the Run; this model can't link it yet.",
+  },
 };
 
 function projectVoice(voice: 'preview' | 'current'): Record<StructuralViolationCode, string> {
@@ -371,16 +379,38 @@ export function wouldExceedAddRiskLimits(graph: GraphV3T): AddRiskPreflight {
   };
 }
 
-export function validateGraphStructure(graph: GraphV3T): StructuralValidationResult {
+export function validateGraphStructure(
+  graph: GraphV3T,
+  // ⭐ K3 (`graph/inert-risk.ts`): READINESS ONLY (`analysis-ready-helper.ts`) leaves an inert risk out of the Run rather
+  // than refusing it. The chat-edit gate (`edit-graph.ts`) does not pass it: an edit that dead-ends a risk is still refused,
+  // exactly as before (DL condition 2 on lease #85 5945974225). RC3 a′'s server-stamped precondition is exempt on BOTH
+  // gates: zero edges is its authorised representation, not a dead-ending edit.
+  opts: { readonly leaveOutInertRisks?: boolean } = {},
+): StructuralValidationResult {
   const violations: StructuralViolation[] = [];
+  const leftOut = opts.leaveOutInertRisks === true
+    ? inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph))
+    : preconditionRiskIds(graph.nodes, graph.edges, limitIdsOf(graph));
+  // A canonical event forecast keeps its reasoning sketch beside the option-level capacity sum. Only context
+  // explicitly excluded by admission is left out of readiness; active settings and limits remain structural blockers.
+  if (opts.leaveOutInertRisks === true && draftedTeamPartOf(graph) !== null) {
+    const targets = new Set(graph.nodes.filter(n => n.kind === 'option').flatMap(n => Object.keys(n.interventions ?? {})));
+    const limits = limitIdsOf(graph);
+    for (const node of graph.nodes) {
+      if (node.id.startsWith('event_context_') && ['factor', 'risk', 'outcome'].includes(node.kind)
+        && node.analysis_participation === 'retained_excluded' && !targets.has(node.id) && !limits.has(node.id)) leftOut.add(node.id);
+    }
+  }
 
   checkRequiredNodeKinds(graph, violations);
+  violations.push(...preconditionRiskLinkViolations(graph));
   // No size check. Absolute graph size is `graphCaps`' question, not this
   // validator's — see the file header for the measurement that settled it.
-  checkOrphanNodes(graph, violations);
+  for (const id of retainedLimitOnlyNodeIds(graph)) leftOut.add(id);
+  checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
-  checkPathToGoal(graph, violations);
+  optionsWithoutGoalPath(graph, leftOut, violations);
   checkCycles(graph, violations);
 
   return {
@@ -392,6 +422,38 @@ export function validateGraphStructure(graph: GraphV3T): StructuralValidationRes
 // ============================================================================
 // Individual Checks
 // ============================================================================
+
+/**
+ * RC3 a′: the stamp is an option precondition, not a causal effect shared by
+ * every option. Its authorised representation has no incident link. This is
+ * the single rule owner: default structural validation, the patch applier,
+ * direct mutation validation and the persistence floor all read this check.
+ * Writers select this violation independently of unrelated drafting gaps.
+ * The server stamp owns the precondition identity even if a generic writer
+ * retypes its carrier: changing kind cannot authorise its causal linkage.
+ */
+export function preconditionRiskLinkViolations(
+  graph: Pick<GraphV3T, 'nodes' | 'edges'>,
+): StructuralViolation[] {
+  const linked = new Set(graph.edges.flatMap((edge) => [edge.from, edge.to]));
+  return graph.nodes.flatMap((risk): StructuralViolation[] => {
+    if (risk.relies_on === undefined || !linked.has(risk.id)) return [];
+    // The persistence floor also reads raw object supersets. Use the schema's
+    // existing stamp parser: malformed metadata is not an authored stamp.
+    const parsed = NodeV3.shape.relies_on.safeParse(risk.relies_on);
+    const stamp = parsed.success ? parsed.data : undefined;
+    if (stamp === undefined) return [];
+    const option = graph.nodes.find((node) => node.id === stamp.option_id && node.kind === 'option');
+    const riskLabel = typeof risk.label === 'string' ? risk.label : 'This risk';
+    const optionLabel = typeof option?.label === 'string' ? option.label : 'its option';
+    return [{
+      code: 'PRECONDITION_RISK_LINKED',
+      detail: `‘${riskLabel}’ is tied to ‘${optionLabel}’ and left out of the Run; this model can't link it yet.`,
+      option_id: stamp.option_id,
+      ...(option?.label === undefined ? {} : { option_label: option.label }),
+    }];
+  });
+}
 
 function checkRequiredNodeKinds(graph: GraphV3T, violations: StructuralViolation[]): void {
   const hasGoal = graph.nodes.some((n) => n.kind === 'goal');
@@ -420,16 +482,17 @@ function checkRequiredNodeKinds(graph: GraphV3T, violations: StructuralViolation
   }
 }
 
-function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): void {
+function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[], leftOut: ReadonlySet<string>): void {
   // Build set of nodes that have at least one edge (directed or bidirected)
   const connected = new Set<string>();
   for (const edge of graph.edges) {
     connected.add(edge.from);
     connected.add(edge.to);
   }
+  // ⭐ K3: `leftOut` (readiness only) — a risk nobody has said the direction of is left out of the Run and said.
 
   for (const node of graph.nodes) {
-    if (!connected.has(node.id)) {
+    if (!connected.has(node.id) && !leftOut.has(node.id)) {
       violations.push({
         code: 'ORPHAN_NODE',
         detail: `Node "${node.id}" (${node.label}) has no edges`,
@@ -439,7 +502,14 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): v
   }
 }
 
-function isDirected(edge: GraphV3T['edges'][number]): boolean {
+/** The nodes a limit names (`goal_constraints`): never left out as an inert risk, and the limit-sink branch's roots. */
+function limitIdsOf(graph: Pick<GoalPathGraph, 'goal_constraints'>): Set<string> {
+  return new Set(
+    (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
+  );
+}
+
+function isDirected(edge: { readonly edge_type?: unknown }): boolean {
   // Treat absent edge_type as 'directed' (backward compat, matches schemas/graph.ts)
   return (edge as Record<string, unknown>).edge_type !== 'bidirected';
 }
@@ -509,9 +579,52 @@ function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolati
   }
 }
 
-function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): void {
+/** Directed reachability shared by construction and structural validation; bidirected edges are not paths. */
+export function reachableNodeIds(
+  edges: readonly { readonly from: string; readonly to: string; readonly edge_type?: string }[],
+  roots: readonly string[],
+  reverse = false,
+): Set<string> {
+  const adjacency = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (edge.edge_type === 'bidirected') continue;
+    const from = reverse ? edge.to : edge.from;
+    const to = reverse ? edge.from : edge.to;
+    if (!adjacency.has(from)) adjacency.set(from, new Set());
+    adjacency.get(from)!.add(to);
+  }
+  const reachable = new Set(roots);
+  const queue = [...reachable];
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of adjacency.get(queue[i]!) ?? []) {
+      if (!reachable.has(next)) {
+        reachable.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return reachable;
+}
+
+/** The admitted data needed by the existing path referee; no schema projection or guessed constraints. */
+export interface GoalPathGraph {
+  readonly nodes: readonly { readonly id: string; readonly kind: string; readonly label: string; readonly category?: unknown; readonly relies_on?: unknown }[];
+  readonly edges: readonly { readonly from: string; readonly to: string; readonly edge_type?: string }[];
+  readonly goal_constraints?: readonly { readonly node_id?: string }[];
+}
+
+/**
+ * The validator's option-path refusals, with its limit sinks, left-out set and specific-violation suppression.
+ * The validator also collects its unchanged decision/other-node violations here. Construction reads only option ids.
+ */
+export function optionsWithoutGoalPath(
+  graph: GoalPathGraph,
+  leftOut: ReadonlySet<string> = inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph)),
+  violations: StructuralViolation[] = [],
+): Set<string> {
+  const refusedOptions = new Set<string>();
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
-  if (goalNodes.length === 0) return; // Already caught by NO_GOAL check
+  if (goalNodes.length === 0) return refusedOptions; // Already caught by NO_GOAL check
 
   const decisionNodes = graph.nodes.filter((n) => n.kind === 'decision');
 
@@ -522,7 +635,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
     decisionCount: decisionNodes.length,
     optionCount: graph.nodes.filter((n) => n.kind === 'option').length,
   });
-  if (decisionNodes.length === 0 && !decisionFree) return;
+  if (decisionNodes.length === 0 && !decisionFree) return refusedOptions;
 
   // ⭐⭐ THE SPLIT, mirroring `graph-validator.ts`'s `validateReachability`.
   //
@@ -536,35 +649,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // Loop 2 (every edged node can REACH the goal) is a reverse BFS from the goal
   // and needs none, so it must keep running.
   if (decisionNodes.length > 0) {
-    // Build forward adjacency list — skip bidirected edges (unmeasured confounders)
-    const forward = new Map<string, Set<string>>();
-    for (const edge of graph.edges) {
-      if (!isDirected(edge)) continue;
-      if (!forward.has(edge.from)) forward.set(edge.from, new Set());
-      forward.get(edge.from)!.add(edge.to);
-    }
-
-    // BFS from each decision node to find all reachable nodes
-    const reachable = new Set<string>();
-    const queue: string[] = [];
-
-    for (const dec of decisionNodes) {
-      queue.push(dec.id);
-      reachable.add(dec.id);
-    }
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      const neighbours = forward.get(current);
-      if (neighbours) {
-        for (const next of neighbours) {
-          if (!reachable.has(next)) {
-            reachable.add(next);
-            queue.push(next);
-          }
-        }
-      }
-    }
+    const reachable = reachableNodeIds(graph.edges, decisionNodes.map((n) => n.id));
 
     // Check if every goal is reachable
     for (const goal of goalNodes) {
@@ -587,31 +672,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // decision side. One reverse-BFS from the goal nodes over the same
   // forward adjacency computes the honest set; true dead-ends (edged
   // nodes with no forward path to the goal) still fail.
-  const reverse = new Map<string, Set<string>>();
-  for (const edge of graph.edges) {
-    if (!isDirected(edge)) continue;
-    if (!reverse.has(edge.to)) reverse.set(edge.to, new Set());
-    reverse.get(edge.to)!.add(edge.from);
-  }
-
-  const canReachGoal = new Set<string>();
-  const reverseQueue: string[] = [];
-  for (const goal of goalNodes) {
-    canReachGoal.add(goal.id);
-    reverseQueue.push(goal.id);
-  }
-  while (reverseQueue.length > 0) {
-    const current = reverseQueue.shift()!;
-    const predecessors = reverse.get(current);
-    if (predecessors) {
-      for (const prev of predecessors) {
-        if (!canReachGoal.has(prev)) {
-          canReachGoal.add(prev);
-          reverseQueue.push(prev);
-        }
-      }
-    }
-  }
+  const canReachGoal = reachableNodeIds(graph.edges, goalNodes.map((n) => n.id), true);
 
   // Suppress the redundant flag for options already reported by
   // OPTION_NO_FACTOR_EDGES: an option with no outbound factor edge
@@ -652,9 +713,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // and every ancestor of it. Any other dead end — one reaching no limit, a limited node with an onward edge that misses
   // the goal, or a limited island no lever reaches — is still refused. Journey C's all-lever parents is a case of this;
   // an exogenous cause of a limited quantity is part of its branch (this supersedes #2129's parents-only contrast).
-  const limitTargetIds = new Set(
-    (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
-  );
+  const limitTargetIds = limitIdsOf(graph);
   const limitSinkBranchIds = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limitTargetIds);
 
   for (const node of graph.nodes) {
@@ -662,11 +721,14 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
     if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
     if (canReachGoal.has(node.id)) continue;
     if (limitSinkBranchIds.has(node.id)) continue;
+    // ⭐ K3 (readiness only): a risk nobody has said the direction of, and a cause drawn only into it, is left out.
+    if (leftOut.has(node.id)) continue;
     if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
     // Already caught by orphan check if it has no edges at all —
     // but an edged node can still be a dead-end with no path to the goal.
     const hasAnyEdge = graph.edges.some((e) => e.from === node.id || e.to === node.id);
     if (hasAnyEdge) {
+      if (node.kind === 'option') refusedOptions.add(node.id);
       violations.push({
         code: 'NO_PATH_TO_GOAL',
         detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,
@@ -674,6 +736,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
       });
     }
   }
+  return refusedOptions;
 }
 
 function checkCycles(graph: GraphV3T, violations: StructuralViolation[]): void {

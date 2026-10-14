@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel, type ConstructionTrace } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
+import { asProjectedMeanCapture, asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
@@ -143,7 +143,14 @@ const restamp = (from: string, to: string, provenance: Link['provenance']) => (l
 interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls: number; inputs: string[]; instructions: string[] }
 
 /** The REAL construction, with the drafter faked: `drafts[i]` answers call i (the last repeats). */
+const PRICE_QUOTE = 'Our Pro price is £49 a month.';
+/** The served drafter's explicit £49 carries its verbatim brief sentence (the receipt the real verifier reads). Idempotent. */
+const quoted = (m: CandidateModel): CandidateModel => ({ ...m, factors: m.factors.map((f) =>
+  f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
+    ? { ...f, baseline_evidence: { quote: PRICE_QUOTE } } : f) });
 async function build(...drafts: CandidateModel[]): Promise<Built> {
+  drafts = drafts.map(quoted);
+  const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}`;
   let body: unknown = null;
   const inputs: string[] = [];
   const instructions: string[] = [];
@@ -159,7 +166,7 @@ async function build(...drafts: CandidateModel[]): Promise<Built> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', SERVED.brief, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { out, body: body as Graph, graph: GraphV3.parse(body) as unknown as Graph, calls: inputs.length, inputs, instructions };
 }
@@ -188,8 +195,18 @@ function reaches(g: Graph, from: string, to: string): boolean {
  * GOAL is compared with exactly these three added, by value; every other node stays byte for byte.
  */
 const G1_HELD = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 } as const;
-const asServedNow = (n: unknown): unknown =>
-  (n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
+/**
+ * S7 (AIE quantity contract): a factor level the verifier credited from the brief carries the EXISTING
+ * `extractionType: 'explicit'` beside `source: 'brief_extraction'`; the served bytes predate it. The comparison is by
+ * content (`canon`), so a node that carried it without being credited — or lacked it while credited — still fails.
+ */
+const withCreditedType = (n: unknown): unknown => {
+  const x = n as { kind?: unknown; observed_state?: { source?: unknown; value?: unknown } } | null;
+  return x !== null && typeof x === 'object' && x.kind === 'factor' && x.observed_state?.source === 'brief_extraction'
+    && typeof x.observed_state.value === 'number' ? { ...x, observed_state: { ...x.observed_state, extractionType: 'explicit' } } : n;
+};
+const asServedNow = (n: unknown): unknown => withCreditedType(
+  n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
 
 /** Sorted-key JSON, so the served bytes and ours compare by content, not key order. */
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
@@ -199,6 +216,7 @@ const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
 async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { option_id?: string; id?: string }[] }[]; error: unknown }> {
   const plotCalls: { options: { option_id?: string; id?: string }[] }[] = [];
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => graph,
     loadGraphAndBriefText: async () => ({ graph, briefText: null }),
   } as unknown as SessionStore;
@@ -245,7 +263,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     // PR1b sizes the served links into bounded targets; subtract that known delta and count it (magnitude-delta.ts).
     const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
     expect(sized, 'PR1b sized at least one served link into a bounded target').toBeGreaterThan(0);
-    expect(unsized.map(canon)).toEqual(servedLessWithheld.map(canon));
+    expect(unsized.map(canon)).toEqual(asProjectedMeanCapture({ edges: servedLessWithheld }, body).edges.map(canon));
   });
 });
 
@@ -276,8 +294,10 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect((out.not_represented as string[]).some((s) => s.includes('nobody has stated which way they run'))).toBe(false);
   });
 
-  it('RED (OUTCOME): readiness is no longer blocked — may_run, and PLoT compares the two user options', async () => {
-    const { graph } = await build(servedCandidate());
+  it('RED (OUTCOME): with an explicitly held AI risk premise, may_run and PLoT compares the two user options', async () => {
+    const { graph: builtGraph } = await build(servedCandidate());
+    const graph = { ...builtGraph, nodes: builtGraph.nodes.map(n => n.id === DELAY
+      ? { ...n, observed_state: { value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred' } } : n) };
     expect(blockers(graph)).toEqual([]);
     expect(resolveRunAdmission(graph).willProceed).toBe(true);
     const { plotCalls, error } = await runAnalysis(graph);
@@ -285,6 +305,12 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect(plotCalls).toHaveLength(1);
     // The marked Phased £54 suggestion is not silently treated as the user's third option.
     expect(plotCalls[0]!.options.map((o) => o.option_id ?? o.id).sort()).toEqual(['keep_49_price', 'raise_to_59']);
+  });
+
+  it('T4f: the original served reconstruction still withholds its unknown risk root', async () => {
+    const { graph } = await build(servedCandidate());
+    expect(blockers(graph)).toEqual(['MISSING_FACTOR_LEVEL']);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
   });
 
   it('RED (a): the loop is a construction issue for the ONE repair retry, naming the loop exactly', async () => {
@@ -415,7 +441,7 @@ describe('CONTROL: an acyclic model is unchanged', () => {
     expect(body.edges).toHaveLength(served.length);
     const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
     expect(sized).toBeGreaterThan(0);
-    expect(unsized.map(canon)).toEqual(served.map(canon));
+    expect(unsized.map(canon)).toEqual(asProjectedMeanCapture({ edges: served }, body).edges.map(canon));
   });
 });
 
@@ -623,7 +649,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1): OVERSIZED + gap + loop — the gap is asked, the loop is not, as a compaction; the compliant retry is adopted and the loop is broken by admission and said', async () => {
-    const first = extended(withGap(servedCandidate()), speculative('factors', 5));
+    const first = quoted(extended(withGap(servedCandidate()), speculative('factors', 5)));
     const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
     expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
     expect(calls).toBe(2);
@@ -655,7 +681,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1b): WITHIN the limit + gap + loop — both are asked; a retry that breaks the loop but leaves the gap is adopted (a loop asked is a reason of its own)', async () => {
-    const first = withGap(servedCandidate());
+    const first = quoted(withGap(servedCandidate()));
     const loopBroken = withGap(withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]));
     const { out, graph, calls, inputs, instructions } = await build(first, loopBroken);
     expect(out.size_retried).toBe(false);

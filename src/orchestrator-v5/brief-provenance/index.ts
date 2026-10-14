@@ -4,7 +4,7 @@
  * ONE sanctioned production call site: the commit-seam hook
  * (`recordBriefProvenanceForCommit` in capture.ts, invoked from
  * src/orchestrator-v5/commit.ts after a durable commit carrying a
- * successful run_analysis fact; fire-and-forget — failures never affect
+ * successful run_analysis fact; bounded post-append wait — failures never affect
  * the turn).
  *
  * Env-read pattern — call-time, not module-load (mirrors

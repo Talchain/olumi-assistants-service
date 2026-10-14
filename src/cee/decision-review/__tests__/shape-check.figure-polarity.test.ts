@@ -47,7 +47,7 @@ function paulsRunInput(robustness: Record<string, unknown> = {}): ReviewInputFor
   };
 }
 
-function review(summary: string, narrative = 'Reduce scope scored highest against your goal in 52% of runs.'): Record<string, unknown> {
+function review(summary: string, narrative = 'Reduce scope was supported by 52% of runs.'): Record<string, unknown> {
   return {
     narrative_summary: narrative,
     story_headlines: { opt_scope: 'Protects the delivery date' },
@@ -205,7 +205,7 @@ describe('shape-check — narrated figures keep their meaning', () => {
 
   it('CONTRAST, same input: an unrelated win-probability sentence passes', () => {
     const result = performShapeCheck(
-      review('Reduce scope scored highest against your goal in 52% of runs.'),
+      review('Reduce scope was supported by 52% of runs.'),
       stability70Input(),
     );
     expect(ungrounded(result.warnings)).toEqual([]);

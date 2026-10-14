@@ -153,6 +153,18 @@ const STATED_AMOUNT_PATTERN = new RegExp(
     `(?<pct>\\s*%)?`,
   "gi",
 );
+/**
+ * The same scan with a literal ISO code accepted where a symbol may stand ("GBP 1,000"). OPT-IN ONLY: the link-effect
+ * path asks for it (RT-6 step 2, Science U2 "a currency symbol/code"). Every other reader keeps the symbol-only scan.
+ */
+const STATED_AMOUNT_PATTERN_WITH_CODES = new RegExp(
+  `(?<![\\w.])(?<currency>${CURRENCY_ALTERNATION}|${ISO_CURRENCY_ALTERNATION})?\\s*` +
+    `(?<digits>${AMOUNT_DIGITS})` +
+    magnitudeSuffixPattern("mag") +
+    MAGNITUDE_AMBIGUOUS_TRAILER_GUARD +
+    `(?<pct>\\s*%)?`,
+  "gi",
+);
 
 /**
  * Every amount stated in `text`, in source order.
@@ -160,13 +172,14 @@ const STATED_AMOUNT_PATTERN = new RegExp(
  * Pure. Never throws. An empty / non-string input yields an empty array, which
  * makes every value un-locatable — the fail-closed direction.
  */
-export function findStatedAmounts(text: string | null | undefined): readonly StatedAmount[] {
+export function findStatedAmounts(text: string | null | undefined, options?: { readonly isoCurrencyCodes?: boolean }): readonly StatedAmount[] {
   if (typeof text !== "string" || text.length === 0) return [];
   const out: StatedAmount[] = [];
   // A fresh RegExp per call: `lastIndex` on a shared /g instance is
   // cross-call state, and a shared one would make this function's answer
   // depend on who called it last.
-  const pattern = new RegExp(STATED_AMOUNT_PATTERN.source, STATED_AMOUNT_PATTERN.flags);
+  const scan = options?.isoCurrencyCodes === true ? STATED_AMOUNT_PATTERN_WITH_CODES : STATED_AMOUNT_PATTERN;
+  const pattern = new RegExp(scan.source, scan.flags);
   // The digits and the written magnitude suffix of each amount, for the range reading below.
   const parts: { digits: number; mag: string }[] = [];
   for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
@@ -182,7 +195,9 @@ export function findStatedAmounts(text: string | null | undefined): readonly Sta
     // brief writes, and reading it as currency keeps the two kinds disjoint.
     const kind: AmountKind = symbol ? "currency" : isPercent ? "percent" : "plain";
     const currencyCode = symbol
-      ? CURRENCY_SYMBOL_TO_CODE[symbol] ?? CURRENCY_SYMBOL_TO_CODE[symbol.toUpperCase()] ?? symbol
+      ? CURRENCY_SYMBOL_TO_CODE[symbol] ?? CURRENCY_SYMBOL_TO_CODE[symbol.toUpperCase()]
+        // Opt-in ISO scan only: "gbp 1,000" is GBP (buddy r2 P2). The default scan never matches a bare code.
+        ?? (options?.isoCurrencyCodes === true && /^[A-Za-z]{3}$/.test(symbol) ? symbol.toUpperCase() : symbol)
       : undefined;
 
     out.push({
@@ -314,7 +329,11 @@ export function readUnit(unit: string | null | undefined): UnitReading {
   if (typeof unit !== "string" || unit.trim().length === 0) {
     return { kind: "plain", multiplier: 1 };
   }
-  const trimmed = unit.trim();
+  // ⛔ LINEAR, NOT CUBIC (P44, 8 Oct): UNIT_PATTERN chains `\s*` around optional groups, so an internal whitespace run
+  // the pattern then rejects ("£" + 4,000 spaces + "/ month") backtracked every split of the run: 19 s at n=4,000.
+  // Every whitespace token in both patterns is `\s*` and no currency, ISO code or magnitude literal contains
+  // whitespace, so one space per run reads every unit exactly as before.
+  const trimmed = unit.trim().replace(/\s+/g, " ");
   if (/^percent(age)?$/i.test(trimmed)) return { kind: "percent", multiplier: 1 };
   const iso = ISO_UNIT_PATTERN.exec(trimmed);
   if (iso) {

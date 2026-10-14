@@ -189,32 +189,37 @@ describe('(1) Paul’s served edge, recorded "very strong" by the user through t
 // stores its spread (A6e), and every authorship byte — source, magnitude, reasoning, `defaulted`, the per-field flags —
 // is KEPT, with the review recorded in `provenance.reviewed_by_user`. Before R11 these rows pinned the `user_specified`
 // stamp, `defaulted` → `exists_defaulted`, and (figure) `std_defaulted: true`.
-describe('(2) confirm_current from a band: the mean is kept and the std is the band’s', () => {
+describe('(2) confirm_current from a band: the whole strength is kept (#2473 CR), the band recorded', () => {
   /** The link already sits in the band the user named (0.85 is very strong), still Olumi's. */
   const inBand = () => paulGraph({ strength: { mean: 0.85, std: OLUMI_STD } });
   const confirm = () => eventFor({ intent: 'confirm_current', magnitude: 0.85, expected: { mean: 0.85, effect_direction: 'positive' } });
 
-  it('⭐ RED A6e: the Agent’s confirm keeps 0.85 and sets std to the very-strong band’s spread', async () => {
+  // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): this row used to pin std → the very-strong band's spread on
+  // a confirm that keeps 0.85 — a no-change approval that moved σ and staled the Run. Every confirm is byte-equal.
+  it('⭐ RED (#2473): the Agent’s confirm keeps 0.85 AND Olumi’s std, byte-equal; the band is recorded in the review', async () => {
     const result = await applyStated(inBand(), confirm(), 'very strong');
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     const edge = persistedEdge(result);
-    expect(edge.strength.mean).toBe(0.85);
-    expect(edge.strength.std).toBe(edgeBandStd('very strong'));
+    expect(edge.strength).toStrictEqual({ mean: 0.85, std: OLUMI_STD });
+    expect(edge.strength.std).not.toBe(edgeBandStd('very strong'));
     const { reviewed_by_user: review, ...kept } = edge.provenance!;
+    // Batch A ruling 1: L4 superseded; review keeps every sizing and authorship byte.
     expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
     expect(review).toMatchObject({ intent: 'confirm', band: 'very strong' });
     expect(edge.defaulted).toBe(true);
     expect(edge).not.toHaveProperty('exists_defaulted');
     expect(edge.exists_probability).toBe(0.8);
     expect(edge.effect_direction).toBe('positive');
-    expect(result.kind === 'mutated' && result.response.assistant_text).toContain('Confirmed the current strength');
+    // Batch A ruling 3: the receipt says the reviewed placeholder is still not sized.
+    expect(result.kind === 'mutated' && result.response.assistant_text).toContain('has not been sized yet');
   });
 
-  it('the spread moved, so the analysis this link fed is stale (the analysis hash changes)', async () => {
+  it('Batch A: a placeholder confirm changes no analysis input, including sizing and std', async () => {
     const graph = inBand();
     const result = await applyStated(graph, confirm(), 'very strong');
     if (result.kind !== 'mutated') throw new Error(result.reason);
-    expect(computeAnalysisAffectingGraphHash(result.graph)).not.toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
 
   it('CONTRAST (a confirm of the exact FIGURE — the UI’s "Confirm this estimate", no stated band): std untouched, still admitted', async () => {
@@ -227,10 +232,12 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
     expect(edge).not.toHaveProperty('std_defaulted');
     expect(edge.defaulted).toBe(true);
     const { reviewed_by_user: review, ...kept } = edge.provenance!;
+    // Batch A ruling 1: L4 superseded; review keeps every sizing and authorship byte.
     expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
     expect(review).toMatchObject({ intent: 'confirm' });
     expect(review).not.toHaveProperty('band');
     if (result.kind !== 'mutated') return;
+    // Batch A ruling 2: a confirmation keeps the analysis hash unchanged.
     expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
 
@@ -277,9 +284,11 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
   const guard = (b: RawGraph, a: RawGraph, statedBand?: InfluenceBand) =>
     isProvenanceOnlyEdgeConfirmation({ before: b, after: a, from: FROM, to: TO, ...(statedBand ? { statedBand } : {}) });
 
-  it('⭐ R11: reasoning, sizing and `defaulted` KEPT, std → the stated band’s, band recorded: admitted; the old adoption stamp: refused', () => {
+  // ⛔ #2473 CR: a band confirm keeps the std too (this row once admitted std → the stated band's spread).
+  it('⭐ R11 + #2473: reasoning, sizing, `defaulted` AND std KEPT, band recorded: admitted; std → the band’s, or the old adoption stamp: refused', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(true);
+    expect(guard(b, stamped(b, { band: 'very strong' }), 'very strong')).toBe(true);
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(false);
     expect(guard(b, adopted(b, { bandStd: edgeBandStd('very strong') }), 'very strong')).toBe(false);
   });
 

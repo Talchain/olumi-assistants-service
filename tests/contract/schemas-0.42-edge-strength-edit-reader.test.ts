@@ -239,7 +239,83 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // naming `edge_strength_edit` is identical (the same six files); `enums.*` and `turn-payload.js` are byte-unchanged.
     // Of the changed lines, 3 name a strength: an IMPORT LIST in `fixtures/index.js` (appends UnitReading/EntityRef/
     // RefHighWater schemas) and one SC-24 input-row fixture (`field: 'strength'`), neither the member nor its band.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.68.0');
+    //
+    // 0.68.0 → 0.69.0 (schemas #78, MG F1: semantic node fields, `option_status_edit`, goal_target_edit metadata; main
+    // `5b0ca7f5`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `5a401a9a…` → `939f5c9e…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same five dist files). Of the changed lines in them, 2 pairs name a
+    // strength: the `SystemEventKind` declaration (appends `option_status_edit` after `goal_target_edit`) and the
+    // fixtures IMPORT LIST (appends GoalHorizon/GoalStatedAs/CountNoun schemas) — neither the member nor its band.
+    //
+    // 0.69.0 → 0.70.0 (schemas #80, F1b: Run snapshot link band/sizing, `sizing` input row, typed empty win shares; main
+    // `cace462d`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `939f5c9e…` → `a987224c…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same five dist files); `enums.*` and `turn-payload.*` are
+    // byte-unchanged; the one changed file is `fixtures/index.js`, and 0 of its changed lines name a strength.
+    //
+    // 0.70.0 → 0.71.0 (schemas #81, F1b: Run snapshot `residual_digest` — `complete` means verified; main `56888181`),
+    // RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `a987224c…` → `c783076e…`): the FILE SET naming
+    // `edge_strength_edit` is identical and all five files are byte-unchanged; 0 changed dist lines name a strength or a
+    // band (contrast: the same diff finds `residual_digest`).
+    //
+    // 0.71.0 → 0.72.0 (schemas #82, F1b: Run snapshot link `authorship_digest`; main `cd1e868e`), RE-DERIVED on 1 Oct
+    // against the PUBLISHED tarballs (sha1 `c783076e…` → `fd389b22…`): the FILE SET naming `edge_strength_edit` is
+    // identical and all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the
+    // same diff finds 42 lines naming `authorship_digest`).
+    //
+    // 0.72.0 → 0.73.0 (schemas #83, F1b: Run snapshot FACTOR `authorship_digest`; main `b447da6f`), RE-DERIVED on 2 Oct
+    // against the PUBLISHED tarballs (sha1 `fd389b22…` → `ab0b2c9a…`): the FILE SET naming `edge_strength_edit` is identical and
+    // all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the same diff finds 42
+    // lines naming `authorship_digest`).
+    //
+    // 0.73.0 → 0.75.0 (0.74.0 ModelVersionDiffV2 + 0.75.0 DecisionFlipBlockV1, schemas #85; main `55a72e62`), RE-DERIVED on
+    // 2 Oct against the PUBLISHED tarballs (sha1 `ab0b2c9a…` → `b608fb22…`): the FILE SET naming `edge_strength_edit` is
+    // identical; four files are byte-unchanged and `dist/fixtures/index.js` differs with 0 changed lines naming it. The
+    // 40 changed dist lines naming a strength or a band are MOVED, not changed (each text appears equally often on both
+    // sides: 20/20). Contrast: the same diff finds 18 changed lines naming `DecisionFlip`/`decision_flip`.
+    // 0.75.0 → 0.76.0 (SCI-DEEP structural challenge), re-derived from the supplied published archives:
+    // all four boundary files above are byte-identical; the fixture registry changes, but its edge_strength_edit
+    // lines are identical. The existing reader assertions below still exercise the current package.
+    // 0.76.0 → 0.77.0 (schemas #88, `stated_relationship_not_used` notice kind; main `b0378e7f`), RE-DERIVED on 5 Oct
+    // against the PUBLISHED tarballs (sha1 `57f6764c…` for 0.77.0): the FILE SET naming `edge_strength_edit` is identical;
+    // four files are byte-unchanged and `dist/fixtures/index.js` differs; 0 changed dist lines name a strength or a band
+    // (contrast: the same diff finds 19 changed lines naming `stated_relationship`).
+    // 0.77.0 → 0.78.0 (schemas #89: `natural_effect` + `effect` + `delivered_record`; main `28f4eccc`), RE-DERIVED on
+    // 6 Oct against the PUBLISHED tarballs (0.77.0 sha1 `57f6764c…`, 0.78.0 sha1 `29c008b0…`): the FILE SET naming
+    // `edge_strength_edit` is identical (5 files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0
+    // changed lines naming `edge_strength_edit`. The 286 changed dist lines naming a strength or a band are inferred type
+    // expansions (`RunInputField` with 'effect'; the delivered Phase 3 block types in handler-fact / handler-results /
+    // blocks .d.ts) and comments — none in an edge_strength_edit file (contrast: 56 changed lines name `natural_effect`,
+    // 14 name `delivered_record`).
+    // 0.78.0 → 0.79.0 (schemas #90: the `run_delivery` handler fact; main `483cd0e0`), RE-DERIVED on 6 Oct against the
+    // PUBLISHED tarballs (0.78.0 sha1 `29c008b0…`, 0.79.0 sha1 `fad0e0ad…`): the FILE SET naming `edge_strength_edit` is
+    // identical (5 files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed lines naming
+    // `edge_strength_edit`. The 200 changed dist lines naming a strength or a band are inferred type expansions in
+    // handler-fact / handler-results / index .d.ts and the one handler-fact.js import line that gained
+    // `RunDeliveryResultSchema` — none in an edge_strength_edit file (contrast: 27 changed lines name `run_delivery`).
+    // 0.79.0 → 0.80.0 (schemas #91: `dominant_factor` + `flip_thresholds_status(_reason)` on the keep-list; main `5a538ef4`),
+    // RE-DERIVED on 7 Oct against the PUBLISHED tarballs (0.79.0 sha1 `fad0e0ad…`, 0.80.0 sha1 `d53e6524…`): the FILE SET naming
+    // `edge_strength_edit` is identical (5 files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed
+    // lines naming `edge_strength_edit` (contrast: 16 changed dist lines name `dominant_factor`).
+    // 0.80.0 → 0.81.0 (schemas #92: `run_delta.goal_chances`; main `581a825b`), RE-DERIVED on 7 Oct against the PUBLISHED
+    // tarballs (0.80.0 sha1 `d53e6524…`, 0.81.0 sha1 `6ca5c614…`): the FILE SET naming `edge_strength_edit` is identical (5
+    // files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed lines naming `edge_strength_edit`
+    // (contrast: 66 changed dist lines name `goal_chances`/`GoalChance`).
+    // 0.81.0 → 0.82.0 (schemas: event_risk.v1 + graph-hash projection v6; main `c7461d7e`), RE-DERIVED on 7 Oct against the
+    // PUBLISHED tarballs (0.81.0 sha1 `6ca5c614…`, 0.82.0 sha1 `3c18c645…`): the FILE SET naming `edge_strength_edit` is
+    // identical (the same 5 dist files, plus `contracts/adoption-manifest.json`); three are byte-unchanged, and
+    // `dist/boundary/turn-payload.d.ts`, `dist/fixtures/index.js` and the manifest differ with 0 changed lines naming
+    // `edge_strength_edit`. The turn-payload.d.ts change is the inferred NodeV3 expansion (contrast: 1,046 of its 3,998 changed
+    // lines name `event_risk`/`EventRisk` or its fields; 185 changed dist lines across the package name `event_risk`/`EventRisk`).
+    // 0.82.0 → 0.83.0 (schemas: probability precision on the enrichment wire — `probability_of_joint_goal_precision`,
+    // `constraint_probabilities_precision`, `probability_precision`; gitHead 1e451c55 = v0.83.0), RE-DERIVED on 12 Oct against
+    // the PUBLISHED tarballs: 0.82.0 sha1 `3c18c645…` (= the sha1 recorded above; sha256 `976e9fdf…` = its own commit's
+    // sidecar), 0.83.0 sha1 `f3930713…` (registry shasum, 467f101), sha256 `69e11b74…` (= sidecar), sha512 `2yK1A9GD…`
+    // (= the lockfile integrity). The FILE SET naming `edge_strength_edit` is identical (the same 5 dist files plus
+    // `contracts/adoption-manifest.json`); all four boundary files (enums.d.ts/.js, turn-payload.d.ts/.js) are
+    // byte-unchanged, and `dist/fixtures/index.js` (15 changed lines) and the manifest (63) differ with 0 changed lines
+    // naming `edge_strength_edit`, a strength or a band. Contrast: of the 1,063 changed dist lines across the package, 23
+    // name `probability_of_joint_goal_precision` and 20 `constraint_probabilities_precision`. The installed package was
+    // proved byte-identical to that tarball (`diff -rq` empty) before this row was run.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.83.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -413,6 +489,8 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
       // 0.59.0 appends `goal_target_edit` the same way — proven append-only
       // by string equality at the vendored bytes (see the version pin above).
       'goal_target_edit',
+      // 0.69.0 appends `option_status_edit` (MG F1 T6) the same way.
+      'option_status_edit',
     ]);
   });
 

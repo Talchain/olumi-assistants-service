@@ -1,0 +1,12 @@
+{
+  "reader_sha256": "dddc47a923aee7d1d367c3db2994ae4e7990c2ee928828edb55cc1c046d55e20",
+  "passed": 406,
+  "failed": 2,
+  "raw_json": "/private/tmp/impact-pct-fix4-interim-reader.json",
+  "raw_json_sha256": "817483b96c89acb5bfa4661fad9aff57c696f0b9fc56547d2ae5724a2f8a767a",
+  "failed_tests": [
+    "event_risk.v1 slice 2a — stated occurrence fix3-review-'review-24': 'There\\'s a chance of a fall of 10% wi…'",
+    "event_risk.v1 slice 2a — stated occurrence fix3-review-'review-26': 'The odds of a price cut of 15% within…'"
+  ],
+  "resolution": "Retain the existing event-amount of N% boundary; of remains an allowed direct noun bridge, EVENT_BRIDGE gains are only."
+}

@@ -1,0 +1,401 @@
+{
+ "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
+ "operation_id": "a5b2d99b-6a76-47db-aae3-45a5b2fffaa1",
+ "candidate": {
+  "nodes": [
+   {
+    "id": "decision_new_customers",
+    "kind": "decision",
+    "label": "Decision: New customers",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "new_customers",
+    "kind": "goal",
+    "label": "New customers",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "customers",
+    "goal_threshold_frame": "level",
+    "goal_threshold_raw": 20,
+    "goal_threshold_cap": 25,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "goal_threshold": 0.8,
+    "observed_state": {
+     "value": 0,
+     "baseline": 0,
+     "unit": "customers",
+     "source": "brief_extraction",
+     "raw_value": 0,
+     "cap": 25
+    },
+    "goal_target_basis": {
+     "quantity_frame": "level",
+     "target_frame": "level",
+     "target_raw": 20,
+     "reference": "launch",
+     "period_months": 3,
+     "period_kind": "over_period",
+     "effect_unit": "customers, or percentage points of conversion, over the first three months after launch",
+     "effects_at_period_end": true,
+     "source": "olumi_reading"
+    },
+    "goal_direction": ">=",
+    "goal_deadline_as_stated": "3 months"
+   },
+   {
+    "id": "hire_a_marketing_manager",
+    "kind": "option",
+    "label": "Hire a marketing manager",
+    "provenance": "from_brief",
+    "interventions": {
+     "marketing_manager_hired": {
+      "value": 0.3333333333333333,
+      "source": "brief_extraction",
+      "target_match": {
+       "node_id": "marketing_manager_hired",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 1,
+      "unit": "people"
+     },
+     "annual_marketing_spend": {
+      "value": 0.45,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "annual_marketing_spend",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 90000,
+      "unit": "GBP/year"
+     }
+    }
+   },
+   {
+    "id": "ai_planning_plus_advertising",
+    "kind": "option",
+    "label": "AI planning plus advertising",
+    "provenance": "from_brief",
+    "interventions": {
+     "advertising_spend": {
+      "value": 0.6,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "advertising_spend",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 60000,
+      "unit": "GBP/year"
+     },
+     "annual_marketing_spend": {
+      "value": 0.35,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "annual_marketing_spend",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 70000,
+      "unit": "GBP/year"
+     }
+    }
+   },
+   {
+    "id": "marketing_manager_hired",
+    "kind": "factor",
+    "label": "Marketing manager hired",
+    "provenance": "unverified_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 3,
+     "declared_scale": "unit_interval",
+     "unit": "people",
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "advertising_spend",
+    "kind": "factor",
+    "label": "Advertising spend",
+    "provenance": "unverified_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 100000,
+     "declared_scale": "unit_interval",
+     "unit": "GBP/year",
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "annual_marketing_spend",
+    "kind": "factor",
+    "label": "Annual marketing spend",
+    "provenance": "unverified_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 200000,
+     "declared_scale": "unit_interval",
+     "unit": "GBP/year",
+     "source": "cee_inference",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "founder_marketing_time",
+    "kind": "factor",
+    "label": "Founder marketing time",
+    "provenance": "ai_inferred",
+    "category": "external",
+    "observed_state": {
+     "value": 0.1,
+     "raw_value": 10,
+     "unit": "%",
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100
+   },
+   {
+    "id": "conversion_rate",
+    "kind": "factor",
+    "label": "Conversion rate",
+    "provenance": "ai_inferred",
+    "category": "observable",
+    "observed_state": {
+     "value": 0.1,
+     "raw_value": 10,
+     "unit": "%",
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100
+   }
+  ],
+  "edges": [
+   {
+    "from": "decision_new_customers",
+    "to": "hire_a_marketing_manager",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "decision_new_customers",
+    "to": "ai_planning_plus_advertising",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "hire_a_marketing_manager",
+    "to": "marketing_manager_hired",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "hire_a_marketing_manager",
+    "to": "annual_marketing_spend",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "ai_planning_plus_advertising",
+    "to": "advertising_spend",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "ai_planning_plus_advertising",
+    "to": "annual_marketing_spend",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "marketing_manager_hired",
+    "to": "conversion_rate",
+    "strength": {
+     "mean": 0.12000000000000001,
+     "std": 0.060000000000000005
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 4,
+      "amount_unit": "percentage points",
+      "per_source_change": 1,
+      "per_source_change_unit": "people",
+      "strength_mean": 0.12000000000000001,
+      "strength_mean_frame": "edge_strength"
+     },
+     "basis": "A specialist improves targeting."
+    },
+    "defaulted": true
+   },
+   {
+    "from": "advertising_spend",
+    "to": "conversion_rate",
+    "strength": {
+     "mean": 0.04,
+     "std": 0.02
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 2,
+      "amount_unit": "percentage points",
+      "per_source_change": 50000,
+      "per_source_change_unit": "GBP/year",
+      "strength_mean": 0.04,
+      "strength_mean_frame": "edge_strength"
+     },
+     "basis": "More reach brings warmer leads."
+    },
+    "defaulted": true
+   },
+   {
+    "from": "conversion_rate",
+    "to": "new_customers",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "mean_projected": true,
+     "magnitude": "olumi_placeholder"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "founder_marketing_time",
+    "to": "conversion_rate",
+    "strength": {
+     "mean": 0.09999999999999999,
+     "std": 0.049999999999999996
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "per_source_change_unit": "%",
+      "strength_mean": 0.09999999999999999,
+      "strength_mean_frame": "edge_strength"
+     },
+     "basis": "Founder attention sharpens the message."
+    },
+    "defaulted": true
+   }
+  ],
+  "goal_constraints": [
+   {
+    "constraint_id": "agent-lane:new_customers:>=",
+    "node_id": "new_customers",
+    "operator": ">=",
+    "value": 20,
+    "label": "New customers",
+    "unit": "customers",
+    "provenance": "inferred",
+    "value_frame": "level",
+    "role": "goal_target"
+   },
+   {
+    "constraint_id": "agent-lane:conversion_rate:>=",
+    "node_id": "conversion_rate",
+    "operator": ">=",
+    "operator_as_stated": ">",
+    "value": 15,
+    "label": "Conversion rate",
+    "unit": "%",
+    "provenance": "inferred",
+    "value_frame": "level",
+    "role": "goal_target"
+   },
+   {
+    "constraint_id": "agent-lane:annual_marketing_spend:<=",
+    "node_id": "annual_marketing_spend",
+    "operator": "<=",
+    "value": 100000,
+    "label": "Annual marketing spend",
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "value_frame": "level"
+   },
+   {
+    "constraint_id": "agent-lane:founder_marketing_time:<=",
+    "node_id": "founder_marketing_time",
+    "operator": "<=",
+    "value": 25,
+    "label": "Founder marketing time",
+    "unit": "%",
+    "provenance": "explicit",
+    "value_frame": "level"
+   }
+  ]
+ }
+}

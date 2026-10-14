@@ -1,0 +1,6 @@
+✅ Typecheck drift within baseline — 100 files / 290 errors (baseline: 103 files / 291 errors).
+::notice::Drift shrank — consider tightening scripts/ci/typecheck-baseline.txt (lower count / remove fixed files).
+Files no longer erroring (safe to remove from baseline):
+  - src/orchestrator-v5/tools/handlers/__tests__/adjust-edge-strength.test.ts
+  - tests/unit/deterministic-sweep-mixed-fixture.test.ts
+  - tests/unit/orchestrator/graph-structure-validator.test.ts

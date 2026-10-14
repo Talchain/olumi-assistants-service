@@ -1,0 +1,20 @@
+PASS w9b-2: real selector and adapter choose own-lever stories, with no card or mutation
+PASS w9b-2: rejection and empty draft still send two qualitative stories without approval
+PASS w9b-3: real selector and adapter choose own-lever stories, with no card or mutation
+PASS w9b-3: rejection and empty draft still send two qualitative stories without approval
+PASS licensed-leader B: whole adapter, fallback and settlement remain byte-identical
+PASS must-not-fire: Run with no option paths retains the entire refusal
+PASS W9: all-user-sized model retains the entire refusal
+PASS decision items without intervention metadata still prepare no approval card
+PASS class guard: leaders, rankings and withheld figures remain rejected; user-label digits pass
+PASS timing: existing number parser on three 20k-whitespace shapes stays below 50 ms
+COMPLIANT DRAFT w9b-2
+Imagine this decision has gone badly. Two failure stories to test:
+1. Raise prices 10%: Price rise drove customers away before the extra revenue could help monthly recurring revenue. Watch for: renewal objections and cancellations. Mitigate: test the change with a small customer group and review retention before expanding.
+2. Launch starter tier: Starter tier launched fell short of the uptake the launch depended on. Watch for: slow signups and stalled activation. Mitigate: test demand with a small launch and adjust the offer before committing further.
+Outside the model: what else could have blindsided this decision?
+DETERMINISTIC FALLBACK w9b-2
+Imagine this decision has gone badly. Two failure stories to test:
+1. The effect of ‘Price rise’ fell short of what ‘monthly recurring revenue’ needed. Watch for: early results diverging from the expected effect. Mitigate: test this lever with a small group before expanding.
+2. The effect of ‘Starter-tier monthly price’ arrived too late to help ‘monthly recurring revenue’. Watch for: delays between the intervention and its effect. Mitigate: stage the rollout and review the effect before committing further.
+Outside the model: what else could have blindsided this decision?

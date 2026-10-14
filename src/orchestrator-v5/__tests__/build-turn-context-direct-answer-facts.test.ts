@@ -156,7 +156,6 @@ function makeStoreCapturingReadFactsFor(opts: {
     async ensureScenarioExists(_s: string, userId: string) {
       return { user_id: userId };
     },
-    async storeDraftGraph() { /* noop */ },
     async loadGraph() { return null; },
     async loadGraphAndBriefText() { return { graph: null, briefText: null }; },
     async readMostRecentPendingActions(): Promise<readonly PendingAction[]> { return []; },

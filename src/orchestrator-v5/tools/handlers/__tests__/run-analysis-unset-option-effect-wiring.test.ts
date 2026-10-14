@@ -53,7 +53,7 @@
  *          ⚠ QUOTED VERBATIM FROM THE STAGING CAPTURE and deliberately NOT
           re-worded: the lead clause was retired on 2026-09-07 (Paul's
           no-winner ruling) and the mutant now reproduces the same defect
-          reading "scored highest against your goal in 62% of runs of this
+          reading "was supported by 62% of runs of this
           model". The DEFECT is unchanged; only the vocabulary moved.
 
           — one sentence crowning a factor the next sentence admits was never

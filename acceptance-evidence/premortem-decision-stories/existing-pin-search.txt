@@ -1,0 +1,69 @@
+src/routes/__tests__/delivered-record-licence.test.ts:64:  'Start with the lowest-risk path.',
+src/routes/__tests__/delivered-record-licence.test.ts:65:  'Start with the lowest-effort step.',
+src/orchestrator-v5/replacement/__tests__/scrub-identifiers.test.ts:44:    expect(scrubKnownIdentifiers('Start with opt-1', GRAPH)).toBe('Start with Full Parity');
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:31:  premortem_reference: { plan_label: string; current_option_labels: string[]; supplied_items: unknown[] };
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:76:    const kinds = new Set((FIXTURE.premortem_reference.supplied_items as { kind: string }[]).map((i) => i.kind));
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:91:    expect(ctx.supplied_items).toEqual(FIXTURE.premortem_reference.supplied_items);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:113:    expect(ctx.supplied_items).toEqual(FIXTURE.premortem_reference.supplied_items);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:130:    expect(none.supplied_items).toEqual([]);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:135:    expect(chosen.supplied_items).toEqual(FIXTURE.premortem_reference.supplied_items);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:146:    expect(lone.supplied_items).toEqual([]);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:151:    expect(chosen.supplied_items.length).toBeGreaterThan(0);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:169:    expect(ctx.supplied_items.map((i) => i.kind)).toEqual(['risk']);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:190:    expect(forSwitch.supplied_items).toEqual(FIXTURE.premortem_reference.supplied_items);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:202:    expect(forPhased.supplied_items.map((i) => i.id)).toContain('phased_only_factor');
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:216:    expect(forSwitch.supplied_items).toEqual(FIXTURE.premortem_reference.supplied_items);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:221:    expect(forPhased.supplied_items.map((i) => i.id)).toContain('phased_only_factor->monthly_spend');
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:226:    expect(d3.supplied_items.some((i) => i.kind === 'limit')).toBe(false);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:232:    expect(d2.supplied_items.filter((i) => i.kind === 'limit')).toEqual([
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:268:    expect(two.supplied_items).toEqual([]);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:297:      expect(ctx.supplied_items, id).toEqual([]);
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:335:      ['current_option_labels', 'dsk', 'goal_label', 'method', 'not_cited', 'plan', 'supplied_figures', 'supplied_items'],
+src/orchestrator-v5/agent-lane/science/__tests__/method-science-context.test.ts:337:    for (const item of ctx.supplied_items) expect(Object.keys(item).sort()).toEqual(['card', 'id', 'kind', 'labels']);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:48:    assert.deepEqual(out.context.supplied_items.map(i => i.id), ['price_change_from_current', 'starter_tier_launched']);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:77:    for (const item of out.context.supplied_items) {
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:95:    assert.deepEqual(out.context.supplied_items.map(i => i.id), ['price_change_from_current', 'starter_tier_launched']);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:107:    assert.deepEqual(out.context.supplied_items.map(i => i.id), ['price_rise', 'starter_tier_subscribers']);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:43:type RcReply = { id: string; policy_id: string; inputs: { plan_label: string; current_option_labels: string[]; supplied_items: SuppliedItem[] }; reply: string; expect: 'pass' | 'fail'; expect_targets: (string | null)[]; failing_checks?: string[] };
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:137:    expect(out.context.supplied_items.length).toBeGreaterThan(0);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:141:    expect(out.directive).toContain(POLICY.method_turns['RC-PREMORTEM'].decision_plan.rule);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:185:    expect(out.context.supplied_items.map(i => i.id)).toEqual([
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:192:    expect(pick.context.supplied_items.some(i => i.id === 'Second driver->Second risk')).toBe(false);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:204:      expect(out.context.supplied_items.length).toBeGreaterThan(0);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:275:    for (const item of out.context.supplied_items) for (const label of item.labels) expect(d).toContain(q(label));
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:287:    const [a, b] = out.context.supplied_items;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:307:        .map(sentence => ['PM-NO-WINNER', `${sentence}\n${good}`]),
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:312:      expect(passes.failed, ok).not.toContain('PM-NO-WINNER');
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:315:    expect(ahead.failed).not.toContain('PM-NO-WINNER');
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:331:      supplied_items: f.inputs.supplied_items, supplied_figures: [],
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:335:      check_inputs: { plan_label: f.inputs.plan_label, current_option_labels: f.inputs.current_option_labels, supplied_items: f.inputs.supplied_items.map(({ id, labels }) => ({ id, labels })) },
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:343:      const items = f.inputs.supplied_items;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:353:        expect(out.reply).toBe(`Imagine ${q(f.inputs.plan_label)} has gone badly. Start with how ${q(items[0].labels[0])} affects ${q(items[0].labels[1])}: how would you notice it early, and what would you do?`);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:361:    const items = good.inputs.supplied_items;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:381:    const [i0, , i2] = out.context.supplied_items;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:400:    const items = out.context.supplied_items.filter((i) => !i.labels.includes(likelihood));
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:401:    const withdrawn: RunMethodTurn = { ...out, context: { ...out.context, supplied_items: items },
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:402:      check_inputs: { ...out.check_inputs, supplied_items: items.map(({ id, labels }) => ({ id, labels })) } };
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:434:    const links = run().context.supplied_items.filter((i) => i.kind === 'link');
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:451:    const item = run().context.supplied_items.find((i) => i.id === 'monthly_cloud_savings->monthly_spend')!;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:463:      for (const item of out.context.supplied_items.filter((i) => i.kind === 'factor')) {
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:478:    const kinds = out.context.supplied_items.map((i) => i.kind);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:481:    for (const item of out.context.supplied_items.filter((i) => i.kind === 'risk' || i.kind === 'limit')) {
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:487:    const items = run().context.supplied_items;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/method-turn.test.ts:540:    const link = out.context.supplied_items.find((i) => i.kind === 'link')!;
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-empty-leader-path.test.ts:53:    assert.deepEqual(out.context.supplied_items.map(i => i.id), [
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-empty-leader-path.test.ts:57:    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph), null);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-empty-leader-path.test.ts:71:    assert.deepEqual(out.context.supplied_items.map(i => i.id), [
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-empty-leader-path.test.ts:75:    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph), null);
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-empty-leader-path.test.ts:118:    assert.ok(out.context.supplied_items.length > 0);
+src/orchestrator-v5/compose/__tests__/lead-ladder-egress.test.ts:185:  'Start with the lowest-risk path.',
+src/orchestrator-v5/compose/__tests__/lead-ladder-egress.test.ts:186:  'Start with the lowest-effort step.',
+src/orchestrator-v5/agent-lane/__tests__/withheld-leader-fail-closed.test.ts:1747:  'Start with the lowest-risk path.',
+src/orchestrator-v5/agent-lane/__tests__/withheld-leader-fail-closed.test.ts:1748:  'Start with the lowest-effort step.',
+src/orchestrator-v5/agent-lane/__tests__/method-turn-route-seam.test.ts:187:    expect(b.assistant_text).toContain(`Imagine ${q(label(PLAN))} has gone badly. Start with how ${q(label('ai_reporting_module_availability'))} affects ${q(label('enterprise_prospect_signing_likelihood'))}: how would you notice it early, and what would you do?`);
+src/orchestrator-v5/agent-lane/__tests__/reasoning-coach-acceptance.test.ts:30:    expect(createHash('sha256').update(policy).digest('hex')).toBe('4295a6941f6d6be791f12e39f3f103dd7d7681be05a1a6ee5341e52efe9eebc9');
+src/orchestrator-v5/agent-lane/__tests__/reasoning-coach-acceptance.test.ts:54:    if ('mode' in c.expect) expect(selection.mode ?? null).toBe(decisionPress ? 'decision_plan' : c.expect.mode);
+src/orchestrator-v5/agent-lane/__tests__/reasoning-coach-acceptance.test.ts:147:    expect(selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'decision_plan' });
+src/orchestrator-v5/agent-lane/__tests__/reasoning-coach-acceptance.test.ts:161:    expect(rowsOf(state).selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'decision_plan' });
+src/orchestrator-v5/agent-lane/__tests__/reasoning-coach-acceptance.test.ts:178:    const assertDecision = () => expect(rowsOf(state).selection.mode).toBe('decision_plan');
+src/orchestrator-v5/agent-lane/__tests__/reasoning-coach-acceptance.test.ts:266:    const inputs = { supplied_items: [{ id: 'f2', ref: 'F2' }, { id: 'r1', ref: 'R1' }], plan_label: 'Alpha', current_option_labels: ['Alpha', 'Beta'] };

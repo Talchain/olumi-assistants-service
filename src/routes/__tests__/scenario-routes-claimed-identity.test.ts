@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Ownership on the scenario routes is derived from the verified token subject.
  *
@@ -56,6 +57,8 @@ const getScenarioOwner = vi.fn();
 const loadGraph = vi.fn();
 const append = vi.fn();
 const store = {
+  readMostRecentPendingActions: async () => [],
+  readExistingScenario: async (scenarioId: string) => ({ userId: await getScenarioOwner(scenarioId), graph: GRAPH, briefText: null, analysisInvalidatedAt: null, revision: 7 }),
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -73,7 +76,6 @@ const listVersions = vi.fn();
 const getCurrentVersionPointer = vi.fn();
 const saveVersion = vi.fn();
 const getVersion = vi.fn();
-const restoreVersion = vi.fn();
 const compareVersions = vi.fn();
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
   const actual =
@@ -85,7 +87,6 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       getCurrentVersionPointer,
       saveVersion,
       getVersion,
-      restoreVersion,
       compareVersions,
     }),
   };
@@ -116,6 +117,7 @@ const REGISTERABLE_GRAPH = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
   return app;
@@ -132,10 +134,11 @@ async function read(app: FastifyInstance, body: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   scenarioExists.mockResolvedValue(true);
-  loadGraphAndBriefText.mockResolvedValue({ graph: GRAPH, briefText: "Should I take the job?" });
+  loadGraphAndBriefText.mockImplementation(async (scenarioId: string) => ({ revision: 7, graph: await loadGraph(scenarioId), briefText: "Should I take the job?" }));
   // The scenario has a stored owner. That is what makes the pairs below
   // discriminating: an unowned scenario would admit everyone.
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
   getScenarioOwner.mockResolvedValue(OWNER);
   loadGraph.mockResolvedValue(GRAPH);
   append.mockResolvedValue({ ok: true });
@@ -149,13 +152,6 @@ beforeEach(() => {
     value: { id: VERSION_ID, version_number: 1, graph_identity_hash: "a".repeat(64) },
   });
   getVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID, graph: GRAPH } });
-  restoreVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID } });
-  // Compare is bound to "was the service reached", exactly like its three
-  // siblings, so this default need only be a shape the handler can act on.
-  compareVersions.mockResolvedValue({
-    status: "error",
-    error: { code: "version_not_found" },
-  });
 });
 
 describe("an OWNED scenario is not readable on a caller's say-so", () => {
@@ -294,6 +290,7 @@ describe("every unverified mode behaves identically — no mode is a side door",
 describe("registering a model is not authorised on a caller's say-so", () => {
   async function buildRegisterApp(): Promise<FastifyInstance> {
     const app = Fastify();
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioRegisterRoute(app);
     await app.ready();
     return app;
@@ -363,6 +360,7 @@ describe("registering a model is not authorised on a caller's say-so", () => {
 describe("scenario version history is not reachable on a caller's say-so", () => {
   async function buildVersionsApp(): Promise<FastifyInstance> {
     const app = Fastify();
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioVersionsRoute(app);
     await app.ready();
     return app;
@@ -430,7 +428,8 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       // resolver in the chain, so both assertions below would fail — which is
       // what makes this a precondition pin and not a tautology.
       expect(resolveUserIdentity).toHaveBeenCalled();
-      expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, OWNER);
+      expect(getScenarioOwner).toHaveBeenCalledWith(SCENARIO);
+      expect(res.headers["x-ownership-caller"]).toBe(OWNER);
       expect(res.statusCode).toBe(200);
       await app.close();
     });
@@ -530,7 +529,6 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).not.toHaveBeenCalled();
-      expect(restoreVersion).not.toHaveBeenCalled();
       await app.close();
     });
 
@@ -551,7 +549,6 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).not.toHaveBeenCalled();
-      expect(restoreVersion).not.toHaveBeenCalled();
       await app.close();
     });
   });
@@ -581,6 +578,7 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
     // conflated.
     ensureScenarioExists.mockResolvedValue({ user_id: null });
     getScenarioOwner.mockResolvedValue(null);
+    getScenarioOwner.mockResolvedValue(null);
     resolveUserIdentity.mockResolvedValue({ mode: "off" });
 
     const app = await buildVersionsApp();
@@ -600,6 +598,7 @@ describe("what this change does NOT do — guest access is untouched", () => {
     // conflated.
     ensureScenarioExists.mockResolvedValue({ user_id: null });
     getScenarioOwner.mockResolvedValue(null);
+    getScenarioOwner.mockResolvedValue(null);
     resolveUserIdentity.mockResolvedValue({ mode: "off" });
 
     const app = await buildApp();
@@ -610,3 +609,8 @@ describe("what this change does NOT do — guest access is untouched", () => {
     await app.close();
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

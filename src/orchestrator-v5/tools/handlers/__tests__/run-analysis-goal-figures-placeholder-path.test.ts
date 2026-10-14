@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * ⛔ (S) A GOAL CHANCE THAT MOVES WITH AN UNSIZED OLUMI LINK IS WITHHELD (DL #75 5902570568; AIQ 5902548598; R3 rows
  * 5902591666; AIQ ACK 5902606752).
@@ -34,6 +35,9 @@ type Json = Record<string, any>;
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-r0-1f9d769.json', import.meta.url), 'utf8')) as {
   _provenance: { brief_text: string }; graph: Json; plot_body: Json;
 };
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const SERVED_GRAPH = F.graph;
+const WORKING = { ...F, graph: legacyDoorGraph(F.graph) };
 const SCENARIO = '714abc5c-4e82-4436-9454-eec6c8f68589';
 const SWITCH = 'switch_fully_to_gcp';
 const PHASE = 'phase_50_to_gcp';
@@ -42,6 +46,7 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
 async function runOn(graph: Json, body: Json = F.plot_body): Promise<Json> {
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: F._provenance.brief_text })),
     loadGraph: vi.fn(async () => clone(graph)),
   };
@@ -102,7 +107,7 @@ describe('PREMISE — the served run, read off the stored bytes', () => {
     expect(F.plot_body.decision_brief.analysis_summary).toMatchObject({ goal_fit: 0.0617, leading_option: 'Switch fully to GCP' });
   });
   it('the movers reach spend through olumi_placeholder links; the status quo moves nothing', () => {
-    const paths = placeholderGoalPaths(F.graph, [REMAIN, SWITCH, PHASE]);
+    const paths = placeholderGoalPaths(WORKING.graph, [REMAIN, SWITCH, PHASE]);
     expect(paths.map((p) => p.option_id).sort()).toEqual([PHASE, SWITCH]);
     expect(paths.find((p) => p.option_id === SWITCH)!.links).toEqual(expect.arrayContaining([
       { from: 'monthly_gcp_cost_saving', to: 'monthly_cloud_spend' }, { from: 'migration_downtime', to: 'monthly_cloud_spend' },
@@ -112,7 +117,7 @@ describe('PREMISE — the served run, read off the stored bytes', () => {
 
 describe('(S) at the call site: the stored run withholds what the placeholder moves', () => {
   it('RED: Switch and Phase carry no goal chance, joint chance, goal estimate or downside in ANY carrier', async () => {
-    const r = await runOn(F.graph);
+    const r = await runOn(WORKING.graph);
     const env = r.enrichment ?? r;
     for (const id of [SWITCH, PHASE]) {
       const entries = entriesFor(env, id);
@@ -128,7 +133,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   });
 
   it('RED: no win share on any option and no leader anywhere (a win share compares every option)', async () => {
-    const r = await runOn(F.graph);
+    const r = await runOn(WORKING.graph);
     const env = r.enrichment ?? r;
     for (const id of [REMAIN, SWITCH, PHASE]) for (const e of entriesFor(env, id)) expect(e).not.toHaveProperty('win_probability');
     expect(env.decision_brief.analysis_summary).not.toHaveProperty('goal_fit');
@@ -141,7 +146,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   });
 
   it('RED (AIQ 5902834053): the leader permission every consumer obeys is withheld, by name', async () => {
-    await runOn(F.graph);
+    await runOn(WORKING.graph);
     const { claim, mayBeNamed } = leaderClaimOf(lastFact);
     expect(claim.permitted).toBe(false);
     expect(typeof claim.withheld_reason).toBe('string');
@@ -150,18 +155,18 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   });
 
   it('ASK CONTROL: with the downtime level gone too, nothing is asked; both links are still named', () => {
-    const g = clone(F.graph);
+    const g = clone(WORKING.graph);
     delete (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!.observed_state;
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     expect(w.message).not.toContain('Give a figure');
   });
 
   it('CONTROL (AIQ 5903627210): without the user\'s downtime limit, the same levelled link IS asked for — the limit alone decides', () => {
-    const g = clone(F.graph);
+    const g = clone(WORKING.graph);
     g.goal_constraints = [];
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toContain('Give a figure for how ‘Migration downtime’ moves ‘Monthly cloud spend’ and Olumi will use it.');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     expect(w.message).not.toContain('only guessed');
   });
 
@@ -172,7 +177,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
       { id: 'costs', kind: 'goal', label: 'Costs' },
     ], goal_constraints: [] };
     const w = placeholderGoalWarning(graph, [{ option_id: 'switch', links: [{ from: 'saving', to: 'costs' }] }], GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toContain('Give a figure for how ‘Expected saving’ moves ‘Costs’');
+    expect(w.message).toBe('This comparison turns on the link from ‘Expected saving’ to ‘Costs’, whose strength isn\'t sized in the model yet. Set it to see how much it matters.');
     expect(w.message).not.toContain('Give a figure for that link');
     expect(w.message.length).toBeLessThanOrEqual(400);
   });
@@ -185,12 +190,12 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     ], goal_constraints: [] };
     const w = placeholderGoalWarning(graph, [{ option_id: 'switch', links: [{ from: 'saving', to: 'costs' }] }], GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w.message.length).toBeLessThanOrEqual(400);
-    expect(w.message).toContain('Give a figure for how ‘Expected saving');
-    expect(w.message).toContain('moves ‘Costs');
+    expect(w.message).toContain('This comparison turns on the link from ‘Expected saving');
+    expect(w.message).toContain('to ‘Costs');
   });
 
   it('CONTROL (AIQ 5903874730 follow-up): a guessed link out of the limit-watched node into a NON-goal node is still asked for — only a link INTO the goal is the guess', () => {
-    const g = clone(F.graph);
+    const g = clone(WORKING.graph);
     const nodes = g.nodes as Json[];
     const edges = g.edges as Json[];
     const out = edges.find((e) => e.from === 'migration_downtime' && e.to === 'monthly_cloud_spend')!;
@@ -199,41 +204,41 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     edges.splice(edges.indexOf(out), 1, { ...clone(out), to: 'downtime_cost' }, { ...clone(out), from: 'downtime_cost' });
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w.node_ids).toContain('downtime_cost');
-    expect(w.message).toContain('‘Migration downtime’ moves ‘Downtime cost’');
-    expect(w.message).toContain('Give a figure');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’, from ‘Downtime cost’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Downtime cost’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
+    expect(w.message).toContain('Set them to see how much they matter.');
     expect(w.message).not.toContain('only guessed');
   });
 
   it('CONTROL (R3 row): the status quo moves nothing, so its earned 0 stays', async () => {
-    const r = await runOn(F.graph);
+    const r = await runOn(WORKING.graph);
     const env = r.enrichment ?? r;
     expect((env.option_comparison as Json[]).find((o) => o.option_id === REMAIN)).toMatchObject({ probability_of_goal: 0 });
   });
 
   it('RED: ONE typed warning says which options, which links, and asks for the size; the Agent is told what to say', async () => {
-    const r = await runOn(F.graph);
+    const r = await runOn(WORKING.graph);
     const env = r.enrichment ?? r;
     const w = (env.inference_warnings as Json[]).filter((x) => x.code === GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w).toHaveLength(1);
     expect(w[0]!.option_ids.sort()).toEqual([PHASE, SWITCH]);
-    expect(w[0]!.message.startsWith('Not shown. ')).toBe(true);
+    expect(w[0]!.message.startsWith('This comparison turns on the links from ')).toBe(true);
     expect(w[0]!.message.length).toBeLessThanOrEqual(400);
-    expect(w[0]!.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
+    expect(w[0]!.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     // The saving holds no level, so its size alone would add to EVERY option ("Stay on AWS" too): named, not asked.
     // ⛔ AIQ 5903604206 / 5903627210 (supersedes this row's earlier "Give a figure for how 'Migration downtime' moves …"):
     // downtime is the node the user's "≤ 2 weeks" limit watches, and its link into spend is Olumi's guess. It is said as a
     // guess and NEVER asked for a size (the answer would make Olumi's invented cause the user's); no removal is offered.
     expect(w[0]!.message).not.toContain('Give a figure');
-    expect(w[0]!.message).toContain('Olumi only guessed that ‘Migration downtime’ changes ‘Monthly cloud spend’, so you aren’t asked to size that link.');
+    expect(w[0]!.message).toContain('Set them to see how much they matter.');
     expect(w[0]!.message).not.toMatch(/take (the|it|that) link out|checked on its own|Olumi’s estimate:/);
     const chance = goalChanceWithheldForAgent({ enrichment: env });
     expect(chance).toMatchObject({ withheld: true, note: PLACEHOLDER_PATH_NOTE });
     expect(chance!.option_ids!.slice().sort()).toEqual([PHASE, SWITCH]);
-    expect(chance!.say.startsWith('Olumi hasn’t sized how')).toBe(true);
+    expect(chance!.say.startsWith('This comparison turns on the links from ')).toBe(true);
   });
 
   it('CONTROL: with those two links sized by Olumi, nothing is withheld and the served figures stand', async () => {
-    const g = clone(F.graph);
+    const g = clone(WORKING.graph);
     for (const e of g.edges as Json[]) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
     const r = await runOn(g);
     const env = r.enrichment ?? r;
@@ -243,7 +248,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   });
 
   it('CONTROL: a strength the user stated is theirs, not a placeholder', async () => {
-    const g = clone(F.graph);
+    const g = clone(WORKING.graph);
     for (const e of g.edges as Json[]) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.source = 'user_specified';
     expect(placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE])).toEqual([]);
   });
@@ -251,7 +256,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   it('CONTROL (#416 speaks first): a run PLoT already withheld gets no second warning', async () => {
     const body = clone(F.plot_body);
     body.inference_warnings = [...(body.inference_warnings ?? []), { code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', message: 'Not shown. x', severity: 'warning', node_ids: [] }];
-    const r = await runOn(F.graph, body);
+    const r = await runOn(WORKING.graph, body);
     const env = r.enrichment ?? r;
     expect((env.inference_warnings as Json[]).some((x) => x.code === GOAL_FIGURES_PLACEHOLDER_PATH)).toBe(false);
   });
@@ -259,7 +264,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
 
 describe('the one exact link: an operand INTO an identity this run evaluated', () => {
   const g0 = (): Json => {
-    const g = clone(F.graph);
+    const g = clone(WORKING.graph);
     const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
     goal.nonlinear_identity = { operation: 'sum', factor_ids: ['monthly_gcp_cost_saving', 'migration_downtime'], stated_in_brief: true };
     return g;
@@ -279,4 +284,42 @@ describe('the one exact link: an operand INTO an identity this run evaluated', (
   it('declared but NOT evaluated → still a placeholder: withheld', () => {
     expect(placeholderGoalPaths(g0(), [SWITCH, PHASE], [{ node_id: 'monthly_cloud_spend', evaluated: false }]).map((p) => p.option_id).sort()).toEqual([PHASE, SWITCH]);
   });
+});
+
+/**
+ * ⭐ DL [R2] (5930827933): the row's ONE click, "Accept starting strength", is offered only for links whose size can make
+ * the figure right — exactly the links the sentence asks about (`acceptable_links`). A guessed mechanism (a link out of a
+ * limit-watched node into the goal) or a link from a node with no level is never offered.
+ */
+describe('[R2] acceptable_links: the offer gate is the ask', () => {
+  it('RED: without the downtime limit the levelled downtime → spend link is asked for AND offered', () => {
+    const g = clone(WORKING.graph);
+    g.goal_constraints = [];
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.acceptable_links).toContainEqual({ from: 'migration_downtime', to: 'monthly_cloud_spend' });
+  });
+
+  it('CONTROL: the limit-watched guess is named but never offered', () => {
+    const g = clone(WORKING.graph);
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.acceptable_links ?? []).not.toContainEqual({ from: 'migration_downtime', to: 'monthly_cloud_spend' });
+  });
+
+  it('CONTROL: no source level → nothing asked, nothing offered', () => {
+    const g = clone(WORKING.graph);
+    delete (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!.observed_state;
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w).not.toHaveProperty('acceptable_links');
+  });
+});
+
+it('Science 393023: as-served cost graph two → three unsized links, including workload → saving', async () => {
+  const r = await runOn(structuredClone(SERVED_GRAPH));
+  expect(r.leading_option_id).toBeNull();
+  const w = r.enrichment.inference_warnings.find((w: Json) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH);
+  expect(w.links).toEqual([
+    { from: 'monthly_gcp_cost_saving', to: 'monthly_cloud_spend' },
+    { from: 'migration_downtime', to: 'monthly_cloud_spend' },
+    { from: 'gcp_workload_share', to: 'monthly_gcp_cost_saving' },
+  ]);
 });

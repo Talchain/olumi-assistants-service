@@ -44,6 +44,7 @@
  */
 
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
+import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
 /**
  * Honest fallback shipped instead of a false registration receipt.
@@ -125,24 +126,15 @@ export function extractPersistedGoalTarget(
   }
   const nodes = (graph as Record<string, unknown>).nodes;
   if (!Array.isArray(nodes)) return null;
+  // ⭐ RT-10 B′ R3 (Science #87 5999608477): the ONE target reader — the raw threshold, else the goal's own limit row with
+  // its operator ("at most 400" through the goal panel writes only the `<=` row). R1 S4-core: the frame rides with the
+  // figure, so no reader prints a change from today as a level.
   for (const n of nodes) {
     if (n === null || typeof n !== 'object') continue;
     const node = n as Record<string, unknown>;
-    if (
-      node.kind === 'goal' &&
-      typeof node.goal_threshold_raw === 'number' &&
-      Number.isFinite(node.goal_threshold_raw)
-    ) {
-      return {
-        value: node.goal_threshold_raw,
-        ...(typeof node.goal_threshold_unit === 'string'
-          ? { unit: node.goal_threshold_unit }
-          : {}),
-        // R1 S4-core: the frame rides with the figure, so no reader prints a change from today as a level.
-        ...(typeof node.goal_threshold_frame === 'string' ? { frame: node.goal_threshold_frame } : {}),
-        ...(typeof node.goal_direction === 'string' ? { held: node.goal_direction } : {}),
-      };
-    }
+    if (node.kind !== 'goal') continue;
+    const stated = statedGoalTargetOf(graph as Record<string, unknown>, node);
+    if (stated !== null) return stated;
   }
   return null;
 }

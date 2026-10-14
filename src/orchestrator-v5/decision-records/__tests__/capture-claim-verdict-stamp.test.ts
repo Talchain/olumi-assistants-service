@@ -180,6 +180,7 @@ describe('decision-record capture — claim verdict stamped from the projected f
     const serialised = JSON.stringify(captureEvent());
     expect(serialised).not.toContain('Option A');
     expect(serialised).not.toContain('currently leads');
+    expect(serialised).not.toContain('scored highest');
     expect(serialised).not.toContain('0.62');
   });
 });

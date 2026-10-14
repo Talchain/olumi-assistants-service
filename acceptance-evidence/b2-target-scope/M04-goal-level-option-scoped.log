@@ -1,0 +1,36 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 23ms
+     × a missing goal baseline still withholds every option, including Keep 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a missing goal baseline still withholds every option, including Keep
+AssertionError: expected [ 'raise', 'keep' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "raise",
++   "keep",
++ ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:84:26
+     82|     const g = graph(); delete g.nodes[0].observed_state;
+     83|     const out = withholdGoalFiguresForUntestableTarget(envelope(), g, …
+     84|     expect(chances(out)).toEqual([]);
+       |                          ^
+     85|     expect(warning(out)?.option_ids).toEqual(ids);
+     86|     for (const id of ids) expect(warning(out)?.per_option[id].message)…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:45:28
+   Duration  4.31s (transform 2.99s, setup 123ms, import 4.04s, tests 23ms, environment 0ms)
+

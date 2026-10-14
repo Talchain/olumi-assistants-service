@@ -1,3 +1,5 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ C5 THROUGH THE ROUTE — the Agent's provisional view on a WITHHELD turn (Paul's ruling, DL #70 5855324470).
  *
@@ -25,17 +27,19 @@ const REPLY = FX.replies.find((r) => r.id === 'stack-1854-714677d5/pricing-run-c
 /** The one ranking sentence in REPLY, exactly as served (trailing space included — it rides with the sentence). */
 const RANKING_SENTENCE =
   'Its unconstrained comparison favours the £59-at-release path, driven by higher MRR per Pro subscriber and the assumed **100%** price–release alignment. ';
-const WITHHELD_STATE = FX.state.analysis_state;
+const RESULT = { type: 'analysis_result', computed_against_hash: '0123456789abcdef', summary: 'Synthetic completed comparison' };
+const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } };
 const PERMITTED_STATE = { ...WITHHELD_STATE, leader_claim: { permitted: true, separation: 'separated' } };
 
 const VIEW = {
-  view: 'I would raise Pro to £59 at release: on this model it is the strongest path to your MRR goal.',
-  reasoning: 'You said most Pro subscribers asked for the release, and the model holds churn at 4% either way. The price rise carries MRR further than holding at £49 does.',
+  view: 'Before comparing, it is worth testing how much churn moves the MRR goal.',
+  reasoning: 'You said most Pro subscribers asked for the release, and the model holds churn at 4% either way. The comparison needs the churn assumption checked.',
   confirm_step: 'Tell me the churn you actually expect at £59, and I can propose it so the analysis can check the limit.',
 };
 
 const SCENARIO = '5e3d2c1b-6f7a-4b8c-9d0e-1f2a3b4c5d6f';
 let readbackState: unknown = WITHHELD_STATE;
+let readbackGraph: unknown = FX.state.draft_graph;
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null };
 const rows = new Map<string, Row>();
 const store = {
@@ -79,6 +83,8 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       const req = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelRequests.push(req);
+      const runCall = runPressToolResponse(req);
+      if (runCall) return runCall;
       // The Run turn's forced provisional-view call runs IN PARALLEL with the interpreter: answer it by content, not order.
       if ((req['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view') {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(VIEW), call_id: 'forced' }] }), { status: 200 });
@@ -97,17 +103,17 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: 'h-run', blocks: [],
+      response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: 'h-run', blocks: [RESULT],
       analysis_ready: FX.state.analysis_ready, analysis_state: readbackState,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: FX.state.draft_graph, graph_hash: 'h-corpus', analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
+      graph: readbackGraph, graph_hash: 'h-corpus', analysis_result: RESULT, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); modelRequests.length = 0; readbackState = WITHHELD_STATE; });
+  beforeEach(() => { rows.clear(); modelRequests.length = 0; readbackState = WITHHELD_STATE; readbackGraph = FX.state.draft_graph; });
 
   let turnSeq = 0;
   let turnId = '';
@@ -216,12 +222,16 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
   });
 
-  const pressRun = (interpretation: string = REPLY.text) => {
+  const pressRun = async (interpretation: string = REPLY.text) => {
     turnSeq += 1;
     turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
     callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }]];
-    return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
+    const before = modelRequests.length;
+    const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
       stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
+    expect(modelRequests.length - before).toBe(1);
+    modelRequests.length = 0;
+    return explainRun(app, SCENARIO, first);
   };
 
   /**
@@ -233,11 +243,57 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
    */
   const pressRunAnswering = (answer: string, view: typeof VIEW | null) => pressRun(JSON.stringify({ answer, provisional_view: view }));
 
+  const withTechLead = () => {
+    const graph = FX.state.draft_graph as { nodes: unknown[] };
+    readbackGraph = { ...graph, nodes: [...graph.nodes, { id: 'tech_lead', kind: 'option', label: 'Tech lead' }] };
+  };
+
+  it.each(['Tech lead should be explored first.', 'We should begin with Tech lead.'])(
+    'finding 2 RED: final Run-button sidecar withholds %s', async (line) => {
+      withTechLead();
+      for (const field of ['view', 'reasoning', 'confirm_step'] as const) {
+        const r = await pressRunAnswering('The analysis cannot put an option forward yet.', { ...VIEW, [field]: line });
+        expect(r.statusCode).toBe(200);
+        const b = r.json() as Body;
+        expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+        expect(b.assistant_text).not.toContain(line);
+      }
+    },
+  );
+
+  it('finding 3 RED: final Run-button sidecar retains a question about Tech lead hiring costs', async () => {
+    withTechLead();
+    const view = { ...VIEW, view: 'Test how much Tech lead hiring costs.' };
+    const r = await pressRunAnswering('The analysis cannot put an option forward yet.', view);
+    expect(r.statusCode).toBe(200);
+    expect((r.json() as Body)._agent.provisional_view).toEqual({ heading, ...view, because });
+  });
+
+  it.each([
+    'I would explore a Tech lead first, without committing to a hire yet.',
+    "I'd start with Tech lead.",
+    'Tech lead is worth trying first.',
+  ])('HARNESS 3 RED at base: Run-button egress withholds the option preference %s', async (view) => {
+    const r = await pressRunAnswering(REPLY.text, { ...VIEW, view });
+    expect(r.statusCode).toBe(200);
+    const b = r.json() as Body;
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+    expect(b.assistant_text).not.toContain(view);
+  });
+
+  it('HARNESS 3 must pass: Run-button egress retains a model-relative test', async () => {
+    const view = { ...VIEW, view: "Before comparing, it's worth testing how much ‘churn’ moves the goal." };
+    const r = await pressRunAnswering(REPLY.text, view);
+    expect(r.statusCode).toBe(200);
+    const b = r.json() as Body;
+    expect(b._agent.provisional_view).toMatchObject(view);
+  });
+
   it('C5b RED: the Run BUTTON on a withheld result → ONE interpreting call, no tools, a strict schema; the labelled view is typed on `_agent`, never in the prose', async () => {
     const r = await pressRunAnswering(REPLY.text, VIEW);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
-    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b._diagnostic_trace?.fast_path).toBe('explain');
     expect(modelRequests, 'exactly one model call').toHaveLength(1);
     expect(modelRequests[0]!['tool_choice']).toBe('none');
     expect(modelRequests[0]!['tools']).toEqual([]);
@@ -250,7 +306,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const instructions = String(modelRequests[0]!['instructions']);
     expect(instructions.endsWith(`${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`)).toBe(true);
     // No tool was called: the view is a field of the interpreting call, never a fabricated tool call.
-    expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
+    expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
     // The gate is unchanged over the ANSWER: its ranking sentence is gone and the no-leader sentence is there.
     expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
     expect(b.assistant_text).toContain(noLeaderSentence);
@@ -259,7 +315,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b.assistant_text).not.toContain(VIEW.view);
     expect(b.assistant_text).not.toContain('Provisional view');
     expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
-    expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the same text').toBe(b.assistant_text);
+    expect([...rows.values()].at(-1)?.assistant_message, 'the separate explanation is saved as its own answer row').toBe(b.assistant_text);
   });
 
   it('C5b: a view the leader gate would NOT strip (it ranks nothing) still never reaches the prose — typed only', async () => {
@@ -309,13 +365,17 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 
-  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, the reply byte-identical', async () => {
+  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, narrator prose plus the unavailable bounded basis', async () => {
     readbackState = PERMITTED_STATE;
     const r = await runViewThenReply();
     const b = r.json() as Body;
     expect(callModelOutputs).toEqual([]);
     expect(b._agent.tool_calls.find((c) => c.name === 'give_provisional_view')).toMatchObject({ ok: false, refusal: 'not_withheld' });
-    expect(b.assistant_text).toBe(REPLY.text);
+    // Re-pinned for S-A (DL ruling R1, 7 Oct): the basis is a host disclosure; it is kept exactly once and MAY sit under
+    // "More detail". The reply passes the ONE composer (its text is the shape's derivation when shaped).
+    const BASIS = 'The sources of this comparison’s factor starting values are unavailable.';
+    expect(b.assistant_text.split(BASIS)).toHaveLength(2);
+    for (const line of REPLY.text.split('\n').filter((l) => l.trim() !== '')) expect(b.assistant_text).toContain(line.replace(/^\s*[-•*]\s+/, '').trim());
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 });

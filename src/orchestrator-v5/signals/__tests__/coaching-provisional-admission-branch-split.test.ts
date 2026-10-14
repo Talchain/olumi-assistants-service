@@ -168,6 +168,7 @@ describe('a capped admission redirects the first-run nudge and leaves the rerun 
     expect(firstRun?.coaching_text).toBe(FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT);
     expect(firstRun?.coaching_text).not.toContain(LEADING_LABEL);
     expect(firstRun?.coaching_text).not.toContain('the leading option');
+    expect(firstRun?.coaching_text).not.toContain('the most-supported option');
 
     // GENUINE RE-RUN — the completed comparison survives, leader named.
     expect(genuineRerun?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
@@ -191,7 +192,7 @@ describe('a capped admission redirects the first-run nudge and leaves the rerun 
     expect(firstRun?.coaching_text).not.toBe(FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT);
     // The standard first-run copy DOES point at the leading option — which is
     // precisely what the cap redirects, and why the two copies exist.
-    expect(firstRun?.coaching_text).toContain('the leading option');
+    expect(firstRun?.coaching_text).toContain('the most-supported option');
 
     // The rerun arm is byte-identical across the cap: it never read it.
     expect(genuineRerun?.coaching_text).toBe(runBranch([USER_RUN_PRIOR()], false)?.coaching_text);

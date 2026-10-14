@@ -72,6 +72,7 @@
  * initialisation).
  */
 
+import type { RunAnalysisProbe } from './handlers/run-analysis-probe.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import type {
@@ -279,6 +280,15 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthAdoptedEstimateAuthority?: { readonly band: import('../format/influence-bands.js').InfluenceBand };
   /**
+   * ⭐ F1 (#87 6006627551; d5 6006667946) — the user asked, in their own words, to REPLACE the figure this link holds.
+   *
+   * Present only on the strict `edge_strength_edit` path, and only when the approval that sent it carried the replace
+   * in-process for this exact link (`stated-link-band-context.ts` `statedLinkReplacesUserFigureFor`). Without it, a
+   * write that moves the strength of a link holding the user's figure is refused and nothing is written
+   * (`user-figure-held.ts`). A routing model cannot populate it: it is not a proposal parameter.
+   */
+  readonly edgeStrengthReplacesUserFigureAuthority?: true;
+  /**
    * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
    * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
    *
@@ -308,6 +318,8 @@ export interface HandlerInvocation {
     readonly limitChange?: import('../routing/baseline-answer-mutation.js').BaselineLimitChange;
   };
   /** Existing server-side proposal frame, relayed only after exact confirmed-tuple matching. */
+  /** Approved S4 limit wording, verbatim from the proposing message (max 200). */
+  readonly confirmedConstraintSourceQuote?: string;
   readonly confirmedConstraintValueFrame?: import('@talchain/schemas').GoalThresholdFrameType;
   /**
    * ⭐ A2 follow-up (DL verdict on #2180): the comparator the user STATED for the limit on this write, TYPED (the Agent's
@@ -634,6 +646,8 @@ export interface HandlerOutcome {
    * reconciling them is the wrong move — the review needs THIS one.
    */
   readonly __run_graph_snapshot?: unknown;
+  /** Server-only: the scenario revision of the snapshot this Run analysed, frozen before dispatch (B2). */
+  readonly __run_evaluated_revision?: { readonly run_id: string; readonly revision: number };
   /**
    * ⭐ THE GRAPH AND GOAL THE RUN'S GOAL-READING TAIL WAS BUILT FROM — server-only, never the wire (AIQ 5895590866 (2)).
    * Set by `run_analysis` only when Olumi's reading of the goal spoke. The registry forwarder rebuilds the tail from it
@@ -754,6 +768,11 @@ export interface RegistryOverrides {
    * state in a test without a mock.
    */
   readonly counterfactualClient?: CounterfactualClient | null;
+  /**
+   * SCIENCE ROBUSTNESS (EXPERIMENT): hand `run_analysis` a probe that receives the exact payload a Run would send and
+   * returns before PLoT (`handlers/run-analysis-probe.ts`). Set ONLY by `handlers/decision-flip-dispatch.ts`.
+   */
+  readonly runAnalysisProbe?: RunAnalysisProbe;
 }
 
 /**
@@ -794,7 +813,11 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
       ? overrides.counterfactualClient ?? null
       : createCounterfactualClient();
 
-  const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
+  const runAnalysis = createRunAnalysisHandler({
+    plotClient,
+    scenarioReader,
+    ...(overrides?.runAnalysisProbe ? { probe: overrides.runAnalysisProbe } : {}),
+  });
   const explainFromStructure = createExplainFromStructureHandler();
   const explainResults = createExplainResultsHandler();
   const whatWouldFlip = createWhatWouldFlipHandler({ counterfactualClient });

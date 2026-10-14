@@ -137,6 +137,9 @@ describe('every branch of the resolver names the rule that produced its cap', ()
   it('the enum covers exactly the branches the resolver can take, plus the one value construction writes', () => {
     expect([...GOAL_THRESHOLD_CAP_PROVENANCE].sort()).toEqual([
       'inherited',
+      // ⭐ D3 step 1 (Science #87 6005138341): written by `goal-ceiling-pair.ts` — a goal ceiling scored on the goal's own
+      // level frame — never by this resolver. Pinned here so the enum still cannot grow unnoticed.
+      'level_frame',
       'metric_scale',
       // ⭐ #2314 (frames v1): written by `refitFramesForStatedEffects` when a user-stated size widens the goal's frame,
       // never by this resolver. Pinned here so the enum still cannot grow unnoticed.

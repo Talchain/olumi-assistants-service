@@ -54,6 +54,7 @@
 // and cycle-free.
 import { isClarifyDimension } from '../clarify-v2/rubric.js';
 
+import { GoalScopeReconciliationSchema, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 export type PendingActionId = string;
 
 /**
@@ -259,6 +260,20 @@ export interface ElicitEditTargetFields {
 }
 
 export type PendingActionAction =
+  | {
+      /** The Agent's delivered level question; only its own route resumes it. */
+      readonly kind: 'elicit_goal_current_level';
+      readonly goal_id: string;
+      readonly goal_label: string;
+      readonly user_id: string | null;
+      readonly question: string;
+      readonly goal_unit?: string;
+      /** Exact figure/unit spans supplied by the user, never Olumi's estimates. */
+      readonly figures?: readonly string[];
+      readonly figure_quote?: string;
+      readonly confirmation?: 'choice' | 'figure';
+    }
+  | GoalScopeReconciliation
   | {
       readonly kind: 'set_factor_value';
       readonly factor_id: string;
@@ -601,6 +616,8 @@ export type PendingActionKind = PendingActionAction['kind'];
  * For chip-derivation use `CHIP_DERIVABLE_ACTION_TYPES` instead.
  */
 export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
+  'elicit_goal_current_level',
+  'reconcile_goal_scope',
   'set_factor_value',
   'run_analysis',
   'what_would_flip',
@@ -900,6 +917,8 @@ export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
  * Every non-member keeps the default bounds unchanged.
  */
 export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = {
+  elicit_goal_current_level: true,
+  reconcile_goal_scope: false, // issue lifetime and answer-binding lifetime are deliberately separate
   // Recorded questions. Answerable only by a bare number or a menu index, and
   // every bind path re-checks the live graph before it binds.
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
@@ -1216,6 +1235,7 @@ export const CONFIRMATION_EXPECTING_ACTION_TYPES: ReadonlySet<PendingActionKind>
  *     (wall-clock only, documented there).
  */
 export function isPendingActionExpired(pa: PendingAction, nowMs: number): boolean {
+  if (pa.action.kind === 'reconcile_goal_scope') return false;
   const expiresMs = Date.parse(pa.expires_at_iso);
   if (!Number.isFinite(expiresMs)) return true;
   if (nowMs > expiresMs) return true;
@@ -1250,6 +1270,8 @@ export type ElicitTargetBaselinePending = PendingAction & {
  * the elliptical carry must refuse.
  */
 export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
+  elicit_goal_current_level: false, // Agent-only: requires units or a recorded figure confirmation.
+  reconcile_goal_scope: false, // only the scoped answer gate may bind this question
   // The asks whose natural answer IS a bare number, or a bare menu index.
   // "What does this option cost?" -> "95000" / "£95,000". TRUE so a lone
   // numeric reply is CLAIMED rather than falling through to the edit lane.
@@ -1513,6 +1535,19 @@ export function parsePendingAction(input: unknown): PendingAction | null {
   const a = action as Record<string, unknown>;
   if (typeof a.kind !== 'string') return null;
   if (!RESUMABLE_ACTION_TYPES.has(a.kind as PendingActionKind)) return null;
+  if (a.kind === 'elicit_goal_current_level') {
+    const bounded = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+    if (!bounded(a.goal_id, 200) || !bounded(a.goal_label, 500) || !bounded(a.question, 400)) return null;
+    if (a.user_id !== null && !bounded(a.user_id, 200)) return null;
+    if (a.goal_unit !== undefined && !bounded(a.goal_unit, 64)) return null;
+    if (a.figures !== undefined && (!Array.isArray(a.figures) || a.figures.length === 0 || a.figures.length > 8
+      || !a.figures.every((f) => bounded(f, 100)))) return null;
+    if (a.confirmation !== undefined && (a.confirmation !== 'choice' && a.confirmation !== 'figure')) return null;
+    if (a.figure_quote !== undefined && !bounded(a.figure_quote, 2000)) return null;
+    if (a.figures !== undefined && (typeof a.figure_quote !== 'string' || !a.figures.every((f: string) => (a.figure_quote as string).includes(f)))) return null;
+    if (a.confirmation !== undefined && a.figures === undefined) return null;
+  }
+  if (a.kind === 'reconcile_goal_scope' && !GoalScopeReconciliationSchema.safeParse(a).success) return null;
   if (a.kind === 'set_factor_value') {
     if (typeof a.factor_id !== 'string') return null;
     if (typeof a.value !== 'number') return null;

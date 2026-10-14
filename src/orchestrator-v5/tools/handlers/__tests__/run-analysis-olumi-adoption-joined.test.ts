@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * Approved Olumi option: the stored graph is the Run input and the next cold
  * analysis read selects the rerun. Only the external PLoT calculation is stubbed.
@@ -52,7 +53,8 @@ function invocation(turnId: string): HandlerInvocation {
 
 describe('approved Olumi option joins Run, stored fact and cold read', () => {
   it('keeps the option and levels, makes the old Run stale, then reopens the rerun as current', async () => {
-    let graph = structuredClone(served.graph);
+    // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+    let graph = legacyDoorGraph(served.graph);
     // Supply the existing £49 baseline explicitly so two distinct user-side
     // comparisons survive; the unadopted £54 suggestion must then be left out.
     graph.nodes.find((n: Rec) => n.id === 'keep_current_price')!.interventions = {
@@ -155,7 +157,14 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
       computed_against_hash: second.result.graph_hash_at_run,
       leading_option_id: null,
       enrichment: {
-        inference_warnings: [{ code: 'GOAL_FIGURES_PRODUCT_NOT_READ' }],
+        // The goal holds the brief's 12 months and no limit is a duration, so the Run also carries A7 as its typed
+        // warning, and the COLD READ returns it: the stored fact keeps it. Contract rule: "staging's chance-free horizon
+        // sentence when no cell shows a chance" — the product-not-read withhold leaves no figure/range cell here.
+        inference_warnings: [
+          { code: 'GOAL_FIGURES_PRODUCT_NOT_READ' },
+          { code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
+            message: 'This model doesn\'t yet say whether any option gets there within 12 months.' },
+        ],
       },
     });
     expect((reopened.analysis_result as Rec).win_probabilities).toBeUndefined();
@@ -163,4 +172,9 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
       .toContain(option.id);
     expect(first.result.graph_hash_at_run).not.toBe(second.result.graph_hash_at_run);
   });
+});
+
+it('Science 393023: the unchanged served adoption seed has two newly unsized links', async () => {
+  const { isPlaceholderLink } = await import('../../../../cee/magnitude/link-sizing.js');
+  expect(served.graph.edges.filter((e: Rec) => isPlaceholderLink(e)).map((e: Rec) => `${e.from}->${e.to}`).sort()).toEqual(['monthly_churn->paying_subscribers', 'pro_plan_price->mrr']);
 });

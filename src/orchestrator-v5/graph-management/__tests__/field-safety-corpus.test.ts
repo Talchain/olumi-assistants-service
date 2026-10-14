@@ -31,7 +31,7 @@ import {
   ALLOWED_OBSERVED_SUBKEYS,
 } from '../field-safety.js';
 import { refereeMutation } from '../referee.js';
-import { FIELD_NOT_ALLOWED, PIPELINE_OWNED_FIELD } from '../reason-codes.js';
+import { FIELD_NOT_ALLOWED, PIPELINE_OWNED_FIELD, STRUCTURAL_APPLY_HELD } from '../reason-codes.js';
 import { buildReadyGraph, frameFor, hashOf, makeEnvelope } from './fixtures.js';
 
 const G = buildReadyGraph();
@@ -81,6 +81,9 @@ function addNode(screened: Record<string, unknown>) {
  * and edge declarations and in the referee's own owned list, read at the bytes.
  */
 const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
+  // event_risk.v1 slice 2a: pipeline-owned occurrence.
+  'event_risk',
+  'relies_on', // RC3: server-authored precondition stamp.
   // src/schemas/cee-v3.ts — NodeV3
   'provenance',
   'extractiontype',
@@ -107,6 +110,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
     const local = new Set<string>(OWNED_NAMES_REACHABLE_IN_THIS_REPO);
     const extra = [...PIPELINE_OWNED_ROOTS].filter((k) => !local.has(k)).sort();
     expect(extra).toEqual([
+      // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority — CEE-owned; no producer may add it.
+      'analysis_participation',
       'beliefexistssource',
       'directionsource',
       // G1 (27 Sep): the goal's stated direction and deadline — CEE-owned; construction writes them from the brief.
@@ -114,12 +119,24 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
+      'goal_horizon_reference_date',
+      'goal_horizon_stated_months',
       // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level — construction only.
       'goal_level_reading',
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
+      'goal_scope',
       'goal_sense_reading',
+      'goal_stock_reading',
+      // Batch C: ruling 4 — the target's stated basis (reference, denominator, period, effect unit) — construction only.
+      'goal_target_basis',
+      // S4 §(ad): the horizon basis stamps are CEE-owned.
+      'horizon_basis',
+      'horizon_basis_months',
+      'horizon_basis_source',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
+      'option_status',
+      'proposed_by',
       'starterid',
       'startertitle',
       'strengthstdsource',
@@ -130,7 +147,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
 });
 
 // ---------------------------------------------------------------------------
-// B. THE SIX SMUGGLE NAMES, SPELLED OUT BY HAND
+// B. THE 27 SMUGGLE NAMES, SPELLED OUT BY HAND
 // ---------------------------------------------------------------------------
 
 /**
@@ -143,7 +160,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
  * — a STAMP (whose existence claim this is), so stripping it from an add is right.
  * A6f (AIQ N1 on #2096) adds an eighth, `std_defaulted` — the same stamp for the spread.
  */
-const SIX_SMUGGLE_NAMES = [
+const SMUGGLE_NAMES = [
   'provenance',
   'provenance_display',
   'validation',
@@ -152,24 +169,39 @@ const SIX_SMUGGLE_NAMES = [
   'std_defaulted',
   'origin',
   'extractiontype',
-  // Nine since the writer audit (2026-09-27): the saved-example stamps joined the CEE-owned roots.
+  // Eleven since the writer audit (2026-09-27): the saved-example stamps joined the CEE-owned roots.
   'starterid',
   'startertitle',
   'interventionkeys',
   // G1 (27 Sep): the goal's stated direction and deadline joined the CEE-owned roots.
   'goal_direction',
   'goal_horizon_months',
+  'goal_horizon_reference_date',
+  'goal_horizon_stated_months',
+  'goal_stock_reading',
   // PJ-E-A2 part 2 (28 Sep): the deadline in the brief's own words — the same G1 class.
   'goal_deadline_as_stated',
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
+  'goal_scope',
   'goal_sense_reading',
+  // S4 §(ad): the horizon basis stamps are CEE-owned.
+  'horizon_basis',
+  'horizon_basis_source',
+  'horizon_basis_months',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
+  // Batch C: ruling 4 — the target's stated basis, written only by construction (`admitGoalTargetBasis`).
+  'goal_target_basis',
+  // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).
+  'proposed_by',
+  'option_status',
+  'analysis_participation',
+  'relies_on',
 ] as const;
 
-describe('corpus B — the six (now eight) smuggle names, hand-written', () => {
+describe('corpus B — the 27 smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
-    for (const name of SIX_SMUGGLE_NAMES) {
+    for (const name of SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);
       expect(INTERVENTION_CONTRACT_KEYS.has(name), `${name} must not be a contract key`).toBe(false);
     }
@@ -179,10 +211,10 @@ describe('corpus B — the six (now eight) smuggle names, hand-written', () => {
     const derived = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
       .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
       .sort();
-    expect(derived).toEqual([...SIX_SMUGGLE_NAMES].sort());
+    expect(derived).toEqual([...SMUGGLE_NAMES].sort());
   });
 
-  for (const name of SIX_SMUGGLE_NAMES) {
+  for (const name of SMUGGLE_NAMES) {
     it(`\`${name}\`: dies at the bare spelling, the nested spelling, and inside interventions`, () => {
       expect(nodeUpdate(name, 'x').blocker?.code, 'bare').toBe(PIPELINE_OWNED_FIELD);
       expect(nodeUpdate('prior', { [name]: 'x' }).blocker?.code, 'nested payload').toBe(
@@ -332,5 +364,68 @@ describe('corpus D — hand-written attack spellings, every one refused', () => 
   it('deferred_derivation is refused with its own class, not silently granted', () => {
     const code = edgeUpdate('confidence', 'high').blocker?.code;
     expect(code).toBe(FIELD_NOT_ALLOWED);
+  });
+});
+
+
+describe('range consent belongs to the dedicated approval, not the generic field screen', () => {
+  const range = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
+  it.each([
+    ['interventions', { 'f-spend': { value: 0.25, range } }],
+    ['data/interventions/f-spend', { value: 0.25, range }],
+    ['data/interventions/f-spend/range', range],
+  ])('a generic field write cannot introduce a range: %s', (field, payload) => {
+    expect(nodeUpdate(field, payload).blocker?.code).toBe(FIELD_NOT_ALLOWED);
+  });
+  it('a generic node add cannot smuggle a range', () => {
+    expect(addNode({ interventions: { 'f-spend': { value: 0.25, range } } }).blocker?.code).toBe(FIELD_NOT_ALLOWED);
+  });
+});
+
+describe('B3 gap fields stay outside generic mutation permission', () => {
+  for (const field of ['unresolved_targets', 'user_questions']) {
+    it(`${field}: a generic field write is refused`, () => {
+      expect(REFUSALS.has(nodeUpdate(field, []).blocker?.code ?? '')).toBe(true);
+    });
+    it(`${field}: a fresh-node declaration is structurally held, never auto-applied`, () => {
+      // Construction has no existing sibling to desynchronise: the documented
+      // add path is held by structural permission, not the update allowlist.
+      const before = structuredClone(G);
+      const verdict = addNode({ [field]: [] });
+      expect(verdict.verdict).toBe('held');
+      expect(verdict.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
+      expect(G).toEqual(before);
+    });
+    it(`${field}: a gap field cannot become an editable container`, () => {
+      expect(REFUSALS.has(nodeUpdate(`${field}/0`, 'replacement').blocker?.code ?? '')).toBe(true);
+    });
+  }
+});
+
+
+describe('event_risk.v1 slice 2a — field safety', () => {
+  it('2a-field-safety: update_node and add_node cannot author event_risk', () => {
+    const block = { version: 1, occurrence: { p_low: 0.1, p_high: 0.3, basis: 'user' }, horizon: { months: 6 } };
+    expect(PIPELINE_OWNED_ROOTS.has('event_risk')).toBe(true);
+    expect(nodeUpdate('event_risk', block).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+    expect(addNode({ event_risk: block }).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+  });
+});
+
+
+describe('S4 temporal authority cannot be forged by an AI mutation', () => {
+  it('R2: add_node and patch refuse a one-off reading, forged reference and forged stated duration', () => {
+    for (const [field, value] of [
+      ['goal_stock_reading', 'one_off'],
+      ['goal_horizon_reference_date', '2020-01-01'],
+      ['goal_horizon_stated_months', 99],
+      // Batch C: ruling 4 — a forged target basis would license a change goal's chance; only construction writes it.
+      ['goal_target_basis', { quantity_frame: 'change', target_frame: 'change_abs', target_raw: 10, reference: 'today',
+        denominator: 'forged', period_months: 3, period_kind: 'at_end', effect_unit: '%', effects_at_period_end: true,
+        source: 'olumi_reading' }],
+    ] as const) {
+      expect(addNode({ [field]: value }).blocker?.code, `${field} add`).toBe(PIPELINE_OWNED_FIELD);
+      expect(nodeUpdate(field, value).blocker?.code, `${field} patch`).toBe(PIPELINE_OWNED_FIELD);
+    }
   });
 });

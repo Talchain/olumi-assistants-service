@@ -62,6 +62,8 @@
  *   | the goal node holds  | sent                          | provenance              |
  *   |----------------------|-------------------------------|-------------------------|
  *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
+ *   | `'<='` or `'<'` beside a target TYPED as a LEVEL (RT-10, below), in any unit, with or without today's level | `'minimise'` | `stated_comparator` |
+ *   | `'<='` or `'<'` beside its own limit row on the goal (the approved card's pair, RT-10 B′) | `'minimise'` | `stated_comparator` |
  *   | no proven ceiling; Olumi's `goal_sense_reading` of a NEGATIVE typed change ("cut by 20%") | `'minimise'` | `typed_change_sign` |
  *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
@@ -72,11 +74,21 @@
  * 20 % reduction", would otherwise be attested a false maximiser, MG 5871403407).
  * `maximise` is still never sent — the one-sided argument above is unchanged. A held floor (and an unproven ceiling)
  * reads exactly as base — the label classifier (DL E13, 5872375159); the held floor's own sense belongs to S4.
+ *
+ * ⛔ RT-10 (red team #87 5992802436 / 5992853052, staging AND production; Science ruling (1), 5 Oct): "Get monthly churn
+ * below 2%" holds `'<'` beside 2 `%` on a target the drafter TYPED `level`, and the S1 proof above can never pass for it
+ * (a percent target; no current level stated), so nothing was sent and ISL ranked the option that MAXIMISES churn
+ * first. S1 waited "until S4 types the frame": the frame is typed now (the drafter must state it, `build-model.ts`), so
+ * a held ceiling beside a held target typed `level` IS the user's sense, in any unit, whether or not today's level is
+ * known. The sense is the comparator's; today's level matters only to the goal chance, which keeps its own gates
+ * (admission, `target-testability.ts`). A target unit that itself names a change ("% reduction", a pre-R1 draft whose
+ * frame defaulted to `level`) is still no level: nothing is sent for it.
  */
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
-import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import { readGoalRecord } from './goal-record.js';
+import { isPersonsOwnValue } from '../../cee/provenance/provenance-of.js';
 
 /** The only sense this module will ever put on the wire. */
 export type EmittedGoalDirection = 'minimise';
@@ -117,18 +129,16 @@ export function readGoalLabel(graph: unknown, goalNodeId: unknown): string | nul
 }
 
 /**
- * The comparator the USER stated for the goal's target, as held on the goal node (`goal_direction`: written by
+ * The comparator the USER stated for the goal's target, as held on the goal node (written by
  * construction's `holdStatedGoalAttributes`, and by the user's approved goal target card, DR row 1), or `null` when
  * none is held. A value outside the stored four is not a held comparator.
  */
 export function readHeldGoalComparator(graph: unknown, goalNodeId: unknown): HeldComparator | null {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return null;
-  for (const node of readNodes(graph)) {
-    if (node.id !== goalNodeId) continue;
-    const held = node.goal_direction;
-    return typeof held === 'string' && HELD_COMPARATORS.includes(held) ? (held as HeldComparator) : null;
-  }
-  return null;
+  const record = readGoalRecord(graph, goalNodeId);
+  const held = record?.target?.comparator;
+  return record?.target?.comparator_source === 'goal_direction'
+    && typeof held === 'string' && HELD_COMPARATORS.includes(held) ? (held as HeldComparator) : null;
 }
 
 /**
@@ -163,9 +173,55 @@ function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): bo
   // proven a level here: nothing is sent.
   if (!ceilingTargetUnitMayBeALevel(targetUnit)) return false;
   // The user's own figure: stated in the brief (`brief_extraction`) or given in chat and approved (`USER_EDIT_SOURCE`).
-  return (level.source === 'brief_extraction' || level.source === USER_EDIT_SOURCE)
+  // ONE PROVENANCE AUTHORITY: the person's own figure (`isPersonsOwnValue`), never a confirmation of Olumi's.
+  return isPersonsOwnValue(level)
     && typeof level.raw_value === 'number' && Number.isFinite(level.raw_value)
     && targetUnit !== null && unit(level.unit) === targetUnit;
+}
+
+/**
+ * A target unit that makes the figure a CHANGE from today: a change noun ON a percent, points or money figure ("%
+ * reduction", "percentage point increase", "£k cut"), not a level. Counted events keep their noun ("falls per month",
+ * "power cuts per month": Codex buddy P1 on #2585), so the noun alone never decides.
+ */
+const CHANGE_UNIT = /(?:%|\bper\s?cent(?:age)?(?:\s+points?)?|\bpp\b|\bpoints?\b|[£$€]\S*)\s*(?:reductions?|decreases?|cuts?|drops?|declines?|falls?|increases?|rises?|growth|uplifts?|changes?|savings?)\b/i;
+
+/**
+ * ⭐ RT-10 (Science ruling (1), 5 Oct): the goal holds a target figure (`goal_threshold_raw`) TYPED as a level
+ * (`goal_threshold_frame` `'level'`, which the drafter must state), in a unit that does not itself name a change. Beside
+ * a held ceiling that is the user's own sense, in any unit (percent included), with or without today's level: since
+ * #2585 construction holds a ceiling on a level only where the brief WRITES that figure as one
+ * (`ceilingTheUserWroteFor`, `stated-by-user.ts`), so the drafter's own comparator never reaches here.
+ */
+function heldTargetIsATypedLevel(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  if (node?.goal_threshold_frame !== 'level') return false;
+  const raw = node.goal_threshold_raw;
+  const unit = node.goal_threshold_unit;
+  return typeof raw === 'number' && Number.isFinite(raw) && !(typeof unit === 'string' && CHANGE_UNIT.test(unit));
+}
+
+/**
+ * ⭐ RT-10 B′ (Science 5 Oct Q1; DL ruling): the goal holds a ceiling BESIDE ITS OWN LIMIT ROW on the goal — a
+ * `goal_constraints` row on the goal node that states the same comparator (`<=`, or `<` as `operator_as_stated`), on a
+ * level (`value_frame` `level` or absent, never a change). The approved goal target card writes exactly that pair
+ * (`add-constraint.ts`: an approved "at most" holds the ceiling and keeps the row), so "If lower is better, tell me and
+ * I'll re-order" re-orders even where the goal holds no target figure of its own.
+ */
+function heldCeilingBesideItsLimitRow(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const held = readHeldGoalComparator(graph, goalNodeId);
+  if (held !== '<' && held !== '<=') return false;
+  const rows = graph !== null && typeof graph === 'object' ? (graph as Record<string, unknown>).goal_constraints : undefined;
+  if (!Array.isArray(rows)) return false;
+  return rows.some((r) => {
+    if (r === null || typeof r !== 'object') return false;
+    const row = r as Record<string, unknown>;
+    if (row.node_id !== goalNodeId || row.operator !== '<=') return false;
+    if (row.value_frame !== undefined && row.value_frame !== 'level') return false;
+    return (row.operator_as_stated === '<' ? '<' : '<=') === held;
+  });
 }
 
 /** R1 S4-core: the goal's target is typed as a change from today (`goal_threshold_frame` `change_abs` | `change_rel`). */
@@ -241,6 +297,13 @@ export function resolveGoalDirection(
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) {
     return { direction: 'minimise', provenance: 'stated_comparator' };
   }
+  // ⛔ RT-10 (Science ruling (1)): a held ceiling beside a target TYPED as a level is the user's sense in any unit, with
+  // or without today's level ("monthly churn below 2%" was ranked by the LARGEST churn).
+  if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && heldTargetIsATypedLevel(graph, goalNodeId)) {
+    return { direction: 'minimise', provenance: 'stated_comparator' };
+  }
+  // ⭐ RT-10 B′: a held ceiling beside its own limit row on the goal (the approved card's pair) — no target figure needed.
+  if (heldCeilingBesideItsLimitRow(graph, goalNodeId)) return { direction: 'minimise', provenance: 'stated_comparator' };
   // ⭐ R1 S4-core: a target TYPED as a change from today ("cut by 15%" → `change_rel` −0.15, held `<=`) needs no level
   // proof — the frame is the proof S1 waited for. Its held ceiling is its direction; a held floor stays today's maximiser.
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && goalTargetIsATypedChange(graph, goalNodeId)) {
@@ -290,7 +353,11 @@ export function resolveGoalThresholdStrict(graph: unknown, goalNodeId: unknown):
   const node = readNodes(graph).find((n) => n.id === goalNodeId);
   const threshold = node?.goal_threshold;
   if (typeof threshold !== 'number' || !Number.isFinite(threshold)) return false;
-  return heldStrictFloorIsScoredStrictly(readHeldGoalComparator(graph, goalNodeId), readGoalLabel(graph, goalNodeId));
+  const held = readHeldGoalComparator(graph, goalNodeId);
+  // ⭐ D3 step 1 (Science #87 6005138341 (4)): a held STRICT ceiling ("below 400") on a run that minimises is scored
+  // strictly too — ISL counts a draw AT the threshold as met unless `goal_threshold_strict` (ISL #209, either direction).
+  if (held === '<') return resolveGoalDirection(graph, goalNodeId)?.direction === 'minimise';
+  return heldStrictFloorIsScoredStrictly(held, readGoalLabel(graph, goalNodeId));
 }
 
 /** The label classifier alone: `'minimise'` when the goal label attests a REDUCE aim, otherwise `undefined`. */

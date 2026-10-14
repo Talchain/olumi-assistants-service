@@ -1,0 +1,8 @@
+src/orchestrator-v5/admission/__tests__/accumulation-chance-credit.test.ts
+src/orchestrator-v5/agent-lane/__tests__/accumulation-identity-build.test.ts
+src/orchestrator-v5/agent-lane/__tests__/accumulation-product-reconciliation.test.ts
+src/orchestrator-v5/agent-lane/__tests__/fixtures/accumulation-live2-head.json
+src/orchestrator-v5/agent-lane/__tests__/fixtures/accumulation-pilot-head.json
+src/orchestrator-v5/agent-lane/__tests__/zero-spread-certainty.test.ts
+src/orchestrator-v5/agent-lane/accumulation-identity.ts
+tests/unit/agent-lane/accumulation-identity.test.ts

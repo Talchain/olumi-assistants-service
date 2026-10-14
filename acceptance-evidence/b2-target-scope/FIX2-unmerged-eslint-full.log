@@ -1,0 +1,10 @@
+
+/private/tmp/accel-er-b2scope-cee/src/cee/provenance/__tests__/fixtures/trace-captures.ts
+  25:1  warning  Unused eslint-disable directive (no problems were reported)
+
+/private/tmp/accel-er-b2scope-cee/src/orchestrator-v5/tools/handlers/analysable-option-gate.ts
+  545:5  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+✖ 2 problems (0 errors, 2 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+

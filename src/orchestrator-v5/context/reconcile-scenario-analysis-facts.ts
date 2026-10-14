@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 /**
  * Reconcile the ordinary bounded turn-window facts with one uncached,
  * scenario-scoped read of the durable `run_analysis` fact set.
@@ -34,6 +35,7 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import type {
   HandlerFactWithTurn,
   IdentifiedHandlerFact,
+  LegacyAnalysisEditFacts,
 } from '../types/handler-fact.js';
 
 /** Sole bounded scenario-history wall for model-facing analysis authority. */
@@ -50,11 +52,12 @@ export type ScenarioAnalysisFactSetStatus =
 
 export type ScenarioAnalysisFactSetDegradedReason =
   | 'durable_unavailable'
+  | 'durable_read_failed'
   | 'durable_contract_invalid'
   | 'snapshot_conflict'
   | 'hot_window_contract_invalid';
 
-export type ScenarioAnalysisFactSet =
+export type ScenarioAnalysisFactSet = { readonly legacy_edit_facts?: LegacyAnalysisEditFacts } & (
   | {
       readonly status: 'complete';
       readonly source: 'scenario';
@@ -77,7 +80,7 @@ export type ScenarioAnalysisFactSet =
       readonly facts: readonly [];
       readonly reason: ScenarioAnalysisFactSetDegradedReason;
       readonly total_count?: number;
-    };
+    });
 
 // Context carriers are process-local and ephemeral. Nominally attest the exact
 // object returned by this authority boundary so a legacy/direct caller cannot
@@ -183,10 +186,11 @@ export type DurableScenarioAnalysisFactRead =
       readonly query_limit: number;
       readonly total_count: number;
       readonly facts: readonly IdentifiedHandlerFact[];
+      readonly legacy_edit_facts?: LegacyAnalysisEditFacts;
     }
   | {
       readonly status: 'degraded';
-      readonly reason: 'unavailable' | 'contract_invalid';
+      readonly reason: 'unavailable' | 'contract_invalid' | 'read_failed';
     };
 
 export interface ReconcileScenarioAnalysisFactsInput {
@@ -260,17 +264,19 @@ export function reconcileScenarioAnalysisFacts(
       return freezeCapped(
         // Contract validation proves a capped page has exactly LOOKAHEAD rows,
         // sorted newest-first. The window is the newest CAP of them.
-        durableContract.map((entry) => entry.fact),
+        durableContract,
         durable.total_count,
         input.scenarioId,
+        validateLegacyEditFacts(durable.legacy_edit_facts),
       );
     }
 
     return freezeComplete(
-      durableContract.map((entry) => entry.fact),
+      durableContract,
       'scenario',
       durable.total_count,
       input.scenarioId,
+      validateLegacyEditFacts(durable.legacy_edit_facts),
     );
   }
 
@@ -278,7 +284,8 @@ export function reconcileScenarioAnalysisFacts(
     return degraded('durable_contract_invalid', input.scenarioId);
   }
 
-  return degraded('durable_unavailable', input.scenarioId);
+  return degraded(durable?.status === 'degraded' && durable.reason === 'read_failed'
+    ? 'durable_read_failed' : 'durable_unavailable', input.scenarioId);
 }
 
 function stableFactKey(fact: HandlerFact): string | null {
@@ -477,6 +484,7 @@ function parseIdentifiedRunAnalysisFact(
     fact,
     fact_row_id: factRowId,
     fact_created_at: factCreatedAt,
+    evaluated_scenario_revision: validatedScenarioRevision(record.evaluated_scenario_revision),
   });
 }
 
@@ -582,13 +590,18 @@ function parseEligibleRunAnalysisFact(
 }
 
 function freezeComplete(
-  facts: readonly HandlerFact[],
+  facts: readonly IdentifiedHandlerFact[],
   source: 'scenario',
   totalCount: number,
   scenarioId: string,
+  legacyEdits?: LegacyAnalysisEditFacts,
 ): ScenarioAnalysisFactSet {
   const immutableFacts = Object.freeze(
-    facts.map((fact) => cloneAndFreezeJson(fact)),
+    facts.map((entry) => {
+      const fact = cloneAndFreezeJson(entry.fact);
+      bindRunAnalysisOccurrence({ ...entry, fact });
+      return fact;
+    }),
   );
   return attestReconciled(
     Object.freeze({
@@ -596,6 +609,7 @@ function freezeComplete(
       source,
       facts: immutableFacts,
       total_count: totalCount,
+      ...(legacyEdits === undefined ? {} : { legacy_edit_facts: legacyEdits }),
     }),
     scenarioId,
     immutableFacts[0] ?? null,
@@ -611,20 +625,26 @@ function freezeComplete(
  * shape as `reconcile-recent-mutation-facts.ts` `freezeResult`.
  */
 function freezeCapped(
-  facts: readonly HandlerFact[],
+  facts: readonly IdentifiedHandlerFact[],
   totalCount: number,
   scenarioId: string,
+  legacyEdits?: LegacyAnalysisEditFacts,
 ): ScenarioAnalysisFactSet {
   const immutableFacts = Object.freeze(
     facts
       .slice(0, SCENARIO_ANALYSIS_FACT_CAP)
-      .map((fact) => cloneAndFreezeJson(fact)),
+      .map((entry) => {
+      const fact = cloneAndFreezeJson(entry.fact);
+      bindRunAnalysisOccurrence({ ...entry, fact });
+      return fact;
+    }),
   );
   return attestReconciled(
     Object.freeze({
       status: 'capped',
       facts: immutableFacts,
       total_count: totalCount,
+      ...(legacyEdits === undefined ? {} : { legacy_edit_facts: legacyEdits }),
     }),
     scenarioId,
     // The same frozen clone the window exposes — claim safety and reasoning
@@ -680,4 +700,33 @@ function cloneAndFreezeJson<T>(value: T): T {
     clone[key] = cloneAndFreezeJson(entry);
   }
   return Object.freeze(clone) as T;
+}
+
+function validateLegacyEditFacts(read: LegacyAnalysisEditFacts | undefined): LegacyAnalysisEditFacts | undefined {
+  if (read === undefined) return undefined; // Compatibility for legacy test stores; production always supplies this for an unstamped Run.
+  const failed: LegacyAnalysisEditFacts = { since: null, facts: [], readOk: false, total_count: null };
+  if (read === null || typeof read !== 'object' || typeof read.since !== 'string'
+    || isoInstantOrderKey(read.since) === null || !Array.isArray(read.facts)
+    || !Number.isSafeInteger(read.total_count) || read.total_count === null || read.total_count < 0
+    || read.facts.length > SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT) return failed;
+  const ids = new Set<string>();
+  for (const entry of read.facts) {
+    const parsed = HandlerFactSchema.safeParse(entry?.fact);
+    if (!parsed.success || parsed.data.fact_type !== 'edit_graph' || parsed.data.noop !== false
+      || parsed.data.result.status !== 'applied' || parsed.data.result.rerun_recommended !== true
+      || typeof entry.fact_row_id !== 'string' || entry.fact_row_id === '' || ids.has(entry.fact_row_id)
+      || typeof entry.fact_created_at !== 'string' || isoInstantOrderKey(entry.fact_created_at) === null
+      || isoInstantOrderKey(entry.fact_created_at)! <= isoInstantOrderKey(read.since)!) return failed;
+    ids.add(entry.fact_row_id);
+  }
+  return cloneAndFreezeJson({ ...read, readOk: read.readOk === true && read.total_count === read.facts.length });
+}
+
+/** A failed Run-history read cannot prove there were no later legacy clearance facts. */
+export function legacyEditFactsForFreshness(value: ScenarioAnalysisFactSet | undefined): LegacyAnalysisEditFacts | undefined {
+  // Omitted legacy test-store ports retain their established hot-window contract.
+  // Production supplies the port; an attempted failed/corrupt read always fails weak.
+  return value?.status === 'degraded' && value.reason !== 'durable_unavailable'
+    ? { since: null, facts: [], readOk: false, total_count: null }
+    : value?.legacy_edit_facts;
 }

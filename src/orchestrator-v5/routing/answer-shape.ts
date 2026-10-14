@@ -355,6 +355,40 @@ function splitFirstSentence(text: string): { headline: string; remainder: string
 }
 
 const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
+/** The text of one synthesiser bullet line (`- point`), or null when the line is not a bullet. Same rule as synthesis. */
+export function synthBulletLineText(line: string): string | null {
+  const m = SYNTH_BULLET_LINE.exec(line);
+  return m === null ? null : m[1];
+}
+
+/** A narrator copy in any spacing must not survive beside the host's one copy. */
+export function withoutSentenceCopies(text: string, sentence: string): string {
+  const trimmed = sentence.trim();
+  if (trimmed.length === 0) return text.trim();
+  const pattern = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[^\\S\\n]+');
+  // The anchored capture identifies a whole bullet; the other branch removes inline copies.
+  const copies = new RegExp(`(^${pattern}$)|${pattern}`, 'g');
+  const lines: string[] = [];
+  for (const line of text.split('\n')) {
+    const bullet = synthBulletLineText(line);
+    copies.lastIndex = 0;
+    if (bullet !== null && copies.exec(bullet.trim())?.[1] !== undefined) continue;
+    copies.lastIndex = 0;
+    if (!copies.test(line)) {
+      lines.push(line);
+      continue;
+    }
+    let cleaned = line;
+    do {
+      copies.lastIndex = 0;
+      cleaned = cleaned.replace(copies, ' ').replace(/[^\S\n]+/g, ' ');
+      copies.lastIndex = 0;
+    } while (copies.test(cleaned));
+    cleaned = cleaned.trimEnd();
+    if (cleaned.length > 0) lines.push(cleaned);
+  }
+  return lines.join('\n').trim();
+}
 
 /**
  * A bullet belongs to the SECTION HEADING immediately above it, and hoisting

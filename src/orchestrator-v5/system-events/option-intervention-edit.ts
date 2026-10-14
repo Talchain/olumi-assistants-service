@@ -1,8 +1,12 @@
+import { proposedFrameForLevels, levelOnFinalFrame, preserveSiblingQuantities, type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
+import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
+import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
+import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
 import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { z } from 'zod';
-import { InterventionV3, TargetMatch } from '../../schemas/cee-v3.js';
+import { InterventionV3, NodeV3, TargetMatch } from '../../schemas/cee-v3.js';
 
 /**
  * ⭐⭐ WHAT THIS WRITER NEEDS TO READ OFF AN EXISTING ENTRY — deliberately NOT
@@ -58,17 +62,23 @@ import type { PatchOperation } from '../../orchestrator/types.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { identityConfirmBaseIsWritable, isEditableGraph, type EditableGraph } from './editable-graph.js';
 import { commitDirectAnswer } from '../commit.js';
+import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { useAppendV6 } from '../append-v6-flag.js';
+import { isRevisionConflict, rethrowRevisionConflict } from '../graph-revision-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { buildOptionEffectRawOperation, linkedFactorsOf, formatOptionEffectWriteAck, readCommittedOptionEffect } from '../routing/option-effect-write.js';
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
 import { buildEditGraphHandlerFact } from '../handlers/edit-graph-fact-builder.js';
 import { evaluateEditGraphMutations } from '../handlers/edit-graph-referee-gate.js';
+import { evaluateFrameGate } from '../graph-management/frame-gate.js';
 import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { interventionKeysFollowInterventions } from '../reindex-intervention-keys.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
+import { applyOptionGapDeclarations, optionGapFields, optionGapCardWords, optionGapsHeld,
+  optionGapPostimageIsScoped, optionGapOperands, parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
 import { factorUnitOf } from '../agent-lane/unit-conflict.js';
@@ -78,9 +88,20 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
-import { applyLinkEffectEdit, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
+import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-reading.js';
+import { isDirectedEdge } from '../../schemas/graph.js';
+import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
+import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady, type HorizonBasisWrite } from '../goal-target/goal-steady-write.js';
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import { deadlineGoalStillBound } from '../agent-lane/proposal-object/still-applies.js';
+import { applyGoalReadingEdit, goalReadingPostimageIsScoped, type ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
+import { applyRiskOccurrenceEdit, riskOccurrencePostimageIsScoped, type ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
+import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -101,12 +122,16 @@ export interface OptionInterventionEditInput {
    * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
    */
   readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  /** Canvas edits may derive display coordinates; explicit approval batches may not. */
+  readonly inferFactorFigure?: boolean;
   /**
    * ⭐ THE USER'S FIGURE, KEPT ON THE CELL (AI Conversation #70 5848429576): the level as they gave it and the range it
    * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
    * bare model number and the figure is unrecoverable. It must normalise to `modelValue` exactly, or nothing is written.
    */
-  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number };
+  readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
+    /** TEMPORAL: the user's likely range for this level, raw units (`intervention-range.ts` gates it at persist). */
+    readonly likely_range?: { readonly low: number; readonly high: number } };
 }
 
 /** Internal server invocation only: no member is added to the .50 wire union. */
@@ -171,6 +196,9 @@ export function optionInterventionBatchPostimageIsScoped(
     const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
     if (!entry.success || entry.data.value !== target.modelValue
       || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
+    const approved = target.figure?.likely_range;
+    if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
+      { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
     const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
     if (oldNode.interventions === undefined) {
       // A new container may hold only this batch's cells, never unrelated invented cells (checked once all are removed).
@@ -244,9 +272,9 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
   | OptionInterventionCandidate
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
-  const { optionId, factorId, modelValue, source, ...rest } = input;
+  const { optionId, factorId, modelValue, source, figure, ...rest } = input;
   const result = applyOptionInterventionBatch({ ...rest,
-    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}) }] });
+    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}), ...(figure !== undefined ? { figure } : {}) }] });
   return result.kind === 'refused' ? { kind: 'refused', reason: result.reason } : result;
 }
 
@@ -268,7 +296,7 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
   const linkOps: { readonly operation: Record<string, unknown>; readonly target: OptionLevelTarget }[] = [];
   for (let i = 0; i < input.targets.length; i += 1) {
     const target = input.targets[i]!;
-    const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph,
+    const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph, inferFactorFigure: input.inferFactorFigure,
       optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
       expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}),
       ...(target.figure !== undefined ? { figure: target.figure } : {}) });
@@ -300,8 +328,14 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
       const t = linkOps[i]!.target;
       if (operations[i]?.op !== 'add_edge' || operations[i]?.path !== `${t.optionId}::${t.factorId}`) return refuse('operation_invalid');
     }
-    const levelOperations = operations.slice(linkOps.length);
-    const decision = evaluateEditGraphMutations({ mode: 'live', operations: levelOperations,
+    // Range is not a generic tunable field. Its authority is THIS dedicated approved target, constructed by
+    // prepareOptionInterventionEdit and checked in the postimage; referee the ordinary level fields only.
+    const refereeLevels = parseEditGraphResponse(JSON.stringify({ operations: levelOps.map(op => {
+      const value = { ...(op.value as Record<string, unknown>) };
+      delete value.range;
+      return { ...op, value };
+    }), removed_edges: [], warnings: [], coaching: null })).operations;
+    const decision = evaluateEditGraphMutations({ mode: 'live', operations: refereeLevels,
       currentGraph: before, currentGraphHash: input.expectedGraphHash,
       baseGraphHash: input.expectedGraphHash, freshness: input.freshness,
       scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
@@ -483,9 +517,10 @@ async function applyApprovedFactorValues(
     const os = (node.observed_state ?? {}) as Record<string, unknown>;
     const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
     // Only a bare amount with no range of its own: a factor that already declares one is never re-read on another.
-    if (typeof raw !== 'number' || !Number.isFinite(raw) || typeof os.cap === 'number'
+    if ((raw !== undefined && (typeof raw !== 'number' || !Number.isFinite(raw))) || typeof os.cap === 'number'
       || (typeof node.scale_frame === 'number' && node.scale_frame > 1)) return refuseFrame('frame_not_applicable', i);
-    (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
+    if (typeof raw === 'number') (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
+    else (node as Record<string, unknown>).scale_frame = f.cap;
   }
   // ⭐ A RANGE MOVES OLUMI'S LINKS TOO (MG #70 5849581652): the level a frame sets is a level like any other, so the
   // Olumi-sized links on that factor are re-derived on it — the same contract the value writer applies (#2033), and the
@@ -523,6 +558,12 @@ export interface ApprovedLinkStrength {
    * band the user named this turn, stamped as the canvas writer stamps it.
    */
   readonly adopted: boolean;
+  /**
+   * ⛔ R3 DEFECT 1 (5936673643): Olumi's band REVIEWED on a link already in it (`confirm_current`, author
+   * `model_proposed`). A review only: written with NO band context, so the writer holds μ, σ and Olumi's sizing note
+   * byte-equal and records `reviewed_by_user` (sizing a placeholder). The band is Olumi's, never the user's: no spread.
+   */
+  readonly review?: boolean;
 }
 
 /**
@@ -539,6 +580,10 @@ export interface ApprovedLinkEffect {
   readonly quote: string;
   /** `linkEffectReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
   readonly reading_token: string;
+  /** Each disclosed end-unit reading, bound into the approval token and written atomically with this link. */
+  readonly unit_readings?: readonly LinkEffectUnitReading[];
+  readonly reversal?: LinkEffectReversal;
+  readonly link_selected?: true;
 }
 
 /**
@@ -547,10 +592,13 @@ export interface ApprovedLinkEffect {
  * on is the batch's own base (`expectedGraphHash`).
  */
 export interface ApprovedIdentityConfirm {
+  readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
+  readonly choice?: 'one_off';
   readonly outcome_id: string;
   readonly factor_ids: readonly string[];
   /** The card's displayed sentence, bound into `reading_token`. */
   readonly words: string;
+  readonly part_levels?: readonly import('../agent-lane/identity-proposal.js').IdentityPartLevel[];
   /** `identityConfirmReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
   readonly reading_token: string;
 }
@@ -559,20 +607,97 @@ export interface ApprovedIdentityConfirm {
 const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provenance', 'provenance_display', 'defaulted', 'exists_defaulted', 'std_defaulted'] as const;
 
 /**
- * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns: no node, no other link, no edge
- * added or removed or re-ordered, no top-level field.
+ * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns. The size-by-chat door additionally
+ * owns exactly each approved end's unit_reading: no other node field, other link, order or top-level field may move.
+ * The one exception is the GAUGE a declared link's answer writes (#2623 (B); below), admitted by identity.
  */
-export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown, links: readonly { from: string; to: string }[]): boolean {
+export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown,
+  links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
+  return isEditableGraph(after) && linkWriteIsScoped(storedBefore, after, links);
+}
+
+/**
+ * ⭐ S5t (Science d5 #87 6007669630): the ONE-link door's postimage when the writer refit the frames. Two facts, each
+ * re-derived here, never taken from the writer:
+ *  1. the user's write itself (`refitFrom`, the link at its full β) changed only what the link writer owns on that link
+ *     (the same scope rule, without the [-1, 1] bound the refit exists to restore);
+ *  2. the stored graph is EXACTLY construction's refit of that write (`refitFramesForStatedEffects` as construction calls
+ *     it, then `clampForPersist`) — no chat-only rescale — and the stored base needed no refit of its own, so no other
+ *     link's size moves because of this sentence.
+ */
+export function linkEffectRefitPostimageIsScoped(storedBefore: unknown, refitFrom: unknown, after: unknown,
+  link: { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }): boolean {
+  if (!isEditableGraph(after) || !isRecordGraph(refitFrom)) return false;
+  if (refitFramesForStatedEffects(normaliseAbsenceOnly(storedBefore) as Record<string, unknown>).refits.length > 0) return false;
+  // r2 (Codex r1 on #2631, P1): ONE preimage. The scope rule and the recompute read the same canonical write, so a shape the
+  // projection repairs (an option's setting under `data.interventions`) can never pass one and escape the other.
+  const canonical = projectGraphForPersistence(refitFrom) as Record<string, unknown>;
+  if (!linkWriteIsScoped(storedBefore, canonical, [link])) return false;
+  const fitted = refitFramesForStatedEffects(canonical);
+  if (fitted.refits.length === 0) return false;
+  return isDeepStrictEqual(projectGraphForPersistence(clampForPersist(fitted.graph)), after)
+    && refitKeepsOtherLinks(canonical, after as Record<string, unknown>, new Set([`${link.from}→${link.to}`]))
+    && storedGaugesKept(canonical, after);
+}
+
+const isRecordGraph = (g: unknown): g is { nodes: unknown[]; edges: unknown[] } =>
+  typeof g === 'object' && g !== null && Array.isArray((g as { nodes?: unknown }).nodes) && Array.isArray((g as { edges?: unknown }).edges);
+
+/** The scope rule itself: `afterGraph` differs from the stored graph only in what the link writer owns on the declared links. */
+function linkWriteIsScoped(storedBefore: unknown, afterGraph: unknown,
+  links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
-  if (!isEditableGraph(before) || !isEditableGraph(after) || links.length === 0) return false;
+  if (!isEditableGraph(before) || !isRecordGraph(afterGraph) || links.length === 0) return false;
+  const after = afterGraph as EditableGraph;
   if (new Set(links.map(l => `${l.from}::${l.to}`)).size !== links.length) return false;
   if (after.edges.length !== before.edges.length) return false;
   const restored = structuredClone(after);
+  const readings = new Map<string, LinkEffectUnitReading['unit_reading']>();
+  for (const link of links) {
+    for (const reading of link.unit_readings ?? []) {
+      if (reading.node_id !== link.from && reading.node_id !== link.to) return false;
+      const checked = NodeV3.shape.unit_reading.safeParse(reading.unit_reading);
+      if (!checked.success || checked.data === undefined || !isDeepStrictEqual(checked.data, reading.unit_reading)
+        || reading.unit_reading.source !== 'user_stated') return false;
+      const existing = readings.get(reading.node_id);
+      if (existing !== undefined && !isDeepStrictEqual(existing, reading.unit_reading)) return false;
+      readings.set(reading.node_id, reading.unit_reading);
+    }
+  }
+  for (const [nodeId, reading] of readings) {
+    const was = before.nodes.filter(node => node.id === nodeId);
+    const now = restored.nodes.filter(node => node.id === nodeId);
+    if (was.length !== 1 || now.length !== 1 || !isDeepStrictEqual(now[0]!.unit_reading, reading)) return false;
+    if (Object.hasOwn(was[0]!, 'unit_reading')) now[0]!.unit_reading = structuredClone(was[0]!.unit_reading);
+    else delete now[0]!.unit_reading;
+  }
+  // ⭐ #2623 (B) AT THE DOOR (Codex r1 on #2631; DL 0df0e1 ruling): one end-to-end answer through a level-less mediator also
+  // writes the GAUGE (M → child = ±1, `sized_by_identity: {op:'gauge'}`, Science 6006425419). Admitted ONLY for the child edge
+  // `mediatorReadings` names for a declared link's TARGET on the stored graph, only when that was not already the stored
+  // gauge, and only when the postimage reads it back as the intact stored gauge; on it, as on a declared link, only what
+  // the link writer owns may move. Any other edge that changed still refuses.
+  const gauges = new Set<number>();
+  const readBefore = mediatorReadings(before);
+  const readAfter = mediatorReadings(after);
+  for (const link of links) {
+    const was = readBefore.get(link.to);
+    if (was?.via !== 'gauge' || was.stored === true) continue;
+    const now = readAfter.get(link.to);
+    if (now?.via !== 'gauge' || now.child !== was.child || now.stored !== true) continue;
+    // #2634 r1 P1: the ONE directed child edge, by POSITION, never by an id string (ids may hold any character, and a
+    // bidirected pair shares the endpoints). r1 P2: carrying exactly the writer's sign, the stored child's own orientation.
+    const at = before.edges.flatMap((e, i) => e.from === link.to && e.to === was.child && isDirectedEdge(e as never) ? [i] : []);
+    if (at.length !== 1) continue;
+    const sign = storedGaugeSign(before.edges[at[0]!]!);
+    const written = after.edges[at[0]!];
+    if (written?.strength?.mean !== sign || written.effect_direction !== (sign < 0 ? 'negative' : 'positive')) continue;
+    gauges.add(at[0]!);
+  }
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]! as Record<string, unknown> & { from: string; to: string };
     const was = before.edges[i]! as Record<string, unknown> & { from: string; to: string };
     if (now.from !== was.from || now.to !== was.to) return false;
-    if (!links.some(l => l.from === was.from && l.to === was.to)) continue;
+    if (!links.some(l => l.from === was.from && l.to === was.to) && !gauges.has(i)) continue;
     for (const member of LINK_WRITER_OWNED_EDGE_MEMBERS) {
       if (Object.hasOwn(was, member)) now[member] = structuredClone(was[member]);
       else delete now[member];
@@ -610,7 +735,8 @@ async function applyApprovedLinkStrengths(
     // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
     const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
       { provenance?: { source?: unknown; reviewed_by_user?: { intent?: unknown; at?: unknown } }; defaulted?: unknown } | undefined;
-    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
+    if (l.adopted && linkSizing(stored) === 'user'
+      && drawnLinkAdoptionFor(ctx.scenarioId, l.from, l.to, l.magnitude, stored) === undefined) return refuse('link_became_users_own', i);
     // …and a link the user REVIEWED since the proposal (a canvas confirm writes only that stamp) is their settled view.
     const review = stored?.provenance?.reviewed_by_user;
     const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
@@ -623,10 +749,14 @@ async function applyApprovedLinkStrengths(
       event: event as never, requestId: ctx.requestId, persistedGraph: working, lastRunIdentityUse: ctx.lastRunIdentityUse,
     });
     let res: Awaited<ReturnType<typeof applyEdgeStrengthEdit>>;
+    // A review of Olumi's band holds the link's figure: no band context, so no spread (DEFECT 1). The writer still sizes a
+    // placeholder on review (`sizedByApproval`, L4 c).
     try {
       res = l.adopted
         ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band }], write)
-        : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
+        : l.review === true
+          ? await write()
+          : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
     } catch {
       return refuse('canonical_graph_unavailable', i);
     }
@@ -641,10 +771,56 @@ async function applyApprovedLinkStrengths(
   return { kind: 'applied', graph, handlerFacts, confirmations };
 }
 
+/** The grouped natural-effect writer: sequential postimages, one final scoped commit, one fact per link. */
+async function applyApprovedLinkEffects(
+  before: EditableGraph,
+  links: readonly ApprovedLinkEffect[],
+  ctx: { readonly lastRunIdentityUse: IdentityRunUse | null },
+): Promise<
+  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly unknown[]; readonly confirmations: readonly string[] }
+  | { readonly kind: 'refused'; readonly reason: string; readonly linkIndex: number }
+> {
+  let working: unknown = structuredClone(before);
+  const handlerFacts: unknown[] = [];
+  const confirmations: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < links.length; i += 1) {
+    const link = links[i]!;
+    const key = `${link.from}::${link.to}`;
+    if (seen.has(key)) return { kind: 'refused', reason: 'duplicate_link', linkIndex: i };
+    seen.add(key);
+    // The proposal's token is the edge as it stood when this link was prepared. The hash is recomputed for the
+    // sequential working graph, so the next operation is checked against the postimage of every preceding one.
+    if (linkEffectEdgeToken(working, link.from, link.to) !== link.edge_token) return { kind: 'refused', reason: 'link_superseded', linkIndex: i };
+    const graphHash = computeAnalysisAffectingGraphHash(working as never);
+    if (!graphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable', linkIndex: i };
+    const written = applyLinkEffectEdit({ persistedGraph: working, from: link.from, to: link.to, effect: link.effect,
+      expected: { graph_hash: graphHash, edge_token: link.edge_token }, quote: link.quote, reading_token: link.reading_token,
+      unit_readings: link.unit_readings,
+      reversal: link.reversal, link_selected: link.link_selected,
+      lastRunIdentityUse: ctx.lastRunIdentityUse });
+    if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: i };
+    working = written.mutatedGraph;
+    handlerFacts.push(...written.handlerFacts);
+    if (written.statement !== undefined) confirmations.push(written.statement);
+  }
+  const graph = projectGraphForPersistence(working);
+  if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, links)) {
+    return { kind: 'refused', reason: 'link_scope_mismatch', linkIndex: -1 };
+  }
+  return { kind: 'applied', graph, handlerFacts, confirmations };
+}
+
 export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
   readonly stage: OlumiResponse['stage_indicator'];
   /** Existing caller request digest: informational, NOT the idempotency key. */
   readonly requestHash: string;
+  /**
+   * B8 (DL CR 5934735711): let a turn-fence refusal escape (the Agent's in-process door only), so its
+   * `runFencedInProcessWrite` maps the verdict. On the wire event a `superseded` refusal is the revision guard's 409
+   * (see the writer's catch); every other verdict keeps `commit_not_confirmed`.
+   */
+  readonly fenceRefusalReachesCaller?: boolean;
 };
 
 /**
@@ -659,8 +835,8 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
   | { readonly kind: 'refused'; readonly reason: string }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
-  const { optionId, factorId, modelValue, ...rest } = input;
-  const outcome = await executeOptionInterventionBatch({ ...rest, targets: [{ optionId, factorId, modelValue }] }, store);
+  const { optionId, factorId, modelValue, figure, ...rest } = input;
+  const outcome = await executeOptionInterventionBatch({ ...rest, targets: [{ optionId, factorId, modelValue, ...(figure !== undefined ? { figure } : {}) }] }, store);
   return outcome.kind === 'refused' ? { kind: 'refused', reason: outcome.reason } : outcome;
 }
 
@@ -673,6 +849,8 @@ export type OptionInterventionBatchExecutionInput =
      * exactly these, or nothing is written (`links_mismatch`): what was approved is what is written.
      */
     readonly expectedLinks?: readonly string[];
+    /** Declarations carried by the SAME approved proposal; no extra wire operation or write. */
+    readonly optionGaps?: readonly ApprovedOptionGap[];
     /**
      * ⭐ A COMPOUND APPROVAL'S FACTOR VALUES (Canonical #70 5849037691): applied through the canonical value writer on
      * the SAME base, and written in the SAME append as the links and levels — one approval, one commit, one receipt.
@@ -684,8 +862,18 @@ export type OptionInterventionBatchExecutionInput =
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
     /** ⭐ One approved user-stated link effect: ONE append, alone (never with a strength set, levels, values or ranges). */
     readonly linkEffect?: ApprovedLinkEffect;
+    /** ⭐ Several approved user-stated effects: one sequential in-memory postimage, one append, one receipt. */
+    readonly linkEffects?: readonly ApprovedLinkEffect[];
     /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
+    readonly goalHorizon?: ApprovedGoalHorizon & { readonly expected_goal?: unknown; readonly own_write_landed?: boolean };
+    /** ⭐ G: the user's answer to the goal's open question, `goal_target_basis.open_question` removed only: ONE append, alone. */
+    readonly goalReading?: ApprovedGoalReading;
+    /** ⭐ Olumi's occurrence range for a risk root, its `event_risk` only (`risk-occurrence.ts`): ONE append, alone. */
+    readonly riskOccurrence?: ApprovedRiskOccurrence;
+    readonly goalSteady?: ApprovedGoalSteady;
+    readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
@@ -700,35 +888,98 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
       readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'];
       /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
-      readonly linksResized?: readonly { from: string; to: string }[] }
+      readonly linksResized?: readonly { from: string; to: string }[];
+      readonly reencodedSiblings?: readonly ReencodedSibling[] }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number;
       readonly linkIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
+  // A temporal answer is a single approved judgement, never a compound edit.
+  if (input.goalSteady !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'goal_steady_not_alone' };
+  }
+  // G: the answer to the goal's open question is one approved card, never part of a compound edit.
+  if (input.goalReading !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.goalSteady !== undefined || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0
+    || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'goal_reading_not_alone' };
+  }
+  // Olumi's range for a risk is one approved card, never part of a compound edit.
+  if (input.riskOccurrence !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.goalReading !== undefined || input.goalSteady !== undefined || input.teamTime !== undefined
+    || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'risk_occurrence_not_alone' };
+  }
+  const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
+  if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
+  const optionGaps = gapInput.declarations;
+  if (optionGaps.some(d => !input.targets.some(t => t.optionId === d.optionId))) {
+    return { kind: 'refused', reason: 'option_gap_without_level_anchor' };
+  }
+  if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined
+    || input.goalHorizon !== undefined || input.teamTime !== undefined)) {
+    return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
+  }
   let before: unknown;
+  let identityBrief: string | null | undefined;
+  let expectedRevision: number | undefined;
   let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
   try {
-    before = await store.loadGraph(input.scenarioId);
+    if (useAppendV6() || input.identityConfirm?.ceiling_stock !== undefined) {
+      ({ graph: before, revision: expectedRevision, briefText: identityBrief } = await store.loadGraphAndBriefText(input.scenarioId));
+    } else {
+      before = await store.loadGraph(input.scenarioId);
+    }
     pendings = await store.readMostRecentPendingActions(input.scenarioId, { validation: 'strict' });
   } catch {
     return { kind: 'unverified', reason: 'canonical_read_failed', commitAttempted: false };
   }
+  if (optionGaps.length > 0) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    if (optionGaps.some(d => d.operands !== undefined && !isDeepStrictEqual(d.operands, optionGapOperands(before, d.optionId)))) {
+      return { kind: 'refused', reason: 'gap_statement_changed_since_approval' };
+    }
+  }
   // ⭐ Whose level this is: Olumi's, when THIS write is the approved adoption the Agent's verified
   // proposal names (same scenario, option, factor, value); otherwise the inspector's `user_specified`.
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
-  const targets: OptionLevelTarget[] = input.targets.map(t => {
+  let targets: OptionLevelTarget[] = input.targets.map(t => {
     const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
     return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
-  const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
+  // Decide value-only no-ops on the original graph, before attaching any range.
+  // These selected cells are siblings too: their old engine quantity must survive.
+  const unchangedTargets = new Set(targets.filter(t => t.figure?.raw_value === undefined
+    && prepareOptionInterventionEdit({ ...t, persistedGraph: before, expectedGraphHash: input.expectedGraphHash,
+      inferFactorFigure: false }).kind === 'unchanged').map(t => `${t.optionId}::${t.factorId}`));
+  // Validate the submitted native coordinate before converting to the final frame.
+  // Re-encoding must never repair a contradictory approval.
+  if (targets.some(t => t.figure?.raw_value !== undefined && (t.figure.cap === undefined
+    ? t.figure.raw_value !== t.modelValue
+    : !Number.isFinite(t.figure.cap) || t.figure.cap <= 0
+      || Math.abs(t.figure.raw_value / t.figure.cap - t.modelValue) > 1e-9))) {
+    return { kind: 'refused', reason: 'level_frame_mismatch' };
+  }
+  const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
+    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
+    goalReading: _callerReading, riskOccurrence: _callerRisk, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
   const values = input.values ?? [];
-  const frames = input.frames ?? [];
+  const frames = [...(input.frames ?? [])];
   let levelBase: unknown = before;
   let levelBaseHash = input.expectedGraphHash;
   let valueFacts: readonly unknown[] = [];
@@ -754,6 +1005,73 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = applied.handlerFacts;
     valueConfirmations = applied.confirmations;
     linksResized = applied.linksResized;
+  }
+  // Settle the factor once, after values and typed frames, before preparing any cell.
+  // Adoption stamps above bind to the original approved target; re-encoding keeps that stamp.
+  if (targets.some(t => t.figure?.raw_value !== undefined) && isEditableGraph(levelBase)) {
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    // A caller supplying native coordinates on an already framed factor must name that frame.
+    // Capless natives are admitted only when this approval itself establishes the range.
+    if (targets.some(t => {
+      if (t.figure?.raw_value === undefined || t.figure.cap !== undefined) return false;
+      const factor = before.nodes.find(n => n.id === t.factorId);
+      return ((factor?.observed_state as { cap?: number } | undefined)?.cap ?? 0) > 1
+        || ((factor as { scale_frame?: number } | undefined)?.scale_frame ?? 0) > 1;
+    })) return { kind: 'refused', reason: 'level_frame_mismatch' };
+    const finalCaps = new Map<string, number | null>();
+    const derivedFrames: ApprovedFactorFrame[] = [];
+    for (const factorId of new Set(targets.map(t => t.factorId))) {
+      const node = levelBase.nodes.find(n => n.id === factorId);
+      if (node === undefined || node.kind !== 'factor') continue;
+      const os = (node.observed_state ?? {}) as { cap?: unknown };
+      const scale = (node as { scale_frame?: unknown }).scale_frame;
+      const existing = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap
+        : typeof scale === 'number' && Number.isFinite(scale) && scale > 1 ? scale : null;
+      const cap = existing ?? proposedFrameForLevels(targets.filter(t => t.factorId === factorId).map(t => t.figure ?? {}));
+      finalCaps.set(factorId, cap);
+      if (existing === null && cap !== null && cap > 1) derivedFrames.push({ factorId, cap });
+    }
+    targets = targets.map(t => {
+      const cap = finalCaps.get(t.factorId) ?? null;
+      if (t.figure?.raw_value === undefined || cap === null) return t;
+      const encoded = levelOnFinalFrame({ value: t.modelValue, ...t.figure }, cap);
+      return { ...t, modelValue: encoded.value, figure: { ...t.figure, cap } };
+    });
+    if (targets.some(t => t.figure?.raw_value !== undefined
+      && (!Number.isFinite(t.modelValue) || t.modelValue < 0 || t.modelValue > 1))) {
+      return { kind: 'refused', reason: 'level_frame_mismatch' };
+    }
+    if (derivedFrames.length > 0) {
+      const applied = await applyApprovedFactorValues(levelBase, [], derivedFrames,
+        { scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId, stage: input.stage });
+      if (applied.kind === 'refused') return { kind: 'refused', reason: applied.reason };
+      frames.push(...derivedFrames);
+      levelBase = applied.graph;
+      levelBaseHash = computeAnalysisAffectingGraphHash(applied.graph)!;
+      valueFacts = [...valueFacts, ...applied.handlerFacts];
+      valueConfirmations = [...valueConfirmations, ...applied.confirmations];
+      linksResized = [...linksResized, ...applied.linksResized];
+    }
+  }
+  // The approval's frame attachment also owns preserving unselected engine
+  // quantities, on both the observed-state and no-baseline scale_frame paths.
+  // This stays inside the same in-memory plan and ONE append below.
+  const siblingBase = preserveSiblingQuantities(before, levelBase,
+    targets.filter(t => !unchangedTargets.has(`${t.optionId}::${t.factorId}`)));
+  if (siblingBase.kind === 'refused') return { kind: 'refused', reason: siblingBase.reason };
+  levelBase = siblingBase.graph;
+  // A preserved no-op now has a different coordinate; do not overwrite it with
+  // the old submitted value or change its original authorship.
+  const preservedPairs = new Set(siblingBase.reencoded.map(c => `${c.option_id}::${c.factor_id}`));
+  targets = targets.map(t => unchangedTargets.has(`${t.optionId}::${t.factorId}`)
+    && preservedPairs.has(`${t.optionId}::${t.factorId}`)
+    ? { ...t, modelValue: readCommittedOptionEffect(levelBase, t.optionId, t.factorId)! } : t);
+  if (siblingBase.reencoded.length > 0 && isEditableGraph(levelBase)) {
+    levelBaseHash = computeAnalysisAffectingGraphHash(levelBase)!;
   }
   /**
    * ⭐ A SET OF LINK STRENGTHS (seam Canonical #72 5871633483): the values' own shape — applied in memory on the
@@ -785,9 +1103,31 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
    * writer in memory, scoped to that one link, then the ONE append and read-back below. One per approval: a second
    * effect prepared on the same base would read `superseded` once the first moved the analysis revision.
    */
+  /** The grouped natural-effect form: every link is written on the prior postimage, then the shared commit below appends once. */
+  const linkEffects = input.linkEffects ?? [];
+  if (linkEffects.length > 0) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || input.linkEffect !== undefined
+      || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'link_effects_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const applied = await applyApprovedLinkEffects(before, linkEffects, { lastRunIdentityUse: input.lastRunIdentityUse ?? null });
+    if (applied.kind === 'refused') return { kind: 'refused', reason: applied.reason, linkIndex: applied.linkIndex };
+    const appliedHash = computeAnalysisAffectingGraphHash(applied.graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = applied.graph;
+    levelBaseHash = appliedHash;
+    valueFacts = applied.handlerFacts;
+    const labelOfBefore = (id: string): string => String(before.nodes.find(node => node.id === id)?.label ?? id);
+    valueConfirmations = linkEffects.map((link) => `"${labelOfBefore(link.from)}" → "${labelOfBefore(link.to)}" now carries the size you stated.`);
+  }
   const linkEffect = input.linkEffect;
   if (linkEffect !== undefined) {
-    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || (expectedLinks?.length ?? 0) > 0) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffects.length > 0 || (expectedLinks?.length ?? 0) > 0) {
       return { kind: 'refused', reason: 'link_effect_not_alone' };
     }
     if (!isEditableGraph(before)
@@ -797,11 +1137,14 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
-      reading_token: linkEffect.reading_token,
-      lastRunIdentityUse: input.lastRunIdentityUse ?? null });
+      reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings,
+      reversal: linkEffect.reversal, link_selected: linkEffect.link_selected,
+      lastRunIdentityUse: input.lastRunIdentityUse ?? null, frameRefit: true });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, [{ from: linkEffect.from, to: linkEffect.to }])) {
+    if (!isEditableGraph(graph) || !(written.refitFrom === undefined
+      ? linkStrengthsPostimageIsScoped(before, graph, [linkEffect])
+      : linkEffectRefitPostimageIsScoped(before, written.refitFrom, graph, linkEffect))) {
       return { kind: 'refused', reason: 'link_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);
@@ -819,7 +1162,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
    */
   const identityConfirm = input.identityConfirm;
   if (identityConfirm !== undefined) {
-    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
       || (expectedLinks?.length ?? 0) > 0) {
       return { kind: 'refused', reason: 'identity_confirm_not_alone' };
     }
@@ -829,10 +1172,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyIdentityConfirmEdit({ persistedGraph: before, outcome_id: identityConfirm.outcome_id,
       factor_ids: identityConfirm.factor_ids, words: identityConfirm.words, reading_token: identityConfirm.reading_token,
+      part_levels: identityConfirm.part_levels, choice: identityConfirm.choice, ceiling_stock: identityConfirm.ceiling_stock, brief_text: identityBrief,
       expected_graph_hash: input.expectedGraphHash });
     if (written.kind === 'refused') return { kind: 'refused', reason: `identity_${written.reason}` };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id)) {
+    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id, identityConfirm.part_levels, identityConfirm.ceiling_stock, identityBrief)) {
       return { kind: 'refused', reason: 'identity_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);
@@ -843,26 +1187,193 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     // AIQ 5887805333 (a): the committed row keeps the card's own words and that they were confirmed on the card — the
     // audit truth that the identity was not in the brief (the `edit_graph` receipt is strict and carries no words).
-    valueConfirmations = [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
+    valueConfirmations = identityConfirm.choice === 'one_off' ? ['Recorded the one-off reading. Run the analysis again.'] : [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
       identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
       identityConfirm.words.trim()}”`];
   }
-  const effectCount = (linkEffect !== undefined ? 1 : 0) + (identityConfirm !== undefined ? 1 : 0);
+  /**
+   * ⭐ S-E GOALS — ONE DEADLINE CARD, the identity confirmation's own shape: alone, on the persisted base, through the one
+   * `goal_horizon` writer in memory, scoped to that one field, then the ONE append and read-back below. The date is outside
+   * the analysis hash, so the revision gate below proves only that nothing else moved; the writer's own gate is the date
+   * the goal held when the card was made.
+   */
+  const goalHorizon = input.goalHorizon;
+  if (goalHorizon !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
+      || identityConfirm !== undefined || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'goal_horizon_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    // ⭐ The card's bound goal, read by the store-reading writer on the base it writes (Codex r1 on #3024: a goal renamed between
+    // the approval read and this read, the hash unchanged, was written). The same rule as the press and the lapse
+    // (`deadlineGoalStillBound`); only THIS proposal's own landed write continues past it, to the writer's verified no-op.
+    if (goalHorizon.expected_goal !== undefined && goalHorizon.own_write_landed !== true
+      && !deadlineGoalStillBound(before, goalHorizon.goal_id, goalHorizon.expected_deadline, goalHorizon.expected_goal)) {
+      return { kind: 'refused', reason: 'goal_horizon_goal_changed' };
+    }
+    const written = applyGoalHorizonEdit(before, goalHorizon);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `deadline_${written.reason}` };
+    // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date ?? null, goalHorizon.stated_months)
+      || goalDeadlineFromRecord(graph, goalHorizon.goal_id) !== goalHorizon.deadline) {
+      return { kind: 'refused', reason: 'deadline_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  /**
+   * ⭐ G — THE ANSWER TO THE GOAL'S OPEN QUESTION, the deadline card's own shape: alone (checked above), on the persisted base,
+   * through the one writer in memory, scoped to removing that one member, then the ONE append and read-back below. The reading
+   * is in the analysis hash, so the caller's base is checked here and the writer's own gate is the reading the card showed.
+   */
+  const goalReading = input.goalReading;
+  if (goalReading !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyGoalReadingEdit(before, goalReading);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `goal_reading_${written.reason}` };
+    // A retry of a write that landed: the answered reading is already held, so the batch is a verified no-op.
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalReadingPostimageIsScoped(projectGraphForPersistence(before), graph, goalReading)) {
+      return { kind: 'refused', reason: 'goal_reading_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  /**
+   * ⭐ OLUMI'S RANGE FOR A RISK ROOT — the goal reading's own shape: alone (checked above), on the persisted base, through the
+   * one writer in memory, scoped to that risk's `event_risk`, then the ONE append and read-back below. The block is in the
+   * analysis hash, so the caller's base is checked here and the writer's own gate is the node the card showed.
+   */
+  const riskOccurrence = input.riskOccurrence;
+  if (riskOccurrence !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyRiskOccurrenceEdit(before, riskOccurrence);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `risk_occurrence_${written.reason}` };
+    // A retry of a write that landed: the card's block is already held, so the batch is a verified no-op.
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !riskOccurrencePostimageIsScoped(projectGraphForPersistence(before), graph, riskOccurrence)) {
+      return { kind: 'refused', reason: 'risk_occurrence_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  let horizonBasisWrite: HorizonBasisWrite | undefined;
+  const goalSteady = input.goalSteady;
+  if (goalSteady !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const written = applyGoalSteadyEdit(before, goalSteady, input.scenarioId);
+    if (written.kind !== 'mutated') return written;
+    horizonBasisWrite = written.horizonBasisWrite;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalSteadyPostimageIsScoped(before, graph, goalSteady, input.scenarioId)) {
+      return { kind: 'refused', reason: 'goal_steady_scope_mismatch' };
+    }
+    const hash = computeAnalysisAffectingGraphHash(graph);
+    if (!hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = hash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  const teamTime = input.teamTime;
+  if (teamTime !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
+      || identityConfirm !== undefined || goalHorizon !== undefined || (expectedLinks?.length ?? 0) > 0) return { kind: 'refused', reason: 'team_time_not_alone' };
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyTeamShareEdit(before, teamTime, input.expectedGraphHash);
+    if (written.kind !== 'mutated') return written;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !teamSharePostimageIsScoped(before, graph, teamTime.team_id)) return { kind: 'refused', reason: 'team_time_scope_mismatch' };
+    levelBase = graph;
+    const teamHash = computeAnalysisAffectingGraphHash(graph);
+    if (!teamHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBaseHash = teamHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
+    + (goalHorizon !== undefined ? 1 : 0) + (goalReading !== undefined ? 1 : 0) + (riskOccurrence !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
   // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
-  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount > 0
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
-  if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
   // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.
-  const plan = candidate.kind === 'candidate'
+  let plan = candidate.kind === 'candidate'
     ? { graph: candidate.graph, operations: candidate.operations, analysisGraphHash: candidate.analysisGraphHash,
       targetsWritten: candidate.targetsWritten, handlerFacts: [...valueFacts, candidate.handlerFact] as unknown[] }
     : { graph: levelBase as EditableGraph, operations: [] as PatchOperation[], analysisGraphHash: levelBaseHash,
       targetsWritten: [] as OptionLevelTarget[], handlerFacts: [...valueFacts] as unknown[] };
+  let gapsChanged = false;
+  if (optionGaps.length > 0) {
+    const gaps = applyOptionGapDeclarations(plan.graph, optionGaps);
+    if (gaps.kind === 'refused') return { kind: 'refused', reason: gaps.reason };
+    gapsChanged = gaps.changed;
+    if (gapsChanged) {
+      const gapOperations: PatchOperation[] = optionGaps.map(d => ({ op: 'update_node', path: d.optionId,
+        value: d.mechanisms.length === 0 ? { unresolved_targets: [], user_questions: [] }
+          : optionGapFields(String(plan.graph.nodes.find(n => n.id === d.optionId)?.label ?? d.optionId), d.mechanisms) }));
+      // These invariant-coupled fields belong to this approved level batch,
+      // never the generic update_node referee/applier. Reuse its frame authority;
+      // preparation and scoped readback keep both carriers in this ONE commit.
+      const permission = evaluateFrameGate(input.expectedGraphHash, {
+        graphReadable: true, currentGraphHash: computeAnalysisAffectingGraphHash(before as EditableGraph), freshness: input.freshness,
+      });
+      if (permission.outcome.kind !== 'proceed') return { kind: 'refused', reason: `mutation_${permission.outcome.kind}` };
+      const graph = projectGraphForPersistence(gaps.graph);
+      if (!isEditableGraph(graph) || !optionGapPostimageIsScoped(plan.graph, graph, optionGaps) || !optionGapsHeld(graph, optionGaps)) {
+        return { kind: 'refused', reason: 'option_gap_scope_mismatch' };
+      }
+      const analysisGraphHash = computeAnalysisAffectingGraphHash(graph);
+      if (!analysisGraphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+      const operations = [...plan.operations, ...gapOperations];
+      // Keep the existing edit_graph rerun signal even when the hot window
+      // has lost the Run. Append persists this fact; only the restore RPC sets
+      // analysis_invalidated_at. The durable Run-facts reader also reads these
+      // applied rerun facts after a legacy Run, outside the hot window.
+      const appliedChanges = buildAppliedChanges(operations, graph, true, levelBase as EditableGraph);
+      const fact = buildEditGraphHandlerFact({ editResult: { blocks: [], assistantText: appliedChanges.summary,
+        latencyMs: 0, wasRejected: false, operations, appliedGraph: graph, appliedChanges },
+        preEditGraph: levelBase as EditableGraph, hasExistingAnalysis: input.hasExistingAnalysis });
+      if (fact === null) return { kind: 'refused', reason: 'mutation_fact_unavailable' };
+      plan = { ...plan, graph, operations, analysisGraphHash, handlerFacts: [...valueFacts, fact] as unknown[] };
+    }
+  }
+  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged) return candidate;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
@@ -876,7 +1387,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
   const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
     .map(resizedLinksSentence);
-  const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+  const acknowledgment = [...valueConfirmations, ...resizedLine, ...siblingBase.reencoded.map(c => c.detail),
+    ...(gapsChanged ? optionGaps.map(d => optionGapCardWords(labelOf(d.optionId), d.mechanisms)) : []), ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue,
     ...((f) => (f !== undefined ? { committedFigure: f } : {}))(committedFigureOf(plan.graph, t.optionId, t.factorId, t.modelValue)) })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
@@ -886,14 +1398,27 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     blocks: [], suggested_actions: [], insights: [], stage_indicator: input.stage };
   let committed: Awaited<ReturnType<typeof commitDirectAnswer>>;
   try {
-    committed = await commitDirectAnswer(response, {
+    const commit = () => commitDirectAnswer(response, {
       scenario_id: input.scenarioId, turn_id: input.turnId, request_hash: input.requestHash,
       turn_class: 'direct_answer', handler_id: null, llm_calls_used: 0, duration_ms: 0,
       handler_facts: plan.handlerFacts as never, graph: plan.graph, contentGraph: plan.graph,
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
+      ...(horizonBasisWrite !== undefined ? { horizonBasisWrite } : {}),
       graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     }, store);
-  } catch {
+    // Scope was verified at the specialised write door above; the generic invariant
+    // guard still compares the real CAS base and final projection exactly.
+    committed = await (teamTime !== undefined || goalHorizon !== undefined
+      ? withApprovedShareByDateWrite(before, plan.graph, commit) : commit());
+  } catch (err) {
+    // The fence refuses BEFORE the write (nothing saved): the in-process door's wrapper names the verdict.
+    if (isRevisionConflict(err)) throw err;
+    if (input.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
+    // J (sys3 CAPACITY-CONCURRENT-409-vs-500): on the wire, the fence's own `superseded` refusal is a CONFIRMED non-write
+    // (a later turn claimed this scenario; the append rolled back). It is the revision guard's refusal: 409
+    // revision_conflict, refresh_and_reconfirm. Any other verdict or error keeps the unverified path below.
+    if (err instanceof TurnFenceRejectedError && err.verdict === 'superseded') rethrowRevisionConflict({ conflict_category: 'revision_conflict' });
     // A transport error need not prove rollback. No Applied response or claim
     // of "nothing changed" escapes; retry/readback must settle that question.
     return { kind: 'unverified', reason: 'commit_not_confirmed', commitAttempted: true };
@@ -902,8 +1427,14 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const reloaded = await store.loadGraph(input.scenarioId);
     // CommitResult.persistedGraph is projected INPUT, not DB readback. A
     // duplicate turn may return an older row without applying new request bytes.
-    if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph)
-      || input.targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
+    if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph) || (optionGaps.length > 0 && !optionGapsHeld(reloaded, optionGaps))
+      || targets.some(t => {
+        if (readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue) return true;
+        const cell = (reloaded as EditableGraph).nodes.find(n => n.id === t.optionId)?.interventions?.[t.factorId] as Record<string, unknown> | undefined;
+        return plan.targetsWritten.some(w => w.optionId === t.optionId && w.factorId === t.factorId)
+          && t.figure?.raw_value !== undefined && (cell?.raw_value !== t.figure.raw_value || cell?.cap !== t.figure.cap
+          || (t.figure.unit !== undefined && cell?.unit !== t.figure.unit.trim()));
+      })) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
     }
     // The graph answers "what is saved now?", not "what did this turn
@@ -942,7 +1473,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
       analysisGraphHash: plan.analysisGraphHash, persistedRowId: committed.persisted_row_id,
-      modelVersionReceipt: receipt, linksResized };
+      modelVersionReceipt: receipt, linksResized, reencodedSiblings: siblingBase.reencoded };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }
@@ -997,9 +1528,13 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     return refuse('invalid_identity');
   }
   const figure = input.figure;
-  if (figure !== undefined && (!Number.isFinite(figure.raw_value) || !Number.isFinite(figure.cap) || !(figure.cap > 0)
-    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === ''))
-    || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)) {
+  if (figure !== undefined && (
+    ((figure.raw_value !== undefined || figure.cap !== undefined)
+      && (typeof figure.raw_value !== 'number' || !Number.isFinite(figure.raw_value)
+        || (figure.cap === undefined ? figure.raw_value !== input.modelValue
+          : typeof figure.cap !== 'number' || !Number.isFinite(figure.cap) || !(figure.cap > 0)
+            || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)))
+    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === '')))) {
     return refuse('level_frame_mismatch');
   }
 
@@ -1021,6 +1556,11 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   if (options.length !== 1 || factors.length !== 1 || option?.kind !== 'option' || factor?.kind !== 'factor'
     || typeof option.label !== 'string' || typeof factor.label !== 'string') {
     return refuse('unresolved_identity');
+  }
+  if (figure?.raw_value !== undefined && figure.cap === undefined
+    && (((factor.observed_state as { cap?: number } | undefined)?.cap ?? 0) > 1
+      || ((factor as { scale_frame?: number }).scale_frame ?? 0) > 1)) {
+    return refuse('level_frame_mismatch');
   }
   // Reuse the conversational writer's identity-link question, not a new
   // topology/science admission policy. Unique endpoint identity is checked
@@ -1107,7 +1647,30 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     }
     // This adapter records changed values, not adoption/confirmation. A repeat
     // must not turn the old AI estimate into a new user-authored measurement.
-    if (entry.data.value === input.modelValue) return { kind: 'unchanged' };
+    // TEMPORAL: a likely range the user just gave for the SAME level is a change (the range is theirs, the level already
+    // was), so it is written; an identical range is still a repeat.
+    // The COMPLETE range this write stores (Codex CR 5963331228 P2): equal bounds stored as `min_max`, or with another
+    // author, are a change, never a repeat.
+    const storedRange = (existing as { range?: Record<string, unknown> } | undefined)?.range;
+    const likelyMoves = figure?.likely_range !== undefined
+      && !(storedRange?.low === figure.likely_range.low && storedRange?.high === figure.likely_range.high
+        && storedRange?.meaning === 'likely_range' && storedRange?.source === 'user_specified');
+    const finalFigure = figure?.raw_value !== undefined ? figure : undefined;
+    const cell = existing as Record<string, unknown>;
+    const factorCap = (factor.observed_state as { cap?: number } | undefined)?.cap
+      ?? (factor as { scale_frame?: number }).scale_frame;
+    const sameFigure = finalFigure !== undefined && cell.raw_value === finalFigure.raw_value
+      && cell.cap === finalFigure.cap
+      && (finalFigure.unit === undefined || cell.unit === finalFigure.unit.trim());
+    // Missing display metadata on a legacy cell already on this factor's
+    // range alone must not turn a repeat into a new authored measurement.
+    const sameNativePoint = finalFigure !== undefined && cell.raw_value === undefined
+      && factorCap !== undefined && factorCap === finalFigure.cap
+      && Math.abs(entry.data.value * factorCap - finalFigure.raw_value!) <= 1e-9
+      && (cell.unit === undefined || finalFigure.unit === undefined || cell.unit === finalFigure.unit.trim());
+    const sameCoordinate = entry.data.value === input.modelValue
+      && (finalFigure === undefined || sameFigure || sameNativePoint);
+    if (sameCoordinate && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({
     optionId: option.id, optionLabel: option.label,
@@ -1116,11 +1679,18 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
-  const levelFigure = figure ?? figureOnFactorRange(graph, factor, existing, input.modelValue);
+  const levelFigure = figure !== undefined && typeof figure.raw_value === 'number'
+    ? { raw_value: figure.raw_value, ...(figure.cap !== undefined ? { cap: figure.cap } : {}), ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
+    : input.inferFactorFigure === false ? undefined : figureOnFactorRange(graph, factor, existing, input.modelValue);
   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
   // (`cap` only when it reproduces the level, which the check above has already required).
-  const operation = levelFigure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
-    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } };
+  // TEMPORAL: the user's likely range, only from THIS approval's figure (never read back from another cell), recorded as
+  // theirs with the one meaning its wording licenses (R3 #75 5914230653).
+  const likely = figure?.likely_range;
+  const operation = levelFigure === undefined && likely === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+    ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, ...(levelFigure.cap !== undefined ? { cap: levelFigure.cap } : {}),
+      ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
+    ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.

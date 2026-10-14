@@ -104,7 +104,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

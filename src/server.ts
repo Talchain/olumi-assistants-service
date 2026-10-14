@@ -1,6 +1,10 @@
 // Load environment variables from .env file
 // In production without a .env file, this is a no-op (dotenv silently skips)
 import "dotenv/config";
+import { markDraftGraphWriteFailed } from './orchestrator-v5/build-turn-context.js';
+import { currentTurnFenceSlot } from './orchestrator-v5/session/turn-fence.js';
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY } from "./orchestrator-v5/ownership/door-ownership.js";
+import { startSessionAnalysisRunSweeper } from "./orchestrator-v5/session/index.js";
 
 import { env } from "node:process";
 import Fastify from "fastify";
@@ -33,6 +37,7 @@ import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
 import collabRoundsRouteV1 from "./routes/collab.v1.rounds.js";
 import collabPacketRouteV1 from "./routes/collab.v1.packet.js";
 import ceeDecisionRecordsRouteV1 from "./routes/assist.v1.decision-records.js";
+import ceeScenarioCopyRouteV1 from "./routes/assist.v1.scenario-copy.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
 import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js";
@@ -68,6 +73,7 @@ import {
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "./utils/errors.js";
+import { scenarioOwnershipPlugin, installScenarioDeclarationGuard } from "./plugins/scenario-ownership.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
@@ -102,6 +108,7 @@ import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPromp
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts, resolvePromptEnvironment, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
+import { assertNoWildcardOrigin, assertAuthConfigured } from "./config/production-boot-checks.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
@@ -152,9 +159,7 @@ function resolveAllowedOrigins(): string[] {
         .filter((o) => o.length > 0)
     : DEFAULT_ORIGINS;
 
-  if (env.NODE_ENV === "production" && origins.some((origin) => origin === "*" || origin === '"*"')) {
-    throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
-  }
+  assertNoWildcardOrigin(origins, env.NODE_ENV);
 
   // Diagnostic: log parsed origins at startup (debug level)
   log.debug({ rawEnv: raw ?? '(not set)', origins }, 'CORS origins parsed');
@@ -189,50 +194,9 @@ export async function build() {
     log.warn({ event: 'config.dead_env_var', key: w.key }, w.message);
   }
 
-  // ── SCENARIO OWNERSHIP POSTURE — say it out loud, at boot, unconditionally ──
-  //
-  // Ownership on the /assist/v1/scenarios/* family is derived from the VERIFIED
-  // token subject alone (route-v2-preflight.ts's
-  // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE). That is correct — and it makes
-  // CEE_REQUIRE_USER_JWT load-bearing rather than optional.
-  //
-  // With the flag OFF, `resolveUserIdentity` returns `{ mode: "off" }` for every
-  // caller, so the effective user is null. A scenario with a non-null stored
-  // owner then has a non-null owner and a null caller, which is refused
-  // (`scenario_requires_authenticated_owner`) on EVERY endpoint below. The
-  // owner cannot read their own scenario and cannot write to it. It reads to
-  // the user as data loss; the cause is a flag.
-  //
-  // ⚠ THIS IS NOT A ROLLBACK LEVER. Turning CEE_REQUIRE_USER_JWT off no longer
-  // restores legacy behaviour — it takes the scenario surfaces DOWN for every
-  // signed-in user. Nothing else in the config layer guards this direction: the
-  // only refine on this flag (config/index.ts) fires when it is TRUE.
-  //
-  // Non-fatal on purpose: guest (unowned) scenarios still work, so this is a
-  // partial outage, and a service that refuses to boot would be worse. But it
-  // must never be silent again.
-  if (config.auth?.requireUserJwt !== true) {
-    log.warn(
-      {
-        event: 'config.scenario_ownership_posture',
-        require_user_jwt: false,
-        owned_scenarios_reachable_by_owner: false,
-        endpoints: [
-          'POST /assist/v1/scenarios/:scenario_id/graph',
-          'POST /assist/v1/scenarios/:scenario_id/graph/register',
-          'POST /assist/v1/scenarios/:scenario_id/versions',
-          'POST /assist/v1/scenarios/:scenario_id/versions/compare',
-          'POST /assist/v1/scenarios/:scenario_id/versions/save',
-          'POST /assist/v1/scenarios/:scenario_id/versions/restore',
-        ],
-      },
-      'MISCONFIGURATION: CEE_REQUIRE_USER_JWT is OFF, so no caller is ever identified — and ownership ' +
-        'on the scenario surfaces is derived from the verified token subject alone. Every OWNED scenario ' +
-        'is therefore unreadable AND unwritable by its own owner across all six /assist/v1/scenarios/* ' +
-        'endpoints, which answer 404. Guest (unowned) scenarios are unaffected. This flag is NOT a ' +
-        'rollback lever for the scenario family: set CEE_REQUIRE_USER_JWT=true to restore owner access.',
-    );
-  }
+  log.info({ event: 'config.scenario_ownership_posture', identity_source: 'verified_supabase_jwt',
+    guest_owner_null_allowed: true, viewer_member_read: 'scenario_graph_only' },
+    'Scenario ownership is enforced centrally, independently of CEE_REQUIRE_USER_JWT');
 
   // Prompt environment — always logged at startup so every boot records which
   // PMS pointer this deployment serves and why. A production runtime resolving
@@ -305,11 +269,7 @@ export async function build() {
     Boolean(config.auth.assistApiKeys?.some((k) => k.trim().length > 0));
   const hasHmacSecret = Boolean(config.auth.hmacSecret?.trim().length);
 
-  if (nodeEnv === 'production' && !hasApiKeys && !hasHmacSecret) {
-    throw new Error(
-      'FATAL: In production, at least one ASSIST_API_KEY/ASSIST_API_KEYS or HMAC_SECRET must be configured',
-    );
-  }
+  assertAuthConfigured(nodeEnv, hasApiKeys, hasHmacSecret);
 
   // One adapter-free routing projection feeds startup status and the admin
   // endpoint. Gated, inert/display and invalid rows remain visible in the full
@@ -484,6 +444,15 @@ export async function build() {
     trustProxy: nodeEnv === "production",
   });
 
+  // @fastify/cors owns one framework-generated OPTIONS route. Its explicit
+  // declaration is installed before the strict guard; no application route gets a default.
+  app.addHook('onRoute', route => {
+    if (route.method === 'OPTIONS' && route.url === '*') {
+      route.config = { ...route.config, scenarioId: 'none' };
+    }
+  });
+  installScenarioDeclarationGuard(app);
+
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
   const allowedOrigins = resolveAllowedOrigins();
   const allowedOriginSet = new Set(allowedOrigins);
@@ -614,6 +583,7 @@ await app.register(rateLimit, {
   // Auth: API key authentication with per-key quotas (v1.3.0)
   // Note: authPlugin uses getRequestId() which now has correct ID from above hook
   await app.register(authPlugin);
+  await app.register(scenarioOwnershipPlugin);
 
   // Response hash: Add x-olumi-response-hash header (v1.5 PR N)
   await app.register(responseHashPlugin);
@@ -705,6 +675,12 @@ await app.register(rateLimit, {
 // Centralized error handler: structured error.v1 responses with request_id
 // Layer 3 guarantee: every error response has a non-empty JSON body.
 app.setErrorHandler((error, request, reply) => {
+  if (error instanceof ModelWriteOwnershipRefused) {
+    // Best-effort terminal mark (the helper never throws); the handler stays synchronous for every other error.
+    const slot = currentTurnFenceSlot();
+    if (slot?.handle) void markDraftGraphWriteFailed(slot.scenarioId, slot.turnId, error.code, getRequestId(request), 'turn_dead_only');
+    return reply.code(403).send(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[error.reason]);
+  }
   // ROADMAP 1.16i (CEE half) — client aborts are not server errors. One
   // aborted browser request used to produce four error-class log lines and
   // a false 5xx metric increment for a 500 that never reached any client
@@ -815,7 +791,7 @@ function buildCeeConfig() {
 // ---------------------------------------------------------------------------
 // /healthz — minimal public probe (load balancers, readiness checks, CI)
 // ---------------------------------------------------------------------------
-app.get("/healthz", async (_request, reply) => {
+app.get("/healthz", { config: { scenarioId: 'none' } }, async (_request, reply) => {
   // GATE 0 — a production runtime must never serve the PMS staging pointer.
   // When the prod verdict is a POSITIVE identification (OLUMI_ENV=prod, or
   // RENDER_SERVICE_NAME set and not containing "staging") and the resolved
@@ -1010,7 +986,7 @@ app.get("/healthz", async (_request, reply) => {
 // ---------------------------------------------------------------------------
 // /healthz/detail — full diagnostics (admin auth required)
 // ---------------------------------------------------------------------------
-app.get("/healthz/detail", async (request, reply) => {
+app.get("/healthz/detail", { config: { scenarioId: 'none' } }, async (request, reply) => {
   const providedKey = request.headers["x-admin-key"] as string | undefined;
   if (!providedKey) {
     return reply.code(401).send({
@@ -1261,7 +1237,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       )
     : null;
 
-  app.get("/diagnostics", async (request, reply) => {
+  app.get("/diagnostics", { config: { scenarioId: 'none' } }, async (request, reply) => {
     // Security: Diagnostics access requires explicit key ID allowlist
     if (!diagnosticsKeyIds || diagnosticsKeyIds.size === 0) {
       reply.code(403);
@@ -1361,6 +1337,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // per Paul's no-dark-launch / no-new-env-gate rulings. Its own always-on
   // Supabase-JWT verification is independent of CEE_REQUIRE_USER_JWT.
   await ceeDecisionRecordsRouteV1(app);
+  await ceeScenarioCopyRouteV1(app);
   await ceeUtilityWeightRouteV1(app);
   await ceeRiskToleranceRouteV1(app);
   await ceeEdgeFunctionRouteV1(app);
@@ -1609,6 +1586,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       'Critical prompt coverage check failed (non-fatal)',
     );
   }
+
+  let stopAnalysisRunSweeper = () => {};
+  app.addHook('onReady', async () => {
+    if (nodeEnv !== 'test') stopAnalysisRunSweeper = startSessionAnalysisRunSweeper();
+  });
+  app.addHook('onClose', async () => { stopAnalysisRunSweeper(); });
 
   // Sentry: register Fastify error handler AFTER all routes
   setupSentryFastify(app);
