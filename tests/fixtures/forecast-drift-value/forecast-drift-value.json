@@ -1,0 +1,8 @@
+{
+ "_source": {
+  "draft": "recovery/prompt/GEN-D4-DRAFTER-TEXT-DRAFT.txt",
+  "draft_sha256": "d32c9b0e8063e0d42ff3bd4602239d275fb4734954ef8809bbecf6266f949a4d",
+  "status": "AIE_TEXT_PENDING: PROMPT's item A, typographic apostrophes; replaced byte for byte from the AIE packet when it answers"
+ },
+ "drift_value": "Put that derived change in the drift factor’s baseline_value (2 in this example, not today’s structural 0), and link the drift to the goal as a definition: effect_amount 1, effect_per_source_change 1. Never carry the change in the link’s size."
+}
