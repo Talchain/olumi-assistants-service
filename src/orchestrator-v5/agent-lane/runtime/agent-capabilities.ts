@@ -289,7 +289,6 @@ import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysis
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
-import { linkStrengthsPostimageIsScoped } from '../../system-events/option-intervention-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
@@ -4049,11 +4048,18 @@ export function createAgentCapabilities(
      *  · every approved link as approved (`holds`);
      *  · the graph the analysis reads is the one the writer committed (`res.graph_hash`): every size and spread, each link's
      *    direction and its source and sizing marks, and every figure that decides a Run;
-     *  · the link writer's own scope rule: only the approved links changed, each only in what that writer owns, so each
-     *    left-out link (its review stamp and display included) and everything else are as they were when approved.
+     *  · everything but the approved links byte-equal to the approved read, so each left-out link (its review stamp and
+     *    display included) and everything else are as they were when approved.
+     * (Not via the link writer's own scope rule: this module never names the internal option writer, the consent manifest's
+     * one-consumer rule.)
      */
+    const approvedKeys = new Set(sent.map((l) => `${l.from}::${l.to}`));
+    const allButApproved = (raw: unknown): unknown => {
+      const g = isPlainRecord(raw) ? raw : {};
+      return { ...g, edges: (Array.isArray(g.edges) ? g.edges : []).filter((e) => !(isPlainRecord(e) && approvedKeys.has(`${String(e.from)}::${String(e.to)}`))) };
+    };
     const retained = check !== null && check.graph_hash === res.graph_hash
-      && linkStrengthsPostimageIsScoped(approvedRead.raw, check.raw, sent.map(({ from, to }) => ({ from, to })));
+      && isDeepStrictEqual(allButApproved(check.raw), allButApproved(approvedRead.raw));
     if (!holds || !retained) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
