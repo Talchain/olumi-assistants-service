@@ -3611,7 +3611,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       own_write_landed: input.risk_occurrence.own_write_landed === true,
       // S2-B: the user's verified "holds now" statement goes WITH its block; without it the door rightly refuses a user block
       // (`applyRiskOccurrenceEdit`: invalid_block), so the holds-now card could never land on the real route.
-      ...(input.risk_occurrence.holds_now !== undefined ? { holds_now: input.risk_occurrence.holds_now } : {}) } } : {}),
+      ...(input.risk_occurrence.holds_now !== undefined ? { holds_now: input.risk_occurrence.holds_now } : {}),
+      // S2: likewise the user's own stated chance (`stated_occurrence`), with its block.
+      ...(input.risk_occurrence.stated_occurrence !== undefined ? { stated_occurrence: input.risk_occurrence.stated_occurrence } : {}) } } : {}),
     ...(input.cohort_forecast !== undefined ? { cohortForecast: { ...input.cohort_forecast,
       own_write_landed: input.cohort_forecast.own_write_landed === true } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
