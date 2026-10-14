@@ -395,7 +395,9 @@ export interface EventCapacityRatio {
   readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number; readonly unit?: string;
     /** AIE 6174736249: a factor the brief did not state, worked out by Olumi through a drafted link from a set factor. A
      * −1-per-1 link in the same unit is Olumi's two-way split assumption (`split_with`, e.g. feature time = 100% − legacy). */
-    readonly derived?: { readonly from: string; readonly split_with?: string; readonly split_total?: number } }[];
+    readonly derived?: { readonly from: string; readonly split_with?: string; readonly split_total?: number };
+    /** A figure today the brief did not state and no link derives: Olumi's estimate, said as that. */
+    readonly estimated?: true }[];
   /** True only when the drafter typed the identity as stated in the brief; otherwise it is Olumi's reading. */
   readonly identity_stated: boolean;
   /** The option's own settings the ratio rests on, each with whether it is Olumi's proposal. */
@@ -458,12 +460,25 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
       return value;
     });
     if (withOption.some(v => !Number.isFinite(v) || v <= 0) || withOption.every((v, k) => v === today[k])) return;
+    // AIE 6174736249 (retained origins): a figure today the brief did not state is Olumi's. A share that sums to 100% with a
+    // stated share in the same unit is Olumi's two-way split of it (75% = 100% − the stated 25%), re-derived when that is edited.
+    const estimated = new Set<number>();
+    labels.forEach((label, k) => {
+      if (derived.has(k) || factors.find(x => sameLabel(x.label, label))?.provenance === 'explicit') return;
+      const unit = unitOf(label);
+      const complement = unit !== undefined && unit.trim().startsWith('%') ? factors.find(x => !sameLabel(x.label, label)
+        && x.provenance === 'explicit' && unitOf(String(x.label)) === unit && baseline(String(x.label)) !== undefined
+        && baseline(String(x.label))! + today[k]! === 100) : undefined;
+      if (complement !== undefined) derived.set(k, { from: String(complement.label), split_with: String(complement.label), split_total: 100 });
+      else estimated.add(k);
+    });
     const product = (vs: readonly number[]): number => vs.reduce((a, b) => a * b, 1);
     const ratio = product(withOption) / product(today as number[]);
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) return;
     out.set(index, { ratio, capacity: String(identity.outcome),
       factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]!,
-        ...(unitOf(label) === undefined ? {} : { unit: unitOf(label) }), ...(derived.has(k) ? { derived: derived.get(k) } : {}) })),
+        ...(unitOf(label) === undefined ? {} : { unit: unitOf(label) }), ...(derived.has(k) ? { derived: derived.get(k) } : {}),
+        ...(estimated.has(k) ? { estimated: true as const } : {}) })),
       identity_stated: identity.provenance === 'explicit',
       settings: settings.map(iv => ({ label: String(iv.factor_label), value: iv.value as number,
         unit: typeof iv.unit === 'string' ? iv.unit : null, olumis: iv.provenance !== 'explicit' })) });

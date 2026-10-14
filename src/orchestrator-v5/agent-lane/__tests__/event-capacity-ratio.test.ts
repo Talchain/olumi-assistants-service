@@ -355,3 +355,33 @@ describe('DL (14 Oct): a stated deadline keeps its forecast whatever options the
       + "forecast doesn't use yet. Worth discussing: how much it would speed up the work, and from when.");
   });
 });
+
+describe('AIE 6174736249 (retained origins): a figure today the brief did not state is said as Olumi\'s — the served draft e635a126', () => {
+  it('⭐ RED→GREEN: the 75% feature time is Olumi\'s split of the stated 25% (and follows an edit to it); the 6 developers are the brief\'s', async () => {
+    const S = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-e635a126-raw-20261014.json', import.meta.url), 'utf8')) as { raw_text: string };
+    const dated = withEventShareDate(await construct(JSON.parse(S.raw_text) as Rec), '2027-04-14', '2026-10-14') as Rec;
+    const r = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: 5, high_months: 7,
+      deadline: '2027-04-14', reference_date: '2026-10-14' } as never, computeAnalysisAffectingGraphHash(dated as never)!);
+    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
+    const g = r.mutatedGraph as Rec;
+    expect(shareOptionEstimateWords(g, 'event_option_2')).toBe('using Olumi’s reading that ‘Feature development capacity’ = '
+      + '‘Development team headcount’ × ‘Time on feature work’ (with ‘Time on feature work’ at 75% today, worked out on Olumi’s '
+      + 'assumption that the time is split only between it and ‘Time on legacy fixes’), Olumi’s proposed setting of ‘Time on legacy '
+      + 'fixes’ at 10% and ‘Time on feature work’ at 90%, and Olumi’s provisional assumption that delivery pace changes in '
+      + 'proportion to ‘Feature development capacity’ from now');
+    // Live: the stated 25% edited to 20% re-derives today's feature time (80%); the option's own 90% stands.
+    const legacyFix = g.nodes.find((n: Rec) => n.label === 'Time on legacy fixes');
+    Object.assign(legacyFix.observed_state, { raw_value: 20, value: 0.2 });
+    const after = projectGraphForPersistence(g) as Rec;
+    expect(node(after, 'event_capacity_2').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(90 / 80, 12);
+  });
+
+  it('CONTRAST: a figure Olumi did not state and that splits nothing is labelled Olumi\'s estimate (never presented as the brief\'s)', async () => {
+    const d = JSON.parse(JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-e635a126-raw-20261014.json', import.meta.url), 'utf8')).raw_text) as Rec;
+    d.factors.find((f: Rec) => f.label === 'Time on legacy fixes').baseline_value = 30; // 30 + 75 ≠ 100: no two-way split
+    const g = await construct(d);
+    expect(node(g, 'event_capacity_2').observed_state.extra_share_by_date.ratio_basis.factors[1]).toMatchObject({
+      label: 'Time on feature work', today: 75, estimated: true });
+    expect(node(g, 'event_capacity_2').observed_state.extra_share_by_date.ratio_basis.factors[1].derived).toBeUndefined();
+  });
+});
