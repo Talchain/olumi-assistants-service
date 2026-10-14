@@ -12,7 +12,9 @@ describe('an option\'s capacity ratio through the brief\'s own product identity'
     const r = eventCapacityRatios(draft() as never);
     expect([...r.keys()]).toEqual([1, 2]);
     expect(r.get(1)).toEqual({ ratio: (6 * 85) / (6 * 75), capacity: 'Feature development capacity',
-      factors: [{ label: 'Mid-weight developers', today: 6, withOption: 6 }, { label: 'Time on feature work', today: 75, withOption: 85 }] });
+      factors: [{ label: 'Mid-weight developers', today: 6, withOption: 6 }, { label: 'Time on feature work', today: 75, withOption: 85 }],
+      // The drafter's identity is Olumi's reading (not quoted from the brief); the 15% is Olumi's proposed setting.
+      identity_stated: false, settings: [{ label: 'Time on legacy fixes', value: 15, unit: '% of development time', olumis: true }] });
     expect(r.get(2)!.ratio).toBeCloseTo(8 / 6, 12);
   });
 
