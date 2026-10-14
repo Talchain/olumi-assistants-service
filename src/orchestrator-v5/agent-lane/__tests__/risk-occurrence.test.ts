@@ -152,31 +152,66 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
       .toEqual(Array(3).fill([false, false, true]));
   });
 
-  it('OWN WRITE: the first save lands unconfirmed → the same card pressed again continues from ITS OWN write and confirms; 1 write in all', async () => {
+  /**
+   * The press's own-write identity on a real ledger: the door's commit records its turn (`authorisationTurnId(pid)`), as the
+   * store's committed-turn ledger does. `firstSave` decides what the FIRST press's door does: land this card's own write but
+   * report it unconfirmed, or write nothing (reported unconfirmed) while ANOTHER writer's equal block lands.
+   */
+  const ownWriteWorld = (firstSave: 'own_write_unconfirmed' | 'nothing_written_equal_block_elsewhere') => {
     let g = structuredClone(G);
-    let writes = 0, firstCall = true;
+    const ledger: string[] = [];
+    let ownWrites = 0, firstCall = true;
     const ctx = { scenario_id: 'dc4e09b6-3727-4b14-a3af-dceef435b7d9', authenticated_user_id: null, request_id: 'r', turn_id: 't', user_text: 'Please propose an assumption.' };
     const caps = createAgentCapabilities(async (path) => {
       if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(g), graph_hash: computeAnalysisAffectingGraphHash(g as never) } };
       if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
       throw new Error(path);
-    }, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: async (input) => {
-      const r = applyRiskOccurrenceEdit(g, input.risk_occurrence!);
-      if (r.kind === 'refused') return { status: 'refused', reason: `risk_occurrence_${r.reason}` } as never;
-      if (r.kind === 'mutated') { g = r.mutatedGraph as Rec; writes += 1; }
-      const result = firstCall ? { status: 'unconfirmed' } : { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(g as never), already_applied: r.kind === 'unchanged',
-        committed_levels: [], links_resized: [], receipt: null };
-      firstCall = false;
-      return result as never;
-    } });
-    const p = await caps.proposeAssumptions(ctx as never, { assumptions: [{ factor_label: riskOf(g).label, value: 30, unit: '%', basis: 'An estimate for the launch window.',
-      user_stated: false, occurrence_range: { low_percent: 20, high_percent: 40 } }] } as never);
-    const yes = { ...ctx, user_text: 'Yes, use that.', typed_approval_of: String(p.proposal_id), typed_approval_words: 'Yes, use that.' } as never;
-    expect(await caps.authoriseChange(yes, { proposal_id: String(p.proposal_id) })).toMatchObject({ ok: false, mutated: true, refusal: 'not_confirmed' });
-    expect(riskOf(g).event_risk).toEqual(BLOCK);
-    const again = await caps.authoriseChange(yes, { proposal_id: String(p.proposal_id) });
+    }, new ProposalStore(), undefined, 'full', undefined, {
+      readCommittedTurnLedger: async () => ({ write_turn_ids: [...ledger], user_message_turn_ids: [], first_user_message: null, complete: true }) as never,
+      commitOptionLevels: async (input) => {
+        if (firstCall && firstSave === 'nothing_written_equal_block_elsewhere') {
+          firstCall = false;
+          const other = applyRiskOccurrenceEdit(g, { ...input.risk_occurrence!, own_write_landed: false });
+          g = (other as Rec).mutatedGraph as Rec; ledger.push('another-writers-turn');
+          return { status: 'unconfirmed' } as never;
+        }
+        const r = applyRiskOccurrenceEdit(g, input.risk_occurrence!);
+        if (r.kind === 'refused') return { status: 'refused', reason: `risk_occurrence_${r.reason}` } as never;
+        if (r.kind === 'mutated') { g = r.mutatedGraph as Rec; ownWrites += 1; ledger.push(input.turn_id); }
+        const result = firstCall ? { status: 'unconfirmed' } : { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(g as never), already_applied: r.kind === 'unchanged',
+          committed_levels: [], links_resized: [], receipt: null };
+        firstCall = false;
+        return result as never;
+      } });
+    const press = async () => {
+      const p = await caps.proposeAssumptions(ctx as never, { assumptions: [{ factor_label: riskOf(G).label, value: 30, unit: '%', basis: 'An estimate for the launch window.',
+        user_stated: false, occurrence_range: { low_percent: 20, high_percent: 40 } }] } as never);
+      const yes = { ...ctx, user_text: 'Yes, use that.', typed_approval_of: String(p.proposal_id), typed_approval_words: 'Yes, use that.' } as never;
+      return () => caps.authoriseChange(yes, { proposal_id: String(p.proposal_id) });
+    };
+    return { press, graph: () => g, ownWrites: () => ownWrites };
+  };
+
+  it('OWN WRITE: the first save lands unconfirmed → the same card pressed again continues from ITS OWN write and confirms; 1 write in all', async () => {
+    const w = ownWriteWorld('own_write_unconfirmed');
+    const press = await w.press();
+    expect(await press()).toMatchObject({ ok: false, mutated: true, refusal: 'not_confirmed' });
+    expect(riskOf(w.graph()).event_risk).toEqual(BLOCK);
+    const again = await press();
     expect(again).toMatchObject({ ok: true, applied: true });
-    expect(writes).toBe(1);
+    expect(w.ownWrites()).toBe(1);
+  });
+
+  it('⛔ buddy r3 (equal value, different identity): the first save writes NOTHING (unconfirmed) while another writer lands an EQUAL block → the retry is refused: no ok, no receipt, no write of its own', async () => {
+    const w = ownWriteWorld('nothing_written_equal_block_elsewhere');
+    const press = await w.press();
+    expect(await press()).toMatchObject({ ok: false, refusal: 'not_confirmed' });
+    expect(riskOf(w.graph()).event_risk, 'the equal block is another writer’s').toEqual(BLOCK);
+    const again = await press() as Rec;
+    // Its card no longer applies (the risk already holds a level that is not its own write), so the press refuses it.
+    expect(again, JSON.stringify(again)).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
+    expect(again).not.toHaveProperty('follow_up');
+    expect(w.ownWrites()).toBe(0);
   });
 
   it('DL Q2: the chance rests on Olumi’s occurrence too — counted on the face and listed on the panel, by the risk’s id', () => {

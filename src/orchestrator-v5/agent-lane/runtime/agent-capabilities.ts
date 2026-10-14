@@ -3858,8 +3858,9 @@ export function createAgentCapabilities(
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
     // A retry continues only from THIS proposal's own landed write (its partial progress, or its own commit in the ledger).
-    const ownWriteLanded = proposals.partialProgressOf(pid) !== undefined || (opts.readCommittedTurnLedger !== undefined
-      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(pid)), () => false));
+    const ownCommitInLedger = async (): Promise<boolean> => opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(pid)), () => false);
+    const ownWriteLanded = proposals.partialProgressOf(pid) !== undefined || await ownCommitInLedger();
     const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
       goal_id: v.goal_id, expected_goal: v.expected_goal, own_write_landed: ownWriteLanded };
     // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
@@ -3870,13 +3871,13 @@ export function createAgentCapabilities(
     }
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
       turn_id: authorisationTurnId(pid), links: [], levels: [], risk_occurrence: approved });
-    // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op (the
-    // goal reading's rule): committed, or an unconfirmed commit whose re-read holds exactly that postimage.
+    // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op. Landed
+    // means THIS proposal's own write: committed by the door, or an unconfirmed commit whose own turn the ledger holds. An equal
+    // re-read is never that identity: nothing written beside another writer's equal block reads the same (buddy on #3013 r3).
     if (res.status === 'committed' || res.status === 'unconfirmed') {
       const written = applyRiskOccurrenceEdit(before.raw, approved);
       const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
-      const landed = postimage !== undefined && (res.status === 'committed'
-        || isDeepStrictEqual((await readGraph(ctx.scenario_id).catch(() => null))?.raw, postimage));
+      const landed = postimage !== undefined && (res.status === 'committed' || await ownCommitInLedger());
       if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
         landed: [op.path], receipts: [], expected_postimage: postimage });
     }
