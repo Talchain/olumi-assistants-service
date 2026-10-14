@@ -145,7 +145,7 @@ jobs:
         # The full src+test `tsc --noEmit` is deliberately NOT this gate — it
         # carries ~466 pre-existing test-file errors and lives behind the honest
         # name `pnpm typecheck:all-including-known-broken-tests`, run by the
-        # separate non-required "Typecheck Drift (ratchet)" job.
+        # separate "Typecheck Drift (ratchet)" job (the REQUIRED check on staging since 14 Oct 2026).
         run: pnpm check:schemas-resolution && pnpm build
       - name: Validate config defaults
         run: pnpm config:validate
@@ -500,16 +500,21 @@ jobs:
         run: pnpm test:integration
 
   # Typecheck Drift (ratchet): full `tsc --noEmit` (tsconfig.json = src + tests).
-  # NON-REQUIRED job — not in any branch-protection required-checks list, so it
-  # never blocks merges. It tolerates a committed baseline of pre-existing
-  # test-file type errors (scripts/ci/typecheck-baseline.txt) and FAILS only on
-  # NEW drift (a new erroring file, or the total count rising past baseline),
-  # keeping the full typecheck visible without forcing a bulk cleanup.
+  # ⛔ THE REQUIRED CHECK on `staging` since 14 Oct 2026 (lean deploy): it is the
+  # ONLY context in staging's branch protection, so every step here BLOCKS merge
+  # (derive it: gh api repos/Talchain/olumi-assistants-service/branches/staging/protection
+  # --jq '.required_status_checks.contexts'). The tsc step tolerates a committed
+  # baseline of pre-existing test-file type errors (scripts/ci/typecheck-baseline.txt)
+  # and FAILS only on NEW drift (a new erroring file, or the total count rising
+  # past baseline). The architecture steps are shrink-only (Paul 14 Oct: stop
+  # per-journey mechanisms): a new agent tool, CAS door member or drafter field fails.
   typecheck-drift:
     name: Typecheck Drift (ratchet)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Architecture counts (shrink-only; Paul 14 Oct)
+        run: bash scripts/ci/architecture-counts.sh
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -524,6 +529,8 @@ jobs:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
       - name: Generate OpenAPI types
         run: pnpm openapi:generate
+      - name: Architecture guards (statement-door freeze; provenance direct reads; shrink-only)
+        run: npx vitest run tests/contract/statement-door-tools.guard.test.ts src/cee/provenance/__tests__/provenance-reads-guard.test.ts --no-file-parallelism
       - name: Typecheck drift ratchet (full tsc; baseline-tolerant)
         run: bash scripts/ci/typecheck-ratchet.sh
 
