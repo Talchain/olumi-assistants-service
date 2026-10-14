@@ -304,6 +304,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'records that the user accepted it. Never on the user\u2019s own figure or one from their brief, never with a ' +
               'different number, and never in the same call as other values. Omit it in every other case.',
           },
+          // AIE_TEXT_PENDING (`recovery/prompt/EVENT-RISK-CARD-DRAFT.txt`): hiring path (a), Olumi's range for a risk root.
+          occurrence_range: { ...obj({
+            low_percent: { type: 'number' },
+            high_percent: { type: 'number' },
+          }, ['low_percent', 'high_percent']), description: 'For a RISK only, named by its label, that has no likelihood yet: Olumi\u2019s estimated '
+            + 'chance, in percent, that it happens at least once within the goal\u2019s period, as a low and a high figure. Give it '
+            + 'with user_stated false and its basis, alone in the call; value and unit are not used for a risk. It is Olumi\u2019s '
+            + 'starting assumption to adopt or correct, never the user\u2019s figure. Omit it for every factor.' },
         }, ['factor_label', 'value', 'unit', 'basis', 'user_stated']),
       },
     }, ['assumptions']),

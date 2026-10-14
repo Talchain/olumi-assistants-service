@@ -650,6 +650,8 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const ops = proposal.operations;
   // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
   if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
+  // AIE_TEXT_PENDING: Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
+  if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return 'Use as a starting assumption';
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the
