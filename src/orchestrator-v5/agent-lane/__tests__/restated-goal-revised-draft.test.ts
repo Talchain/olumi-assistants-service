@@ -864,6 +864,18 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     await refusedAtOffer(server({ graph: g }));
   });
 
+  it('a colleague\'s figure (`elicited_from`) is never carried, so no card calls it the user\'s: it refuses (buddy round 3)', async () => {
+    const g = structuredClone(FX.graph);
+    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { provenance: 'user_set',
+      observed_state: { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'panel_elicited', elicited_from: { participant_id: 'p-grace' } } });
+    await refusedAtOffer(server({ graph: g }));
+    // CONTRAST: the user's own typed figure, the same bytes without `elicited_from`, is carried (offered).
+    const own = structuredClone(FX.graph);
+    Object.assign((own.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { provenance: 'user_set',
+      observed_state: { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' } });
+    expect(await lane(server({ graph: own })).caps.proposeGoalTarget!(l20Turn, conversion as never)).toMatchObject({ ok: true, mutated: false });
+  });
+
   it('a limit the user set still refuses: a stored graph cannot hold a user limit row, so it is never carried', async () => {
     const g = structuredClone(FX.graph);
     g.goal_constraints = [...(g.goal_constraints ?? []), { node_id: 'advertising_spend', operator: '<=', value: 50000, unit: 'GBP/year', provenance: 'user' }];

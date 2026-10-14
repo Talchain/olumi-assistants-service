@@ -96,15 +96,17 @@ export function humanItemsAfterTheDraft(raw: unknown): HumanItem[] {
       const source = os.source;
       // The node's figure stamp travels with the figure, as the value writer pairs them (`set-factor-value.ts`): a typed
       // figure is `user_set`, an approved adoption of Olumi's keeps `ai_inferred`; any other review keeps the revision's.
+      // ⛔ A colleague's figure (`elicited_from`, `provenance-of.ts`) is never carried, so no card calls it the user's: it refuses.
+      const colleague = os.elicited_from !== undefined;
       if (rec(os.reviewed_by_user) !== undefined) {
         found.push({ words: `your review of the value for ${named(n, 'a factor')}`, origin: 'human',
-          carry: { kind: 'value', node: n, ...(n.provenance === 'ai_inferred' ? { stamp: 'ai_inferred' } : {}) } });
+          ...(colleague ? {} : { carry: { kind: 'value' as const, node: n, ...(n.provenance === 'ai_inferred' ? { stamp: 'ai_inferred' } : {}) } }) });
       }
       else if (source === undefined) {
         if (holdsAValue(os) && !isTodayDefinition(os)) unknown(`a value for ${named(n, 'a factor')} whose author is not recorded`);
       } else if (!(typeof source === 'string' && DRAFT_VALUE_SOURCES.has(source))) {
         if (provenanceOf({ value: os }).origin === 'human') {
-          found.push({ words: `your figure for ${named(n, 'a factor')}`, origin: 'human', carry: { kind: 'value', node: n, stamp: 'user_set' } });
+          found.push({ words: `your figure for ${named(n, 'a factor')}`, origin: 'human', ...(colleague ? {} : { carry: { kind: 'value' as const, node: n, stamp: 'user_set' } }) });
           figureNodes.add(n);
         } else unknown(`a value for ${named(n, 'a factor')} whose author is not recorded`);
       }
