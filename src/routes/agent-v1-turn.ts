@@ -1777,6 +1777,28 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
  * `source: 'retry'`). `sameAgentTurnRequest` lets exactly that retry replay the recorded press (Codex pre-review P1).
  */
 const CHIP_HASH_SEP = '#chip:';
+/**
+ * Restart continuity (DL 17:18Z, 14 Oct): a durable answer row's words were TYPED when its stored hash is this subject's
+ * PLAIN hash of them: no `#chip:` suffix and no operation in the digest, the same rule as `typedByUser`. The reseed holds
+ * proven rows as typed words (`HistoryStore.seed`); every other row stays source-unknown.
+ */
+export function typedRowProof(scenarioId: string, userId: string | null):
+  (row: { request_hash?: string | null; user_message?: string | null; created_at?: string | null }) => boolean {
+  return (row) => typeof row.user_message === 'string' && writtenSinceTypedOriginCutoff(row.created_at)
+    && row.request_hash === agentTurnRequestHash(scenarioId, userId, row.user_message);
+}
+/**
+ * ⛔ THE CUTOFF (DL, 14 Oct): before DGAI c3a20ea9 (#2792 + #2793 + #2794) the UI sent some of Olumi's own text without a
+ * chip (GuidanceStrip discuss and exercise, confirm, OptionsComparison, OptionPreview, DraftNotes, FactorNode, …), so an
+ * older row's plain hash does not prove its words were typed. Only rows written once that UI was served are proven:
+ * staging's version.json showed c3a20ea9 at 21:03Z (built 20:24:48Z), so the cutoff is that observation, never earlier.
+ * An older row, or one with no readable time, stays source-unknown.
+ */
+export const TYPED_ORIGIN_PROOF_FROM = '2026-10-14T21:03:00Z';
+function writtenSinceTypedOriginCutoff(createdAt: string | null | undefined): boolean {
+  const at = typeof createdAt === 'string' ? Date.parse(createdAt) : Number.NaN;
+  return Number.isFinite(at) && at >= Date.parse(TYPED_ORIGIN_PROOF_FROM);
+}
 /** A durable typed discriminator lets the UI's chipless retry recognise SCI-DEEP without reversing the digest. */
 export const STRUCTURAL_CHALLENGE_HASH_TAG = 'sci-deep:';
 export function chipOperationOf(body: Record<string, unknown>): string | undefined {
@@ -3091,7 +3113,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const durable = historyFromDurableTurns(durableSeedRows);
         if (durable.length > 0) {
           // Seeding reuses already-saved rows and held history; it is not an effect of this turn.
-          histories.seed(sessionId, durable, held, durableSeedRows);
+          // Restart continuity: a row whose stored hash is this subject's PLAIN hash of its own words was typed (no chip, no
+          // operation); `HistoryStore.seed` holds those words as typed again. Any other row stays source-unknown.
+          histories.seed(sessionId, durable, held, durableSeedRows, typedRowProof(scenarioId, userId));
         }
         earlierWordsKnown = true;
       } catch (err) {

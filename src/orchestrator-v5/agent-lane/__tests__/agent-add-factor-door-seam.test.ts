@@ -73,7 +73,8 @@ const store = {
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
         handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
-        created_at: new Date(Date.UTC(2026, 8, 27, 0, 0, tick)).toISOString() });
+        // After the typed-origin cutoff (`TYPED_ORIGIN_PROOF_FROM`, the UI that sends all of Olumi's text as chips).
+        created_at: new Date(Date.UTC(2026, 9, 15, 0, 0, tick)).toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) {
         graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
@@ -158,6 +159,8 @@ const toolOutputIn = (body: Record<string, unknown>): Record<string, unknown> =>
   const out = (body['input'] as { type?: string; output?: string }[]).filter((i) => i.type === 'function_call_output').at(-1);
   return JSON.parse(String(out?.output ?? '{}')) as Record<string, unknown>;
 };
+
+const HIRING_TIMES_BRIEF = 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.';
 
 describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held on the product\'s own seam (the add-risk door\'s twin)', () => {
   let app: FastifyInstance;
@@ -389,18 +392,24 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       .toEqual(expect.arrayContaining([expect.objectContaining({ source: USER_SOURCE, raw_value: 120000 }), expect.objectContaining({ source: USER_SOURCE, raw_value: 65000 })]));
   }, 120_000);
 
-  it.each(['verified', 'unknown', 'model'])('A2h deadline phrase on real route (%s)', async origin => {
+  // Restart continuity (DL 17:18Z, 14 Oct): words TYPED before a cold session are proven typed by their row's own request
+  // hash (`typedRowProof`), so `cold_typed` verifies. `unknown` keeps A2h's negative: the same words arrived as a CHIP
+  // press (the row's hash carries `#chip:`), so after a cold session their origin stays unknown.
+  it.each(['verified', 'cold_typed', 'unknown', 'model'])('A2h deadline phrase on real route (%s)', async origin => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     const words = '30 April 2028';
-    if (origin !== 'model') await turn({ message: `Our deadline is ${words}.` });
+    if (origin === 'unknown') await turn({ message: `Our deadline is ${words}.`, source: 'chip', chip: { id: 'chip-not-typed' } });
+    else if (origin !== 'model') await turn({ message: `Our deadline is ${words}.` });
     let output: Record<string, any> = {};
     script = [() => fnCall('propose_goal_deadline', { deadline_words: words, rationale: '' }),
       body => { output = toolOutputIn(body); return say('Check the deadline card.'); }];
-    const result = await turn({ message: 'Prepare the deadline.', ...(origin === 'unknown' ? { agent_session_id: randomUUID() } : {}) });
+    const cold = origin === 'unknown' || origin === 'cold_typed';
+    const result = await turn({ message: 'Prepare the deadline.', ...(cold ? { agent_session_id: randomUUID() } : {}) });
     const call = result._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
-    expect(call, JSON.stringify(output)).toMatchObject(origin !== 'verified' ? { ok: false, mutated: false, refusal: 'origin_unknown' } : { ok: true });
-    if (origin === 'verified') {
+    const users = origin === 'verified' || origin === 'cold_typed';
+    expect(call, JSON.stringify(output)).toMatchObject(!users ? { ok: false, mutated: false, refusal: 'origin_unknown' } : { ok: true });
+    if (users) {
       const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
       const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
       expect(proposal?.provenance.authored_by).toBe('user_stated');
@@ -426,9 +435,9 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     ]);
   });
 
-  it('A2h cold-session salaries keep unknown origin even though the AI sees the figures', async () => {
+  it('A2h cold-session salaries sent as a CHIP keep unknown origin even though the AI sees the figures', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    await turn({ message: FIG_MSG });
+    await turn({ message: FIG_MSG, source: 'chip', chip: { id: 'chip-not-typed' } });
     const before = bytes();
     let saw = false, output: Record<string, unknown> = {};
     script = [body => { saw = (body.input as { role?: string }[]).filter(i => i.role === 'user').some(i => JSON.stringify(i).includes(FIG_MSG)); return fnCall('propose_new_factor', { factors: factorArgs(), rationale: '' }); },
@@ -441,6 +450,19 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(before);
   });
 
+  it('restart continuity: cold-session salaries the user TYPED stay theirs (proven by the row\'s own request hash)', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await turn({ message: FIG_MSG });
+    script = [() => fnCall('propose_new_factor', { factors: factorArgs(), rationale: '' }), () => say('Check the card.')];
+    const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
+    expect(callOf(result)).toMatchObject({ ok: true, mutated: false });
+    const held = await heldOnLatestRow();
+    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
+      { quote: FIG_MSG, observed_state: { source: USER_SOURCE, raw_value: 120000 } },
+      { quote: FIG_MSG, observed_state: { source: USER_SOURCE, raw_value: 65000 } },
+    ]);
+  });
+
   it.each([false, true])('A2h hiring times preserve source across the real route (cold=%s)', async cold => {
     const { admitCandidateModel } = await import('../admit-model.js');
     const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
@@ -449,7 +471,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
         { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
         { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
-      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, HIRING_TIMES_BRIEF);
     graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
     const words = 'A Tech lead would take at least 3 months to get in the door.';
     await turn({ message: words });
@@ -460,12 +482,31 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const result = await turn({ message: 'Use those hiring times.', ...(cold ? { agent_session_id: randomUUID() } : {}) });
     expect(saw).toBe(true);
     const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
-    expect(call, JSON.stringify(output)).toMatchObject(cold ? { ok: false, refusal: 'origin_unknown' } : { ok: true });
-    if (cold) expect(JSON.stringify(output)).toContain('origin stays unknown');
-    else {
-      expect(JSON.stringify(result)).toContain('at least 3 months');
-      expect(JSON.stringify(result)).toContain('you said');
-    }
+    // Restart continuity: typed words survive the cold session (the row's own request hash proves them typed).
+    expect(call, JSON.stringify(output)).toMatchObject({ ok: true });
+    expect(JSON.stringify(result)).toContain('at least 3 months');
+    expect(JSON.stringify(result)).toContain('you said');
+  });
+
+  it('A2h hiring times sent as a CHIP keep unknown origin across a cold session', async () => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, HIRING_TIMES_BRIEF);
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+    const words = 'A Tech lead would take at least 3 months to get in the door.';
+    await turn({ message: words, source: 'chip', chip: { id: 'chip-not-typed' } });
+    let output: Record<string, unknown> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: 'at least 3 months' }] }] }),
+      body => { output = toolOutputIn(body); return say('Check the source.'); }];
+    const result = await turn({ message: 'Use those hiring times.', agent_session_id: randomUUID() });
+    const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
+    expect(call, JSON.stringify(output)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(JSON.stringify(output)).toContain('origin stays unknown');
   });
 
   it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {
@@ -476,7 +517,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
         { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
         { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
-      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, HIRING_TIMES_BRIEF);
     graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
 
     if (source === 'restored') await turn({ message: 'We discussed the recruitment process.' });
@@ -510,7 +551,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
         { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
         { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
-      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, HIRING_TIMES_BRIEF);
     graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
 
     const quote = `A Tech lead would take ${phrase}, but that is uncertain`;
