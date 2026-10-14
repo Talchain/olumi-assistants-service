@@ -99,6 +99,16 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(result.detail).toBe(`${UNATTESTED_GOAL_CLARIFICATION} Retained event wording: "${EVENT_WORDS}". Retained intent wording: "${GOVERNING}".`);
   });
 
+  /** ⛔ Codex post-merge 3026, probe 1: the redraft's own target is credited only as admission RETAINED it. */
+  it('a redraft whose goal names the user\'s quantity but states no target (`target_stated: false`) is not adopted: the target is never lost', async () => {
+    const r = redraft();
+    r.goal.target_stated = false;
+    const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(r)]);
+    expect(calls).toHaveLength(2);
+    expect(graph, 'productivity must never register without its ≥ 10 % target').toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+  });
+
   it('a retained-wording clause is omitted when its words are not a complete statement of the brief (the core text stays whole)', async () => {
     const d = draft();
     d.goal.source_quote = 'an urgent launch date in the next three months';
@@ -219,6 +229,39 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(rows).toEqual(expect.arrayContaining([['New customers in first 3 months', '>=', 20], ['Annual marketing spend', '<=', 100000],
       ['Working time on launch marketing', '<=', 25]]));
     expect(registeredBrief, 'the brief is the source registered').toBe(D2.brief);
+  });
+
+  /** ⛔ Codex post-merge 3026, probe 2: the second size retry keeps the ACCEPTED redraft's conditions, not only the first draft's. */
+  it('a compaction after a permitted redraft that drops a condition the redraft added is not adopted: nothing registers without it', async () => {
+    const D2 = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-r1.json', 'utf8')) as Rec;
+    const RETRIES = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-v3-retries.json', 'utf8')) as Rec;
+    const regoal = (draft: Rec, alsoRequired: string[], extraLinks: readonly Rec[] = []): Rec => {
+      const d = structuredClone(draft);
+      d.goal = { ...d.goal, kind: null, deliverable: null, metric: 'Conversion rate', operator: '>', target_stated: true, value: 15, unit: '%',
+        horizon_months: 3, frame: 'level', quantity_frame: 'level',
+        basis: { reference: 'launch', denominator: null, period_months: 3, period_kind: 'over_period', effect_unit: '%', effects_at_period_end: true,
+          also_required: alsoRequired, open_question: null },
+        source_quote: 'Success means a conversion rate of over 15% and at least 20 new customers during the first three months after launch.' };
+      d.constraints = (d.constraints as Rec[]).filter((c) => c.metric !== 'Conversion rate');
+      d.factors = (d.factors as Rec[]).filter((f) => f.label !== 'Conversion rate');
+      d.links = (d.links as Rec[]).map((l) => (l.to === 'Feature launch' ? { ...l, to: 'Conversion rate' } : l)).filter((l) => l.from !== l.to).concat(extraLinks);
+      return d;
+    };
+    const stillOver = [{ from: 'Annual marketing spend', to: 'Unknown conversion lift', direction: 'positive', provenance: 'ai_proposed',
+      effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null }];
+    const both = ['maintain customer trust', 'avoid misleading claims'];
+    const { graph, result, calls } = await construct([JSON.stringify(D2.draft_call1), JSON.stringify(regoal(RETRIES.retry_rep7, both, stillOver)),
+      JSON.stringify(regoal(RETRIES.retry_rep6, ['maintain customer trust', 'maintain customer trust']))], D2.brief);
+    expect(calls).toHaveLength(3);
+    const registered = graph === undefined ? undefined : goalOf(graph).goal_target_basis?.also_required;
+    expect(registered, 'never ["maintain customer trust" ×2] without "avoid misleading claims"').not.toEqual(['maintain customer trust', 'maintain customer trust']);
+    if (graph !== undefined) expect(registered).toEqual(both);
+    else expect(result.ok).toBe(false);
+    // CONTRAST: the same compaction keeping both conditions registers them.
+    const kept = await construct([JSON.stringify(D2.draft_call1), JSON.stringify(regoal(RETRIES.retry_rep7, both, stillOver)),
+      JSON.stringify(regoal(RETRIES.retry_rep6, both))], D2.brief);
+    expect(kept.result.ok, JSON.stringify(kept.result).slice(0, 400)).toBe(true);
+    expect(goalOf(kept.graph!).goal_target_basis?.also_required).toEqual(both);
   });
 
   it('CONTRAST: an event the brief attests is not re-asked: one drafter call, and the event reading stands', async () => {

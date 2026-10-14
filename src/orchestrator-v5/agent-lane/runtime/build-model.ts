@@ -1,5 +1,6 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -1966,7 +1967,12 @@ export async function buildModelFromBrief(
      * `compactionKeepsWhatOptionsDo` on the moving candidate). It returns what adoption sets, against the first draft, or null.
      */
     const first = { candidate, admitted, preparation, size, keptApart, linksSetAside, mechanismsUnmodelled, costsOffRevenue } as const;
-    const judgeRetry = (text: string) => {
+    /**
+     * `accepted`: the model the retry edits (the first draft, or the redraft a first retry adopted). Its goal conditions are
+     * the ones a second size retry must keep (⛔ Codex post-merge 3026: compaction was checked against the ORIGINAL event
+     * draft, so a condition the accepted redraft added was lost).
+     */
+    const judgeRetry = (text: string, accepted: CandidateModel) => {
       const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(text) as CandidateModel));
       const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: first.keptApart, setAside: first.linksSetAside }, retryApart);
       // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
@@ -2007,8 +2013,21 @@ export async function buildModelFromBrief(
       // fact and relationship the user stated must still be there by name.
       // A redraft that re-chose an unattested event goal keeps the user's material with the goal node exempt and the user's
       // target kept as its goal (`keepsEveryUserStatedIdentityWhenGoalRechosen`); every other retry exactly as before.
+      // ⛔ The redraft goal's own target is credited only as ADMISSION RETAINED it (Codex post-merge 3026: a redraft with
+      // `target_stated: false` registered productivity without its ≥10% target, credited from the raw candidate).
+      const admittedGoal = retryAdmitted.nodes.find((n) => n.kind === 'goal') as Record<string, unknown> | undefined;
+      // Read through the one goal-record authority (S5), never the node's fields.
+      const held = admittedGoal === undefined ? null : readGoalRecord(retryAdmitted, String(admittedGoal.id))?.target ?? null;
+      const retainedTarget = {
+        metric: String(admittedGoal?.description ?? admittedGoal?.label ?? ''),
+        // The comparator is the goal's own claim (admission writes the node's comparator later, from it); the figure is what it RETAINED.
+        operator: String(held?.comparator ?? retryCandidate.goal.operator),
+        value: typeof held?.raw === 'number' && Number.isFinite(held.raw) ? held.raw : null,
+        unit: held?.unit ?? null,
+        frame: held?.frame ?? null,
+      };
       const keepsUserMaterial = unattested === null ? keepsEveryUserStatedIdentity(first.size, retrySize)
-        : keepsEveryUserStatedIdentityWhenGoalRechosen(first.size, retrySize, retryCandidate.goal);
+        : keepsEveryUserStatedIdentityWhenGoalRechosen(first.size, retrySize, retainedTarget);
       // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
       const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(first.preparation, retryPreparation, retryRaw, retryAdmitted);
       if (!(
@@ -2017,7 +2036,8 @@ export async function buildModelFromBrief(
         // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
         // A redraft of an unattested event goal re-chooses the goal: adopted only when it is no longer one, losing no condition.
         (unattested === null ? keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal)
-          : keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal) && !stillTheUnattestedEvent(retryCandidate)) &&
+          : (accepted === firstCandidate ? keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal)
+            : keepsEveryGoalCondition(accepted.goal, retryCandidate.goal)) && !stillTheUnattestedEvent(retryCandidate)) &&
         // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
         // gap — but it must never cover LESS, and when coverage is the only reason
         // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
@@ -2100,7 +2120,7 @@ export async function buildModelFromBrief(
           schema: strictForTheDrafter(unattested === null ? retrySchemaPinningGoal(first.candidate.goal, first.candidate.decision_question)
             : retrySchemaPinningGoal(previous.goal, first.candidate.decision_question, attempt === 2), { providerBoundary: false }),
         });
-        const adopted = retry.text.length > 0 ? judgeRetry(retry.text) : null;
+        const adopted = retry.text.length > 0 ? judgeRetry(retry.text, previous) : null;
         if (adopted !== null) {
           carriedWithheld = adopted.carriedWithheld;
           leftOut = adopted.leftOut;
