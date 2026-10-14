@@ -25,6 +25,7 @@ import { composeRecoveredProposalReply } from '../proposal-reply.js';
 import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
+import { sayDate, todayInLondon } from '../../goal-target/deadline-date.js';
 import { emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import {
   eligibleTools,
@@ -413,6 +414,17 @@ export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly wh
   + 'newer and supersedes this for what it covers: describe the model from the latest applied result. A proposal\u2019s '
   + 'readiness_if_approved describes the model only IF the user approves, and never supersedes this. As the turn began: ';
 
+/**
+ * ⭐ TODAY, FROM THE SERVER CLOCK (DL 15 Oct 23:08Z; HIRING's legacy capture turn 02 served "Six months from today, 9 March
+ * 2026", on 14 Oct 2026). The ordinary turn's input held no date at all, so the Agent guessed one. Every turn now carries the
+ * server's own day in Europe/London (`todayInLondon`, the deadline reader's clock), once, beside the state; like the state it
+ * is never handed on into the history, so a later turn never reads a stale day.
+ */
+export const TODAY_PREFIX = 'TODAY, from Olumi\u2019s server clock (Europe/London): ';
+export function todayLine(at: Date): string {
+  return `${TODAY_PREFIX}${sayDate(todayInLondon(at))}. Count every date, and anything \u201cfrom today\u201d, from this day; never assume another date.`;
+}
+
 export async function runAgentTurn(
   input: AgentTurnInput,
   caps: AgentCapabilities,
@@ -444,20 +456,22 @@ export async function runAgentTurn(
   const selectionItem = input.selectionNote !== undefined && input.selectionNote !== ''
     ? { role: 'developer', content: [{ type: 'input_text', text: input.selectionNote }] }
     : undefined;
+  // The day comes from the turn's own start reading (`startedAt`), so the clock is read no more often than before.
+  const now = input.now ?? (() => Date.now());
+  const startedAt = now();
+  const todayItem = { role: 'developer', content: [{ type: 'input_text', text: todayLine(new Date(startedAt)) }] };
   const items: unknown[] = [
     ...input.history,
+    todayItem,
     ...(stateItem !== undefined ? [stateItem] : []),
     ...(selectionItem !== undefined ? [selectionItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
-  /** What this turn hands on as history: everything but the state and the selection it was given. */
-  const handedOn = (): unknown[] => (stateItem === undefined && selectionItem === undefined
-    ? items : items.filter((i) => i !== stateItem && i !== selectionItem));
+  /** What this turn hands on as history: everything but the state, the selection and the day it was given. */
+  const handedOn = (): unknown[] => items.filter((i) => i !== stateItem && i !== selectionItem && i !== todayItem);
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
-  const now = input.now ?? (() => Date.now());
-  const startedAt = now();
   let providerMs = 0;
   let toolMs = 0;
   let toolProviderMs = 0;
