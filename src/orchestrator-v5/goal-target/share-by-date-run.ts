@@ -245,10 +245,19 @@ export function shareOptionEstimateWords(graph: unknown, optionId: string, opts:
  */
 export function capacityRatioWords(part: Rec | undefined): string {
   const c = part?.observed_state?.extra_share_by_date, basis = c?.ratio_basis;
-  if (!basis || !Array.isArray(basis.factors)) return '';
   const q = (label: unknown): string => `‘${String(label)}’`;
   const withUnit = (value: unknown, unit: unknown): string =>
     `${months(Number(value))}${typeof unit === 'string' && unit !== '' ? (unit.startsWith('%') ? unit : ` ${unit}`) : ''}`;
+  // DL (14 Oct, the coaching loop): the user's own figure for the share of time (their pressed answer), Olumi's reading that
+  // the time freed goes to the deliverable (adopted by that press, still Olumi's), and Olumi's timing assumption.
+  if (basis?.relation === 'freed_time' && basis.source !== null && typeof basis.source === 'object' && typeof c.capacity_ratio === 'number') {
+    const s = basis.source as Rec;
+    const when = typeof c.lead_low === 'number' && c.lead_low > 0 ? `from ${months(c.lead_low)} months in` : 'from now';
+    return `your figure of ${withUnit(s.withOption, s.unit)} for ${q(s.label)} with this option (${withUnit(s.today, s.unit)} today), `
+      + `Olumi’s reading that the time freed goes to ${q(basis.capacity)}, so the team’s capacity for it is about ${Math.round(c.capacity_ratio * 100)}% `
+      + `of today’s, and Olumi’s provisional assumption that delivery pace changes in proportion to that capacity ${when}`;
+  }
+  if (!basis || !Array.isArray(basis.factors)) return '';
   const identity = `${q(basis.capacity)} = ${basis.factors.map((f: Rec) => q(f.label)).join(' × ')}`;
   const derived = basis.factors.flatMap((f: Rec) => f.derived !== null && typeof f.derived === 'object' ? [f.derived.split_with !== undefined
     ? `${q(f.label)} at ${withUnit(f.today, f.unit)} today, worked out on Olumi’s assumption that the time is split only between it and ${q(f.derived.split_with)}`
@@ -339,7 +348,7 @@ export function shareUnearnedCertaintyLine(graph: unknown, optionId: string, sid
 }
 
 /** The share goal's deliverable ("next feature launch" from "% of next feature launch"): one read of the goal's unit. */
-function deliverableOf(share: { readonly goal: Rec }): string {
+export function deliverableOf(share: { readonly goal: Rec }): string {
   return String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
 }
 

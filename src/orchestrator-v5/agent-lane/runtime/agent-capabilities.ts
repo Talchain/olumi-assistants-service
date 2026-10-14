@@ -32,6 +32,8 @@ import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArguments
 import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
+import { optionCapacityChangeCard, optionCapacityChangeHeld, optionCapacityChangeStillApplies, optionCapacityTarget, planOptionCapacityChange,
+  shareFiguresIn, withOptionCapacityChange, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
 import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
@@ -208,6 +210,7 @@ const NOT_A_FACTOR_NOTE =
 
 /** E5: the hiring-times op (its union member and `record.ts` entry are EBD's one-writer edits to `proposal.ts`; DL, 12 Oct). */
 const SET_HIRING_TIMES: StructuredProposal['operations'][number]['op'] = 'set_hiring_times';
+const SET_OPTION_CAPACITY_CHANGE: StructuredProposal['operations'][number]['op'] = 'set_option_capacity_change';
 /** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
 const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
 
@@ -3609,6 +3612,52 @@ export function createAgentCapabilities(
   };
 
   /**
+   * ⭐ THE COACHING LOOP (DL 14 Oct; the `set_hiring_times` precedent): the pressed option-capacity card. It stands while what it
+   * was offered against does (`optionCapacityChangeStillApplies`); the postimage is built from THIS read and registered whole
+   * with compare-and-set on both of this read's hashes, under an operation id of that base and this card (a retry replays; a
+   * conflict writes nothing). "Set" is said only once the stored model holds the carrier, the user's figure and every switch.
+   */
+  const applyOptionCapacityChange = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedOptionCapacityChange;
+    const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
+    const done = `‘${a.option_label}’ now acts in the deadline forecast through the time it frees. Run the analysis to see its chance.`;
+    if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
+    if (optionCapacityChangeHeld(before.raw, a)) {
+      proposals.markApplied(pid, []);
+      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: done };
+    }
+    if (!optionCapacityChangeStillApplies(a, before.raw)) {
+      return notApplied('superseded', `The model changed after this card was offered, so nothing was set for ‘${a.option_label}’. Offer it again only if it still applies.`);
+    }
+    const postimage = withOptionCapacityChange(before.raw, a);
+    const operationId = constructionOperationId(ctx.scenario_id, `option_capacity:${before.graph_identity_hash}:${pid}`);
+    const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+      graph: { ...postimage },
+      expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: operationId,
+    });
+    const code = reg.status === 200 ? '' : String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+    if (/STALE/.test(code)) {
+      return notApplied('superseded', `The model changed just before this was written, so nothing was set for ‘${a.option_label}’. Offer it again only if it still applies.`);
+    }
+    // Confirmed from state, also after an ambiguous failure (which does not prove no save): held exactly, or unknown.
+    const after = await readGraph(ctx.scenario_id);
+    if (after === null || !optionCapacityChangeHeld(after.raw, a)) {
+      return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+        detail: 'The change was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+          + 'offer to check the model again, and never say it was set or that it was not.' };
+    }
+    const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+    const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+      ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+        source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }]
+      : [];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: done };
+  };
+
+  /**
    * ⭐ B RESTATED GOAL (`draft-replacement.ts`; DL ruling (B), PL 6116779075, AIE 0244): the three gates over ONE read, at
    * the offer and again at the approval. `found` = what still refuses, in plain words; empty = a draft the revision may
    * replace. A record that cannot be read is listed too: unknown authority never permits replacement.
@@ -6354,6 +6403,47 @@ export function createAgentCapabilities(
           + 'Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.' };
     },
 
+    /**
+     * ⭐ THE COACHING LOOP (DL 14 Oct; `option-capacity-change.ts`): the user's new figure for a share of time an option the
+     * deadline forecast holds unresolved already changes. The figure is an S2 statement of the user's own words; the option
+     * and the share are set from graph identity; Olumi's freed-time reading and "from now" are said on the card as Olumi's.
+     * Nothing is written here.
+     */
+    async proposeOptionCapacityChange(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const optionId = typeof args?.option_id === 'string' ? args.option_id : '';
+      const factorId = typeof args?.factor_id === 'string' && args.factor_id !== '' ? args.factor_id : undefined;
+      const target = optionCapacityTarget(g.raw, optionId, factorId);
+      if (target.kind === 'refused') return refuse(target.refusal, target.detail);
+      const verdict = verifyStatements(args?.statements, { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text },
+        { subject: { quantity: 'share_of_time', node_id: String(target.factor.id), option_id: optionId }, unit: '%', forms: ['point'], figuresIn: shareFiguresIn });
+      if (verdict.kind === 'refused') return refuse(verdict.refusal, verdict.detail);
+      const plan = planOptionCapacityChange(g.raw as Record<string, unknown>, target, verdict.statements);
+      if (plan.kind === 'refused') return refuse(plan.refusal, plan.detail);
+      const a = plan.approved;
+      // The postimage must hold exactly what the card says before it is offered, never only after the press.
+      if (!optionCapacityChangeHeld(withOptionCapacityChange(g.raw, a), a)) {
+        return refuse('option_capacity_unusable', `Olumi couldn't apply this figure to ‘${a.option_label}’ as the model stands, so nothing was prepared. Say so plainly.`);
+      }
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_OPTION_CAPACITY_CHANGE, path: optionId, value: a }],
+        // The figure is the user's; the relation and timing on the card are Olumi's reading, which the press adopts.
+        provenance: { authored_by: 'model_proposed', basis: a.statements.map(st => st.quote).join(' | ') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: optionCapacityChangeCard(a) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        const op = proposals.get(pending.proposal_id)?.operations[0];
+        if (op?.op === SET_OPTION_CAPACITY_CHANGE && op.path === optionId) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        note: 'Nothing has changed yet. The change is ready for review on ONE card. Tell the user what the card says, in its words; never the ids. '
+          + 'Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.' };
+    },
+
     async proposeModelChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
@@ -8122,6 +8212,7 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_OPTION_CAPACITY_CHANGE) return applyOptionCapacityChange(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === CONFIRM_GOAL_READING_OP) return applyGoalReading(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);

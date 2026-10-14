@@ -589,6 +589,21 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['options']),
   },
   {
+    // ⭐ The coaching loop (DL 14 Oct; `goal-target/option-capacity-change.ts`): the user's answer to "how much it would speed
+    // up the work" for an option the deadline forecast holds without a mechanism.
+    type: 'function', name: 'propose_option_capacity_change',
+    description: 'Prepare one approval card when the user gives a new figure for a share of time that an option without a chance changes in the model (for example "it would cut legacy work from 25% to 15%"). Use it only for an option whose chance the result says is not shown because the model doesn\'t say how it changes the team\'s pace. Quote the user\'s complete statement from this turn or a verified earlier message, as form point with value their NEW figure. Olumi reads the time freed as going to the deliverable, and the change as taking effect from now; both stay Olumi\'s reading, shown on the card. Nothing is saved before the press on this card.',
+    parameters: obj({
+      option_id: { type: 'string', description: 'The option\'s id, as get_canonical_state gives it.' },
+      factor_id: { type: 'string', description: 'Optional: the share of time the figure is for, when the option changes more than one.' },
+      statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({
+        quote: { type: 'string', description: 'The user\'s complete statement, verbatim.' },
+        form: { type: 'string', enum: ['point'] },
+        value: { type: 'number', description: 'The new figure the quote states for the share, in percent.' },
+      }, ['quote', 'form', 'value']) },
+    }, ['option_id', 'statements']),
+  },
+  {
     type: 'function',
     name: 'propose_goal_deadline',
     description: 'Prepare one deadline card for approval. Keep the exact source deadline phrase and its conditions, using this turn or verified retained source. Interpret it from the actual known reference and any explicitly stated start; these have different roles. You may supply the proposed ISO deadline date, showing how it follows from that source. For a relative deadline (for example "6 months from last Friday"), pass the user\'s exact words and leave reference_date and deadline_date unset: Olumi resolves them from the recorded reference. Never invent or silently replace a reference, unit or level, or use recruitment/team completion time as the goal deadline. Put the full relevant source and uncertainty in rationale. Distinguish human wording from your interpretation; approval selects the displayed change without rewriting its original source. Nothing is saved before approval bound to this card. When the stated deadline belongs to this different deliverable, supply deliverable and the deadline wording through the existing parameters. Where the existing revised-draft preparation permits a complete faithful candidate, Olumi may return its approval card. The card must show the complete proposed goal, scope, conditions and changes; only the user’s approval applies them.',
@@ -918,7 +933,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -1005,6 +1020,8 @@ export interface AgentCapabilities {
   proposeCohortForecast?(ctx: AgentToolContext, args: { option_label?: unknown; people?: unknown; conversion?: unknown; same_cohort?: unknown }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
   proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
+  /** The coaching loop: the user's new figure for a share of time an unresolved option changes, on ONE card. */
+  proposeOptionCapacityChange?(ctx: AgentToolContext, args: { option_id?: unknown; factor_id?: unknown; statements?: unknown }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
   proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string; reference_date?: string; deadline_date?: string; deliverable?: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
@@ -1181,6 +1198,8 @@ async function dispatchToolUnbounded(
       return caps.proposeCohortForecast !== undefined ? caps.proposeCohortForecast(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_hiring_times':
       return caps.proposeHiringTimes !== undefined ? caps.proposeHiringTimes(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
+    case 'propose_option_capacity_change':
+      return caps.proposeOptionCapacityChange !== undefined ? caps.proposeOptionCapacityChange(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_goal_deadline':
       return caps.proposeGoalDeadline !== undefined
         ? caps.proposeGoalDeadline(ctx, args as never)

@@ -142,6 +142,13 @@ export interface ProposalOperation {
     /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
     | 'set_hiring_times'
     /**
+     * ⭐ THE COACHING LOOP (DL 14 Oct; `goal-target/option-capacity-change.ts`) — `path` is the option's id, `value` is the
+     * approved change: the user's new figure for a share of time the option changes (S2 statements), Olumi's freed-time
+     * reading adopted by the press, and the capacity carrier it adds. Written only by the press on its own card, as ONE
+     * `/graph/register` revision with compare-and-set (the `set_hiring_times` precedent).
+     */
+    | 'set_option_capacity_change'
+    /**
      * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244) — REPLACE AN UNREVIEWED DRAFT WITH THE REVISED ONE
      * PREPARED FROM THE STORED BRIEF AND THE USER'S TYPED GOAL. `path` is the scenario id; `value` is the prepared
      * candidate and the identities it was prepared against (`runtime/draft-replacement.ts`). Written only through
@@ -320,7 +327,8 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   // G: the answer to the goal's open question about its reading is the user's choice on the card that shows that reading.
   return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
     // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
-    || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_option_intervention'
+    || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_option_capacity_change'
+    || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));
 }

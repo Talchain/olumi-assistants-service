@@ -250,12 +250,15 @@ export function isEventShareForecast(graph: unknown): boolean {
 export function unresolvedEventOptionIds(graph: unknown): string[] {
   const carrier = eventShareCarrierOf(graph)?.provenance?.share_by_date;
   if (!carrier || !rec(graph) || !Array.isArray(graph.nodes)) return [];
-  const ids = Array.isArray(carrier.unresolved_option_ids) ? carrier.unresolved_option_ids.filter((id: unknown): id is string => typeof id === 'string') : [];
+  // An option that switches a mechanism on (a carrier with `extra_share_by_date`) acts, whatever admission recorded: the
+  // user's pressed answer to "how much it would speed up the work" gives it one (`option-capacity-change.ts`).
+  const acts = (n: Rec | undefined): boolean => Object.entries(n?.interventions ?? {}).some(([target, v]) => rec(v) && v.value === 1
+    && graph.nodes.some((factor: Rec) => factor.id === target && factor.observed_state?.extra_share_by_date));
+  const ids = (Array.isArray(carrier.unresolved_option_ids) ? carrier.unresolved_option_ids.filter((id: unknown): id is string => typeof id === 'string') : [])
+    .filter((id: string) => !acts(graph.nodes.find((n: Rec) => n.id === id && n.kind === 'option')));
   const known = Array.isArray(carrier.option_ids) ? carrier.option_ids : [];
   const added = graph.nodes.filter((n: Rec) => n.kind === 'option' && n.is_baseline !== true && typeof n.id === 'string'
-    && !known.includes(n.id)
-    && !Object.entries(n.interventions ?? {}).some(([target, v]) => rec(v) && v.value === 1
-      && graph.nodes.some((factor: Rec) => factor.id === target && factor.observed_state?.extra_share_by_date)));
+    && !known.includes(n.id) && !acts(n));
   return [...new Set([...ids, ...added.map((n: Rec) => n.id as string)])];
 }
 export function missingEventCapacityOptionIds(graph: unknown): string[] {
@@ -677,7 +680,16 @@ function compileCapacityRatios(graph: Rec): void {
       const v = option.interventions?.[id];
       return rec(v) && num(v.raw_value) !== undefined ? num(v.raw_value) : rec(src.settings) ? num(src.settings[id]) : undefined;
     };
-    const compiled = options.length !== 1 ? null : (() => {
+    // DL (14 Oct, the coaching loop): the user's pressed answer cuts a share of time the model holds ("from 25% to 15%"), and
+    // Olumi's reading, adopted by that press, is that the time freed goes to the deliverable: capacity = total − that share.
+    const comp = rec(src.complement_of) ? src.complement_of : undefined;
+    const compiled = options.length !== 1 ? null : comp !== undefined ? (() => {
+      const option = options[0]!, total = num(comp.total), sid = typeof comp.source_id === 'string' ? comp.source_id : undefined;
+      if (total === undefined || sid === undefined) return null;
+      const t = today(sid), set = setting(option, sid);
+      if (t === undefined || set === undefined || !(total - t > 0) || !(total - set > 0)) return null;
+      return { r: (total - set) / (total - t), base: [] as number[], withOption: [] as number[], option, complement: { today: t, setting: set } };
+    })() : (() => {
       const option = options[0]!;
       // A factor Olumi derived by a two-way split follows its source: today = total − source today; with the option = total − setting.
       const split = (f: string): { readonly source: string; readonly total: number } | undefined => {
@@ -715,10 +727,13 @@ function compileCapacityRatios(graph: Rec): void {
       const product = (vs: readonly (number | undefined)[]): number => vs.reduce<number>((a, b) => a * b!, 1);
       const r = product(withOption) / product(base);
       if (!Number.isFinite(r) || r <= 0) return null;
-      return { r, base: base as number[], withOption: withOption as number[], option };
+      return { r, base: base as number[], withOption: withOption as number[], option, complement: undefined };
     })();
     if (compiled === null) { c.ratio_source_unreadable = true; continue; }
     c.capacity_ratio = compiled.r;
+    if (compiled.complement !== undefined && rec(c.ratio_basis) && rec(c.ratio_basis.source)) {
+      c.ratio_basis.source.today = compiled.complement.today; c.ratio_basis.source.withOption = compiled.complement.setting;
+    }
     // One value everywhere (PL 14 Oct): the derived factor's own saved figure follows its source, as the card, the AI input and
     // the mechanism read it; it stays Olumi's (its source is untouched).
     (src.factor_ids as string[]).forEach((id, i) => {
