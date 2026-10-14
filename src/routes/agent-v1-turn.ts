@@ -4151,6 +4151,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (committedChange && !analysedThisTurn && admitsRunOffer((await readBackState(readingDispatch, scenarioId)).analysisReady)) {
       autoRun = await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.', effects_timing: null },
         { afterCommittedChange: true });
+      // ⭐ THE AUTOMATIC RUN IS THIS TURN'S RUN (principle review C.md, after #3038): recorded as the Agent's own Run is, so
+      // every reader of "this turn ran an analysis" (the chance lines, what it rests on, break-even, the bound card, the
+      // Run's outcome chips) reads it. A Run that did not complete is not recorded: its own sentence below says so, and the Run chip stays.
+      if (autoRun.ran === true) {
+        result = { ...result, tool_calls: [...result.tool_calls, { name: 'run_analysis', ok: autoRun.ok === true, mutated: false }],
+          tool_results: [...result.tool_results, autoRun] };
+      }
     }
     const runPressFailed = runPress && runPressResult?.refusal === 'run_failed';
     // Preserve the existing typed engine refusal/failure on a Run press, even if the model invents another cause.
