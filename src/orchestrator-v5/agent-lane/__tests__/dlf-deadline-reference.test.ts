@@ -103,9 +103,11 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     expect(card.ok, JSON.stringify(card)).toBe(true);
     expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
     expect(card).toMatchObject({ reference_used: '2026-10-13', reference_set_aside: '2026-02-17' });
-    expect(String(card.note)).toContain('The reference_date you passed (2026-02-17) was not used: Olumi counts this deadline from the '
-      + "scenario's recorded reference date, 13 October 2026, which the card shows. That is deliberate, not an inconsistency: "
-      + 'show the card as it is and do not withdraw it for that reason.');
+    // AIE #94 6178720067 item 2, exact text.
+    expect(String(card.note)).toContain('The reference_date you passed (2026-02-17) was not used. This proposal uses 13 October 2026, '
+      + 'shown on the card. Explain the returned card using that reference; this difference alone is not a reason to withdraw it. '
+      + 'If the returned deadline or reference conflicts with the user\u2019s actual applicable words or the current supported date/source, '
+      + 'surface that specific conflict and use the existing clarification or correction path.');
     // CONTRAST: no model reference, or the recorded one itself, says nothing about a set-aside reference.
     for (const args of [{}, { reference_date: '2026-10-13' }]) {
       const plain = await world().offer(args);
