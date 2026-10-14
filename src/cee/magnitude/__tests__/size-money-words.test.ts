@@ -7,8 +7,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { sizeLink, type MagnitudeNode } from '../link-effect.js';
-import { buildModelFromBrief, type CallStructuredModel } from '../../../orchestrator-v5/agent-lane/runtime/build-model.js';
-import type { InternalDispatch } from '../../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 
 const outcome = (label: string, unit: string, cap: number): MagnitudeNode => ({ label, kind: 'outcome', scale_frame: cap, unit, option_levels: [] } as MagnitudeNode);
 const count = (label: string, unit: string, cap: number): MagnitudeNode => ({

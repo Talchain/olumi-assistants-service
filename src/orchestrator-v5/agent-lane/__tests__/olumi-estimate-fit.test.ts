@@ -83,7 +83,7 @@ it('row (a): served goal estimate fits, preserves every other natural size, and 
   const id = 'pro_plan_price→mrr';
   expect(edge(before.graph, id).provenance.magnitude).toBe('olumi_placeholder');
   expect(before.result.set_aside_estimates).toContainEqual(expect.objectContaining({ from: 'pro_plan_price', to: 'mrr' }));
-  expect(before.result.open_questions.some((q: string) => q.includes(NOT_REPRESENTABLE) && q.includes('100000'))).toBe(true);
+  expect(before.result.open_questions.some((q: string) => q.includes(NOT_REPRESENTABLE) && q.includes('£100,000'))).toBe(true); // money as written (#2425)
   const e = edge(after.graph, id);
   expect(e.provenance).toMatchObject({ magnitude: 'olumi_estimate', source: 'cee_hypothesis', natural_effect: { amount: 100000, strength_mean: e.strength.mean } });
   const drafterBasis = JSON.parse(row.drafter_texts[0]!).links.find((l: Rec) => l.from === 'Pro plan price' && l.to === 'MRR').basis;
