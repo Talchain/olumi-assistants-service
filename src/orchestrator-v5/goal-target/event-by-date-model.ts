@@ -290,6 +290,12 @@ export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliv
 export function teamTimeAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
   if (part === null || goalDeadlineFromRecord(graph, part.goal.id) === undefined || part.team.observed_state?.value !== undefined) return null;
+  // S2 (PL #94 6135017311): one end the user gave is held as that end, so this asks ONLY for the other, never the whole time again.
+  const bound = eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.held_bound;
+  if ((bound?.end === 'lower' || bound?.end === 'upper') && Number.isFinite(bound.months)) {
+    return bound.end === 'lower' ? `What is the latest it could take with the team you have now? You said at least ${bound.months} months.`
+      : `What is the soonest the team you have now could finish? You said no more than ${bound.months} months.`;
+  }
   return Number.isFinite(eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.most_likely)
     ? 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?'
     : `How long would ${part.deliverable} take with the team you have now?`;

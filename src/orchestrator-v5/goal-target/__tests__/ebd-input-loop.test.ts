@@ -574,8 +574,9 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     const card = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: PAUL_STATEMENTS }) as Rec;
     expect(card.ok).toBe(true);
     expect(card.public_label).toBe(`From your messages: ‘${PAUL_LOWER}’ and ‘${PAUL_UPPER}’ Do you want to use Olumi’s provisional model for today's team to finish `
-      + 'next feature launch, based on your lower end of 7 months and your likely upper end of 8 months? A likely end is not a hard limit, so Olumi assumes a '
-      + '7–8.25-month range from your words. It informs this approximate calculation; modelled outcomes can fall outside those time bounds.');
+      + 'next feature launch, based on your lower end of 7 months and your likely upper end of 8 months? A likely end is not a hard limit: Olumi assumes '
+      + '8 in 10 chances it’s done within 8 months, so its range is 7 to 8.25 months. It informs this approximate calculation; modelled outcomes can fall '
+      + 'outside those time bounds.');
     // Never a point of 8, never Olumi's 6–10: his floor is the range's low end, and his likely upper end is not its cap.
     expect(card.team_time).toMatchObject({ low_months: 7, high_months: 8.25, range_origin: 'olumi_estimate', range_rule: 'likely_end' });
     expect(card.team_time).not.toHaveProperty('forecast_months');
@@ -596,12 +597,33 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(resolveRunAdmission(g).willProceed).toBe(true);
     expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(true);
   });
-  it('S2: a lone bound prepares nothing and asks ONLY for the other end; two hard ends are his own range; disagreeing ends ask which holds', async () => {
+  it('S2 (PL #94 6135017311): his lone "At least 7 months" is recorded AS a lower end → readiness asks ONLY the latest → his "8 months" alone completes it, never repeated', async () => {
+    const w = world();
+    const lone = await w.caps.proposeTeamTime!(ctx(PAUL_LOWER) as never, { statements: [PAUL_STATEMENTS[0]] }) as Rec;
+    expect(lone.ok).toBe(true);
+    expect(lone.public_label).toBe(`From your message: ‘${PAUL_LOWER}’ Do you want to record your lower end of 7 months for today's team to finish next feature launch? `
+      + 'The model still needs the latest time before it can run; Olumi will not assume it.');
+    expect(lone.team_time).toMatchObject({ held_bound: { end: 'lower', months: 7 } });
+    expect(lone.team_time).not.toHaveProperty('range_origin');
+    expect(lone.team_time).not.toHaveProperty('forecast_months');
+    expect(await approve(w, lone.proposal_id)).toMatchObject({ ok: true, applied: true });
+    // Held as that end, never a point or a level: the Run stays withheld, and its ONE question is the other end only.
+    const g1 = w.graph();
+    expect(draftedTeamPartOf(g1)!.team.observed_state?.value).toBeUndefined();
+    expect(resolveRunAdmission(g1).willProceed).toBe(false);
+    expect(eventModelAsk(g1)).toBe('What is the latest it could take with the team you have now? You said at least 7 months.');
+    // The same end again prepares nothing and is never asked again.
+    expect(await w.caps.proposeTeamTime!(ctx(PAUL_LOWER) as never, { statements: [PAUL_STATEMENTS[0]] })).toMatchObject({ ok: false, refusal: 'team_time_needs_other_end' });
+    // His next answer alone: the held lower end combines with it, the one card quotes both, and his press opens the Run.
+    const both = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: [PAUL_STATEMENTS[1]] }) as Rec;
+    expect(both.ok).toBe(true);
+    expect(both.team_time).toMatchObject({ low_months: 7, high_months: 8.25, range_rule: 'likely_end' });
+    expect(String(both.public_label).startsWith(`From your messages: ‘${PAUL_LOWER}’ and ‘${PAUL_UPPER}’ `)).toBe(true);
+    expect(await approve(w, both.proposal_id)).toMatchObject({ ok: true, applied: true });
+    expect(resolveRunAdmission(w.graph()).willProceed).toBe(true);
+  });
+  it('S2: two hard ends are his own range; disagreeing ends ask which holds', async () => {
     const w = world(), before = JSON.stringify(w.graph());
-    const lone = await w.caps.proposeTeamTime!({ ...ctx(PAUL_LOWER) } as never, { statements: [PAUL_STATEMENTS[0]] }) as Rec;
-    expect(lone).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_needs_other_end' });
-    expect(lone.detail).toContain('the latest time today\'s team could take');
-    expect(lone.detail).toContain(`without asking them to repeat the 7 months`);
     // Two hard ends, from two messages: his range as given, no assumed end, no Olumi range.
     const hard = await w.caps.proposeTeamTime!({ ...ctx('No more than 9 months.'), user_text: [PAUL_LOWER, 'No more than 9 months.'].join('\n') } as never,
       { statements: [PAUL_STATEMENTS[0], { quote: 'No more than 9 months.', form: 'upper_bound', value: 9 }] }) as Rec;
