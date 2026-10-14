@@ -15,7 +15,7 @@
  * `detail` under More detail. Null when anything above does not hold. Pure.
  */
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { linkSizing, valueAuthorshipOf } from '../../cee/provenance/provenance-of.js';
 import { readMoney } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { goalLevelWords, symbolOf } from './goal-level-in-goal-units.js';
@@ -123,9 +123,12 @@ export function outOfReachWhyOf(result: unknown, graph: unknown): OutOfReachWhy 
     const symbol = symbolOf(money.code);
     const amount = (n: number) => `${symbol}${sayFigure(n, '')}`;
     const volumeUnit = isRec(volume.observed_state) && typeof volume.observed_state.unit === 'string' ? volume.observed_state.unit.trim() : '';
-    const olumis = classifyValueSource(isRec(volume.observed_state) ? volume.observed_state.source : undefined) !== 'user_stated';
+    // Olumi's mark only where the ONE authority says the level is Olumi's (its estimate, or one the user accepted): a level
+    // of unknown origin is never called Olumi's, nor the user's.
+    const volumeAuthorship = valueAuthorshipOf(volume.observed_state);
+    const olumis = volumeAuthorship === 'olumi_estimate' || volumeAuthorship === 'olumi_accepted';
     const via = [...new Set(rateRoutes.map((r) => r[r.length - 1]!.from as string).filter((id) => id !== rateId))].map((id) => `‘${label(byId.get(id)!)}’`);
-    const unsized = rateRoutes.flat().filter((e) => isRec(e.provenance) && e.provenance.magnitude === 'olumi_placeholder');
+    const unsized = rateRoutes.flat().filter((e) => linkSizing(e) === 'placeholder');
     const ceilingWords = goalLevelWords(ceiling, goal);
     const lost = volumeUnit === '' ? 'nothing lost' : `no ${volumeUnit} lost`;
     return {

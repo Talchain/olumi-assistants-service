@@ -56,10 +56,19 @@ describe('out-of-reach why (Science §(k) FINAL)', () => {
     expect(outOfReachWhyOf(result(), g)!.detail[0]).toContain('through ‘Monthly churn’ (one of these links has no size yet). So even');
   });
   it('the user\'s own level carries no Olumi mark (§(m))', () => {
-    const g = graph(); node(g, 'pro_subscribers').observed_state.source = 'brief_extraction';
+    // The user's own level, as the ONE provenance authority reads it: the brief's figure, extracted as stated.
+    const g = graph(); Object.assign(node(g, 'pro_subscribers').observed_state, { source: 'brief_extraction', extractionType: 'explicit' });
     const out = outOfReachWhyOf(result(), g)!;
     expect(out.visible).toBe(`No option can reach your £20,000 in this model: even at £59 with no subscribers lost, MRR would be £14,750 a month. ${ASK}`);
     expect(out.detail[0]).toContain('£59 × 250 = £14,750 a month');
+  });
+  it('a level of UNKNOWN origin is never called Olumi\'s (the authority answers whose, three tiers)', async () => {
+    const { valueAuthorshipOf } = await import('../../../cee/provenance/provenance-of.js');
+    const g = graph(); const os = node(g, 'pro_subscribers').observed_state; delete os.source; delete os.extractionType;
+    expect(valueAuthorshipOf(os), 'control: the authority reads this level as unknown').toBe('unknown');
+    const out = outOfReachWhyOf(result(), g)!;
+    expect(out.visible).toBe(`No option can reach your £20,000 in this model: even at £59 with no subscribers lost, MRR would be £14,750 a month. ${ASK}`);
+    expect(out.detail[0]).not.toContain('Olumi');
   });
   it('CONTROL: a ceiling at or over the target → no why (the bound would not hold)', () => {
     const g = graph(); node(g, 'mrr').goal_threshold_raw = 14000;
