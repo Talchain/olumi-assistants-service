@@ -43,7 +43,9 @@ const store = {
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => {
     const r = rows.find((x) => x.turn_id === id);
     return r === undefined ? null : { id: String(r.turn_id), request_hash: r.request_hash, assistant_message: r.assistantMessage ?? null,
-      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [] };
+      user_message: r.userMessage ?? null, llm_calls_used: r.llm_calls_used ?? 0, pending_actions: r.pending_actions ?? [],
+      // As the real store reads it back (T1h, migration 20261013230000): the narration this answer was sent with.
+      run_narration: r.run_narration ?? null };
   }),
   append: vi.fn(async (row: Row) => { rows.push({ ...row }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => []),
@@ -135,10 +137,13 @@ describe('result-first on retry, lost response and failed explanation (live rout
     const savedRows = structuredClone(rows);
     await app.close(); app = await freshApp();
     const retry = (await runTurn(turn)).json() as Body;
-    expect(retry.blocks).toEqual(current.blocks);
-    expect(retry.narration).toEqual(current.narration);
-    expect(explainIds(retry)).toEqual(explainIds(current));
-    expect(retry.narration?.run_key === first.narration?.run_key).toBe(false);
+    // AMENDED (T1h; DL ruling 14 Oct = PL #94 6135017311 item 4, "never borrow today/latest key or rewrite old history").
+    // Was: the retry carried Run B's blocks, narration and Explain. Now: Run A's own historical receipt, never B's.
+    expect(retry.assistant_text).toBe(first.assistant_text);
+    expect(retry.blocks ?? []).toEqual([]);
+    expect(retry.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
+    expect(explainIds(retry)).toEqual([]);
+    expect(retry.narration?.run_key === current.narration?.run_key).toBe(false);
     expect(runs).toBe(2);
     expect(modelCalls).toBe(0);
     expect(rows).toEqual(savedRows);
@@ -217,18 +222,25 @@ describe('result-first on retry, lost response and failed explanation (live rout
     expect(explained.narration).toEqual({ status: 'ready', run_key: first.narration!.run_key });
   });
 
-  it('legacy receipt CONTROL (P2 lost response): after a newer Run B, the replay is built on the CURRENT result — B\'s key and control, never A\'s', async () => {
+  // AMENDED (T1h; DL ruling 14 Oct = PL #94 6135017311 item 4). Was: "after a newer Run B, the replay is built on the
+  // CURRENT result — B's key and control, never A's" ({pending, K_B} + B's Explain). Now: A's own historical receipt.
+  it('legacy receipt CONTROL (P2 lost response): after a newer Run B, the replay is A\'s historical receipt — A\'s key, never B\'s result, key or control', async () => {
     const r1 = randomUUID();
     const runA = (await legacyRunTurn(r1)).json() as Body;
     computedAt = RUN_B;
     const replay = (await legacyRunTurn(r1)).json() as Body;
     const runB = (await legacyRunTurn(randomUUID())).json() as Body;
     expect(runB.narration!.run_key).not.toBe(runA.narration!.run_key);
-    expect(replay.narration).toEqual({ status: 'pending', run_key: runB.narration!.run_key });
-    expect(explainIds(replay)).toEqual(explainIds(runB));
+    expect(replay.narration).toEqual({ status: 'stale', run_key: runA.narration!.run_key });
+    expect(replay.assistant_text).toBe(RUN_RESULT_READY_TEXT);
+    expect(replay.blocks ?? []).toEqual([]);
+    expect(explainIds(replay)).toEqual([]);
   });
 
-  it('legacy receipt RED (P1 @b30759b2): retry Run A after the figures changed and Run B completed → the current withheld finding and ready detail, never A\'s stored figures — also after a restart', async () => {
+  // AMENDED (T1h; DL ruling 14 Oct = PL #94 6135017311 item 4). Was: the replay said B's live words and shape, "never A's
+  // stored figures". Now: A's committed words byte for byte, labelled as Run A ({stale, K_A}), with no current result
+  // beside them, so A's figures never sit beside B's (the P1 concern) and B's result is never presented as A's answer.
+  it('legacy receipt RED (P1 @b30759b2): retry Run A after the figures changed and Run B completed → A\'s own words labelled as stale Run A, never B\'s result beside them — also after a restart', async () => {
     const r1 = randomUUID();
     const runA = (await legacyRunTurn(r1)).json() as Body;
     // What request 1 stored can carry paragraphs built from ITS readback (the break-even arithmetic, the provisional
@@ -254,11 +266,11 @@ describe('result-first on retry, lost response and failed explanation (live rout
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await legacyRunTurn(r1)).json() as Body;
-      expect(replay.assistant_text, `restart=${restart}`).toBe(live.assistant_text);
-      // 2b-0 (DL: reload = same): the replay passes the same composer, so the layout is the live one, byte for byte.
-      expect((replay as { _answer_shape?: unknown })._answer_shape, `restart=${restart}`).toEqual((live as { _answer_shape?: unknown })._answer_shape);
-      expect(replay.assistant_text).not.toMatch(/1,234,567|4,321/);
-      expect(replay.narration?.run_key).not.toBe(runA.narration!.run_key);
+      expect(replay.assistant_text, `restart=${restart}`).toBe(String(row.assistantMessage));
+      expect(replay.assistant_text, `restart=${restart}`).not.toBe(live.assistant_text);
+      expect(replay.narration, `restart=${restart}`).toEqual({ status: 'stale', run_key: runA.narration!.run_key });
+      expect(replay.blocks ?? [], `restart=${restart}`).toEqual([]);
+      expect(explainIds(replay), `restart=${restart}`).toEqual([]);
     }
   });
 

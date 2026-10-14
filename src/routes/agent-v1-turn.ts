@@ -58,7 +58,7 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { answerRunNarrationOf, type CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -2315,6 +2315,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * the stored reply being Olumi's own fixed line, never from the user's words.
        */
       const replayChip = runExplanationChip(scenarioId, state);
+      // What this exact answer was sent with: this process's memory of its controls, else the narration stored WITH its row.
+      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
+      const durableNarration = prior.run_narration ?? undefined;
+      // Set when a result-first Run receipt is not KNOWN to be the current Run's: its own Run since moved (its key), or the
+      // Run it was sent with is unknown ('': a row written before migration 20261013230000). Answered below as that
+      // historical receipt, never on today's Run.
+      let historicalReceiptKey: string | undefined;
       const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT]);
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       // Legacy host receipts retain the existing current-state reconstruction below. This is
@@ -2384,7 +2391,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       } else if (approvedProposal === undefined && typedRunOf(body) && replayText.includes(RUN_RESULT_READY_TEXT)) {
         // B15: the atomic ready part may follow the typed chance headline in the stored derivation.
-        if (replayChip !== null) {
+        // A receipt is re-answered on the current Run only when it is KNOWN to be that Run's (this process's memory, else
+        // the narration stored with its row). Its own Run since moved, or unknown (a legacy row), it is replayed below as
+        // that historical receipt (PL #94 6135017311 item 4; DL rulings 14 Oct, superseding #2470's "built on the CURRENT
+        // result"): never on today's Run.
+        const sentRunKey = (rememberedControls?.narration ?? durableNarration)?.run_key ?? '';
+        if (replayChip !== null && replayChip.id !== `${RUN_EXPLANATION_PREFIX}${sentRunKey}`) {
+          historicalReceiptKey = sentRunKey;
+        } else if (replayChip !== null) {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
@@ -2411,7 +2425,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
           if (reasonNow !== null) owedNow.push(reasonNow);
-          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
+          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady, state.analysisResult);
           if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
             const basis = conditionalInputBasis({ graph: state.graph,
@@ -2464,7 +2478,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayText = RUN_RESULT_UNVERIFIED_TEXT;
         }
       }
-      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
       const remembered = rememberedControls?.actions ?? [];
       // AI-written loop answers need their ORIGINAL bound identity. Legacy host receipts
       // are regenerated from current state; receipts saying nothing ran are not analysis answers.
@@ -2472,24 +2485,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && !legacyRunReceipt
         && replayText !== RUN_FAILED_TEXT
         && replayText !== 'The analysis did not run. Press Run to try again.';
-      // Original bound controls only: never borrow today's key to identify yesterday's answer.
+      // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the
+      // narration persisted WITH this exact row names its Run, never the latest row's; a row without it leaves the Run
+      // unknown.
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
-        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey;
-      const replayLoopRunCurrent = replayLoopRun
+        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey
+        || durableNarration?.run_key || undefined;
+      // Currentness is a separate fact: an answer is re-sent as current only with the narration it was sent with (this
+      // process's memory, else its row's). A key alone names the original Run on the historical receipt.
+      const replayLoopRunCurrent = replayLoopRun && (rememberedControls !== undefined || durableNarration !== undefined)
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
-      const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
+      const historicalLoopReplay = (replayLoopRun && !replayLoopRunCurrent) || historicalReceiptKey !== undefined;
       if (replayLoopRunCurrent) {
-        replayNarration = rememberedControls?.narration;
+        replayNarration = rememberedControls?.narration ?? durableNarration;
       }
       if (historicalLoopReplay) {
         replayText = prior.assistant_message ?? '';
         // Empty means unknown original identity, never the current Run's identity.
-        replayNarration = { status: 'stale', run_key: replayLoopRunKey
+        replayNarration = { status: 'stale', run_key: historicalReceiptKey ?? replayLoopRunKey
           ?? (isRunExplanationChip(explanationId) ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : '') };
         boundControl.length = 0;
         // A warm answer with no original bound analysis controls must not gain a Run
         // control just from being resent. Cold/moved bound answers keep the historical exit.
-        if (rememberedControls === undefined || replayLoopRunKey !== undefined
+        if (historicalReceiptKey !== undefined || rememberedControls === undefined || replayLoopRunKey !== undefined
           || remembered.some(action => action.id === RUN_OFFER_CHIP.id)) boundControl.push(RUN_OFFER_CHIP);
       }
       const resultFirstReplay = !historicalLoopReplay && (replayNarration !== undefined || replayLoopRunCurrent);
@@ -2549,11 +2567,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (replayLoopRunCurrent) {
         // Preserve the sent controls and their order. Revalidate human approval independently,
         // but never manufacture Explain, sizing, or proposal controls on a verified warm resend.
+        // After a restart only this row's durable controls are known: those still valid, nothing else.
         const validDecisionIds = new Set(historicalDecisions.map(action => action.id));
-        replayActions.splice(0, replayActions.length, ...remembered.filter(action =>
+        replayActions.splice(0, replayActions.length, ...(rememberedControls === undefined ? stillValid : remembered.filter(action =>
           (typedApprovalOf({ chip: { id: action.id } }) === undefined
             && action.id !== AMEND_CHIP.id && declinedProposalOf(action.id) === undefined)
-          || validDecisionIds.has(action.id)));
+          || validDecisionIds.has(action.id))));
       }
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
@@ -2643,7 +2662,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
-        current: !replayLoopRun && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        current: !replayLoopRun && historicalReceiptKey === undefined && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
       });
@@ -2651,7 +2670,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
       // K2: committed loop prose already crossed the live gates. Preserve those exact bytes;
       // currentness belongs to typed controls/narration, not a new sentence in the saved answer.
-      if (replayLoopRun) gatedReplay.assistant_text = prior.assistant_message ?? '';
+      if (replayLoopRun || historicalReceiptKey !== undefined) gatedReplay.assistant_text = prior.assistant_message ?? '';
       return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
@@ -4872,7 +4891,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
     const rootLine = runPress && resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
-      ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
+      ? treatedAsZeroReplyLine(readbackGraph, analysisReady, analysisResult) : null;
     // GOAL-REACH 3b (DL CHANGES_REQUIRED #2816): an explicit Run says why the goal chance was refused (§(g)), on the same
     // binding as the root line; its replay says the same in the same place.
     const reasonLine = runPress && resultFirstRunCompleted
@@ -5471,6 +5490,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
+    const answerNarration = answerRunNarrationOf(wireBody.narration);
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
@@ -5541,6 +5561,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             suggested_actions: answerOffers,
             suggested_actions_run_key: answerOffersRunKey,
           } : {}),
+          // The narration this answer is sent with, stored WITH its row so a replay after a restart names its Run.
+          ...(answerNarration !== null ? { run_narration: answerNarration } : {}),
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
@@ -5637,7 +5659,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     // Remember only the controls actually sent, after egress and held-proposal reconciliation.
-    // This bounded in-process cache changes no persistence; a cold replay has no original key.
+    // This bounded in-process cache changes no persistence; a cold replay has only the narration persisted with its row.
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, {
       actions: wireBody.suggested_actions,
       ...(wireBody.narration !== undefined ? { narration: wireBody.narration as ReplayNarration } : {}),
