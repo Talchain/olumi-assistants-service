@@ -19,7 +19,25 @@ export interface GoalTargetGap {
   readonly question: string;
 }
 
-/** The goal the graph names: `goal_node_id` when it is a goal node, else the ONE goal node; undefined otherwise. */
+/**
+ * Whether the goal carries a target: any of the fields the goal-target writer sets (a legacy goal's normalised threshold too,
+ * which the Run sends as its threshold), or (RT-10 B′ R3) the goal's own limit row, read by the ONE target reader — "at most
+ * 400" is a target, so it is never asked for again. Moved verbatim from `decision-input-ask.ts`, which re-exports it: the
+ * target ask and this gap decide with ONE predicate (C1 r1 Codex: a legacy normalised threshold read as "no target").
+ */
+export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
+  const g = rec(graph);
+  return finiteNum(goal.goal_threshold_raw) || finiteNum(goal.success_threshold) || finiteNum(goal.goal_threshold)
+    || (g !== undefined && statedGoalTargetOf(g, goal) !== null);
+}
+
+/**
+ * A goal Olumi inferred is a PROVISIONAL objective: its one question is the objective reader's ("What should this model
+ * help you explore?", `decision-input-ask.ts`), never a target (AIE Q4; C1 r1 Codex). ONE predicate for both readers.
+ */
+export const isProvisionalObjective = (goal: Rec): boolean => goal.provenance === 'ai_inferred';
+
+/** The goal the graph names (its named goal id when that is a goal node), else the ONE goal node; undefined otherwise. */
 function namedGoalOf(raw: Rec): Rec | undefined {
   const goals = (Array.isArray(raw.nodes) ? raw.nodes.map(rec) : []).filter((n): n is Rec => n?.kind === 'goal');
   const named = raw.goal_node_id;
@@ -28,15 +46,15 @@ function namedGoalOf(raw: Rec): Rec | undefined {
 }
 
 /**
- * The named goal holds no stated target (`statedGoalTargetOf`), or null. A chance goal takes no target quantity (the
- * goal-kind registry, #2742 S1): its one question is S1's deadline ask, never this one.
+ * The named goal holds no target ({@link goalHasStatedTarget}), or null. A chance goal takes no target quantity (the goal-kind
+ * registry, #2742 S1): its one question is S1's deadline ask. A provisional objective's is the objective ask. Never this one.
  */
 export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
   const raw = rec(graph);
   const goal = raw === undefined ? undefined : namedGoalOf(raw);
   const label = typeof goal?.label === 'string' && goal.label !== '' ? goal.label : null;
   if (raw === undefined || goal === undefined || typeof goal.id !== 'string' || label === null
-    || goalKindOf(goal) === 'chance_of_event' || statedGoalTargetOf(raw, goal) !== null) return null;
+    || goalKindOf(goal) === 'chance_of_event' || isProvisionalObjective(goal) || goalHasStatedTarget(goal, raw)) return null;
   const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
   const horizon = rec(goal.goal_horizon);
   const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
