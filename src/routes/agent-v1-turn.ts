@@ -5341,9 +5341,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // this turn's message, never instead of it (hiring post3007 turn 02: "Is this a UI or a data issue?" got only the card,
       // and the next turn's AI said its question had gone unanswered). Both enter the ONE composer and the egress gate like
       // every other reply, so nothing below writes them again.
+      // An answer that already says the card's whole question (exactly, not a word match) is not given it twice (Codex #3009).
       const agentAnswer = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
-      let reply = withCellHorizon(withDisclosures(agentAnswer, automaticDeadlineLabel === undefined ? [] : [automaticDeadlineLabel]),
-        readbackGraph, chanceCells);
+      const cardOwed = automaticDeadlineLabel !== undefined && !agentAnswer.includes(automaticDeadlineLabel) ? [automaticDeadlineLabel] : [];
+      let reply = withCellHorizon(withDisclosures(agentAnswer, cardOwed), readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
