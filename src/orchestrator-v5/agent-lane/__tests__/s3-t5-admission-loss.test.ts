@@ -23,6 +23,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 });
 
 import { buildModelFromBrief, type CallStructuredModel, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { goalLevelTheUserWrote } from '../stated-by-user.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -58,6 +59,9 @@ async function run(e: Episode, brief = e.brief): Promise<{ result: Rec; stored: 
   let next = 0;
   const inputs: string[] = [];
   const call: CallStructuredModel = async (req) => {
+    // The draft-time widening (restored, Paul #94 6166259456) is not one of T5's drafting answers: it gets no answer, adds
+    // nothing, and takes no T5 slot, so every row reads the same saved model T5 saved.
+    if (isDraftWideningRequest(req)) throw new Error(`${e.episode}: no widening answer recorded`);
     inputs.push(String((req as { input?: unknown }).input));
     const c = e.calls[next++];
     if (c === undefined) throw new Error(`${e.episode}: a call T5 never answered`);
