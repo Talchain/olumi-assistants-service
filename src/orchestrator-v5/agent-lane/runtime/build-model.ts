@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, deliverableWrittenIn, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
@@ -1762,9 +1762,16 @@ export async function buildModelFromBrief(
   observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
   /** A revised draft's current saved model, as context only (`firstConstructInput`); omitted → today's input, byte for byte. */
   context?: ConstructionContext,
+  /**
+   * GEN #5: the deliverable the user stated in this message, as the AI named it and the caller verified it (verbatim in the
+   * user's message). Written verbatim in this brief text too, it attests the event-by-date reading in place of the verb list.
+   */
+  attestedDeliverable?: string,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
-  const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
+  const construction: ConstructionAdmission = {
+    event_by_date_prompted: briefAttestsEventByDate(brief) || deliverableWrittenIn(brief, attestedDeliverable),
+  };
   const buildInstructions = buildInstructionsForBrief(brief, construction);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
