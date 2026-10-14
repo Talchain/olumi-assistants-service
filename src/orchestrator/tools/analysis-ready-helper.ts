@@ -10,7 +10,6 @@
 import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
-import { EventRiskV1 } from "../../schemas/event-risk.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import {
@@ -39,6 +38,7 @@ import {
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
+import { riskOccurrenceAskWords, riskOccurrenceIsCurrent, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -1335,8 +1335,9 @@ function goalRootsWithoutStatusQuoLevel(
     // ISL still centres the factor on 0.0.
     if (hasSampledPrior((node as { prior?: unknown }).prior)) continue;
     // event_risk.v1: an event risk's level is its OCCURRENCE, which ISL draws (0/1 per draw);
-    // it is never held at zero, so it needs no level today. Only a block the write doors accept counts.
-    if (EventRiskV1.safeParse(node.event_risk).success) continue;
+    // it is never held at zero, so it needs no level today. Only a block the write doors accept counts, and Olumi's range
+    // only over the goal's CURRENT window (`riskOccurrenceIsCurrent`): a stale one withholds and is asked again.
+    if (riskOccurrenceIsCurrent(node, graph)) continue;
     if (!reachesGoal(node.id)) continue;
     gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }
@@ -1372,7 +1373,15 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   const eventTeam = draftedTeamPartOf(rawGraph)?.team;
   const eventAsk = eventTeam !== undefined && eventTeam.id === gap.id ? eventModelAsk(rawGraph) : null;
   if (eventAsk) return eventAsk;
-  if (gap.kind === 'risk') return `How likely or how large is "${gap.label}" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
+  // AIE packet 6e52e896 `event_risk.readiness_copy`: where the event path is ACTUALLY available (a risk root with no level and
+  // one current goal period, `riskOccurrenceSubject`, the card's own eligibility), the question is its occurrence within that
+  // window, never a level "today". Every other risk keeps its ask, byte for byte.
+  const eventPath = gap.kind === 'risk' ? riskOccurrenceSubject(rawGraph, gap.id) : undefined;
+  const question = eventPath?.kind === 'eligible' ? riskOccurrenceAskWords(gap.label, eventPath.window_months) : `How likely or how large is "${gap.label}" today?`;
+  // The offer to propose is said only where the card can exist (PL 05:53Z): with no single saved goal period there is no
+  // window, so no card, and the ask never promises one.
+  if (gap.kind === 'risk') return `${question} The numerical analysis is withheld until this risk has a supported value.`
+    + (eventPath?.kind === 'eligible' ? ' You can also ask Olumi to propose a labelled starting assumption for review.' : '');
   return statusQuoLevelAsk(gap.label);
 };
 
