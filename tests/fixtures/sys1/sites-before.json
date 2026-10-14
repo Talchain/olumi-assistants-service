@@ -10,10 +10,10 @@
   ],
   "callStructured": [
     {
-      "body": "1d81e0be68ad39e0dbe902ed4c9d6671a979234e35f658b14ffbcacaf78b894d",
-      "instructions": "f9517a6dea6a38043f4988896588edce20386829fbc17609faccc885a93e9d77",
+      "body": "29059f70bf7fa586ba7b3755e021487e2c06d3bd58f14d0e3ba4329291c4cfba",
+      "instructions": "11a1151cc3450b8bb5cf4a536f16d47f86c4cac947f42da6022a836205d7c93e",
       "tools": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
-      "schema": "c38e20218569bb8a9961dae8c1d2af09558e66e7075d3d815872d1d8ba508b38",
+      "schema": "a51530388f51e0398d001902d54a70ebff684f60047045220bc5ac55e73d6895",
       "consumed": "{\"text\":\"{\\\"goal\\\":{\\\"metric\\\":\\\"Delivery reliability\\\",\\\"operator\\\":\\\">=\\\",\\\"value\\\":90,\\\"unit\\\":\\\"%\\\",\\\"horizon_months\\\":6,\\\"provenance\\\":\\\"explicit\\\"},\\\"constraints\\\":[],\\\"options\\\":[{\\\"label\\\":\\\"Hire a tech lead\\\",\\\"provenance\\\":\\\"explicit\\\",\\\"interventions\\\":[]}],\\\"factors\\\":[{\\\"label\\\":\\\"Team capacity\\\",\\\"role\\\":\\\"controllable\\\",\\\"baseline_known\\\":true,\\\"baseline_value\\\":5,\\\"unit\\\":\\\"people\\\",\\\"provenance\\\":\\\"explicit\\\"}],\\\"risks\\\":[],\\\"outcomes\\\":[{\\\"label\\\":\\\"Delivery reliability\\\",\\\"provenance\\\":\\\"inferred\\\"}],\\\"links\\\":[{\\\"from\\\":\\\"Team capacity\\\",\\\"to\\\":\\\"Delivery reliability\\\",\\\"direction\\\":\\\"positive\\\",\\\"provenance\\\":\\\"inferred\\\"}],\\\"unknowns\\\":[]}\",\"usage\":{\"input_tokens\":23,\"output_tokens\":7},\"status\":\"completed\"}"
     },
     {

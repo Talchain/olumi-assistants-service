@@ -1,4 +1,5 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
+import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
@@ -128,6 +129,12 @@ const QUANTITY_FRAME = {
 } as const;
 
 /**
+ * GEN D4 item B: the claim path's complete question (the AIE's exact text, #94 6164650110). It is Olumi's reading of the
+ * source, asked once; it never says the brief set the date, and it sets, saves or approves nothing.
+ */
+export const DEADLINE_CLAIM_QUESTION = 'Olumi reads "<deadline words>" as a calendar deadline for "<goal name>". Which date does that mean? The model does not yet hold a confirmed date for this reading. Retained wording: "<complete verified goal.source_quote>"';
+
+/**
  * ⭐ STRICT ONLY AT THE OPENAI BOUNDARY (DL #75 5916270318, option D). OpenAI's strict json_schema needs every property in
  * `required`. The candidate contract (`buildCandidateSchema`) lets an outcome or a risk omit its frame, so a candidate
  * recorded before the frames existed still validates, and admission reads an absent frame as null (`withQuantityFrames`);
@@ -149,7 +156,7 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
         if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence' || name === 'evidence' || name === 'source_quote'
-          || name === 'unknown_concerns')) continue;
+          || name === 'unknown_concerns' || name === 'deadline_words')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -236,6 +243,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // (packet 20dfa110, item 6).
       source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
         'For a target actually stated in the brief, including a stated event or deliverable, copy the complete relevant statement VERBATIM. Preserve any stated speaker, subject, figure, comparator, unit, reference, denominator, period, qualifications, conditions and negation. Include consecutive complete sentences when they are needed for that meaning; do not shorten qualifications, stitch unrelated passages or add words or a speaker name not present in the source. null when the brief states no target. A quote does not itself verify the claim, create a numerical target or confirm that its complete meaning is saved.' },
+      // ⭐ GEN D4 ITEM B (DL GO 14 Oct; the AIE's exact field text, #94 6164650110, `tests/fixtures/calendar-deadline-text/
+      // deadline-words.json`): Olumi's claim that the goal's deadline is a calendar point, in the source's words; checked
+      // against `source_quote` and only asked, never stored (`calendar-deadline-claim.ts`). Optional in the contract,
+      // required in what is sent.
+      deadline_words: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'For a calendar deadline belonging to this goal whose date genuinely needs clarification, copy the complete applicable deadline wording VERBATIM from goal.source_quote. The quote must preserve the complete goal meaning, including consecutive sentences needed to identify words such as \'that quarter\', with all relevant speakers, conditions and qualifications. null when the source does not support this deadline for this goal, when that linkage is missing, conflicting or ambiguous, when the date is already known, or when the words instead describe a launch reference, runway, forecast horizon, learning or measurement window without being this goal\'s deadline. Do not turn a calendar point into a guessed month count. This is Olumi\'s source-linked interpretation for a clarification only; it does not verify human goal ownership, set or save a date, approve a change or permit a Run.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -551,7 +564,7 @@ export const BUILD_INSTRUCTIONS = [
   // AIE C drafter changeset (12 Oct), three clauses verbatim: the additive hiring assumption is disclosed, effect timing
   // matches period_kind, and each secondary target keeps its own frame/reference/period (unsupported ones are retained).
   'CHANGE QUANTITIES. When the goal is a percentage change of a quantity that has no unit of its own in the brief and whose level today the brief does not give ("increase productivity by at least 10%"), measure the goal AS that change: goal.quantity_frame "change", goal.frame "change_abs", goal.unit "%", goal.value the signed percentage (10), and the metric named for the quantity ("Productivity"). Every link into that goal then states effect_amount in % of today\u2019s level of it, per effect_per_source_change of its source, as the size AT the end of the goal\u2019s period, including recruitment, notice and ramp-up \u2014 never a steady-state size. For the provisional hiring calculation, use additive per-person effects at that horizon; this assumes no diminishing returns or additional onboarding interaction beyond the stated per-person estimate. Keep that assumption explicit rather than presenting linear scaling as a fact. A quantity with a unit of its own (money, customers, a rate in %) keeps goal.quantity_frame "level" and the frames above. '
-  + 'TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference "today", or "launch" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example "today\u2019s monthly development capacity"), null for a level target; period_months, the months at which or over which the target is measured; period_kind "at_end" for the level or change AT that month, "over_period" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end is true only when every incoming effect is sized for the selected period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not establish the timing basis. also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example "code quality maintained", "spend within \u00a3200,000"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so "+10%" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. '
+  + 'TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference "today", or "launch" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example "today\u2019s monthly development capacity"), null for a level target; period_months, the months at which or over which the target is measured; period_kind "at_end" for the level or change AT that month, "over_period" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end is true only when every incoming effect is sized for the selected period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not establish the timing basis. When the goal’s deadline is a calendar point, such as the end of next quarter, by Q3 or by March, do not convert it to a guessed number of months. Until a compatible duration is actually supported, leave goal.horizon_months null; leave basis.period_months null when its measurement horizon depends on that unresolved point, while preserving any separately stated measurement window. Keep the complete applicable words in goal.source_quote, including the earlier words that identify ‘that quarter’, and retain the forecast’s horizon and conditions in their existing carriers. Use the existing deadline clarification for the date or calendar information that is genuinely missing; do not re-ask a retained date or turn a launch reference, runway or learning window into a goal deadline. also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example "code quality maintained", "spend within \u00a3200,000"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so "+10%" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. '
   + 'SEVERAL TARGETS. When the user names several success targets, keep one as the goal and each other as a constraint with role target. Give each its stated comparator and target frame by the same level/change rules; never force a change target into level. For the conversion/new-customer example both are level targets over the same first three months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused clarification, rather than inventing a shared period or claiming the full conjunction. Budget, time and other constraints keep role limit. A period count is the cumulative total from that period\'s start, and a period conversion rate is the conversion rate over that window, never a month-end snapshot.',
   'Labels are NAMES, not sentences.',
   'Set decision_question to the brief\'s governing question or statement of intent, copied VERBATIM as one span of 8–240 characters, including a statement such as \'We need to decide whether ...\'. Preserve its compound purposes and conditions. Use null only when no such span exists. Never reword it or turn exploration into a decision.',
@@ -2503,6 +2516,10 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
+    // The FIRST draft's goal carries the claim and the quote (a retry's schema carries neither); it is asked only while the
+    // adopted goal is still that goal (AIE #94 6164650110): a retry that re-chose the goal asks nothing on this path.
+    const calendarDeadline = calendarDeadlineClaim(brief, firstCandidate.goal as Parameters<typeof calendarDeadlineClaim>[1],
+      candidate.goal as Parameters<typeof calendarDeadlineClaim>[2]);
     const claimedHorizon = candidate.goal?.horizon_months;
     const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
       ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
@@ -2520,6 +2537,12 @@ export async function buildModelFromBrief(
         : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
     } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
       openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+    } else if (statedGoal.horizon.status === 'absent' && calendarDeadline !== undefined) {
+      // ⭐ GEN D4 ITEM B (DL GO 14 Oct): a calendar point the drafter claimed, checked inside the goal's own verified
+      // statement (`calendar-deadline-claim.ts`), is asked as Olumi's reading with that statement, so "that quarter" is
+      // asked with the words that identify it (the AIE's question, #94 6164650110). Only asked: nothing is stored.
+      openQuestions.unshift(DEADLINE_CLAIM_QUESTION.split('<deadline words>').join(calendarDeadline.words)
+        .split('<goal name>').join(calendarDeadline.goal).split('<complete verified goal.source_quote>').join(calendarDeadline.quote));
     }
     // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
     // its `goal_scope` entry). First, because the ruling requires it clarified or named before
