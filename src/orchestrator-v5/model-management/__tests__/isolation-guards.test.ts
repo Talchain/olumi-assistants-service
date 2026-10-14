@@ -38,6 +38,7 @@ const TEST_FILE = /\.(test|spec)\./;
 const ALLOWED_CROSS_BOUNDARY = new Set(
   [
     '../../config/index.js', // config.cee.modelVersionsEnabled (flag read)
+    '../../utils/supabase-bounded-fetch.js', // the client's bounded fetch (#3098): every CEE Supabase client's global.fetch
     '../persist-graph-write.js', // SYS10: authorised save/restore operations in the existing controlled door
     '../persisted-graph-invariants.js', // refusal class retained at the HTTP boundary
     '../ownership/door-ownership.js', // existing ownership refusal class

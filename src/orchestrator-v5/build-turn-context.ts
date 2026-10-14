@@ -1,6 +1,5 @@
 import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
-import { ANALYSIS_REREAD_TIMEOUT_MS } from './session/analysis-read-deadline.js';
-import { withAnalysisReadDeadline } from './session/analysis-read-deadline.js';
+import { ANALYSIS_READ_SETTLE_MS, ANALYSIS_REREAD_TIMEOUT_MS, AnalysisReadDeadlineError } from './session/analysis-read-deadline.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
@@ -2117,6 +2116,19 @@ async function fetchPriorTurnsTotal(
  * malformed reader contracts are permanently invalid for this turn and may
  * not fall back to the generic hot window.
  */
+/** The whole scenario analysis-fact read: its nested legacy read's budget, then its settle window. */
+export const SCENARIO_FACT_READ_BOUND_MS = ANALYSIS_REREAD_TIMEOUT_MS + ANALYSIS_READ_SETTLE_MS;
+async function boundedScenarioFactRead<T>(read: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([read(), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new AnalysisReadDeadlineError()), SCENARIO_FACT_READ_BOUND_MS);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchScenarioAnalysisFacts(
   scenarioId: string,
   requestId: string,
@@ -2128,10 +2140,12 @@ async function fetchScenarioAnalysisFacts(
 
   try {
     // ⛔ BOUNDED (served 14 Oct 14:19Z, b7b77ba2): this request never reached the database and stalled 109.8 s, inside a
-    // Run that then took 139 s; Paul's 16:18Z draft hung on the same read. On a path with no enclosing read scope (a v2
-    // Run) nothing bounded it. A read cut by its deadline takes the existing degraded path below: unavailable, never
-    // "no Run". Inside an enclosing scope (the graph read) it shares that scope's budget, unchanged.
-    const page = await withAnalysisReadDeadline(() => store.readScenarioRunAnalysisFactsFor!(
+    // Run that then took 139 s; Paul's 16:18Z draft hung on the same read. A read that does not answer takes the existing
+    // degraded path below: unavailable, never "no Run". A plain race, NOT a read scope: the store's own legacy-edit read
+    // keeps its own budget, so a slow legacy part degrades only that part (#3098 CI: a shared scope degraded the whole set).
+    // The bound outlasts that nested budget (+ its settle window); the stalled request itself is bounded by the client's
+    // fetch (`supabase-bounded-fetch.ts`).
+    const page = await boundedScenarioFactRead(() => store.readScenarioRunAnalysisFactsFor!(
       scenarioId,
       SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
     ));

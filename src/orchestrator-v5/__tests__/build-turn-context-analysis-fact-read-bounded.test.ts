@@ -8,9 +8,8 @@
  * the analysis history is UNAVAILABLE, never "this scenario was never analysed".
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildTurnContext } from '../build-turn-context.js';
+import { SCENARIO_FACT_READ_BOUND_MS, buildTurnContext } from '../build-turn-context.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
-import { ANALYSIS_REREAD_TIMEOUT_MS } from '../session/analysis-read-deadline.js';
 import { makeMessagePayload } from './fixtures.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
@@ -28,7 +27,7 @@ describe('buildTurnContext: a stalled scenario analysis-fact read', () => {
     };
     let context: Awaited<ReturnType<typeof buildTurnContext>> | undefined;
     const built = buildTurnContext(PAYLOAD, 'request-stalled', { sessionStore: store }).then((c) => { context = c; });
-    await vi.advanceTimersByTimeAsync(ANALYSIS_REREAD_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(SCENARIO_FACT_READ_BOUND_MS);
     await built;
     expect(context).toBeDefined();
     expect(context!.scenario_analysis_fact_set).toMatchObject({ status: 'degraded' });
