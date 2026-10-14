@@ -1812,7 +1812,9 @@ describe('Science §(ad) time-bound goal reply details', () => {
   const note = goalHorizonWithholdDetail(graph)!;
   const context = 'The shared model retains the current evidence and assumptions for review before the team considers which strategic issue to resolve next.';
 
-  it('the horizon cause owns the exact face and its stored detail once, even beside another target failure', () => {
+  it('the result cards carry the horizon marker, so the reply leads with its why ONCE and never repeats the marker, even beside another target failure', () => {
+    // §(ad) amended (Paul pricing, served 2a35ff31: the card's "Not shown yet: needs month-by-month changes" was the reply's
+    // headline too; DL → AIE #94): the card keeps the marker; the reply says the why once, as its lead, then the next step.
     const c = composeReplyShape({ faceContract: 'run', graph, text: `Your results are ready.\n\n${note}\n\n${context}`,
       chanceCells: [{ kind: 'withheld', face: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, why: note, reasons: [
         { code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: 'The current level is missing.' },
@@ -1820,13 +1822,26 @@ describe('Science §(ad) time-bound goal reply details', () => {
       ] }],
       horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });
     expect(c.shape, c.reason).not.toBeNull();
-    expect(c.shape!.headline).toBe(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
-    expect(c.shape!.detail.split(note)).toHaveLength(2);
-    expect(face(c).join('\n')).not.toContain(note);
+    // AIE #94 6178106849's exact lead: the goal's quantity AT its point ("MRR at month 9", never "9-month MRR").
+    expect(c.shape!.headline).toBe('Your goal is MRR at month 9; this Run has not evaluated it at that point.');
+    expect(c.text.split('this Run has not evaluated it')).toHaveLength(2);
+    expect(c.text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    expect(c.text).not.toContain(note);
+    expect(c.text).not.toMatch(/\d+-month MRR/);
     expect(c.text).not.toContain(HORIZON_MARKER);
     expect(c.text).not.toContain("This model doesn't yet say");
     expect(c.text).not.toContain('%');
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('CONTRAST: a card that does NOT carry the horizon marker keeps the ruled shape: the marker leads, its why once in detail', () => {
+    const c = composeReplyShape({ faceContract: 'run', graph, text: `Your results are ready.\n\n${note}\n\n${context}`,
+      chanceCells: [{ kind: 'withheld', face: 'Not shown yet', why: note, reasons: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: note }] }],
+      horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    expect(c.shape!.detail.split(note)).toHaveLength(2);
+    expect(face(c).join('\n')).not.toContain(note);
   });
 
   it('a stored triple does not unlock the chance cells passed to compose-reply', () => {

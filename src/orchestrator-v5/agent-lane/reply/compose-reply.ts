@@ -41,7 +41,7 @@ import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { launchWindowOf } from '../../goal-target/goal-target-basis.js';
-import { goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
+import { goalHorizonReplyLead, goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
 export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
@@ -691,7 +691,24 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
       return [{ ...o, text: sentence ?? written }];
     }) : [];
   const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
+  const horizonWithholdDetails = !canMark || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
+    : cell.reasons.filter(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED' || reason.code === 'HORIZON_NOT_TESTED')
+      .flatMap(reason => typeof reason.message === 'string' && reason.message.trim() !== '' ? [reason.message] : []));
+  /**
+   * ⭐ Science §(ad), amended (Paul pricing, served 2a35ff31; AIE #94 6178106849 ACK + AMEND): the result cards already carry the
+   * horizon marker (`canonical-analysis-view.ts`), so the reply never says it again. It leads, once, with the AIE's sentence
+   * ("Your goal is MRR at month 12; this Run has not evaluated it at that point."), then the one next step. More detail keeps
+   * only what the why adds beyond that reason (the missing inputs it names), never the reason again.
+   */
+  const horizonLead = goalHorizonReplyLead(input.graph);
+  const horizonWhyLeads = horizonLead !== null && chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested'
+    && new Set(horizonWithholdDetails).size === 1
+    && (input.chanceCells ?? []).some(cell => cell.kind === 'withheld' && cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+  const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined
+    : horizonWhyLeads && horizonLead !== null ? horizonLead : markerForDisclosure(chanceDisclosure);
+  // The why's opening restates the lead's reason ("Your goal is for month 12, and this model only has today's numbers."): dropped.
+  const horizonDetailBeyondLead = !horizonWhyLeads ? horizonWithholdDetails
+    : horizonWithholdDetails.slice(0, 1).map(why => sentencesOf(why).slice(1).join(' ').trim()).filter(rest => rest !== '');
   const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
     || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
       && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
@@ -705,13 +722,10 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const steadyWhy = canMark && faceContract && steadyAttested && horizonBesideChance
     ? goalHorizonSteadyWhyLine(input.graph) : undefined;
-  const horizonWithholdDetails = !canMark || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
-    : cell.reasons.filter(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED' || reason.code === 'HORIZON_NOT_TESTED')
-      .map(reason => reason.message));
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonDetailBeyondLead, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
@@ -726,7 +740,9 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const sourceText = addedFaceLines.length === 0 ? input.text : [inputQuestions?.lead ?? input.text,
     ...addedFaceLines, inputQuestions?.segment ?? '', inputQuestions?.after ?? ''].filter(Boolean).join('\n\n');
   // Move verbatim narrator copies to their typed detail position; never duplicate a risk sentence.
-  const body = detailLines.length === 0 ? sourceText : detailLines.reduce((text, line) => text.replaceAll(line, ''), sourceText)
+  // The why the §(ad) lead replaces is removed wherever the reply carried it, never said beside the lead.
+  const movedLines = [...detailLines, ...(horizonWhyLeads ? horizonWithholdDetails.slice(0, 1) : [])];
+  const body = movedLines.length === 0 ? sourceText : movedLines.reduce((text, line) => text.replaceAll(line, ''), sourceText)
     .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
   const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body);
   // The questions toggle owns its segment; disclosures sit before it, never inside it.
