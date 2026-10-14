@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
-import { unresolvedEventOptionIds, withEventShareDate } from '../../goal-target/event-by-date-model.js';
+import { unresolvedEventOptionIds, withEventShareDate, withRatioCarrierSizes } from '../../goal-target/event-by-date-model.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { CAPACITY_RATIO_COMPARISON_WITHHELD, withoutCapacityRatioComparison, withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
@@ -34,16 +34,25 @@ async function construct(answer: Rec): Promise<Rec> {
 }
 const node = (g: Rec, id: string): Rec => g.nodes.find((n: Rec) => n.id === id);
 /** Paul's 7–8 months, saved through the real team-time write (which sizes the ratio link, L3). */
-async function saved(): Promise<Rec> {
+async function saved(low = 7, high = 8): Promise<Rec> {
   const dated = withEventShareDate(await construct(draft()), '2027-04-14', '2026-10-14') as Rec;
-  const result = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: 7, high_months: 8,
+  const result = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: low, high_months: high,
     deadline: '2027-04-14', reference_date: '2026-10-14' } as never, computeAnalysisAffectingGraphHash(dated as never)!);
   if (result.kind !== 'mutated') throw new Error(JSON.stringify(result));
   return result.mutatedGraph as Rec;
 }
 const envelope = (): Rec => ({ option_comparison: [['event_option_1', 0.2], ['event_option_2', 0.3], ['event_option_3', 0.5]]
-  .map(([id, w]) => ({ option_id: id, probability_of_goal: 0.004, win_probability: w, outcome: { p10: 0.6, p50: 0.8, p90: 0.95 } })),
+  .map(([id, w]) => ({ option_id: id, probability_of_goal: 0.004, win_probability: w, outcome: { p10: 0.6, p50: 0.8, p90: 0.95 },
+    probability_of_goal_drivers: { rows: [] } })),
   inference_warnings: [] as Rec[] });
+/** The engine's chance read off the graph CEE sends: goal = C·T + X, C the team link, X the option's ratio link (Normal). */
+function engineChance(g: Rec, switchId: string): number {
+  const team = node(g, 'event_team').observed_state, c = g.edges.find((e: Rec) => e.from === 'event_team').strength;
+  const X = g.edges.find((e: Rec) => e.from === switchId).strength;
+  const mean = c.mean * team.value + X.mean;
+  const sd = Math.sqrt(c.mean ** 2 * team.std ** 2 + c.std ** 2 * (team.value ** 2 + team.std ** 2) + X.std ** 2);
+  return upperTail((1 - mean) / sd);
+}
 /** Normal upper tail, written independently of the engine (Numerical Recipes erfc, fractional error < 1.2e-7). */
 function upperTail(z: number): number {
   const x = Math.abs(z) / Math.SQRT2, t = 1 / (1 + 0.5 * x);
@@ -74,7 +83,7 @@ describe('L2: an event option with no Olumi pace acts through the brief\'s own c
     expect(node(g, 'event_capacity_3').observed_state.extra_share_by_date.capacity_ratio).toBeUndefined();
   });
 
-  it('⭐ L3: with the team\'s 7–8 months saved, the ratio link is sized from that same team share and the legacy option is licensed', async () => {
+  it('⭐ L3 + PL 6135017311 (bounds beat the tail): with Paul\'s 7–8 months the link is sized, and his own 7-month floor puts 100% out of reach, so the arithmetic is said, not a tail chance', async () => {
     const dated = withEventShareDate(await construct(draft()), '2027-04-14', '2026-10-14') as Rec;
     // Before the team time is held, nothing sizes the link and no chance rests on it.
     expect(dated.edges.find((e: Rec) => e.from === LEGACY_SWITCH).defaulted).toBe(true);
@@ -82,36 +91,59 @@ describe('L2: an event option with no Olumi pace acts through the brief\'s own c
     const g = await saved();
     const link = g.edges.find((e: Rec) => e.from === LEGACY_SWITCH);
     expect(link.defaulted).toBeUndefined();
-    expect(node(g, LEGACY_SWITCH).observed_state.extra_share_by_date.ratio_sizing.rule).toBe('marginal_exact');
+    expect(node(g, LEGACY_SWITCH).observed_state.extra_share_by_date.ratio_sizing.rule).toBe('marginal_normal');
     expect(sharePartsForOption(g, LEGACY)).toMatchObject({ ratio: 510 / 450 });
+    // 6 months × 17/15 ÷ 7 months = 34/35: even at the soonest time the option gets about 97% done by the deadline.
     const gated = withShareByDateChanceGate(envelope(), g, 'event_goal') as Rec;
-    expect((gated.inference_warnings as Rec[]).filter((w) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION),
-      JSON.stringify(gated.inference_warnings)).toEqual([]);
-    expect(gated.option_comparison.find((r: Rec) => r.option_id === LEGACY).probability_of_goal).toBe(0.004);
+    const legacy = (gated.inference_warnings as Rec[]).filter((w) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION
+      && Array.isArray(w.option_ids) && w.option_ids.includes(LEGACY));
+    expect(legacy.map((w) => w.message)).toEqual(['No chance is shown for this option: on your own soonest estimate it can’t reach '
+      + '100% of next feature launch by 14 April 2027. Even at 7 months, it gets about 97% done by then (7 months of work at 113% of '
+      + 'today’s capacity is still about 6.2 months, past the 6 months to the deadline).']);
+    expect(gated.option_comparison.find((r: Rec) => r.option_id === LEGACY).probability_of_goal).toBeUndefined();
+    // CONTRAST: on a reachable estimate (5–7 months) the same option is licensed and keeps its chance.
+    const reachable = withShareByDateChanceGate(envelope(), await saved(5, 7), 'event_goal') as Rec;
+    expect((reachable.inference_warnings as Rec[]).filter((w) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION
+      && Array.isArray(w.option_ids) && w.option_ids.includes(LEGACY))).toEqual([]);
+    expect(reachable.option_comparison.find((r: Rec) => r.option_id === LEGACY).probability_of_goal).toBe(0.004);
   });
 
-  it('⭐ NUMERICAL (DL ruling (A) 1): the engine\'s chance for the legacy option equals a hand-calculated P(r·T ≥ 100%) on 7–8 months', async () => {
+  it('⭐ NUMERICAL (local Normal-CDF match, AIE 6175233964; not the engine, not a shown figure): the sized link gives the Normal approximation of k × the team\'s contribution, for a fixed k', async () => {
     const g = await saved();
     // Hand: 6 months to 14 April 2027; T = 6/U, U uniform on 7–8 months. E[T] = 6·ln(8/7), E[T²] = 36·(1/7 − 1/8).
-    // r = (6 × 85%) / (6 × 75%) = 510/450. r·T has mean r·m and variance r²·sd²; every option's team link also carries the
-    // engine's held coefficient (sd 0.01), Var = 0.01²·E[T²].
+    // r = (6 × 85%) / (6 × 75%) = 510/450, fully effective from now (L = 0), so k = r. The team's contribution is B = C·T with
+    // the engine's held coefficient C ~ (1, 0.01): Var(B) = sd² + 0.01²·E[T²]. Under the Normal approximation k·B has mean
+    // k·m and sd k·σB. (The exact uniform-time reference differs: 0 here, since 6.8 months of work is under the 7-month floor.)
     const r = 510 / 450, m = 6 * Math.log(8 / 7), sd = Math.sqrt(36 * (1 / 7 - 1 / 8) - m * m);
-    const hand = upperTail((1 - r * m) / Math.sqrt(r * r * sd * sd + 0.01 ** 2 * (m * m + sd * sd)));
-    // The engine, read off the graph CEE sends: goal = C·T + L, C ~ (1, 0.01) on the team link, L the legacy switch's link.
-    const team = node(g, 'event_team').observed_state, c = g.edges.find((e: Rec) => e.from === 'event_team').strength;
-    const L = g.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength;
-    const engineMean = c.mean * team.value + L.mean;
-    const engineSd = Math.sqrt(c.mean ** 2 * team.std ** 2 + c.std ** 2 * (team.value ** 2 + team.std ** 2) + L.std ** 2);
-    const engine = upperTail((1 - engineMean) / engineSd);
-    expect(engineMean).toBeCloseTo(r * m, 9);
-    expect(engine).toBeCloseTo(hand, 6);
-    expect(hand).toBeGreaterThan(0.003); expect(hand).toBeLessThan(0.006); // under 1%: 7.8 months at 113% pace
-    // CEE's own reference point for the licence agrees with both.
+    const sB = Math.sqrt(sd * sd + 0.01 ** 2 * (m * m + sd * sd));
+    const hand = upperTail((1 - r * m) / (r * sB));
+    expect(engineChance(g, LEGACY_SWITCH)).toBeCloseTo(hand, 6);
+    // Never shown on these figures: the 7-month floor makes 100% unreachable (the L3 row), so this is a sizing check only.
+    // CEE's own Normal reference for the licence agrees.
     expect(normalChance(sharePartsForOption(g, LEGACY)!, 1)).toBeCloseTo(hand, 6);
   });
 
-  it('⛔ DL ruling (A) 2: no win share or leader for a compared ratio option, with one reason; every chance stays', async () => {
+  it('⭐ AIE 6175233964: an effect fully effective L months into the window uses k = 1+(r−1)·max(0,H−L)/H, never r', async () => {
     const g = await saved();
+    Object.assign(node(g, LEGACY_SWITCH).observed_state.extra_share_by_date, { lead_low: 2, lead_high: 2 });
+    withRatioCarrierSizes(g);
+    const r = 510 / 450, k = 1 + (r - 1) * (6 - 2) / 6;
+    expect(sharePartsForOption(g, LEGACY)!.ratio).toBeCloseTo(k, 12);
+    const m = 6 * Math.log(8 / 7), sd = Math.sqrt(36 * (1 / 7 - 1 / 8) - m * m), sB = Math.sqrt(sd * sd + 0.01 ** 2 * (m * m + sd * sd));
+    expect(engineChance(g, LEGACY_SWITCH)).toBeCloseTo(upperTail((1 - k * m) / (k * sB)), 6);
+    expect(shareOptionEstimateWords(g, LEGACY)).toContain('in proportion to ‘Feature development capacity’ from 2 months in');
+    // CONTRAST (fail closed): an uncertain start has no single k, so the link is unsized and the chance withheld with its reason.
+    Object.assign(node(g, LEGACY_SWITCH).observed_state.extra_share_by_date, { lead_low: 1, lead_high: 3 });
+    withRatioCarrierSizes(g);
+    expect(g.edges.find((e: Rec) => e.from === LEGACY_SWITCH).defaulted).toBe(true);
+    expect(sharePartsForOption(g, LEGACY)).toBeNull();
+    const gated = withShareByDateChanceGate(envelope(), g, 'event_goal') as Rec;
+    expect((gated.inference_warnings as Rec[]).find((w) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION
+      && Array.isArray(w.option_ids) && w.option_ids.includes(LEGACY))?.message).toMatch(/^Not shown\. This option's start is given as a range/);
+  });
+
+  it('⛔ DL ruling (A) 2: no win share or leader for a compared ratio option, with one reason; every chance stays', async () => {
+    const g = await saved(5, 7);
     const out = withShareByDateChanceGate(envelope(), g, 'event_goal') as Rec;
     for (const row of out.option_comparison as Rec[]) {
       expect(row.win_probability, row.option_id).toBeUndefined();
@@ -120,6 +152,9 @@ describe('L2: an event option with no Olumi pace acts through the brief\'s own c
     const reason = (out.inference_warnings as Rec[]).filter((w) => w.code === CAPACITY_RATIO_COMPARISON_WITHHELD);
     expect(reason).toHaveLength(1);
     expect(reason[0]).toMatchObject({ option_ids: [LEGACY], message: CAPACITY_RATIO_COMPARISON_NOTE, win_shares_withheld: true });
+    // AIE 6175233964: the ratio option's main-driver block rests on the lost coupling, so it goes; the others keep theirs.
+    expect((out.option_comparison as Rec[]).map((r) => r.probability_of_goal_drivers === undefined))
+      .toEqual([false, true, false]);
     // The card says why once, and what the ratio chance leaves out (PL L3), beside the licensed chances.
     const licence = goalChanceLicenceOf(out, g, 'event_goal')!;
     expect(licence.notes).toEqual([CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE]);
@@ -128,10 +163,12 @@ describe('L2: an event option with no Olumi pace acts through the brief\'s own c
     expect((noRatio.option_comparison as Rec[]).map((r) => r.win_probability)).toEqual([0.2, 0.3, 0.5]);
   });
 
-  it('⭐ DL ruling (A) 3: the chance line says the ratio rests on Olumi\'s reading of the identity and on Olumi\'s 15%', async () => {
-    const words = shareOptionEstimateWords(await saved(), LEGACY);
-    expect(words).toContain('Olumi’s reading that ‘Feature development capacity’ = ‘Mid-weight developers’ × ‘Time on feature work’');
-    expect(words).toContain('Olumi’s proposed setting of ‘Time on legacy fixes’ at 15%');
+  it('⭐ DL ruling (A) 3 + AIE 6174736249: the chance line names each Olumi assumption: the identity, the derived 75%, the 15% and proportional pace', async () => {
+    expect(shareOptionEstimateWords(await saved(), LEGACY)).toBe('using Olumi’s reading that ‘Feature development capacity’ = '
+      + '‘Mid-weight developers’ × ‘Time on feature work’ (with ‘Time on feature work’ at 75% of development time today, worked out on '
+      + 'Olumi’s assumption that the time is split only between it and ‘Time on legacy fixes’), Olumi’s proposed setting of '
+      + '‘Time on legacy fixes’ at 15% of development time, and Olumi’s provisional assumption that delivery pace changes in '
+      + 'proportion to ‘Feature development capacity’ from now');
   });
 
   it('⛔ CONTRAST (fail closed): a hand-edited ratio size no longer matches the team share, so no chance rests on it', async () => {

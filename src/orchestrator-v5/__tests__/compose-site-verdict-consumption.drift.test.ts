@@ -1803,8 +1803,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // void — so the exact expression is pinned, not paraphrased.
     // C46 stage 1: the headline is ALSO withheld when the leader's sign on a multiplied goal is not proven —
     // still "withheld-able headline, else a locked template".
-    // An unadopted Olumi suggestion retained provisionally also cannot produce a leader headline.
-    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional\n      ? null : buildAnalysisResultHeadline(headlineInput);');
+    // An unadopted Olumi suggestion retained provisionally also cannot produce a leader headline, nor can a Run that compares
+    // a capacity-ratio option (its run-by-run comparison is not a shared draw; #3100, AIE 6175233964).
+    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared\n      ? null : buildAnalysisResultHeadline(headlineInput);');
     // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
     // constraint-gap one. The `gated` stance is unaffected and the pin is
     // updated rather than loosened: `summary` is still "withheld-able headline,
@@ -1910,9 +1911,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     expect(RUN_ANALYSIS).toContain(
       'const leaderPermission = applyNonlinearIdentityToLeaderPermission(\n      applyIntakeToLeaderPermission(',
     );
-    // The provisional/scope gates can only remove that permission; the reason is chosen by the common composer.
+    // The provisional/ratio-comparison/scope gates can only remove that permission; the reason is chosen by the common composer.
     expect(RUN_ANALYSIS).toContain(
-      "constraint_verdict: keptOlumiProvisional\n          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')\n          ? { ...leaderPermission, may_name_leading_option: false }\n          : leaderPermission,",
+      "constraint_verdict: keptOlumiProvisional || ratioOptionCompared\n          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')\n          ? { ...leaderPermission, may_name_leading_option: false }\n          : leaderPermission,",
     );
   });
 

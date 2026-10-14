@@ -9,7 +9,7 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
-import { capacityRatioOptionIds, CAPACITY_RATIO_COMPARISON_NOTE, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { capacityRatioOptionIds, capacityRatioOutOfReach, CAPACITY_RATIO_COMPARISON_NOTE, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -171,7 +171,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
   for (const row of readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? []) {
     const id = row.option_id ?? row.id;
     if (typeof id !== 'string') continue;
-    const failure = shareChanceInputFailure(graph, id);
+    // PL 6135017311 item 1: the user's own bound beats the Normal tail; an unreachable ratio option says the arithmetic.
+    const failure = shareChanceInputFailure(graph, id) ?? capacityRatioOutOfReach(graph, id);
     if (failure !== null) inputScopedEnvelope = withholdOptionGoalFigures(inputScopedEnvelope, new Set([id]), {
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: failure,
     }, { keepOutcome: true, keepOrdering: true });
@@ -206,9 +207,11 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
 export const CAPACITY_RATIO_COMPARISON_WITHHELD = 'CAPACITY_RATIO_COMPARISON_WITHHELD';
 
 /**
- * ⛔ L4 (DL ruling (A) condition 2): a capacity-ratio option's link is drawn beside the team part, not as the same draw, so
- * its run-by-run comparison with any other option is distorted. Every share, the leader and the flips go; every option's
- * chance stays (each is exact in its moments). The licence note says why on the card (`CAPACITY_RATIO_COMPARISON_NOTE`).
+ * ⛔ L4 (DL ruling (A) condition 2; AIE 6175233964): a capacity-ratio option's link is an auxiliary part drawn beside the
+ * team's contribution, not the same draw. Its own chance matches k × the team's share under the model's Normal
+ * approximation, but nothing paired or joint carries over. So every share, the leader and the flips go for every option, and
+ * the ratio option's main-driver block and joint chance go too (they rest on the lost coupling). Every option's own chance
+ * stays. The licence note says why on the card (`CAPACITY_RATIO_COMPARISON_NOTE`).
  */
 export function withoutCapacityRatioComparison<E>(envelope: E, graph: unknown): E {
   const ratioIds = capacityRatioOptionIds(graph);
@@ -216,9 +219,34 @@ export function withoutCapacityRatioComparison<E>(envelope: E, graph: unknown): 
   const ids = new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
     const id = r.option_id ?? r.id; return typeof id === 'string' && ratioIds.includes(id) ? [id] : [];
   }));
-  return withholdOptionGoalFigures(envelope, ids, {
+  if (ids.size === 0) return envelope;
+  const out = withholdOptionGoalFigures(envelope, ids, {
     code: CAPACITY_RATIO_COMPARISON_WITHHELD, severity: 'info', option_ids: [...ids], message: CAPACITY_RATIO_COMPARISON_NOTE,
-  }, { keepGoalFigures: true });
+  }, { keepGoalFigures: true }) as Rec;
+  return withoutCoupledRowClaims(out, ids) as E;
+}
+
+const COUPLED_ROW_KEYS = ['probability_of_goal_drivers', 'probability_of_joint_goal', 'probability_of_joint_goal_precision'] as const;
+/** Remove the coupled claims from the named options' rows, in every option-result carrier the withholder strips. */
+function withoutCoupledRowClaims(env: Rec, ids: ReadonlySet<string>): Rec {
+  const strip = (v: unknown): unknown => !Array.isArray(v) ? v : v.map((row) => {
+    if (!isRec(row)) return row;
+    const id = row.option_id ?? row.id;
+    if (typeof id !== 'string' || !ids.has(id)) return row;
+    const kept: Rec = { ...row };
+    for (const k of COUPLED_ROW_KEYS) delete kept[k];
+    return kept;
+  });
+  const out: Rec = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else if (isRec(env.results)) {
+    const n: Rec = { ...env.results };
+    for (const k of ['option_comparison', 'options', 'option_results']) if (k in n) n[k] = strip(n[k]);
+    out.results = n;
+  }
+  if (isRec(env.decision_brief) && 'options' in env.decision_brief) out.decision_brief = { ...env.decision_brief, options: strip(env.decision_brief.options) };
+  return out;
 }
 
 /**
