@@ -164,6 +164,17 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
     expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   }, 90_000);
 
+  it('NEGATIVE: the goal renamed elsewhere (the hash unchanged) → the card lapses, said; its press writes nothing', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, session } = await bothCards(w, turn);
+    const g = w.read(); const before = hash(g); goal(g).label = 'Team productivity'; expect(hash(g)).toBe(before); w.replace(g);
+    const next = await turn({ message: 'And now?', source: 'composer', agent_session_id: session });
+    expect(String(next.assistant_text)).toMatch(LAPSE);
+    expect(w.onLatestRow(deadline.id)).toBe(false);
+    await turn({ message: deadline.message, source: 'chip_click', chip: { id: deadline.id }, agent_session_id: session });
+    expect(goal(w.read()).goal_horizon ?? null).toBeNull();
+  }, 90_000);
+
   it('NEGATIVE: the goal’s own date was set elsewhere → the card lapses, said; its press writes nothing', async () => {
     const w = world(); const turn = await route(w);
     const { deadline, session } = await bothCards(w, turn);
