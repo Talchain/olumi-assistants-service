@@ -769,12 +769,20 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     await expectStoredRunAndReopen(s, rows);
   });
 
-  it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is not "held"', async () => {
+  // ⛔ CHANGED EXPECTATION (old → new, DL 14 Oct 01:4xZ: unverifiable is unknown, never "not included"): false + "NOT in the
+  // revised draft" → 'unknown' + "check the targets on the card". The card DOES carry "> 15%" (on Conversion rate), so with no
+  // quote the host cannot tell whether it is this call's target; it is still never "held" (`marketing-turn02-target-quote`).
+  it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is never "held" — unknown', async () => {
     const s = server();
     // "customers" is in L20; 15% is a figure L20 states. The candidate holds "> 15%" only on Conversion rate.
     const r = await offerOn(s, candidate, { constraint_type: 'at_least', value: 15, unit: '%', measures: 'customers', rationale: L20 });
-    expect(r).toMatchObject({ ok: true, revised_draft: { holds_this_target: false } });
-    expect(String(r.note)).toMatch(/This target \(15%\) is NOT in the revised draft/);
+    expect(r).toMatchObject({ ok: true, revised_draft: { holds_this_target: 'unknown' } });
+    expect(String(r.note)).toMatch(/could not be checked against the user\u2019s words: ask the user to check the targets on the card/);
+    expect(String(r.note)).not.toMatch(/NOT in the revised draft/);
+    // With the AI's quote of L20's customer words, 15% is not in them: still never held.
+    const q = await offerOn(s, candidate, { constraint_type: 'at_least', value: 15, unit: '%', measures: 'customers', rationale: L20,
+      quote: 'secure 20 new customers within the first 3 months' });
+    expect(q).toMatchObject({ ok: true, revised_draft: { holds_this_target: 'unknown' } });
   });
 
   it('RED (whole graph): a postimage that is not the acknowledged registration is unconfirmed, and no replacement receipt is issued', async () => {
