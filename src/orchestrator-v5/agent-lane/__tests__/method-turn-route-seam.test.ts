@@ -148,12 +148,18 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
   });
 
   it('ROW R2: a pick runs ONE call; the directive rides in THIS turn\'s instructions, never the user\'s words; no proposing tool is offered', async () => {
-    const base = await baseInstructions();
-    expect(base, 'vacuity: an ordinary turn was sent').toContain('Olumi');
+    const ordinary = await baseInstructions();
+    expect(ordinary, 'vacuity: an ordinary turn was sent').toContain('Olumi');
+    // BYPASS1 (AIE #94 6158232014): the stated-figure rule rides only where tools are offered. The ordinary turn offers them,
+    // so it ends with that rule; the method turn offers none, so it extends the prompt before it and never carries it.
+    const { STATED_FIGURE_INSTRUCTION } = await import('../../../routes/agent-v1-turn.js');
+    expect(ordinary.endsWith(`\n\n${STATED_FIGURE_INSTRUCTION}`)).toBe(true);
+    const base = ordinary.slice(0, -`\n\n${STATED_FIGURE_INSTRUCTION}`.length);
     await pick();
     expect(sent).toHaveLength(1);
     const call = sent[0];
     expect(call.instructions.startsWith(`${base}\n\nMETHOD TURN`)).toBe(true);
+    expect(call.instructions).not.toContain(STATED_FIGURE_INSTRUCTION);
     expect(call.instructions).toContain('METHOD TURN');
     expect(call.instructions).toContain(`The plan to stress-test is ${q(label(PLAN))}.`);
     expect(JSON.stringify(call.input)).not.toContain('METHOD TURN');

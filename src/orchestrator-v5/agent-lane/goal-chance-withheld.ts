@@ -44,6 +44,30 @@ export interface GoalChanceWithheld {
   readonly note: string;
   /** The options whose chance was withheld. Absent = every option (#416 / #422). */
   readonly option_ids?: readonly string[];
+  /** Set only where the host shows `say` at the end of this reply (`SAY_SHOWN_NOTE`): the build's first pass and a Run. */
+  readonly say_shown?: string;
+}
+
+/**
+ * ⭐ SAY-SHOWN (capacity post3010 row 4; PL 03:51Z / 04:44Z; DL 14 Oct). Served: the AI explained the withheld cause in its
+ * own words, then the host's `say` said the same cause again. On a turn whose first pass or Run withheld the chance, the
+ * host shows `say` (the route's chance face), so the AI is told so and spends its reply elsewhere. The route keeps this
+ * promise (`goalChanceSayPromisedThisTurn`). The AIE's text, byte for byte (packet 6e52e896 `say_shown.text`).
+ */
+export const SAY_SHOWN_NOTE =
+  "The attached `say` is shown once, word for word, in this reply. Do not repeat its chance statement or withholding reason. Answer the user’s question and add relevant reasoning, qualifications or an available next step that `say` does not cover.";
+
+/** Whether the latest Run this turn told the AI its `say` is shown (`say_shown`); a later Run without it clears it. */
+export function goalChanceSayPromisedThisTurn(toolResults: readonly unknown[]): boolean {
+  let promised = false;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    const firstPass = recordOf(rec?.first_analysis);
+    const chance = recordOf(rec?.goal_chance) ?? recordOf(firstPass?.goal_chance);
+    if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') promised = typeof chance.say_shown === 'string';
+    else if (rec?.ran === true || firstPass?.ran === true) promised = false;
+  }
+  return promised;
 }
 
 // DL words ruling (8 Oct): chance vocabulary, with the same held-target words as the horizon line.
@@ -54,17 +78,12 @@ function withheldOpeningForGraph(graph: unknown): string {
 export const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
 /** S2a removes only the scoped points; the other options keep their licences. */
 export const SHARE_APPROXIMATION_NOTE =
-  'This run withheld a single chance figure for the options in `option_ids`. Never state or estimate those points. '
-  + 'Those options’ licensed ranges may be said as written. Other options’ licensed points and ranges may also be said '
-  + 'as written, subject to the run’s other withhold rules. Say `say` once, as written, when you describe the run.';
+  "This run withheld a single chance figure for the options in `option_ids`. Never state or estimate those points. Those options’ licensed ranges may be said as written. Other options’ licensed points and ranges may also be said as written, subject to the run’s other withhold rules. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer.";
 /** PLoT's words open "Not shown." — right beside a missing figure, not in a reply; the reason after it is kept verbatim. */
 const UI_OPENING = /^Not shown\.\s*/;
 
 export const GOAL_CHANCE_WITHHELD_NOTE =
-  'This run withheld the chance of reaching the goal for EVERY option. Never state, estimate, rank or compare a chance, probability '
-  + 'or percentage of reaching the goal for any option, never say an option is more or less likely to reach it, and never quote an '
-  + 'option’s estimated value for the goal itself as a result: those come from the same calculation. Say `say` once, as written, '
-  + 'when you describe the run. Other results of this run may be described as they are.';
+  "This run withheld the chance of reaching the goal for EVERY option. Never state, estimate, rank or compare a chance, probability or percentage of reaching the goal for any option, never say an option is more or less likely to reach it, and never quote an option’s estimated value for the goal itself as a result: those come from the same calculation. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer. Other results of this run may be described as they are.";
 
 /**
  * ⛔ (S) (DL #75 5902570568): the chance is withheld only for the options a placeholder path moves (the status quo keeps
@@ -73,8 +92,7 @@ export const GOAL_CHANCE_WITHHELD_NOTE =
 export const PLACEHOLDER_PATH_NOTE =
   'This run withheld the chance of reaching the goal for the options in `option_ids`, and for EVERY option the share of runs '
   + 'that supported it: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
-  + 'quote those options’ estimated value for the goal itself, and never name a leading option. Say `say` once, as written, when '
-  + 'you describe the run: it names the link, and asks for its size only where it does. Never ask the user to size a link `say` '
+  + 'quote those options’ estimated value for the goal itself, and never name a leading option. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer. Never ask the user to size a link `say` '
   + 'calls a guess. Other results of this run may be described as they are.';
 
 /**
@@ -82,11 +100,7 @@ export const PLACEHOLDER_PATH_NOTE =
  * option's goal figures and the leader are withheld. No promise of the reading: the card that offers it is its own door.
  */
 export const PRODUCT_NOT_READ_NOTE =
-  'This run withheld, for EVERY option, the chance of reaching the goal, the option’s estimated value for the goal itself, and '
-  + 'the share of runs that supported it: the user’s own figures make the goal the product `say` names, and this run did not '
-  + 'calculate it that way. Never state, estimate, rank or compare those figures, never name a leading option, and never say '
-  + 'Olumi will calculate it that way. Say `say` once, as written, when you describe the run. Other results of this run may be '
-  + 'described as they are.';
+  "This run withheld, for EVERY option, the chance of reaching the goal, the option’s estimated value for the goal itself, and the share of runs that supported it: the user’s own figures make the goal the product `say` names, and this run did not calculate it that way. Never state, estimate, rank or compare those figures, never name a leading option, and never say Olumi will calculate it that way. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer. Other results of this run may be described as they are.";
 
 /**
  * ⭐ F1b [R1] (DL 5930827933; condition (1) 5931324913): a target this run can't test, where every option's OUTCOME was
@@ -94,31 +108,19 @@ export const PRODUCT_NOT_READ_NOTE =
  * them — one option's own range — and forbids every comparative use: no rank, no leader, no better or worse.
  */
 export const OUTCOME_KEPT_NOTE =
-  'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs that supported it: '
-  + 'the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread) is shown to the user on the '
-  + 'results panel; you are not given those figures. Never quote or estimate an option’s outcome, never rank or order the '
-  + 'options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. '
-  + 'Say `say` once, as written, when you describe the run.';
+  "This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs that supported it: the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread) is shown to the user on the results panel; you are not given those figures. Never quote or estimate an option’s outcome, never rank or order the options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer.";
 
 /**
  * ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the untestable target KEPT the ordering. Only the chance of
- * reaching the target (and, unless the failures leave it in the goal's units, the outcome) is withheld; the shares and the
- * leader are this run's findings and may be said as such, in the run's own direction.
+ * reaching the target (and, unless the failures leave it in the goal's units, the outcome) is withheld.
+ * ⭐ AIE Q3 (#2994 rulings, 13 Oct, request 6156574557): both notes no longer permit a share of runs or a leader as a
+ * Run-result finding (P13); dedicated comparative reasoning may use only a separately permitted share. AIE text, verbatim.
  */
 export const TARGET_ONLY_NOTE =
-  'This run withheld, for EVERY option, the chance of reaching the goal’s target and each option’s outcome for the goal: the '
-  + 'target can’t be tested yet. The share of runs that supported each option IS a result of this run: say it, if at all, as a '
-  + 'finding of this model in the goal’s own direction (where lower is better, the option that came out lowest), always said as '
-  + '‘in this model’, never as a chance of reaching the target and never as a recommendation. Never state, estimate, rank or compare a chance of reaching the '
-  + 'target, and never quote or estimate an option’s outcome. Say `say` once, as written, when you describe the run.';
+  "For the options covered by the selected Run’s current withholding record, the chance of reaching the goal’s target and the goal outcome are withheld because this Run cannot test the target as specified. Do not state, estimate, rank or compare those withheld quantities. In a Run result reply, do not report relative shares of model runs or name an option leader from them. Never substitute a relative ranking for an unavailable goal chance. Dedicated comparative reasoning may use only a separately permitted share recorded for the selected current Run, with the approved credit label and split-tie qualifier; it is neither a goal chance nor a recommendation. Explain the supplied withholding reason in ordinary language, preserving its affected options, quantity, target, unit, reference, period, uncertainty, source and unresolved conditions. Give a grounded executable next step when supported; do not invent a remedy, imply a narrower result covers the whole goal, or drop a known limitation.";
 /** The same, where the failures leave each option's outcome in the goal's units (P2/P3/P4 only): the panel shows it. */
 export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
-  'This run withheld, for EVERY option, the chance of reaching the goal’s target: the target can’t be tested yet. Each option’s '
-  + 'outcome for the goal is shown to the user on the results panel; you are not given those figures, so never quote or estimate '
-  + 'one, never rank or order the options by those outcomes, and never say one option is better or worse than another (DL #2448 '
-  + 'condition (1)). The share of runs that supported each option IS a result of this run: say it, if at all, as a finding of this model '
-  + 'in the goal’s own direction (where lower is better, the option that came out lowest), always said as ‘in this model’, never '
-  + 'as a chance of reaching the target and never as a recommendation. Say `say` once, as written, when you describe the run.';
+  "For the options covered by the selected Run’s current withholding record, the chance of reaching the goal’s target is withheld. Their goal outcomes may be shown on the results panel, but this note does not supply or license those figures. Do not quote, estimate or rank outcomes that the selected current Run has not separately supplied and licensed. In a Run result reply, do not report relative shares of model runs or name an option leader from them. Never substitute a relative ranking for an unavailable goal chance. Dedicated comparative reasoning may use only a separately permitted share recorded for the selected current Run, with the approved credit label and split-tie qualifier; it is neither a goal chance nor a recommendation. Explain the supplied withholding reason in ordinary language, preserving its affected options, quantity, target, unit, reference, period, uncertainty, source and unresolved conditions. Give a grounded executable next step when supported; do not invent a remedy, imply a narrower result covers the whole goal, or drop a known limitation.";
 
 /**
  * ⛔ GATE 1 v2 (DL 5 Oct, #2574): options the Run could not tell apart split their wins, so EVERY option's share of runs
@@ -126,11 +128,7 @@ export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
  * Every outcome stays, but identical options share one, so they are never compared with each other.
  */
 export const OPTIONS_IDENTICAL_NOTE =
-  'This run withheld, for EVERY option, the share of runs that supported it, so no option may be called leading or best; '
-  + 'and, for the options in `option_ids`, the chance of reaching the goal: those options came out identical in this model, so '
-  + 'the run cannot tell them apart. Never state, estimate, rank or compare those figures, never name a leading option, and never '
-  + 'say one of the options in `option_ids` is better or worse than another. Say `say` once, as written, when you describe the '
-  + 'run. Other results of this run may be described as they are.';
+  "This run withheld, for EVERY option, the share of runs that supported it, so no option may be called leading or best; and, for the options in `option_ids`, the chance of reaching the goal: those options came out identical in this model, so the run cannot tell them apart. Never state, estimate, rank or compare those figures, never name a leading option, and never say one of the options in `option_ids` is better or worse than another. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer. Other results of this run may be described as they are.";
 
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
@@ -249,10 +247,7 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
  * went, ahead of any other cause; the reply says the ruling's one sentence and never offers to size a link into it.
  */
 export const CHANCE_AS_GOAL_NOTE =
-  'This run withheld, for EVERY option, the chance and outcome for the goal and the share of runs that supported it: the goal '
-  + 'is measured as a chance of an event, which Olumi works out and never treats as a quantity. Never quote, estimate, rank or '
-  + 'compare a figure for the goal, never name a leading option, never ask the user for today\u2019s level of that chance or a '
-  + 'target for it, and never offer to size a link into it. Say `say` once, as written, when you describe the run.';
+  "This run withheld, for EVERY option, the chance and outcome for the goal and the share of runs that supported it: the goal is measured as a chance of an event, which Olumi works out and never treats as a quantity. Never quote, estimate, rank or compare a figure for the goal, never name a leading option, never ask the user for today’s level of that chance or a target for it, and never offer to size a link into it. Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer.";
 
 /** The reader for every withhold code but gate 1 v2's; `warnings` is non-empty. */
 function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], opening: string, guidedText: string | null,
@@ -326,7 +321,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
     + (goalFiguresLeaderWithheldWarning({ enrichment: { inference_warnings: warnings } }) !== undefined
       ? 'The share of runs that supported any option and any leader are withheld; never state them. '
       : 'Shares may be said as findings of this model in the goal’s own direction, always as ‘in this model’, never as target chances or recommendations. ')
-    + 'Say `say` once, as written, when you describe the run.' : undefined;
+    + "Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer." : undefined;
   if (targetOnly) {
     const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
     const tail = warnings.map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((t) => t !== '');
@@ -414,6 +409,23 @@ export function goalChanceLineOwed(
 }
 
 /** The latest Run this turn's typed sentence; a later Run without a warning clears an earlier one. */
+/**
+ * The options this turn's withheld `say` covers, from the SAME record `goalChanceSayFromThisTurn` reads: its `option_ids`,
+ * or `'all'` when it names none (#416 / #422). `undefined` when this turn's latest Run withheld nothing.
+ */
+export function goalChanceWithheldOptionsFromThisTurn(toolResults: readonly unknown[]): readonly string[] | 'all' | undefined {
+  let options: readonly string[] | 'all' | undefined;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    const firstPass = recordOf(rec?.first_analysis);
+    const chance = recordOf(rec?.goal_chance) ?? recordOf(firstPass?.goal_chance);
+    if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') {
+      options = Array.isArray(chance.option_ids) ? chance.option_ids.filter((id): id is string => typeof id === 'string') : 'all';
+    } else if (rec?.ran === true || firstPass?.ran === true) options = undefined;
+  }
+  return options;
+}
+
 export function goalChanceSayFromThisTurn(toolResults: readonly unknown[]): string | null {
   let say: string | undefined;
   for (const r of toolResults) {

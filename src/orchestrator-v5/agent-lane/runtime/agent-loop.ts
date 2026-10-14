@@ -137,6 +137,8 @@ export interface AgentTurnInput {
    * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
    */
   readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
+  /** A Run press returns its saved result before optional narration. Other turns keep the ordinary loop. */
+  readonly stopAfterSuccessfulRun?: () => string;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
   /**
@@ -241,6 +243,13 @@ export interface AgentTurnResult {
   readonly mutated: boolean;
   readonly hops: number;
   readonly stopped_reason: 'answered' | 'hop_limit' | 'incomplete';
+  /**
+   * ⭐ BYPASS1 (DL, 14 Oct): who wrote `assistant_text`. `ai` only where the model's own final answer is returned; `host`
+   * at every exit Olumi composes (the Run press's ready text, a single call answered from its own result, a narration
+   * recovered from a held proposal, an unfinished answer, the hop limit). The route stops restating, in prose, facts the
+   * AI was given ONLY when the AI wrote the reply; a host-written reply keeps every host line.
+   */
+  readonly reply_author?: 'ai' | 'host';
   /** Where this turn's wall time went. Always present. */
   readonly timing: TurnTiming;
 }
@@ -514,6 +523,7 @@ export async function runAgentTurn(
       mutated,
       hops: hopsTaken,
       stopped_reason: 'answered',
+      reply_author: 'host',
       timing: ((t) => { emitTiming(t); return t; })(timingAt(hopsTaken)),
     };
   };
@@ -604,6 +614,7 @@ export async function runAgentTurn(
           mutated,
           hops: hop,
           stopped_reason: 'incomplete',
+          reply_author: 'host',
           timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
         };
       }
@@ -616,6 +627,7 @@ export async function runAgentTurn(
         mutated,
         hops: hop,
         stopped_reason: 'answered',
+        reply_author: 'ai',
         timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
       };
     }
@@ -737,6 +749,18 @@ export async function runAgentTurn(
       });
     }
     const hopResults = toolResults.slice(hopResultsFrom);
+    // Finish every call's bookkeeping before returning, so history retains a paired output for each call.
+    // The route still checks the final canonical read before shipping the result and its bound Explain control.
+    if (input.stopAfterSuccessfulRun !== undefined && calls.some((call, index) =>
+      call.name === 'run_analysis' && hopResults[index]?.ok === true && hopResults[index]?.ran === true)) {
+      const text = input.stopAfterSuccessfulRun();
+      items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+      return {
+        assistant_text: text, items: handedOn(), tool_calls: toolCalls, tool_results: toolResults,
+        mutated, hops: hop + 1, stopped_reason: 'answered', reply_author: 'host',
+        timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+      };
+    }
     // ⛔ P44 S2 — align each call with its own result; refused and replayed builds cannot announce writing.
     previousHopBuilt = calls.some((call, index) => {
       const result = hopResults[index];
@@ -765,6 +789,7 @@ export async function runAgentTurn(
           mutated,
           hops: hop + 1,
           stopped_reason: 'answered',
+          reply_author: 'host',
           timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
         };
       }
@@ -781,6 +806,7 @@ export async function runAgentTurn(
     mutated,
     hops: maxHops,
     stopped_reason: 'hop_limit',
+    reply_author: 'host',
     timing: ((t) => { emitTiming(t); return t; })(timingAt(maxHops)),
   };
 }

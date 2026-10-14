@@ -120,7 +120,9 @@ describe('E3 — the door: the user\'s phrase is placed, and an unplaceable one 
     const { proposals, dispatch } = caps(), c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-12T08:52:27Z') });
     const typed = "If we don't increase our developer's output by 25%, in the next three months, we're unlikely to hit our launch deadline in six months time";
     const r = await c.proposeGoalDeadline!(ctx(typed) as never, { deadline_words: 'launch deadline in six months time', rationale: '' }) as Rec;
-    expect(r).toMatchObject({ ok: true, public_label: 'Is your deadline 12 April 2027 (6 months from 12 October 2026)? Your words: “launch deadline in six months time”.' });
+    // ⛔ DLf5 (#2997 Codex check, DL rule): EXPECTATION CHANGED, old "Your words: …" (user_stated) → new "… Olumi’s
+    // interpretation; …": his sentence holds two durations, so which is the deadline is Olumi's reading. Date unchanged.
+    expect(r).toMatchObject({ ok: true, public_label: 'Is your deadline 12 April 2027 (6 months from 12 October 2026)? Your words: “launch deadline in six months time”. Olumi’s interpretation; check the date and reference before approving.' });
   });
   it('an unplaceable phrase: the Agent is told to ask the model\'s own deadline question, never "never offer a date"', async () => {
     const { proposals, dispatch } = caps(), c = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-12T08:52:27Z') });
@@ -339,12 +341,19 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(w.rows).toHaveLength(0);
     expect(w.graph()).toEqual(changed);
   });
-  it('CONTROL: a proposal with no field-scoped read (the deadline card) is still stale on any model change, byte-identically', async () => {
+  // ⛔ EXPECTATION CHANGED (#3024, DL 14 Oct ruling (A)): the deadline card now has its own field-scoped read (its goal's
+  // complete projection), so an unrelated model change no longer makes it stale; a change to its goal still does.
+  it('CONTROL: the deadline card reads its own subject: hiring times landing leaves it applying; a changed goal supersedes it', async () => {
     const w = world(drafted());
     const card = await w.caps.proposeGoalDeadline!(ctx('Our launch deadline is in six months time.') as never, { deadline_words: 'in six months time', rationale: '' }) as Rec;
     expect(card.ok).toBe(true);
     w.replace(hiringTimesLand(w.graph()));
-    expect(await approve(w, card.proposal_id)).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, mutated: true });
+    const w2 = world(drafted());
+    const card2 = await w2.caps.proposeGoalDeadline!(ctx('Our launch deadline is in six months time.') as never, { deadline_words: 'in six months time', rationale: '' }) as Rec;
+    const moved = hiringTimesLand(w2.graph()); moved.nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw = 90; w2.replace(moved);
+    expect(await approve(w2, card2.proposal_id)).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(w2.rows).toHaveLength(0);
   });
   it('the write stays CAS-fenced: the writer refuses an expected hash the model has moved past', () => {
     const g = dated(), part = draftedTeamPartOf(g)!;

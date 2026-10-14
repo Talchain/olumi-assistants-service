@@ -8,6 +8,8 @@ import {
   type InputOrigin,
 } from '../../cee/provenance/provenance-of.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from './olumi-estimates-feeding-result.js';
+import { EventRiskV1 } from '../../schemas/event-risk.js';
+import { computeResponseHash } from '../../utils/response-hash.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -140,6 +142,15 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
   const RC4_AUTHORSHIP = { human: 'yours', ai: 'olumi_estimate', ai_accepted: 'olumi_accepted', unverified: 'unknown' } as const;
   const factors: GoalPathFactor[] = valued.map(id => ({ factor_id: id, label: labelOf(id),
     value_authorship: RC4_AUTHORSHIP[originOf.get(id)!], goal_distance: distance.get(id)!, value_hash: factorValueHash(byId.get(id)!) }));
+  // ⭐ (a′) A risk's occurrence that is OLUMI'S range (`event_risk.occurrence.basis: 'olumi'`, written only by its approved card,
+  // `risk-occurrence.ts`) is a starting value Olumi estimated: counted on the face and listed on the panel alike (DL 14 Oct:
+  // the chance says it rests on that estimate too). Approval applied it; the basis stays Olumi's, so it is never "accepted".
+  const occurrences = upstream.filter(id => !valued.includes(id) && byId.get(id)!.kind === 'risk'
+    && EventRiskV1.safeParse(byId.get(id)!.event_risk).data?.occurrence.basis === 'olumi');
+  for (const id of occurrences) {
+    factors.push({ factor_id: id, label: labelOf(id), value_authorship: 'olumi_estimate', goal_distance: distance.get(id)!,
+      value_hash: computeResponseHash({ event_risk: byId.get(id)!.event_risk }) });
+  }
   // (b) Every setting of every option in this Run on the set (the scored goal and the status quo included; a baseline cell
   // that holds today's level is today's figure, not a setting).
   const setsOf = (o: Rec): Rec => rec(o.interventions) ?? rec(rec(o.data)?.interventions) ?? {};
@@ -176,7 +187,7 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
     validatedDefinition: validatedDefinitionForLink(`${e.from as string}->${e.to as string}`) !== undefined }))).length;
   const census = olumiEstimatesFeedingResult({ validatedDefinitionForLink,
     goalPathFactors: factors, goalPathLinks: links, optionSettings: settings });
-  const valueIds = new Set(valued);
+  const valueIds = new Set([...valued, ...occurrences]);
   const settingsByOption: Record<string, number> = {};
   for (const v of census.values) {
     const option = valueIds.has(v.id) ? undefined : optionOf.get(v.id);

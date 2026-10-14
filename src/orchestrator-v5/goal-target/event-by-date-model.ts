@@ -2,7 +2,8 @@
 import { REPAIR_CODES } from '@talchain/schemas';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
-import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
 import { extraShareLinkMoments, hirePaceIsOlumisOwn, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
@@ -24,6 +25,22 @@ const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
   deliver: 'deliver', delivering: 'deliver', delivered: 'deliver', delivers: 'deliver',
   finish: 'finish', finishing: 'finish', finished: 'finish', finishes: 'finish',
 };
+/**
+ * ⛔ AN UNATTESTED EVENT IS NEVER SAVED AS THE GOAL (DL ruling 14 Oct, amended per PL #94 05:36Z; served hiring on 34a5cdf6,
+ * raw 9d75b605: "We have an urgent launch date in the next three months." drafted as the event-by-date goal "Urgent launch"
+ * while the brief's governing sentence asks to "increase productivity by at least 10%"). The drafter's event goal the brief
+ * reader does not attest, with the brief's own words kept for the redraft and the clarification: the event's quote and the
+ * governing sentence, each only when it is verbatim in the brief (else null, never paraphrased). Null when the draft's goal
+ * is not an event, or construction prompted the event (`event_by_date_prompted`), or the brief attests it.
+ */
+export interface UnattestedEventGoal { readonly event: string; readonly words: string | null; readonly governing: string | null }
+export function unattestedEventGoal(candidate: CandidateModel, brief: string, prompted: boolean): UnattestedEventGoal | null {
+  const goal = candidate.goal;
+  if (prompted || goal.kind !== 'event_by_date' || briefAttestsEventByDate(brief, goal)) return null;
+  const verbatim = (text: unknown): string | null => (typeof text === 'string' && text.trim() !== '' && brief.includes(text.trim()) ? text.trim() : null);
+  return { event: goal.metric, words: verbatim((goal as { source_quote?: unknown }).source_quote), governing: verbatim(candidate.decision_question) };
+}
+
 /** The candidate's quantity decides the class; numbers elsewhere in the brief do not. */
 export function isQuantityGoalCandidate(goal: CandidateModel['goal']): boolean {
   return goal.value !== null || readCurrencyUnitWithQualifiers(currencyWordsAsCodes(goal.unit)).kind === 'currency';
@@ -277,6 +294,28 @@ export function eventModelAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
   if (part === null) return null;
   return goalDeadlineFromRecord(graph, part.goal.id) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311; Codex buddy r1): the ONE next step for a goal measured as a chance, from
+ * the same branches as the coach's one ask (`decision-input-ask.ts` `rawDecisionInputAsk`). A drafted event team part has
+ * its own question chain, the date then the team's time (`eventModelAsk`), each answer taken by a writer: that question is
+ * the step. Any other chance goal: with the date held the model still can't say what must be done by then and no writer
+ * records that, so it is a CAPABILITY gap; with no date, the date is still asked first (Science ruling §4), with that same
+ * gap beside it so the answer is never promised to unlock the chance.
+ */
+export function chanceGoalBlockerOf(graph: unknown): PressBlocker | null {
+  if (draftedTeamPartOf(graph) !== null) {
+    const ask = eventModelAsk(graph);
+    return ask === null ? null : { kind: 'missing_input', ask };
+  }
+  const goal = soleGoalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '' || goalKindOf(goal) !== 'chance_of_event') return null;
+  const unbuilt = `a chance for ‘${label}’ until the model says what must be done by the deadline`;
+  return goalDeadlineFromRecord(graph, goal.id) === undefined
+    ? { kind: 'missing_input', ask: chanceGoalDeadlineAsk(label), also_unbuilt: unbuilt }
+    : { kind: 'missing_implementation', what: unbuilt };
 }
 
 export const EVENT_BY_DATE_REFUSALS = [

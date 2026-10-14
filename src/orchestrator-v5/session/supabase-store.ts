@@ -49,6 +49,7 @@ import {
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
+  answerRunNarrationOf,
   type AtomicCommittedModelVersionReceipt,
   type AnswerOffersRead,
   type CommittedTurnLedger,
@@ -755,6 +756,12 @@ export class SupabaseSessionStore implements SessionStore {
     rpcMode: GraphCasRpcMode,
     options: ConditionalAppendOptions,
   ): Promise<ConditionalSessionAppendOutcome> {
+    if (write.run_narration !== undefined) {
+      const narrated = await this.appendNarratedAnswer(write, baseRpcArgs, options);
+      if (narrated !== undefined) return narrated;
+      const { run_narration: _narration, ...withoutNarration } = write;
+      return this.appendAgentAnswerIfLatest(withoutNarration, baseRpcArgs, rpcMode, options);
+    }
     const rpcName = 'append_agent_answer_if_latest';
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
     const { data, error } = await this.client.rpc(rpcName, {
@@ -781,6 +788,45 @@ export class SupabaseSessionStore implements SessionStore {
     }
     // JSONB preserves the delegate's receipt object, or its UUID string on v2.
     const outcome = this.decodeAnswerAppendResult(data, rpcName, withOffers || write.agent_guidance !== undefined);
+    this.cache.invalidateAll(write.scenario_id);
+    return outcome;
+  }
+
+  /**
+   * T1h: the final answer row WITH the narration it was sent with (migration 20261013230000), conditional when
+   * `options` is given. `undefined` when the RPC is absent: the caller then takes today's path without the narration.
+   */
+  private async appendNarratedAnswer(
+    write: SessionTurnWrite,
+    baseRpcArgs: Record<string, unknown>,
+    options: ConditionalAppendOptions | undefined,
+  ): Promise<ConditionalSessionAppendOutcome | undefined> {
+    const rpcName = options === undefined ? 'append_agent_answer_narrated' : 'append_agent_answer_if_latest_narrated';
+    const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
+    const { data, error } = await this.client.rpc(rpcName, {
+      ...(options === undefined ? {} : { p_expected_latest_row_id: options.expectedLatestRowId }),
+      ...baseRpcArgs,
+      p_agent_guidance: write.agent_guidance ?? null,
+      p_suggested_actions: withOffers ? write.suggested_actions : null,
+      p_suggested_actions_run_key: withOffers ? write.suggested_actions_run_key ?? null : null,
+      p_run_narration: write.run_narration,
+    });
+    if (error) {
+      if (isMissingAppendFunction(error)) {
+        // Never silent: every answer recorded without its narration says so.
+        log.warn({ event: 'v5.agent_answer.narrated_rpc_missing', rpc: rpcName, rpc_code: errCode(error),
+          scenario_id: write.scenario_id, turn_id: write.turn_id },
+        'Narrated answer RPC is unavailable; recording the answer without its narration until migration 20261013230000 is applied');
+        return undefined;
+      }
+      throw new StateCommitFailedError(`${rpcName} RPC failed: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) });
+    }
+    if (options !== undefined && data !== null && typeof data === 'object' && !Array.isArray(data)
+      && (data as { status?: unknown }).status === 'latest_moved') {
+      return { status: 'latest_moved' };
+    }
+    const outcome = this.decodeAnswerAppendResult(data, rpcName, true);
     this.cache.invalidateAll(write.scenario_id);
     return outcome;
   }
@@ -815,6 +861,13 @@ export class SupabaseSessionStore implements SessionStore {
   ): Promise<SessionAppendOutcome> {
     if (useAppendV6() && write.graph != null) {
       return this.appendAtomicFenced(write, baseRpcArgs, rpcMode, null);
+    }
+    if (write.run_narration !== undefined && write.graph == null) {
+      const narrated = await this.appendNarratedAnswer(write, baseRpcArgs, undefined);
+      if (narrated !== undefined && !('status' in narrated)) return narrated;
+      if (narrated !== undefined) throw new StateCommitFailedError('append_agent_answer_narrated returned a conditional outcome');
+      const { run_narration: _narration, ...withoutNarration } = write;
+      return this.dispatchCheckedAppend(withoutNarration, baseRpcArgs, rpcMode);
     }
     const useV3 = rpcMode !== 'off' && write.graph != null;
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
@@ -2015,12 +2068,18 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
-    const { data, error } = await this.client
-      .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance')
-      .eq('scenario_id', scenarioId)
-      .eq('turn_id', turnId)
-      .limit(1);
+    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance';
+    const read = (select: string) => this.client.from('v5_conversation_turns').select(select)
+      .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
+    let { data, error } = await read(`${columns}, run_narration`);
+    // Order-safe: before migration 20261013230000 the column is absent; the row is then read as before T1h, its Run
+    // identity unknown, never refused. Never silent: every such read says so.
+    if (error && errCode(error) === '42703') {
+      log.warn({ event: 'v5.committed_turn.run_narration_column_missing', rpc_code: errCode(error),
+        scenario_id: scenarioId, turn_id: turnId },
+      'Committed-turn read without run_narration; its Run is unknown until migration 20261013230000 is applied');
+      ({ data, error } = await read(columns));
+    }
     // A failed read is an UNKNOWN and is thrown, never folded into "no row":
     // the caller would otherwise re-execute a turn that may already have run.
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
@@ -2040,13 +2099,16 @@ export class SupabaseSessionStore implements SessionStore {
       pending_actions: (Array.isArray(row.pending_actions) ? row.pending_actions : [])
         .map((pa) => parsePendingAction(pa))
         .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
+      // The narration this exact answer was sent with; absent or malformed reads as unknown.
+      run_narration: answerRunNarrationOf(row.run_narration),
     };
   }
 
   /**
    * ⭐ B RESTATED GOAL: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`). Scoped at the bytes
    * to the exact scenario; oldest first with a stable tie break; one row past the cap marks the ledger incomplete. Only
-   * the first message's text is returned. A failed or malformed read throws: "unknown", never "nothing written".
+   * the first message's text is returned as the brief; the later ones only as context (`later_user_messages`). A failed or
+   * malformed read throws: "unknown", never "nothing written".
    */
   async readCommittedTurnLedger(scenarioId: string): Promise<CommittedTurnLedger> {
     const { data, error } = await this.client
@@ -2061,6 +2123,7 @@ export class SupabaseSessionStore implements SessionStore {
     const rows = data as Array<Record<string, unknown>>;
     const writes: string[] = [];
     const messages: string[] = [];
+    const later: { turn_id: string; text: string }[] = [];
     let first: string | null = null;
     for (const row of rows.slice(0, COMMITTED_TURN_LEDGER_ROWS)) {
       if (typeof row.turn_id !== 'string' || row.turn_id === '') {
@@ -2071,9 +2134,11 @@ export class SupabaseSessionStore implements SessionStore {
       if (said !== '' && !messages.includes(row.turn_id)) {
         messages.push(row.turn_id);
         if (first === null) first = said;
+        else later.push({ turn_id: row.turn_id, text: said });
       }
     }
-    return { write_turn_ids: writes, user_message_turn_ids: messages, first_user_message: first, complete: rows.length <= COMMITTED_TURN_LEDGER_ROWS };
+    return { write_turn_ids: writes, user_message_turn_ids: messages, first_user_message: first, later_user_messages: later,
+      complete: rows.length <= COMMITTED_TURN_LEDGER_ROWS };
   }
 
   async releaseTurnClaim(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void> {

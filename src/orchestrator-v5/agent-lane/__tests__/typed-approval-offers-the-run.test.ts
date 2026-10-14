@@ -1,5 +1,9 @@
 /**
- * ⛔ A TYPED APPROVAL RUNS NOTHING — AND STILL OFFERS THE RUN (AI Quality, #63; Paul 5812069638).
+ * ⭐ ADOPTED (Paul, #94 6166259456, confirmed 14 Oct): a committed approval is analysed by the ROUTE's automatic Run, once,
+ * in the same turn. The Agent's own `run_analysis` in that request is still refused (`run_not_requested`): only the route
+ * runs, so the approving turn runs exactly once and offers no Run chip.
+ *
+ * Previously: ⛔ A TYPED APPROVAL RUNS NOTHING — AND STILL OFFERS THE RUN (AI Quality, #63; Paul 5812069638).
  *
  * `runAnalysis` refuses `run_not_requested` in the request whose approval applied a change, and its
  * detail tells the Agent to say the user can run the analysis when ready. The route's `offerRun` must
@@ -79,21 +83,21 @@ describe('K3 at the route — a typed "yes" applies the change, runs nothing, an
     return approve!.id.slice('agent-approve-proposal:'.length);
   }
 
-  it('RED-first: typed "yes" → authorise_change then run_analysis → the change applies, NOTHING runs, ONE Run chip is offered', async () => {
+  it('typed "yes" → authorise_change then the Agent\'s run_analysis (refused) → the change applies, the route\'s automatic Run runs ONCE, no Run chip', async () => {
     const proposalId = await propose();
     script = [fnCall('authorise_change', { proposal_id: proposalId }, 'a1'), fnCall('run_analysis', { reason: 'after the change' }, 'r1')];
     const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply it.' } });
     expect(t2.statusCode).toBe(200);
     expect(edges, 'the typed approval really applied').toHaveLength(1);
-    expect(runs, 'no surprise Run in the approving turn').toBe(0);
+    expect(runs, 'ONE Run: the route\'s automatic Run, never the Agent\'s refused one as well').toBe(1);
     // Bound by identity: the model DID ask to run, and the server's approval guard refused it.
     expect((t2.json() as { _agent: { tool_calls: { name: string; mutated: boolean; refusal?: string }[] } })._agent.tool_calls)
       .toEqual([
         expect.objectContaining({ name: 'authorise_change', mutated: true }),
         expect.objectContaining({ name: 'run_analysis', refusal: 'run_not_requested' }),
       ]);
-    expect((t2.json() as { suggested_actions: Chip[] }).suggested_actions.filter((c) => c.action_type === 'run_analysis'), 'the refused run analysed nothing, so the Run is still offered')
-      .toEqual([expect.objectContaining({ id: 'agent-run-analysis', action_type: 'run_analysis' })]);
+    expect((t2.json() as { suggested_actions: Chip[] }).suggested_actions.filter((c) => c.action_type === 'run_analysis'), 'it ran: no Run chip')
+      .toEqual([]);
   });
 
   it('CONTRAST: a typed request to run, with no change in the turn, does run', async () => {

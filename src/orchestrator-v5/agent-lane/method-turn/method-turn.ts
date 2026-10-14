@@ -322,7 +322,8 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
   const plan = ctx.plan === null ? 'this decision' : quote(ctx.plan.label);
   const decision = ctx.decision_level === true;
   return [
-    'METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.',
+    'METHOD TURN: the user asked for a pre-mortem, and this reply calls no tools.',
+    'Use the selected method and its supplied facts to develop a useful answer for the actual question. Keep it concise without omitting relevant reasoning, evidence, dissent or uncertainty to fit an arbitrary word limit. Preserve this role’s required response schema.',
     `${decision ? 'Stress-test the whole decision' : `The plan to stress-test is ${plan}`}.${ctx.goal_label !== null ? ` The goal is ${quote(ctx.goal_label)}.` : ''}`,
     ...(decision ? [CONTRACT.decision_plan.rule,
       `The current option labels are: ${ctx.current_option_labels.map(quote).join(', ')}.`] : []),
@@ -348,7 +349,6 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
     ...(storyOnlyDecision(ctx) ? ['Outside the model’s own labels, give no Run figures, leader or ranking claims; durations are allowed. This exercise prepares no model change or approval card.'] : []),
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
-    `At most ${POLICY.method_turns.shared.max_words} words.`,
   ].join('\n');
 }
 
@@ -588,8 +588,9 @@ export type CardCall =
 /**
  * The ONE change card the method turn ends in (RC `action_target`), as the existing door's own call. It authors no
  * figure: a link is offered at the band the writer itself reads as current, read through RC's `linkTargetOf` (#2477:
- * the ONE read of a link's mean and band, shared with the S1 picker), with no `from_words`, so it is
- * recorded as Olumi's estimate that the user accepts or edits; a factor is offered as Olumi's STORED figure to keep
+ * the ONE read of a link's mean and band, shared with the S1 picker), with no `from_words` and declared `stored`, so the door
+ * carries that band's stored origin (#3002, AIE packet 2b19ae59): a review of Olumi's estimate, the user's "already", any
+ * other origin left out as unknown; a factor is offered as Olumi's STORED figure to keep
  * (`keep`: the writer re-reads the stored figure and refuses anything not Olumi's own). Labels are the graph's, which
  * the writer resolves.
  *

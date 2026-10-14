@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
@@ -31,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
-const RUN_INTERPRETATION = 'The model result is provisional.';
+const RUN_INTERPRETATION = RUN_RESULT_READY_TEXT;
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
@@ -73,6 +74,10 @@ let scenario: string;
 let table: Record<string, any>[];
 let realStore: SupabaseSessionStore;
 let modelCalls: number;
+/** Every model request body, in order (the count above, with each call's identity). */
+let modelBodies: Record<string, unknown>[];
+/** The Explain press's interpreting call (agent-v1-turn.ts `interpretSelectedRun`): no tools at all, `tool_choice: 'none'`. */
+const isInterpretingCall = (b: Record<string, unknown>): boolean => b.tool_choice === 'none' && Array.isArray(b.tools) && b.tools.length === 0;
 let revision = 7;
 let graphWrites: number;
 let fenceGenerations: Map<string, number>;
@@ -156,10 +161,10 @@ function bindStore(): void {
 }
 beforeEach(async () => {
   vi.clearAllMocks(); serial += 1; scenario = `6f1e2d3c-4b5a-4e6d-9c7b-${String(serial).padStart(12, '0')}`;
-  table = []; fenceGenerations = new Map(); runRequests = []; modelCalls = 0; graphWrites = 0; setWithheld(); bindStore();
+  table = []; fenceGenerations = new Map(); runRequests = []; modelCalls = 0; modelBodies = []; graphWrites = 0; setWithheld(); bindStore();
   port.ensureScenarioExists.mockResolvedValue({ user_id: OWNER }); port.getScenarioOwner.mockResolvedValue(OWNER);
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
-  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { modelCalls += 1; return runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { modelCalls += 1; modelBodies.push(JSON.parse(String(init?.body ?? '{}'))); return runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
     { type: 'message', content: [{ type: 'output_text', text: 'The model result is provisional.' }] },
   ] }), { status: 200 }); }));
   app = Fastify({ logger: false });
@@ -218,7 +223,10 @@ async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propos
   expect(wire!.graph.nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity).toEqual({
     operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: true,
   });
-  expect(plotRun).not.toHaveBeenCalled(); expect(modelCalls).toBe(callsBeforeApproval);
+  // Adopted (DL, after #3038): the committed Yes's automatic Run is interpreted ONCE, by the Explain press's own call, and the
+  // approval adds no other model call.
+  expect(plotRun).not.toHaveBeenCalled();
+  expect(modelBodies.slice(callsBeforeApproval).map(isInterpretingCall), 'only the automatic Run\'s interpreting call').toEqual([true]);
 }
 
 describe('GOAL-REACH row 2 through the real doors', () => {
@@ -235,7 +243,7 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       } });
       expect(response.statusCode, response.body).toBe(200);
       const card = response.json();
-      expect(card._diagnostic_trace?.fast_path).toBeUndefined();
+      expect(card._diagnostic_trace?.fast_path).toBe('run');
       expect(runRequests).toHaveLength(1);
       expect(runRequests[0]).toMatchObject({ stage: 'analyse', chip: { action_type: 'run_analysis' } });
       expect(issue).toHaveBeenCalledWith(
@@ -250,8 +258,11 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       expect(writer.mock.calls[0]![0]).toMatchObject({ identity_confirm: {
         outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
       } });
-      expect(runRequests, 'Yes records the reading without running analysis').toHaveLength(1);
-      expect(modelCalls, 'two Run-loop calls; approval adds no model call').toBe(2);
+      // Adopted (Paul #94 6166259456): the committed Yes is analysed by the route's automatic Run, once, on the saved reading.
+      expect(runRequests, 'the Run press, then ONE automatic Run after the committed Yes').toHaveLength(2);
+      expect(runRequests[1]).toMatchObject({ stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+      // The Run press's pre-tool call, then (adopted, DL after #3038) the automatic Run's one interpreting call; nothing else.
+      expect(modelBodies.map(isInterpretingCall), 'pre-tool Run call; the automatic Run\'s interpreting call').toEqual([false, true]);
     } finally { issue.mockRestore(); writer.mockRestore(); }
   });
   it('row 2 RED: withheld Run bar has one enabled confirm_reading, press → held card → Yes → saved/reloaded identity → NEXT Run wire', async () => {
@@ -327,7 +338,7 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
         chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json();
-      expect(body._diagnostic_trace?.fast_path).toBeUndefined();
+      expect(body._diagnostic_trace?.fast_path).toBe('run');
       return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');

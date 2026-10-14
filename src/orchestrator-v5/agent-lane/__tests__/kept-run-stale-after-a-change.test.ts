@@ -78,7 +78,7 @@ describe('the retained Run output is a neutral pointer after a change and withou
   const turn = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', ...payload } });
   const runChip = async (scenario_id: string) => {
     const r = await turn({ scenario_id, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
-    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'control: the Run chip entered the loop').toBeUndefined();
+    expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'control: the Run chip returned its result').toBe('run');
   };
   /** The run's output in the LAST request, parsed, and whether its call is still beside it. */
   const carriedRun = () => {

@@ -67,7 +67,13 @@ describe('B19 goal-relative shortfall — one licensed point option at a time', 
     expect(l.pct_by_option).toEqual({ [RAISE]: 48, [STARTER]: 99 });
     expect(l.withheld_option_ids).toEqual([KEEP]);
     expect(l.shortfall_note_by_option).toEqual({ [RAISE]: RAISE_LINE });
-    expect(l.status_quo).toEqual({ option_id: KEEP, line: 'Doing nothing: no change to ‘Monthly recurring revenue’ in this model, by assumption.' });
+    // AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines):
+    // a level goal holding today's level and its target in one unit names both as recorded values.
+    expect(l.status_quo).toEqual({ option_id: KEEP, line: 'This Run cannot give a chance for carrying on as now: it uses ‘Monthly recurring revenue’ as its '
+      + 'unchanged reference, by assumption. The model’s held reference value is £120,000 / month; the target '
+      + 'for this Run is at least £126,000 / month. Review the evidence for how ‘Monthly recurring revenue’ '
+      + 'could change over this Run’s goal period without an intervention, including any forecast or uncertainty '
+      + 'already retained in the model.' });
   });
   it('recorded delta positive control → level frame suppresses every shortfall', () => {
     const f = fixture(); positive(f); f.sent = { ...f.sent, frame: 'level' };

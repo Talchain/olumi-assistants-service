@@ -832,6 +832,32 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
 // RESTORE
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe("⭐ UNDO IS A COMMITTED CHANGE: the restored state is analysed (Paul, #94 6166259456)", () => {
+  it("a committed restore runs the existing Run turn ONCE (stage analyse, the Run chip) before its analysis is read; the response keeps its six keys", async () => {
+    const runs: Record<string, unknown>[] = [];
+    const app = Fastify({ requestIdHeader: "x-request-id" });
+    await installOwnershipHarness(app, () => resolveUserIdentity());
+    app.post("/orchestrate/v2/turn", { config: { scenarioId: { from: "body", key: "scenario_id" } } } as never,
+      async (req: { body: unknown }) => { runs.push(req.body as Record<string, unknown>); return { blocks: [] }; });
+    await scenarioVersionsRoute(app);
+    await app.ready();
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(res.statusCode).toBe(200);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ scenario_id: SCENARIO, stage: "analyse", chip: { id: "agent-run-analysis", action_type: "run_analysis" } });
+    expect(Object.keys(res.json()).sort()).toEqual(["analysis_state", "receipt", "request_id", "restored", "scenario_id", "schema"]);
+    await app.close();
+  });
+
+  it("a Run that cannot be started leaves the restore standing (200, the same receipt)", async () => {
+    const app = await buildApp();
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().restored).toBe(true);
+    await app.close();
+  });
+});
+
 describe("POST /versions/restore — C8-A atomic restore", () => {
   it("returns the one-transaction receipt with exact graph, undo and two hashes", async () => {
     const app = await buildApp();

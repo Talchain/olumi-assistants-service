@@ -319,7 +319,7 @@ describe('S-B slice 2a: standing gaps and typed replies', () => {
     const empty = actionFactsOf(preRun({ nodes: [], edges: [] }));
     expect(ids(actionBarOf(empty).priority)).toEqual(['frame_brief']);
     expect(decidePress({ id: 'act:frame_brief' }, empty)).toMatchObject({ kind: 'reply', reply: {
-      text: 'Your brief has: none of these elements yet.\n- What are you trying to achieve with this decision?'
+      text: 'Your brief has: none of these elements yet.\n- What are you trying to achieve here?'
         + '\n- What else could you do instead?\n- What most affects whether your goal is met?\nAlso missing: risks, outcomes, limits.',
     } });
     const g = gapGraph(); g.nodes[0]!.goal_horizon = { deadline: '2027-04-07' };

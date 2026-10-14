@@ -214,7 +214,7 @@ const READY_GRAPH = {
   nodes: [
     { id: 'dec_q3', kind: 'decision', label: 'Choose the Q3 resourcing route' },
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
-    { id: 'fac_local_hire', kind: 'factor', label: 'Local Senior Hire Programme' },
+    { id: 'fac_local_hire', kind: 'factor', label: 'Local Senior Hire Programme', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     {
       id: 'opt_hire_local',
       kind: 'option',

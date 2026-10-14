@@ -35,8 +35,10 @@ import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
-import { withholdOptionGoalFigures, withholdStatusQuoIntervals } from '../../orchestrator/context/constraint-feasibility.js';
+import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { midSentence } from '../agent-lane/guidance/render.js';
+import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -90,6 +92,11 @@ export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of y
 const SPREAD_NOTE_RETIRED = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** The scale authority's exact percent spellings (`unit-scale-class.ts`), never its prefix fallback. */
+const PERCENT_TOKENS: readonly string[] = UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [];
+/** Two recorded phrases are the same words: case, spacing and apostrophe form aside. */
+const sameWords = (a: unknown, b: string): boolean => typeof a === 'string'
+  && a.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
 const SHORTFALL_TEMPLATE = 'In its worst 1 in 20 runs of this model, ‘<label>’ falls short of your target by <figure> or more.';
 const TYPICAL_SHORTFALL_TEMPLATE = 'In this model, ‘<label>’ falls short of your target in almost every run, typically by about <figure>.';
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -229,6 +236,7 @@ export interface GoalChanceLicence {
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
 export interface GoalChanceConstraintInputs {
+  readonly perLimit?: readonly PerLimitVerdict[];
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
   /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
@@ -246,11 +254,13 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
 
 /** The DISPLAYED whole percentage of a chance: the figure the user reads, and the one Science's gap is tested on. */
 /**
- * Science §(ab)(2) face words for a zero-spread option (93 @0ecd69e4, ruled (a): never " / month" on the face):
- *  · the goal's level projected from monthly rates (an accumulation carrier): "Meets £20,000 a month by month 12 if today’s
- *    rates hold." / "Falls short of £20,000 a month by month 12 if today’s rates hold.";
- *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
- *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
+ * ⛔ THE PLAIN ZERO-SPREAD CELL SAYS WHAT ITS PREDICATE PROVES, AND NO FUTURE EVENT (capacity judge post3010 row 3, 14 Oct; PL
+ * #94 6135017311 and 05:25Z; AIE packet 247cd85a numeric_scope[2]). Served `keep_current_staffing`: "Falls short of 100 tickets
+ * per week if today’s figures hold." claimed the event's outcome. What the cell has is `zeroSpread` (`goal-certainty.ts`):
+ * true on EQUAL low and high deciles (p10 = p90) before any std test, so it never proves "every run the same" or "no
+ * uncertainty". The plain no-carrier, no-horizon variant now says that, and no more; `side` stays as data, never said.
+ * Unchanged (Science §(ab)(2) / 93 §(o′)): the accumulation-carrier variant ("… by month N if today’s rates hold.") and the
+ * stated-horizon, no-carrier line.
  */
 /**
  * How a Run reads carrying on as now (AIE status-quo disposition, 12 Oct, #94 6117119450):
@@ -340,19 +350,40 @@ function statusQuoReadingOf(a: {
   return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
 }
 
+/**
+ * AIE packet 281e8b3d `zero.line` (#94 6162120876), byte for byte: the plain zero-spread cell's line, label-free, the status quo
+ * included. True under both arms of `zeroSpread` (equal deciles, or a std within tolerance): it says only that the recorded
+ * results do not establish certainty, never a statistical diagnosis, a figure or a forecast.
+ */
+export const ZERO_SPREAD_LINE = 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+  + 'You can review whether the model reflects the uncertainties that matter for this option.';
+
+/** The goal's target as the face says it: the shared formatter's rate separator (" / month") is the panel's, the face's is "a month". */
+const zeroSpreadFigure = (value: number, unit: string): string => sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+
+/**
+ * The RETIRED plain words, exactly as this producer wrote them before 14 Oct for a Run's own target: kept ONLY so the
+ * stored-licence reader can recognise that exact variant on a historical Run (by identity with its stored target, never a
+ * pattern) and say the current line instead. Never written.
+ */
+function retiredPlainZeroSpreadLine(side: 'meets' | 'falls_short', value: number, unit: string): string {
+  const figure = zeroSpreadFigure(value, unit);
+  return side === 'meets' ? `Meets ${figure} if today’s figures hold.` : `Falls short of ${figure} if today’s figures hold.`;
+}
+
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
   const rates = ordinaryTimingOf(graph, envelope).forecast;
   const months = heldGoalHorizonMonths(goal);
-  // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
-  const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+  const figure = zeroSpreadFigure(value, unit);
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
-    const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
+    const tail = `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.`;
     const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
-      : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
+      : rates ? (side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`)
+      : ZERO_SPREAD_LINE;
     out[id] = { reason: 'zero_spread', side, line };
   }
   return out;
@@ -376,6 +407,39 @@ export function displayedGoalPct(p: number): number {
  * only where the Run's own goal certainty earned it (`earned`; 0.63.0): the transport strips an unearned one, so a licence
  * over it would quote a figure the user is never shown. No certainty decision ⇒ unearned (fail closed).
  */
+function licenceGoalIdentity(goalId: unknown, goal: Rec | undefined) {
+  return { ...(typeof goalId === 'string' ? { goal_node_id: goalId } : {}),
+    ...(typeof goal?.label === 'string' ? { goal_label: goal.label } : {}) };
+}
+
+/** Target-state survives a primary-goal refusal, without reviving any refused percentages. */
+function goalTargetStateOf(
+  envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
+): GoalChanceLicence | null {
+  const primary = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
+  if (primary !== null || !isRec(envelope)) return primary;
+  const nodes = isRec(horizonGraph) && Array.isArray(horizonGraph.nodes) ? horizonGraph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId);
+  const optionIds = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
+  const block = goalTargetsBlockOf({ envelope, graph: horizonGraph, optionIds,
+    storedConstraints: constraints.storedConstraints, sentConstraints: constraints.sentConstraints,
+    basis: goalTargetBasisOf(goal), perLimit: constraints.perLimit, primaryGoalId: goalId, primaryRefused: true });
+  const target = block?.conditions.find((c) => c.role === 'target' && c.node_id === goalId);
+  if (block === null || target === undefined || optionIds.length === 0) return null;
+  // The primary percentage remains empty; secondary targets use the existing per-target guards and attribution.
+  const seed: GoalChanceLicence = { code: GOAL_CHANCE_LICENSED, severity: 'info', message: '', form: 'each', option_ids: optionIds,
+    pct_by_option: {}, withheld_option_ids: optionIds,
+    target: { comparator: COMPARATOR[target.operator]!, value: target.value, unit: target.unit },
+    ...licenceGoalIdentity(goalId, goal),
+    notes: [], targets: block };
+  return withSeveralTargets(seed, { envelope, graph: horizonGraph, goal, basis: goalTargetBasisOf(goal),
+    statusQuoId: nodes.find((n) => n.kind === 'option' && n.is_baseline === true)?.id as string | undefined,
+    constraints, option_ids: optionIds, alsoRequired: goalTargetBasisOf(goal)?.also_required ?? [],
+    sqReading: 'unknown', timingOrdinary: ordinaryTimingOf(horizonGraph, envelope).ordinary,
+    estimates: NO_ESTIMATES, estimateOnly: false, jointEstimates: undefined, primaryRefused: true });
+}
+
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
@@ -571,7 +635,19 @@ export function goalChanceLicenceOf(
     }
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
-  const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
+  // ⭐ AIE #94 6160376175 (hiring row 3): on the bound percent CHANGE from today (a change quantity this Run scored as the paired
+  // change from today), a shortfall is a share of today's level of the goal ("21% of today’s productivity"): never percentage
+  // points, never a share of the target. Codex #3008 r1: bound by the RECORD, never a text classifier. The target's unit is
+  // one of the scale authority's exact percent tokens (its prefix fallback admits "percentage points"), and the validated
+  // basis records its denominator as today's level of THIS goal and its effect unit as that unit of it, exactly. Any
+  // other percent-family change says no shortfall (it would be ambiguous); other units keep their own.
+  const percentChange = changeFrame !== undefined && classifyUnitScaleClass(target.unit) !== 'unknown';
+  const ofTodayBound = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today'
+    && goalLabel !== undefined && PERCENT_TOKENS.includes(target.unit.trim().toLowerCase())
+    && sameWords(basis.denominator, `today's ${goalLabel}`) && sameWords(basis.effect_unit, `${target.unit.trim()} of today's ${goalLabel}`);
+  const ofToday = ofTodayBound ? ` of today’s ${midSentence(goalLabel!)}` : undefined;
+  const shortfall = percentChange && ofToday === undefined ? {}
+    : shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope, ofToday ?? '');
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
   // ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): over everything upstream of EVERY node of the event this Run sent —
   // each target and each included limit (the joint rests on all of them), by any path — one census (`goalChanceEstimateCounts`).
@@ -600,8 +676,7 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
-    ...(typeof goalId === 'string' ? { goal_node_id: goalId } : {}),
-    ...(typeof goal?.label === 'string' ? { goal_label: goal.label } : {}),
+    ...licenceGoalIdentity(goalId, goal),
     option_labels_by_option: Object.fromEntries(option_ids.flatMap(id => {
       const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
       return typeof label === 'string' && label.trim() !== '' ? [[id, label]] : [];
@@ -682,9 +757,16 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   // provisional, with its own note saying what it rests on. It is never counted as Olumi's (that is `olumiInputs`).
   const provisional = c.estimateOnly || c.olumiInputs || c.unverifiedInputs || c.periodEndNote !== undefined;
   const unverified = c.unverifiedInputs ? [UNVERIFIED_SOURCES_NOTE] : [];
-  // Amendment 1, every frame: the status quo's own line, by assumption — never a figure or an interval.
+  // Amendment 1, every frame: the status quo's own line, by assumption — never a chance or an interval. AIE #94 6160089127:
+  // the held reference value and the target are named only on a LEVEL goal whose held level and target share one unit
+  // (capacity judge row 3); a change goal, a missing level or another unit gets the generic line.
+  const goalState = isRec(c.goal?.observed_state) ? c.goal!.observed_state : undefined;
+  const levelUnit = typeof goalState?.unit === 'string' ? goalState.unit.trim() : '';
+  const sqLevel = c.changeFrame === undefined && c.quantityFrame !== 'change' && finite(goalState?.raw_value)
+    && typeof c.target.unit === 'string' && levelUnit !== '' && levelUnit === c.target.unit.trim()
+    ? { today: goalState!.raw_value as number, comparator: c.comparatorHeld, target: c.target.value, unit: c.target.unit } : undefined;
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
-    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel) } } : {};
+    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel, sqLevel) } } : {};
   // AIE disposition: a forecast's status quo is carrying on's own projection, said as such (never "no change").
   const projection = c.sqReading === 'projection' && c.statusQuoLabel !== undefined && c.statusQuoId !== undefined
     && single.option_ids.includes(c.statusQuoId) ? [statusQuoProjectionWords(c.statusQuoLabel)] : [];
@@ -819,6 +901,7 @@ function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): 
  */
 function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly envelope: unknown; readonly graph: unknown; readonly basis: GoalTargetBasis | undefined;
+  readonly primaryRefused?: boolean;
   readonly statusQuoId: string | undefined; readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
   /** The drafter's retained conditions (`goal_target_basis.also_required`), whatever the basis' timing (AIE C clause 3). */
   readonly alsoRequired: readonly string[];
@@ -864,6 +947,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
+    perLimit: c.constraints.perLimit, primaryGoalId: c.goal?.id, primaryRefused: c.primaryRefused,
     ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || jointMovedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
   });
@@ -896,7 +980,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   // R5-3: a moved LIMIT is named too — it is why the status quo's joint is withheld.
   const movedNames = [...namedWhere(movedIds, 'moved'),
     ...block.conditions.filter((x) => x.role === 'limit' && jointMovedIds.has(x.constraint_id)).map((x) => x.label)];
-  const notes: string[] = [];
+  const notes: string[] = [...(block.notes ?? [])];
   let assumptionSaid = false;
   for (const n of l.notes ?? []) {
     if (n.startsWith('This chance covers ') || n === UNVERIFIED_SOURCES_NOTE) continue;
@@ -911,7 +995,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   // period or reference) is said beside the joint, never claimed by it. ⛔ Re-scope (r2 BLOCKING 2): EVERY one is said — a
   // retained condition sharing a figure with a target the joint names (the same 15% over a distinct period) is not that target.
   const covers = partialGoalWords(targetNames, c.alsoRequired);
-  if (covers !== undefined && targetNames.length > 0) notes.push(covers);
+  if (covers !== undefined && targetNames.length > 0 && (block.joint.status === 'licensed' || block.per_target.length > 0)) notes.push(covers);
   // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
   // a status quo whose own share disagrees with that reference is withheld with that reason.
   // R5-3: "no change" only where EVERY condition of the joint is on the same-draw reference — and then it names every one.
@@ -987,11 +1071,19 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     ...statusQuo, ...moved, targets: block };
 }
 
-/** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
+/**
+ * One Run-input candidate must agree with every licensed option; ambiguity records nothing.
+ * ⛔ Hiring row 3 (14 Oct): the licence it agrees with is the one the Run states, read with the Run's own inputs. A change goal
+ * whose effects are not stated at the period end is licensed only on its conditional reading (`periodEndConditionalOf`: the
+ * brief and Olumi's timing reading). With `sentRun` alone that licence was null, so no threshold was recorded and the shortfall
+ * line (`shortfallNotesOf`) was never said for hiring.
+ */
 export function sentGoalThresholdOf(
-  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean, sentRun?: SentRunInputs,
+  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
 ): SentGoalThreshold | undefined {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, sentRun === undefined ? {} : { sentRun });
+  const sentRun = inputs.sentRun;
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, inputs);
   if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
@@ -1073,7 +1165,7 @@ function spreadNotesOf(
 function shortfallNotesOf(
   sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
   pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
-  unit: string, graph: unknown, envelope: Rec,
+  unit: string, graph: unknown, envelope: Rec, reference = '',
 ): Record<string, string> {
   const notes: Record<string, string> = {};
   // goalChanceScreenLinesForAgent shows no per-option point under `similar` or a superlative.
@@ -1098,9 +1190,15 @@ function shortfallNotesOf(
     if (!finite(downside?.p05) || !finite(outcome?.p10)) continue;
     const q05 = downside.p05 * cap;
     if (!finite(q05) || q05 > outcome.p10 + 1e-6 * Math.abs(outcome.p10) || q05 >= raw) continue;
+    // ⛔ Hiring row 3 (14 Oct): the outcome percentiles are in the frame this Run RECORDED (`sent.field`): raw beside the raw
+    // threshold field, normalised beside the normalised one. The tail must also hold in that frame: a negative change in the
+    // normalised frame passed the line above by its sign alone. The typical figure is read in that frame too (below).
+    const toRaw = sent.field.endsWith('_raw') ? 1 : cap;
+    const p10Raw = outcome.p10 * toRaw;
+    if (!finite(p10Raw) || q05 > p10Raw + 1e-6 * Math.abs(p10Raw)) continue;
     const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
     if (typeof label !== 'string' || label.trim() === '' || /[\r\n]/.test(label)) continue;
-    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 : NaN) : q05);
+    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 * toRaw : NaN) : q05);
     if (!finite(difference) || difference <= 0) continue;
     const amount = pct[id] === 0 ? Number(difference.toPrecision(2)) : floorSig2(difference);
     if (!finite(amount) || amount <= 0) continue;
@@ -1110,8 +1208,10 @@ function shortfallNotesOf(
     const figure = sayFigureAsWritten(amount, unit);
     // A two-state unit may format a difference as "on"; a shortfall requires a numeric amount.
     if (!/\d/.test(figure)) continue;
+    // The caller's reference words follow the amount ("21% of today’s productivity"); empty for a level.
+    const said = `${figure}${reference}`;
     const template = pct[id] === 0 ? TYPICAL_SHORTFALL_TEMPLATE : SHORTFALL_TEMPLATE;
-    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : figure) });
+    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : said) });
   }
   return notes;
 }
@@ -1217,7 +1317,7 @@ export function withGoalChanceLicence<E>(
 ): E {
   // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
   const checked = withSentTargetWithheld(envelope, graph, goalId, constraints.sentRun);
-  const licence = goalChanceLicenceOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
+  const licence = goalTargetStateOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
   if (licence === null || !isRec(checked)) return checked;
   // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no
   // precision and no Monte Carlo interval on any surface (its standard error is 0 by construction: never "±0").
@@ -1392,7 +1492,14 @@ export function goalChanceLicenceForAgent(result: unknown): {
     if (!withheld?.includes(id) || (isRec(r.pct_by_option) && Object.hasOwn(r.pct_by_option, id))
       || !isRec(reason) || typeof reason.line !== 'string' || reason.line.trim() === '' || /[\r\n]/.test(reason.line)) continue;
     if (reason.reason === 'zero_spread' && (reason.side === 'meets' || reason.side === 'falls_short')) {
-      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line: reason.line };
+      // Capacity post3010 row 3: ONLY the retired plain variant, recognised by identity with the words this Run's producer wrote
+      // for its own stored target, is said with the current line. Every other stored line (the carrier's rates line, §(o′)'s
+      // horizon line) is the historical Run's own, kept with its figures, period and currentness.
+      const storedTarget = isRec(r.target) && finite(r.target.value) && typeof r.target.unit === 'string' ? r.target : undefined;
+      const retired = storedTarget !== undefined
+        && reason.line === retiredPlainZeroSpreadLine(reason.side, storedTarget.value as number, storedTarget.unit as string);
+      const line = retired ? ZERO_SPREAD_LINE : reason.line;
+      zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line };
     } else if (reason.reason === 'reference_moved' && reason.side === undefined) {
       // AIE status-quo disposition: the status quo's row disagrees with the same-draw reference (a typed reason, no side).
       zeroSpreadReasons[id] = { reason: 'reference_moved', line: reason.line };

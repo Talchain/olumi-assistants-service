@@ -340,7 +340,11 @@ const hiringAnswer = (request: Rec): Rec[] => [
   answered(idOf(request, 'Hire two developers'), 0.31, { mean: 8, std: 4, p10: 3, p50: 8, p90: 13 }),
   answered(idOf(request, 'Carry on with the current team'), 0, { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 }),
 ];
-const DOING_NOTHING = (label: string): string => `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+/** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
+ * status-quo row is the AIE's generic line. */
+const DOING_NOTHING = (label: string): string => `This Run cannot give a chance for carrying on as now: it uses ‘${label}’ as its unchanged reference, by `
+  + `assumption. Review the evidence for how ‘${label}’ could change over this Run’s goal period without an `
+  + `intervention, including any forecast or uncertainty already retained in the model.`;
 
 describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "% higher than today", the status quo by assumption, Olumi\'s sizes named', () => {
   it('RED: the stored Run licenses each option on the ruled sentence; the status quo is "no change, by assumption" with no figure or interval', async () => {
@@ -555,11 +559,13 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(licence.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
     // D2 CONTRAST (DL ruling A, 12 Oct, Batch D): a change target on a level quantity never records the frame it scored in
     // (its threshold is a change, its samples are levels), so carrying on is read on no frame: no "no change, by assumption"
-    // and no "doesn't match today". It keeps its existing typed zero-spread line, verbatim, never a blank or a new withhold.
+    // and no "doesn't match today". It keeps its typed zero-spread reason and side, with the one line that says no future
+    // event (capacity post3010 row 3), never a blank or a new withhold.
     expect(licence.status_quo).toBeUndefined();
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'zero_spread', side: 'falls_short',
-      line: 'Falls short of 10% if today’s figures hold.' });
+      line: 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+        + 'You can review whether the model reflects the uncertainties that matter for this option.' });
     expect(JSON.stringify(licence)).not.toMatch(/by assumption|doesn’t match/);
     // Its row is the Run's own, intervals kept: none is removed for an assumption that is not claimed.
     expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome)
@@ -880,6 +886,30 @@ describe('RE-SCOPE 2 R5-5 — a reading refused for its conditions survives the 
     expect(goalChanceWithheldForAgent(view, reloaded)).toMatchObject({ withheld: true, say: CONDITIONS_NOT_KEPT });
     for (const c of projectCanonicalAnalysisCells(view as never, reloaded).filter((x) => x.cell.kind === 'withheld')) {
       expect((c.cell as Rec).why, c.option_id).toBe(NOT_KEPT);
+    }
+  });
+});
+
+
+describe('T4e K1: cold read never licenses an unknown sampled root as zero', () => {
+  it.each(['risk', 'outcome'])('a stored %s root withholds with the named next step', async (kind) => {
+    const graph = JSON.parse(store(marketing())) as Rec;
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    graph.nodes.push({ id: 'unknown_root', kind, label: 'Delivery disruption' });
+    graph.edges.push({ from: 'unknown_root', to: goal.id, strength: { mean: -0.4, std: 0.1 },
+      exists_probability: 1, effect_direction: 'negative' });
+    const bytes = JSON.stringify(graph);
+    const { AnalysisNotReadyError } = await import('../analysis-ready-core.js');
+    try {
+      await runFromStore(bytes);
+      expect.unreachable('Unknown root must not produce a numerical request');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnalysisNotReadyError);
+      const { assessCanonicalAnalysisReadiness } = await import('../../../../orchestrator/tools/analysis-ready-helper.js');
+      expect(assessCanonicalAnalysisReadiness(JSON.parse(bytes)).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
+        // AIE packet 6e52e896 `event_risk.readiness_copy`: a risk root on the event path is asked its occurrence within the goal's period.
+        ? 'How likely is ‘Delivery disruption’ to happen at least once within 3 months? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.'
+        : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
     }
   });
 });

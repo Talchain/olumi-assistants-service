@@ -26,6 +26,8 @@ import { toTypedRunRows } from '../../runs/typed-run-rows.js';
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../../agent-lane/coach-route-v0_2.js';
 import { GOAL_CHANCE_RANKING_INSTRUCTION, SELECTED_RUN_SCOPE_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
+import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
+import { applyGoalReadingEdit } from '../goal-reading-write.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -39,7 +41,11 @@ const WITHHOLD = 'The chance of reaching your target for ‘productivity’ (up 
   + 'the model has not established how much of these effects would be in place by then.';
 const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than today at three months';
 /** Amendment 1, read in the change frame (DL ruling after G r1: the AIE's D2 exact equality in the Run's own recorded frame). */
-const DOING_NOTHING = 'Doing nothing: no change to ‘productivity’ in this model, by assumption.';
+/** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
+ * status-quo row is the AIE's generic line (no figures: the LEVEL line is for a level goal's held level and target only). */
+const DOING_NOTHING = 'This Run cannot give a chance for carrying on as now: it uses ‘productivity’ as its unchanged '
+  + 'reference, by assumption. Review the evidence for how ‘productivity’ could change over this Run’s goal '
+  + 'period without an intervention, including any forecast or uncertainty already retained in the model.';
 const SQ_ASSUMED = 'This assumes carrying on as now leaves ‘productivity’ unchanged through month three; each option is measured against that.';
 const SQ_MOVED = 'Not shown: this run’s result for carrying on as now doesn’t match ‘productivity’ as it stands today in the model, so it needs checking first.';
 const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
@@ -66,7 +72,7 @@ function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: 
   const brief = 'brief' in o ? o.brief : FX.brief;
   const effects_timing = 'effects_timing' in o ? o.effects_timing : 'not_stated';
   const withheld = withholdForPeriodEndEffects(served, graph, GOAL, { sentRun, brief, effects_timing });
-  const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, sentRun),
+  const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, { sentRun, brief, effects_timing }),
     graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief, effects_timing });
   return { envelope, view: { type: 'analysis_result', enrichment: envelope } };
 }
@@ -186,6 +192,16 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     }
   });
 
+  it('CONTRAST (status-quo words, AIE #94 6160089127): a CHANGE goal holding a level in the target\'s unit still says the generic line', () => {
+    // The LEVEL line names a held reference value beside a LEVEL target; "at least 10% higher than today" is not one.
+    const g = withGoal(FX.graph, (goal) => {
+      goal.observed_state = { value: 0.5, raw_value: 50, unit: '%', source: 'user_override', extractionType: 'explicit' };
+    });
+    const licence = goalChanceLicenceForAgent(runAsTheHandlerDoes({ graph: g }).view)!;
+    expect(licence.status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
+    expect(JSON.stringify(licence)).not.toContain('held reference value');
+  });
+
   it('D2 PAIRING FROM THE PRODUCER (AIE 6133027121): a Run recorded in another or unknown frame is not read as paired', () => {
     // The at-period-end reading (effects stated), so the conditional's own identity check is not what decides here.
     const g = withGoal(FX.graph, (goal) => { goal.goal_target_basis = { ...goal.goal_target_basis, effects_at_period_end: true }; });
@@ -246,6 +262,30 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     const live = analysisResultForAgent(runAsTheHandlerDoes().view, FX.graph, true);
     const stored = { type: 'analysis_result', enrichment: JSON.parse(JSON.stringify(runAsTheHandlerDoes().envelope)) as Rec };
     expect(analysisResultForAgent(stored, JSON.parse(JSON.stringify(FX.graph)), true)).toEqual(live);
+  });
+
+  it('CONTINUATION (13 Oct "relative to today"): the same Run with the target\'s open question is withheld; the recorded answer licenses it', () => {
+    // The question as the 13:18Z draft held it, verbatim; the served run-4 reading is otherwise the same relative reading.
+    const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
+    const asked = withGoal(FX.graph, (g) => { g.goal_target_basis.open_question = QUESTION; });
+    const before = runAsTheHandlerDoes({ graph: asked });
+    expect(goalChanceLicenceForAgent(before.view)).toBeUndefined();
+    const gated = withholdForOpenTargetQuestion(before.envelope, asked, GOAL) as Rec;
+    expect((gated.inference_warnings as Rec[]).find((w) => w.detail?.reason === 'target_reading_open'))
+      .toMatchObject({ message: `Not shown. Your target can be read more than one way. ${QUESTION}`, option_ids: [...HIRING, SQ] });
+    // The user's answer, through the one writer: its postimage is the served graph without the question, byte for byte.
+    const written = applyGoalReadingEdit(asked, { goal_id: GOAL, expected_basis: goalOf(asked).goal_target_basis });
+    if (written.kind !== 'mutated') throw new Error(written.kind);
+    expect(written.mutatedGraph).toEqual(FX.graph);
+    const after = runAsTheHandlerDoes({ graph: written.mutatedGraph });
+    expect(withholdForOpenTargetQuestion(after.envelope, written.mutatedGraph, GOAL)).toBe(after.envelope);
+    const licence = goalChanceLicenceForAgent(after.view)!;
+    expect(licence.chance_words).toBe(OWN_TARGET);
+    expect(licence.period_end_assumption).toEqual({ origin: 'olumi', period_months: 3, reference: 'today' });
+    expect([...goalChanceCellFacesForAgent(after.view, written.mutatedGraph, true)]).toEqual(Object.entries(FACE));
+    const notes = goalChanceNotesForAgent(after.view, written.mutatedGraph, true);
+    expect(notes.filter((n) => n === NOTE)).toHaveLength(1);
+    expect(notes).toContain(CONDITIONS);
   });
 
   it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {

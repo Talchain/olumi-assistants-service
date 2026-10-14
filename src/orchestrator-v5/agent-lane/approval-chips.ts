@@ -29,6 +29,7 @@ import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { CONFIRM_GOAL_READING_OP } from '../goal-target/held-change-target.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -41,6 +42,12 @@ const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
 // and £ never meets % (#2641's twins).
 const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
   || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
+
+/** AIE_TEXT_PENDING: the button on the card answering the goal's open question (`goal-target/held-change-target.ts`). */
+export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' } as const;
+
+/** AIE packet 6e52e896 `event_risk.Q3`: the button on the card of Olumi's range for a risk root (`risk-occurrence.ts`). */
+const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message: 'Yes, use that.' } as const;
 
 /** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
 const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
@@ -208,6 +215,13 @@ export function approvalChipsFor(
   // cannot prove that its omitted operations were gap-free. Offer no approval.
   if (labelSourceFor !== undefined && stored === undefined
     && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
+  // ⭐ G (card-only, so before the generic card-only button): the answer to the goal's open question has its own button, never "Set this target" (it sets none); the card's words
+  // ride in `detail`, only when the proposer's own result for that id returned the same card.
+  if (stored?.operations.length === 1 && stored.operations[0]?.op === CONFIRM_GOAL_READING_OP) {
+    if (stored.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored.public_label !== 'string' || held.public_label !== stored.public_label) return [];
+    return [{ id: approvalChipIdFor(proposalId), ...CONFIRM_GOAL_READING_APPROVE, detail: stored.public_label }, AMEND_CHIP];
+  }
   if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
     // This must precede every generic/special chip path: the exact stored gap
     // card and its operands are the subject of the existing typed approval.
@@ -215,8 +229,10 @@ export function approvalChipsFor(
       || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
       || held.public_label !== stored!.public_label) return [];
     const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
+    const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
-      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : approve.message, detail: stored!.public_label }, AMEND_CHIP];
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message : approve.message,
+      detail: stored!.public_label }, AMEND_CHIP];
   }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
@@ -639,6 +655,8 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const ops = proposal.operations;
   // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
   if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
+  // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
+  if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the

@@ -96,6 +96,9 @@ import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } fr
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady, type HorizonBasisWrite } from '../goal-target/goal-steady-write.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import { deadlineGoalStillBound } from '../agent-lane/proposal-object/still-applies.js';
+import { applyGoalReadingEdit, goalReadingPostimageIsScoped, type ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
+import { applyRiskOccurrenceEdit, riskOccurrencePostimageIsScoped, type ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
 import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
@@ -864,7 +867,11 @@ export type OptionInterventionBatchExecutionInput =
     /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
-    readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly goalHorizon?: ApprovedGoalHorizon & { readonly expected_goal?: unknown; readonly own_write_landed?: boolean };
+    /** ⭐ G: the user's answer to the goal's open question, `goal_target_basis.open_question` removed only: ONE append, alone. */
+    readonly goalReading?: ApprovedGoalReading;
+    /** ⭐ Olumi's occurrence range for a risk root, its `event_risk` only (`risk-occurrence.ts`): ONE append, alone. */
+    readonly riskOccurrence?: ApprovedRiskOccurrence;
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
@@ -894,6 +901,22 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
     || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
     return { kind: 'refused', reason: 'goal_steady_not_alone' };
+  }
+  // G: the answer to the goal's open question is one approved card, never part of a compound edit.
+  if (input.goalReading !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.goalSteady !== undefined || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0
+    || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'goal_reading_not_alone' };
+  }
+  // Olumi's range for a risk is one approved card, never part of a compound edit.
+  if (input.riskOccurrence !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.goalReading !== undefined || input.goalSteady !== undefined || input.teamTime !== undefined
+    || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'risk_occurrence_not_alone' };
   }
   const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
   if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
@@ -951,7 +974,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   }
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
-    lastRunIdentityUse: _callerRunUse, ...common } = input;
+    goalReading: _callerReading, riskOccurrence: _callerRisk, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -1185,6 +1208,13 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    // ⭐ The card's bound goal, read by the store-reading writer on the base it writes (Codex r1 on #3024: a goal renamed between
+    // the approval read and this read, the hash unchanged, was written). The same rule as the press and the lapse
+    // (`deadlineGoalStillBound`); only THIS proposal's own landed write continues past it, to the writer's verified no-op.
+    if (goalHorizon.expected_goal !== undefined && goalHorizon.own_write_landed !== true
+      && !deadlineGoalStillBound(before, goalHorizon.goal_id, goalHorizon.expected_deadline, goalHorizon.expected_goal)) {
+      return { kind: 'refused', reason: 'goal_horizon_goal_changed' };
+    }
     const written = applyGoalHorizonEdit(before, goalHorizon);
     if (written.kind === 'refused') return { kind: 'refused', reason: `deadline_${written.reason}` };
     // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).
@@ -1193,6 +1223,58 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date ?? null, goalHorizon.stated_months)
       || goalDeadlineFromRecord(graph, goalHorizon.goal_id) !== goalHorizon.deadline) {
       return { kind: 'refused', reason: 'deadline_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  /**
+   * ⭐ G — THE ANSWER TO THE GOAL'S OPEN QUESTION, the deadline card's own shape: alone (checked above), on the persisted base,
+   * through the one writer in memory, scoped to removing that one member, then the ONE append and read-back below. The reading
+   * is in the analysis hash, so the caller's base is checked here and the writer's own gate is the reading the card showed.
+   */
+  const goalReading = input.goalReading;
+  if (goalReading !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyGoalReadingEdit(before, goalReading);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `goal_reading_${written.reason}` };
+    // A retry of a write that landed: the answered reading is already held, so the batch is a verified no-op.
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalReadingPostimageIsScoped(projectGraphForPersistence(before), graph, goalReading)) {
+      return { kind: 'refused', reason: 'goal_reading_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  /**
+   * ⭐ OLUMI'S RANGE FOR A RISK ROOT — the goal reading's own shape: alone (checked above), on the persisted base, through the
+   * one writer in memory, scoped to that risk's `event_risk`, then the ONE append and read-back below. The block is in the
+   * analysis hash, so the caller's base is checked here and the writer's own gate is the node the card showed.
+   */
+  const riskOccurrence = input.riskOccurrence;
+  if (riskOccurrence !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyRiskOccurrenceEdit(before, riskOccurrence);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `risk_occurrence_${written.reason}` };
+    // A retry of a write that landed: the card's block is already held, so the batch is a verified no-op.
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !riskOccurrencePostimageIsScoped(projectGraphForPersistence(before), graph, riskOccurrence)) {
+      return { kind: 'refused', reason: 'risk_occurrence_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);
     if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
@@ -1241,7 +1323,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = [written.confirmation];
   }
   const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
-    + (goalHorizon !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
+    + (goalHorizon !== undefined ? 1 : 0) + (goalReading !== undefined ? 1 : 0) + (riskOccurrence !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

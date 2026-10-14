@@ -187,7 +187,18 @@ describe('Explain scoped assembly safety', () => {
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
       // G (12 Oct, AIE #94 6133027121): the selected-Run scope line and its range/headline/ranking edits: 39,550 → 39,914 bytes
       // (+364, the selected-coach delta). Reversing exactly those edits on the SENT instructions reproduces fb8392d6….
-      .toBe('a792187f43143d7167124826b051330589ab397b5599812299c1176a7400a37f');
+      // PROMPT 28 (AIE one-pass packet 94ad9c8f…): the coach prompt's packet edits plus P16 (rerun) and P17 (Interpreter v0.2):
+      // 39,914 → 36,786 bytes. Captured from the SENT body against staging's; only `instructions` differs, by those sentences.
+      // #2994 AMEND (AIE Q2/Q3/C5, rulings 1ad7f7b2…): 36,786 → 36,964 bytes. Captured from the SENT body against the previous
+      // head's (which reproduces 111192bc…); every changed leaf is exactly the five AIE constants, nothing else.
+      // BYPASS1: the AIE's Q4 host entry only: 36,964 → 38,001 bytes (captured against staging's body; the tool-less Explain
+      // carries no stated-figure rule).
+      // T2A5 (#3002, AIE T2A5): the AIE's coach sentence only: 38,001 → 38,008 bytes. The previous head's (staging 14b1e544) SENT
+      // instructions reproduce 22670bbd…; replacing exactly the AIE's three texts with staging's on the SENT body gives them.
+      // USER VOCABULARY (Paul, 14 Oct; CLAUDE.md §3): the coach template's VOCABULARY section and three phrases only:
+      // 38,008 → 38,583 bytes (+575). Captured from the SENT body against staging 687c0d50's; reversing exactly those edits
+      // on the SENT body reproduces staging's body byte for byte.
+      .toBe('0755d3985c9ebebba18736a26bce337008864c705d13531f3b46e8f74f5abb20');
   },60000);
 });
 

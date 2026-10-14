@@ -79,6 +79,7 @@
  * and acyclicity.
  */
 
+import { retainedLimitOnlyNodeIds } from '../graph/retained-limit.js';
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
 import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
 import { draftedTeamPartOf } from '../orchestrator-v5/goal-target/event-by-date-model.js';
@@ -405,6 +406,7 @@ export function validateGraphStructure(
   violations.push(...preconditionRiskLinkViolations(graph));
   // No size check. Absolute graph size is `graphCaps`' question, not this
   // validator's — see the file header for the measurement that settled it.
+  for (const id of retainedLimitOnlyNodeIds(graph)) leftOut.add(id);
   checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);

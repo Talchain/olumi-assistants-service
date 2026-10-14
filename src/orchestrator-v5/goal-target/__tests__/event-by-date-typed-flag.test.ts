@@ -231,8 +231,10 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       expect(JSON.stringify(registrations[0])).not.toContain('olumi_fit_candidate');
       // S7 PR-B re-record (field-by-field vs staging cbf36b7a): only nodes 5, 6, 9 (drafter-declared explicit, no verbatim brief quote) gain
       // extractionType inferred + user_material_unverified, provenance from_brief->unverified_brief (and source brief_extraction->cee_inference where it was set).
+      // Capacity row 7 re-pin (#3030): a drafter-`explicit` option setting the verifier cannot credit now also carries
+      // `user_material_unverified` (UNKNOWN, never Olumi's). Proof: with only that stamp switched off, this pin and the row pass.
       expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrationBase, sealed(), 'sealedR-d3'))).digest('hex'))
-        .toBe('e6e213467888242aaf6e74c98deccdea5415774ea85bae69540b5992aa9dccf7');
+        .toBe('09518fbbf287c255037d35406b01ad448c453732afa337de307c5620c5d6e60a');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
     } finally { info.mockRestore(); eventAdmission.mockRestore(); }

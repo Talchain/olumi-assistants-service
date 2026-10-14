@@ -67,6 +67,7 @@ import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
+import { untargetedGoalLevelAsk } from './untargeted-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
 import { admitGoalTargetBasis, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
@@ -81,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -205,6 +206,8 @@ export interface CandidateModel {
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
+      /** Internal: a setting the drafter called the user's that the verifier could not credit — UNKNOWN origin, never Olumi's. */
+      user_material_unverified?: true;
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -422,6 +425,8 @@ export interface ConstructedLevel {
   range?: InterventionV3T['range'];
   estimate?: true;
   basis?: string;
+  /** UNKNOWN origin, as `observed_state.user_material_unverified`: never the user's, never Olumi's (`settingProvenanceOf`). */
+  user_material_unverified?: true;
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -1119,27 +1124,14 @@ function costRollupGoalEdges(
     if (goalIdentityParts.has(q.id)) continue;
     shapes.push({ q, levers: [...new Set(into.map((e) => e.from))], edge });
   }
-  // The precondition, to a fixed point: a roll-up whose edge is kept (asked) restores that edge for the others.
-  let drop = new Set(shapes.map((s) => s.q.id));
-  const onlyThrough = new Map<string, string[]>();
-  for (let changed = true; changed;) {
-    changed = false;
-    const kept = edges.filter((e) => !(e.to === goal.id && drop.has(e.from)));
-    for (const s of shapes) {
-      if (!drop.has(s.q.id)) continue;
-      const around = kept.filter((e) => e.from !== s.q.id && e.to !== s.q.id);
-      const stuck = s.levers.filter((l) => findMechanismPath(around, l, goal.id) === null);
-      if (stuck.length > 0) {
-        onlyThrough.set(s.q.id, stuck);
-        drop = new Set([...drop].filter((id) => id !== s.q.id));
-        changed = true;
-      }
-    }
-  }
+  // T4 A6: a cost limit does not establish that its causal edge is wrong.
+  // Preserve every such edge and surface Olumi's assumption for review.
+  const onlyThrough = new Map(shapes.map((s) => [s.q.id, s.levers.filter((l) =>
+    findMechanismPath(edges.filter((e) => e.from !== s.q.id && e.to !== s.q.id), l, goal.id) === null)]));
   const goalLabel = goal.label ?? goal.id;
   return {
-    pure_limits: shapes.filter((s) => drop.has(s.q.id)).map((s) => ({ node_id: s.q.id, label: s.q.label ?? s.q.id, dropped_edge_to: goal.id })),
-    asks: shapes.filter((s) => !drop.has(s.q.id)).map((s) => {
+    pure_limits: [],
+    asks: shapes.map((s) => {
       const direction = s.edge.effect_direction === 'negative' ? 'negative' : 'positive';
       return {
         node_id: s.q.id,
@@ -1926,7 +1918,7 @@ function markProductIdentities(
         ? `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds up each effect separately.` +
           oppositeSentence + separateSentence + routesDisagreeSentence + differSentence + aroundSentence +
           ` If it adds them up, this model cannot show which option does better on "${labelOf(goalId)}": treat its ` +
-          'figures then as a rough approximation, not a decision.'
+          'figures then as a rough approximation, not a basis to decide on.'
         : `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds effects up, and its figures for ` +
           `"${outcomeLabel}" are then an approximation` +
           (oneWay
@@ -2579,7 +2571,7 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
   const shape = loopLabels.length === 2 ? 'are linked both ways' : 'are linked in a loop';
   const yours = links.filter((l) => l.yours).map((l) => `"${l.from}" to "${l.to}"`);
   const built = links.filter((l) => !l.yours).map((l) => l.fromDecision
-    ? `the link from "${l.from}" to "${l.to}" is how the decision holds that option`
+    ? `the link from "${l.from}" to "${l.to}" is how the question holds that option`
     : `the link from "${l.from}" to "${l.to}" is what that option sets`);
   const yourPart = yours.length === 0 ? '' : ` You linked ${yours.join(' and ')};`;
   return `${quoted(loopLabels)} ${shape} (${chain(loopLabels)}).${yourPart} ${built.join('; ')}. A model cannot hold a loop, `
@@ -3652,7 +3644,9 @@ function admitOnce(
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
-  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const { model: draftedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  // Authenticate before framing or writing levels: an estimate never competes with the user's current figure.
+  const model = { ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) };
   const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
@@ -3675,10 +3669,12 @@ function admitOnce(
     if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
       capByLabel.set(f.label, f.plausible_max);
     }
-    // ⛔ ONLY A KNOWN BASELINE. An AI estimate (`baseline_known: false`) must never
-    // derive its own frame: a guess that sets the scale it is then read against
-    // is a guess dressed as a measurement.
-    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value, f.provenance);
+    // T4 A3: a coordinate frame is not evidence for the estimate. Derive it only
+    // for an already named unit, keep the inferred source and disclose the frame.
+    if (f.baseline_known || (typeof f.unit === 'string' && f.unit.trim() !== ''
+      && typeof f.baseline_value === 'number' && f.baseline_value >= 0)) {
+      noteMagnitude(f.label, f.baseline_value, f.baseline_known ? f.provenance : 'ai_proposed');
+    }
   }
   for (const o of model.options) {
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
@@ -3781,7 +3777,11 @@ function admitOnce(
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
-    if (capByLabel.has(label) || largest <= 1) continue;
+    const unframedEstimate = model.factors.some((f) => f.label === label && !f.baseline_known
+      && (f.plausible_max === null || f.plausible_max === undefined)
+      && typeof f.unit === 'string' && f.unit.trim() !== ''
+      && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value) && f.baseline_value >= 0);
+    if (capByLabel.has(label) || (largest <= 1 && !unframedEstimate)) continue;
     const frame = defaultFrameFor(largest);
     capByLabel.set(label, frame);
     defaultedFrames.push({ label, frame });
@@ -3870,6 +3870,13 @@ function admitOnce(
         const raw = model.goal.value;
         const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
         if (!stated) {
+          // GEN #3: the user's stated level holds no figure without a target's scale, and is ASKED, never dropped silently.
+          const unscaled = untargetedGoalLevelAsk(model.goal, goalLevelStated, brief);
+          if (unscaled !== null) {
+            loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].observed_state.magnitude_question`,
+              before: { value: unscaled.value, unit: unscaled.unit, quote: unscaled.quote }, after: null, reason: unscaled.question,
+              severity: 'warn' } as RepairEntry);
+          }
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -4476,6 +4483,7 @@ function admitOnce(
         (iv as { derived_total?: unknown }).derived_total === true);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
+      if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }
@@ -5489,7 +5497,7 @@ function admitOnce(
       field_path: `nodes[${label}].category`,
       before: 'controllable',
       after: 'external',
-      reason: `No option in this decision changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
+      reason: `No option in this model changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
       severity: 'info',
     } as RepairEntry);
   }

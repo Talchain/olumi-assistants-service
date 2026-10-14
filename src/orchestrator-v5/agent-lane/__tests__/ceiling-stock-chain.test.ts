@@ -54,6 +54,7 @@ import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accum
 import { sayFigureAsWritten } from '../say-figure.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 import { timeClassOf, unsupportedTimeSentence } from '../../goal-target/time-class.js';
+import { limitsKeptBy } from '../runtime/draft-replacement.js';
 
 type Rec = Record<string, any>;
 const SID = '550e8400-e29b-41d4-a716-4466554400c6';
@@ -496,6 +497,38 @@ describe('typed ceiling-stock confirmation chain', () => {
 });
 
 // #2946 owns the stored approval authority, independently of the automatic deadline issuer.
+describe('#3020 r3 (DL split, Codex CHECK-3020-dc005c2a): a revised draft\u2019s target is never overwritten by the brief\u2019s ceiling', () => {
+  // Codex's reproducer (`/private/tmp/probe-3020-dc005c2a/ceiling.test.ts:103`): the revised draft sets ≤1,600 riders, which
+  // `limitsKeptBy` stores inferred with no user source. The older brief's 1,900 must not come back as a card, and never as the user's.
+  const revisedTo1600 = (): Rec => {
+    const candidate = held();
+    Object.assign(goal(candidate), { label: 'Registered riders at month 10', goal_direction: '<=', threshold_source: 'brief_extraction',
+      goal_threshold_raw: 1600, goal_threshold_unit: 'riders' });
+    candidate.goal_constraints = [...(candidate.goal_constraints ?? []).filter((r: Rec) => r.node_id !== goal(candidate).id),
+      { constraint_id: 'new-target', node_id: goal(candidate).id, operator: '<=', value: 1600, unit: 'riders', role: 'goal_target', provenance: 'explicit', value_frame: 'level' }];
+    expect(proposeCeilingStock(candidate, fixture.brief), 'precondition: the user-attested candidate offers no card').toBeNull();
+    return limitsKeptBy({}, candidate).replacement as Rec;
+  };
+  it('⭐ RED→GREEN: after the replacement no ceiling card is offered, nothing is written, and the 1,600 target stands', async () => {
+    const revised = revisedTo1600();
+    expect(goal(revised)).not.toHaveProperty('threshold_source');
+    expect(goal(revised).goal_threshold_raw).toBe(1600);
+    expect(recogniseCeilingStock(revised, fixture.brief)).toBeNull();
+    const w = world(revised);
+    const offered = await w.offer() as Rec;
+    expect(offered.ok, JSON.stringify(offered)).not.toBe(true);
+    expect(offered).not.toHaveProperty('proposal_id');
+    expect(w.writes).toHaveLength(0);
+    expect(goal(w.read()).goal_threshold_raw, 'the replacement target never reverts to the older ceiling').toBe(1600);
+    expect(goal(w.read())).not.toHaveProperty('threshold_source');
+  });
+  it('CONTRAST: the same brief on the drafter\u2019s own model (no replacement) still offers the ceiling card', async () => {
+    expect(recogniseCeilingStock(held(), fixture.brief)).not.toBeNull();
+    const offered = await world().offer() as Rec;
+    expect(offered.ok, JSON.stringify(offered)).toBe(true);
+  });
+});
+
 describe('ceiling offerability on the stored graph', () => {
   it('O1 pending projection and fresh-worker held chip survive carry and reload', async () => {
     const w = world(), offered = await w.offer() as Rec, graph = w.read();

@@ -44,6 +44,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** Introduction is separate from figure/display provenance. Only admission's positive stamp licenses this verdict. */
+export function nodeIntroductionOf(node: unknown): { readonly origin: 'olumi_added' | 'unknown'; readonly adopted: boolean } {
+  const n = rec(node);
+  if (n?.proposed_by !== 'olumi') return { origin: 'unknown', adopted: false };
+  // The option card records inclusion; subsequent user exclusion preserves that earlier adoption.
+  const adopted = n.kind === 'option' && (n.analysis_participation === 'included'
+    || n.option_status === 'infeasible' || n.option_status === 'removed');
+  return { origin: 'olumi_added', adopted };
+}
+
 // ============================================================================
 // The display vocabulary (moved verbatim from `cee/transforms/provenance-display.ts`, which re-exports it)
 // ============================================================================
@@ -958,6 +968,9 @@ export function isEventByDateSwitchValue(node: unknown): boolean {
  * structural; anything else — missing, unrecognised (a legacy `user`) — `unknown`.
  */
 export function settingProvenanceOf(cell: unknown, target?: unknown): Provenance {
+  // A setting the drafter called the user's that construction could not credit: UNKNOWN, whatever the non-user stamp beside
+  // it, exactly as `observed_state.user_material_unverified` (capacity authorship row 7, DL 14 Oct).
+  if (rec(cell)?.user_material_unverified === true) return P('unknown');
   const source = rec(cell)?.source;
   if (typeof source === 'string') {
     if (HUMAN_SETTING_STAMPS.has(source)) {

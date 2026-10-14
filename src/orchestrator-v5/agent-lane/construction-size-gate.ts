@@ -112,6 +112,12 @@ export interface ConstructionSizeVerdict {
    * withheld — has lost the limit too.
    */
   readonly brief_stated_keys: { readonly nodes: readonly string[]; readonly edges: readonly string[]; readonly limits: readonly string[] };
+  /**
+   * Links the kept options imply, not the drafter's `links`: one from the decision to each option and one from each option
+   * to each factor it acts on (the status quo's to each factor the other options act on). The first-pass budget sentence
+   * counts them the same way (`build-model.ts`); a retry needs them to know how many `links` it may keep (T5 D2 r1).
+   */
+  readonly option_edges: number;
   /** One sentence a user could be shown. Empty when within budget. */
   readonly detail: string;
 }
@@ -145,6 +151,32 @@ export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, af
   const l = new Set(after.brief_stated_keys.limits);
   return before.brief_stated_keys.nodes.every((k) => n.has(k)) && before.brief_stated_keys.edges.every((k) => e.has(k))
     && before.brief_stated_keys.limits.every((k) => l.has(k));
+}
+
+/**
+ * The same check for a redraft that RE-CHOSE an unattested event goal (`unattestedEventGoal`, build-model.ts; DL ruling 14 Oct).
+ * The first draft's goal node is the drafter's unattested claim, so its identity alone is not required. A user's limit is
+ * kept either as a limit or as the redraft goal's own target BY ITS FULL IDENTITY: the same quantity (its label, read as
+ * every identity key reads it) and the same comparator, figure, unit and frame — as the goal's admitted target row (a level
+ * goal), or as the goal itself (a change goal holds its target on the goal node). ⛔ Codex FAIL 3026 r1: terms alone let
+ * "Code quality +10 %" stand in for productivity's +10 %, and let two same-sentence targets collapse into one.
+ * A user-stated node is kept as itself, or as the redraft's goal under the same label (the quantity the user's target named
+ * became the goal: T5 D2's "Conversion rate"). Every relationship, and every other node and limit, by identity as above.
+ */
+export function keepsEveryUserStatedIdentityWhenGoalRechosen(before: ConstructionSizeVerdict, after: ConstructionSizeVerdict,
+  retryGoal: { readonly metric: string; readonly operator: string; readonly value: number | null; readonly unit?: string | null; readonly frame?: string | null }): boolean {
+  const n = new Set(after.brief_stated_keys.nodes);
+  const e = new Set(after.brief_stated_keys.edges);
+  const l = new Set(after.brief_stated_keys.limits);
+  /** `quantity|op|value|unit|frame`: the key without its kind, so a factor's limit and the goal's target on it compare. */
+  const quantityAndTerms = (k: string): string => k.slice(k.indexOf(':') + 1);
+  const asGoal = new Set(after.brief_stated_keys.limits.filter((k) => k.startsWith('goal:')).map(quantityAndTerms));
+  if (retryGoal.value !== null) {
+    asGoal.add([keyLabel(retryGoal.metric), retryGoal.operator, retryGoal.value, retryGoal.unit ?? '', retryGoal.frame ?? ''].join('|'));
+  }
+  return before.brief_stated_keys.nodes.every((k) => k.startsWith('goal:') || n.has(k) || n.has(`goal:${quantityAndTerms(k)}`))
+    && before.brief_stated_keys.edges.every((k) => e.has(k))
+    && before.brief_stated_keys.limits.every((k) => l.has(k) || asGoal.has(quantityAndTerms(k)));
 }
 
 /** An admitted edge the user themselves stated. */
@@ -216,6 +248,8 @@ export function assessConstructionSize(
     for (const id of [endpoint(e, 'from'), endpoint(e, 'to')]) if (nodeIds.has(id)) floorIds.add(id);
   }
   const floor_nodes = floorIds.size;
+  const kindOf = new Map(admitted.nodes.map((n) => [n.id, String((n as { kind?: unknown }).kind ?? '')]));
+  const option_edges = admitted.edges.filter((e) => ['decision', 'option'].includes(kindOf.get(endpoint(e, 'from')) ?? '')).length;
   const floor_edges = admitted.edges.filter((e) => isBriefStatedEdge(e) || (floorIds.has(endpoint(e, 'from')) && floorIds.has(endpoint(e, 'to')))).length;
   const user_material_exceeds_limit = floor_nodes > limits.maxNodes || floor_edges > limits.maxEdges;
   const identityOf = new Map(admitted.nodes.map((n) => [n.id, nodeIdentity(n)]));
@@ -262,8 +296,26 @@ export function assessConstructionSize(
     floor_nodes,
     floor_edges,
     brief_stated_keys,
+    option_edges,
     detail,
   };
+}
+
+/**
+ * ⭐ THE DRAFTER'S OWN LINKS BUDGET (T5 D2 r1, DL 14 Oct). The totals alone ("32 links, 2 over") left the drafter cutting
+ * nothing: 18 of the 32 were its kept options' own links, which it cannot see in `links`, so its 14 `links` read as
+ * within budget. Over on links only, it is told what `links` may hold: the limit minus the options' links. Still a target,
+ * never a list. HOW it cuts matches the adoption rules: whole optional added nodes only, since measured retries that cut a
+ * kept risk's links or the only node on a kept node's goal path were rightly refused (`retainsRiskHypotheses`). The AIE's
+ * text, branches (a) and (b), byte for byte (`codex/AIE-SIZE-RETRY-BUDGET-AND-PRESERVATION-20261014.json`, sha 4056486b).
+ */
+function linksBudget(v: ConstructionSizeVerdict): string[] {
+  if (v.over_by.edges === 0) return [];
+  const own = v.edges - v.option_edges;
+  const room = v.limits.maxEdges - v.option_edges;
+  return room > 0
+    ? [`${v.option_edges} of those links come from the options themselves: one from the decision to each option and one for each factor an option acts on (for the option that keeps things as they are, each factor the other options act on). That leaves \`links\` room for ${room}; yours hold ${own}, so \`links\` must lose at least ${own - room} entries. Remove only whole optional nodes you ADDED beyond the brief, each with all its links; do not remove a factor that a kept option acts on, cut a kept risk’s or option’s links, or break any kept node’s path to the goal. Check that the revised complete draft meets both limits without losing any stated material or required model meaning.`]
+    : [`The options’ own links, including the unchanged option’s links to the factors the others act on, already come to ${v.option_edges}, leaving no room for \`links\`. Remove only an optional option or action you ADDED beyond the brief, with its now-unneeded nodes and links; preserve every option and action the brief gives, every shared factor still needed by a kept option, and every kept risk’s links and path to the goal.`];
 }
 
 /**
@@ -283,6 +335,7 @@ export function retryInstruction(v: ConstructionSizeVerdict): string {
   return [
     `Your previous model was too large: ${v.nodes} nodes and ${v.edges} links${over === '' ? '' : `, ${over} over the limit`}.`,
     `The limit is ${v.limits.maxNodes} nodes and ${v.limits.maxEdges} links.`,
+    ...linksBudget(v),
     'Keep EVERY option, factor, figure, constraint, horizon AND STATED RELATIONSHIP the brief gives — those are not negotiable and must not be dropped or merged.',
     'Remove what you ADDED beyond the brief: speculative options, secondary factors, risks, outcomes and links that are not decision-critical for this question.',
     'Anything you judge material but cannot fit belongs in `unknowns` as a question, NOT as a node.',

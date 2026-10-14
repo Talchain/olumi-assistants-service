@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
@@ -227,11 +228,12 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 
   it('the route judges the ask on the composed reply at rest — model words + owed lines + host status (source pin)', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);');
+    // BYPASS1: the owed lines said are `owedShown` (all of them on a host reply; on the AI's own, the lines it lacks).
+    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
     expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
-    expect(src).toContain('withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText)');
+    expect(src).toContain('withWriteOutcome(withDisclosures(narrationText, [...owedShown, ...decisionLines]), statusText)');
   });
 
   it('textAtRest is the panel\'s own split: the same marker and producer-sentence predicate as the pinned DGAI copy', () => {
@@ -489,7 +491,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(text.split(A7).length - 1).toBe(1);
     // Approved 5471d752 correction: a contract reply already within its face ships as written.
     expect(reply._answer_shape).toBeUndefined();
-    expect(text).toBe([modelSays, A7, ASK].join('\n\n'));
+    expect(text).toBe([RUN_RESULT_READY_TEXT, A7, ASK].join('\n\n'));
     expect(text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
     expect(textAtRest(text)).toContain(ASK_QUESTION);
     expect((text.match(/\?/gu) ?? [])).toHaveLength(1);

@@ -18,6 +18,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
+import { deadlineCardSubjectOf } from '../../agent-lane/proposal-object/still-applies.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { applyGoalHorizonEdit } from '../goal-horizon-write.js';
@@ -129,13 +130,18 @@ describe('the deadline door on Paul\'s marketing turns', () => {
   it('RED (Paul\'s second turn): "Last Friday was the 9th of October." places his first turn\'s deadline — the card "Is your deadline 9 April 2027 (6 months from 9 October 2026)?"', async () => {
     const d = door();
     const r = await d.caps.proposeGoalDeadline!(saying(TURN_B, [TURN_A]), { deadline_words: A_WORDS, rationale: TURN_B }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “6 months to launch our new features from last Friday”. Basis supplied for this interpretation: ' + TURN_B }));
-    expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: TURN_B });
+    // ⛔ DLf5 (#2997 Codex check, DL rule): EXPECTATION CHANGED, old "Your words: …" / user_stated → new "… Olumi’s
+    // interpretation; check the date and reference before approving." / model_proposed. His first turn holds two durations
+    // ("6 months … from last Friday", "the initial 3-month sales cycle"), so which is the deadline is Olumi's reading for
+    // him to check. The date (9 April 2027), the reference and the saved horizon are unchanged.
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “6 months to launch our new features from last Friday”. Olumi’s interpretation; check the date and reference before approving. Basis supplied for this interpretation: ' + TURN_B }));
+    expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'model_proposed', basis: TURN_B });
     expect(r.deadline.words).toBe(A_WORDS);
     expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
     const op = d.proposals.get(String(r.proposal_id))!.operations[0]!;
     // The horizon is measured from the recorded draft day (11 Oct), so the count from 9 Oct is NOT its length.
-    expect(op).toEqual({ op: 'set_goal_deadline', path: GOAL_ID, value: { deadline: '2027-04-09', expected_deadline: null, words: A_WORDS, reference: SUNDAY } });
+    expect(op).toEqual({ op: 'set_goal_deadline', path: GOAL_ID, value: { deadline: '2027-04-09', expected_deadline: null, words: A_WORDS, reference: SUNDAY,
+      expected_goal: deadlineCardSubjectOf(d.graph, GOAL_ID) } });
     const applied = applyGoalHorizonEdit(d.graph, { goal_id: GOAL_ID, deadline: '2027-04-09', expected_deadline: null, reference_date: SUNDAY });
     expect(applied.kind).toBe('mutated');
     if (applied.kind === 'mutated') expect((applied.mutatedGraph.nodes as Rec[]).find((n) => n.id === GOAL_ID)).toEqual(expect.objectContaining({
@@ -180,7 +186,7 @@ describe('the deadline door on Paul\'s marketing turns', () => {
     const proposal = d.proposals.get(String(r.proposal_id))!;
     expect(proposal.provenance).toEqual({ authored_by: 'model_proposed', basis });
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: GOAL_ID,
-      value: { deadline: '2027-04-09', expected_deadline: null, words: A_WORDS, reference: SUNDAY } }]);
+      value: { deadline: '2027-04-09', expected_deadline: null, words: A_WORDS, reference: SUNDAY, expected_goal: deadlineCardSubjectOf(d.graph, GOAL_ID) } }]);
     expect(JSON.stringify(d.graph)).toBe(before);
     // Removing the AI-supplied date and interpretation leaves the same human words unresolved.
     const without = door();

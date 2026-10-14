@@ -21,7 +21,19 @@ const GOAL = 'weekly_support_capacity';
 const SQ = 'keep_current_staffing';
 const SPECIALIST = 'add_one_specialist';
 const SERVED_LINE = (FX.served_licence.withheld_reason_by_option as Record<string, { line: string }>)[SQ]!.line;
-const BY_ASSUMPTION = 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.';
+/**
+ * AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): the
+ * status-quo row's LEVEL line. This goal holds today's 80 and a target of at least 100 in one unit, spelt as each served graph
+ * holds it. These rows are about the Run's frame; the words are pinned in `status-quo-row-words.test.ts`.
+ */
+const byAssumptionIn = (unit: string): string => `This Run cannot give a chance for carrying on as now: it uses ‘Weekly support capacity’ as its `
+  + `unchanged reference, by assumption. The model’s held reference value is 80 ${unit}; the target for this `
+  + `Run is at least 100 ${unit}. Review the evidence for how ‘Weekly support capacity’ could change over `
+  + `this Run’s goal period without an intervention, including any forecast or uncertainty already retained `
+  + `in the model.`;
+const BY_ASSUMPTION = byAssumptionIn('tickets per week');
+/** The run-4 served graph (`FLOAT`) spells the same unit "tickets / week". */
+const FLOAT_BY_ASSUMPTION = byAssumptionIn('tickets / week');
 const RECORDED = FX.recorded_field_on_a_licensed_capacity_run.sent_threshold;
 
 /**
@@ -150,7 +162,7 @@ describe('D2 exact same-frame equality (11 Oct capacity Run, and run 4\'s capaci
 
   it('AMENDED: the residue row (std 5.6e-17, mean one ulp above 0.4) reads moved; its exact twin is "No change, by assumption"', () => {
     expect(reasonOf(floatLicence(floatEnvelope()))).toMatchObject({ reason: 'reference_moved' });
-    expect(floatLicence(floatEnvelope({ std: 0, mean: 0.4 }))!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+    expect(floatLicence(floatEnvelope({ std: 0, mean: 0.4 }))!.status_quo).toEqual({ option_id: SQ, line: FLOAT_BY_ASSUMPTION });
     // Each half on its own: the std alone, and the centre alone.
     expect(reasonOf(floatLicence(floatEnvelope({ mean: 0.4 })))).toMatchObject({ reason: 'reference_moved' });
     expect(reasonOf(floatLicence(floatEnvelope({ std: 0 })))).toMatchObject({ reason: 'reference_moved' });
@@ -174,13 +186,13 @@ describe('D2 exact same-frame equality (11 Oct capacity Run, and run 4\'s capaci
       FLOAT.served_licence.sent_threshold, tiny, {});
     expect(reasonOf(at(1e-12))).toMatchObject({ reason: 'reference_moved' });
     expect(reasonOf(at(1e-16))).toMatchObject({ reason: 'reference_moved' });
-    expect(at(0)!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+    expect(at(0)!.status_quo).toEqual({ option_id: SQ, line: FLOAT_BY_ASSUMPTION });
   });
 
   it('UNIT-RESCALED: in raw units (read against raw_value 80) exactly 80 with no spread is today; the residue row still moves', () => {
     const raw = { value: 100, field: 'goal_threshold_raw', frame: 'delta' } as const;
     const scaled = (outcome: Rec) => goalChanceLicenceOf(floatEnvelope(outcome), FLOAT.graph, GOAL, earned, raw, FLOAT.graph, {});
-    expect(scaled({ p10: 80, p50: 80, p90: 80, mean: 80, std: 0 })!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });
+    expect(scaled({ p10: 80, p50: 80, p90: 80, mean: 80, std: 0 })!.status_quo).toEqual({ option_id: SQ, line: FLOAT_BY_ASSUMPTION });
     const sq = (FLOAT.envelope.option_comparison as Rec[]).find((o) => o.option_id === SQ)!.outcome as Record<string, number>;
     const x200 = Object.fromEntries(['p10', 'p50', 'p90', 'mean', 'std'].map((k) => [k, sq[k]! * 200]));
     expect(reasonOf(scaled(x200))).toMatchObject({ reason: 'reference_moved' });

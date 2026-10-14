@@ -223,7 +223,9 @@ describe('SYS1 ordinary Responses transport', () => {
     dump('llm-after.json', JSON.stringify(result, null, 2));
   });
   it('RED schema: the existing interpretation schema and adapter success payload retain their bytes', async () => {
-    expect(jsonSha(RUN_INTERPRETATION_FORMAT.schema)).toBe('3539e2bc2bf7963a295ae854719e99354383cbc93880efc1c7938f46f7c9bf83');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE C5, rulings 1ad7f7b2…): only `confirm_step`'s description changed; the previous
+    // schema with exactly that description swapped in is byte-equal to this one (3539e2bc… before).
+    expect(jsonSha(RUN_INTERPRETATION_FORMAT.schema)).toBe('a7b613f54c9487e83065952b4641db4fd5c06cb7f8278fc2effd9d01c1adb08e');
     const body = { model: 'gpt-x', instructions: 'unchanged', input: [], tools: [], text: { format: RUN_INTERPRETATION_FORMAT } };
     const rows = await runWithProviderPolicy({ ...OPENAI_ONLY('schema'), request_id: 'request-schema', scenario_id: scenario, turn_id: 'turn-schema' }, async () => {
       const { r } = await adapter.postResponses(body, { detail: { ...agentRequestIdentity('agent.interpret', body), purpose: 'conversation' } });
@@ -396,8 +398,9 @@ describe('S1T2 residual Responses sites', () => {
   };
   it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
     const { response } = await drive(site);
-    // ONE structured call per build: E6 (Batch R; also in the B combine) parks the draft-time widening call, so only the drafter's is sent.
-    expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(1); expect(consumed).toHaveLength(attempts.length);
+    // A build sends the drafter's structured call, then the two draft-time widening passes (risks, options): restored (Paul
+    // #94 6166259456) after E6 parked them; the drafter's entry is byte-unchanged.
+    expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(site === 'callStructured' ? 3 : 1); expect(consumed).toHaveLength(attempts.length);
     const proof = attempts.map((bytes, i) => {
       const body = JSON.parse(bytes);
       return { body: sha(bytes), instructions: sha(body.instructions), tools: jsonSha(body.tools ?? null), schema: jsonSha(body.text?.format?.schema ?? null), consumed: consumed[i] };
@@ -410,7 +413,7 @@ describe('S1T2 residual Responses sites', () => {
   it.each(residualSites)('%s has one host-bound physical success receipt and usage', async site => {
     const { rows, sid } = await drive(site);
     const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
-    expect(calls).toHaveLength(attempts.length); expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(attempts.length); expect(calls).toHaveLength(site === 'callStructured' ? 3 : 1);
     calls.forEach((call, i) => {
       const body = JSON.parse(attempts[i]);
       expect(call).toMatchObject({ request_id: expect.any(String), scenario_id: sid,
@@ -430,7 +433,8 @@ describe('S1T2 residual Responses sites', () => {
       const { rows } = await drive(site);
       const calls = rows.filter(r => r.site === `agent-v1-turn.${site}`);
       const retried = site === 'callStructured' && ['transport', 'terminal', 'malformed', 'unreadableHTTP'].includes(kind);
-      expect(attempts).toHaveLength(retried ? 2 : 1); expect(calls).toHaveLength(attempts.length);
+      // A transport retry succeeds, so the build goes on to the two widening passes; every other failure ends the build.
+      expect(attempts).toHaveLength(retried ? kind === 'transport' ? 4 : 2 : 1); expect(calls).toHaveLength(attempts.length);
       const expectedOutcome = kind === '429' ? 'rate_limited' : kind === '503' || kind === 'unreadableHTTP' ? 'http_error' : kind === 'TimeoutError' || kind === 'undiciTimeout' ? 'timeout' : kind === 'malformed' ? 'invalid_response' : 'transport_error';
       expect(calls[0].attempt).toMatchObject({ outcome: expectedOutcome, transport_status: kind === '429' || kind === '503' ? Number(kind) : kind === 'unreadableHTTP' ? 503 : kind === 'malformed' ? 200 : null, retry: retried });
       if (kind === 'unreadableHTTP') expect(calls[0].attempt?.result).toBe(site === 'callBriefReading' ? 'http_error' : 'http_error_body_unreadable');

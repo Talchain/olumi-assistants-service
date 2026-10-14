@@ -104,14 +104,7 @@ describe('R3-2 — the served C shape: the lever-only tally that feeds the goal'
     expect(out.open_questions).toContain(G_SENTENCE);
     expect(out.sum_identities).toEqual([{ node_id: TALLY, label: 'Total investment spend', factor_ids: G_SUM.factor_ids }]);
   });
-  it('⭐ §3-1 (C): the Olumi-signed tally → MRR edge is not drawn (MRR is £ too: the unit-family exemption is withdrawn), disclosed once', async () => {
-    const { graph, out } = await build(G.brief, candidate(G));
-    expect(pairs(graph.edges)).not.toContain(`${TALLY}::${GOAL}`);
-    expect(pairs(graph.edges)).toEqual(pairs(G.graph.edges.filter((e) => !(e.from === TALLY && e.to === GOAL))));
-    expect(out.pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
-    expect(said(out).filter((s) => s === G_DROP_SENTENCE)).toHaveLength(1);
-    expect(out.pure_limit_asks).toBeUndefined();
-  });
+  
   it('the tally stays a valid limit-only terminal: readiness raises no blocker the served graph did not (the served first build\'s own unset option levels only)', async () => {
     const { graph } = await build(G.brief, candidate(G));
     const codes = (g: unknown) => assessCanonicalAnalysisReadiness(g as never).blockingIssues.map((i) => i.code).sort();
@@ -183,7 +176,7 @@ describe('§3-3 / 38-class — nothing fires where the options set the spend dir
     const S = C.unit_mismatch;
     const { graph, out } = await build(S.brief, candidate(S));
     expect(sumsOf(graph.nodes)).toEqual([]);
-    expect(out.pure_limits).toEqual([{ node_id: 'incremental_6_month_spend', label: 'Incremental 6-month spend', dropped_edge_to: 'mrr' }]);
+    expect(out.pure_limits).toBeUndefined();
   });
   it('⭐ unit equality: served journey E — hires under a £ salary limit are not its addends: no sum', async () => {
     const { graph } = await build(E.brief, candidate({ candidate: E.e01_candidate }));
@@ -243,8 +236,8 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     const { graph, out } = await build(G.brief, rejectedDraft);
     expect(said(out).join(' '), 'the user is told it was not used').toContain('was not used and nothing about it is assumed');
     expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toBeUndefined();
-    expect(pairs(graph.edges)).not.toContain(`${TALLY}::${GOAL}`);
-    expect(out.pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
+    expect(pairs(graph.edges)).toContain(`${TALLY}::${GOAL}`);
+    expect(out.pure_limits).toBeUndefined();
   });
   // ⛔ THE PARITY LOCK (DL verdict on 04dd4649, condition 1): the exemption's verdict (before loops are broken) and the
   // final one DISAGREE. The user states "Monthly churn → Pro plan price" (negative); Olumi drafted "Pro plan price →
@@ -272,18 +265,14 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
       .toContain('"Pro plan price" does not feed into "MRR" in the model');
     const { graph, out } = await build(G.brief, draft);
     expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toBeUndefined();
-    expect(pairs(graph.edges)).not.toContain(`${TALLY}::${GOAL}`);
-    expect(out.pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
-    expect(said(out).filter((s) => s === G_DROP_SENTENCE)).toHaveLength(1);
-    expect(out.pure_limit_asks).toBeUndefined();
+    expect(pairs(graph.edges)).toContain(`${TALLY}::${GOAL}`);
+    expect(out.pure_limits).toBeUndefined();
+    expect(said(out).filter((s) => s === ASK)).toHaveLength(1);
+    expect(out.pure_limit_asks).toEqual([{
+      node_id: TALLY, label: 'Total investment spend', goal_id: GOAL, effect_direction: 'positive', levers_only_through: [], question: ASK,
+    }]);
   });
-  it('the lock leaves the TALLY, not a lever: restoring the dropped edge reconnects only the tally; both spend levers still reach MRR', async () => {
-    const { graph } = await build(G.brief, candidate(G, loopCutsPrice));
-    const without = reachersOfGoal(graph.edges);
-    const withEdge = reachersOfGoal([...graph.edges, { from: TALLY, to: GOAL }]);
-    expect([...withEdge].filter((id) => !without.has(id))).toEqual([TALLY]);
-    for (const lever of G_SUM.factor_ids) expect(without.has(lever), lever).toBe(true);
-  });
+  
   it('⭐ the lock keeps §3\'s precondition: a withdrawn exemption whose lever reaches MRR only through the tally is KEPT and ASKED, never dropped', async () => {
     const { graph, out } = await build(G.brief, candidate(G, (c) => { loopCutsPrice(c); onlyThrough(c); }));
     expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toBeUndefined();
@@ -305,9 +294,14 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     expect(out.pure_limits).toBeUndefined();
     expect(out.pure_limit_asks).toBeUndefined();
   });
-  it('a goal identity that does NOT contain the cost (the served MRR = price × subscribers) exempts nothing', () => {
+  it('a goal identity that does NOT contain the cost keeps the cost link as an Olumi hypothesis', () => {
     expect(G.candidate.identities).toEqual([{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro paying subscribers'], provenance: 'inferred' }]);
-    expect(admit(candidate(G), G.brief).pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
+    const model = admit(candidate(G), G.brief);
+    expect(model.nodes.find(n => n.id === GOAL)?.nonlinear_identity).toEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false });
+    const edge = model.edges.find(e => e.from === TALLY && e.to === GOAL);
+    expect(edge).toBeDefined();
+    expect(edge?.provenance).toEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true });
+    expect(model.pure_limits).toBeUndefined();
   });
   it('a limit Olumi inferred (not the user\'s) leaves the goal edge alone — and still mints the sum (the ≤ level limit names it)', () => {
     const m = admit(candidate(G, (c) => { c.constraints[0].provenance = 'inferred'; }), G.brief);

@@ -675,10 +675,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const bothSentences = (text: string, label: string) => {
     // Quote-agnostic first: the defect is the sentence being DROPPED.
-    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the decision and acting on "?${esc(label)}"?\\.`));
+    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the question and acting on "?${esc(label)}"?\\.`));
     expect(text, text).toMatch(new RegExp(`Its level for "?${esc(label)}"? is Olumi's estimate, for you to correct\\.`));
     // Then the exact sentences: each label quoted, as the user's data.
-    expect(text, text).toContain(`Added "Test £54 at release", linked from the decision and acting on "${label}".`);
+    expect(text, text).toContain(`Added "Test £54 at release", linked from the question and acting on "${label}".`);
     expect(text, text).toContain(`Its level for "${label}" is Olumi's estimate, for you to correct.`);
   };
   for (const label of ['Size of the user base', 'cost_per_hire']) {

@@ -20,6 +20,7 @@ import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
+import type { PressBlocker } from './press-next-step.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -107,6 +108,24 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
     }
   }
   return found;
+}
+
+/**
+ * What can unlock an unread rate × count reading, from the route's own facts (`actions/state.ts` identityReading: a card the
+ * sole writer accepts on this base; `approvalWaiting` and a pending goal-scope question are other owners of the step).
+ */
+export type ProductUnlock = 'confirm_reading' | 'owned_elsewhere' | 'no_writer';
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step for a goal Olumi has not read as rate × count, bound
+ * to its actual cause. A writable reading card is the step (the user checks the reading and the chance can follow); while
+ * another held change or the scope question owns the step, nothing is added. Only where no card or writer can record the
+ * reading is it a CAPABILITY gap, said as such and never asked.
+ */
+export function unreadGoalProductBlockerOf(p: UnreadGoalProduct, unlock: ProductUnlock): PressBlocker | null {
+  if (unlock === 'confirm_reading') return { kind: 'confirm', by: 'confirm_reading' };
+  if (unlock === 'owned_elsewhere') return null;
+  return { kind: 'missing_implementation', what: `how likely any option is to reach ‘${p.goal.label}’ read as ‘${p.rate.label}’ × ‘${p.count.label}’` };
 }
 
 /**

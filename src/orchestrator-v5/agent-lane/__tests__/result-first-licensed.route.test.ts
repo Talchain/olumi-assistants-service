@@ -44,14 +44,12 @@ describe('the two-request Run reads the licensed run on both requests (live rout
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
   let runModelBodies: Record<string, unknown>[] = [];
-  let awaitingRunReply = false;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? '{}'));
       const forced = runPressToolResponse(body);
-      if (forced) { runModelBodies.push(body); awaitingRunReply = true; return forced; }
-      if (awaitingRunReply) { runModelBodies.push(body); awaitingRunReply = false; }
-      else modelBodies.push(body);
+      if (forced) { runModelBodies.push(body); return forced; }
+      modelBodies.push(body);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 });
     }));
     vi.resetModules();
@@ -70,7 +68,7 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { state = SERVED.analysis_state; rows.length = 0; modelBodies = []; runModelBodies = []; awaitingRunReply = false; });
+  beforeEach(() => { state = SERVED.analysis_state; rows.length = 0; modelBodies = []; runModelBodies = []; });
 
   const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
@@ -89,7 +87,7 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     const first = await run();
     expect(first.statusCode, first.body).toBe(200);
     expect(modelBodies).toHaveLength(0);
-    expect(runModelBodies).toHaveLength(2);
+    expect(runModelBodies).toHaveLength(1);
     const second = await explain(first.json() as First);
     expect(second.statusCode, second.body).toBe(200);
     expect(modelBodies).toHaveLength(1);

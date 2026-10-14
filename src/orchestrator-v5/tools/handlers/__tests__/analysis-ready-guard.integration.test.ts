@@ -282,11 +282,8 @@ describe('EP2 integration — run_analysis handler blocked/analysed', () => {
     try { outcome = await handler(invocation); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(HandlerInvocationFailedError);
     expect((err as HandlerInvocationFailedError).cause_kind).toBe('analysis_not_ready');
-    expect((err as HandlerInvocationFailedError).details).toMatchObject({
-      // The canonical structural record now names the precise load-bearing
-      // blocker instead of collapsing it into the legacy option-count code.
-      reason_code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
-    });
+    // R5 retires the mapping demand; this unchanged unknown root is blocked by K1.
+    expect((err as HandlerInvocationFailedError).details?.reason_code).toBe('MISSING_FACTOR_LEVEL');
     expect(calls.n).toBe(0); // PLoT was never called
     expect(outcome).toBeUndefined(); // no run_analysis fact can exist
   });

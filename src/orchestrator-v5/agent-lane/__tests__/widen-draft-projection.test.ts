@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { admitCandidateModel, type AdmittedModel, type CandidateModel } from '../admit-model.js';
 import { widenDraft, widenedRiskMarker, widenedRiskNote, WIDENED_RISK_MARKER_DOWN } from '../runtime/widen-draft.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
-import { doorLevelOf, estimateLevelPersists, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { doorLevelOf, estimateLevelPersists, projectEntity, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { widenGate, widenTurnFromSignals } from '../method-turn/widen-turn.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
@@ -220,5 +220,11 @@ describe('P05b widening retains the level its existing options gate checked', ()
     const renamedInput = withoutPreconditionRisks(renamed);
     expect(renamedInput.nodes.map((node) => node.id)).not.toContain('hiring_stalls');
     expect(renamedInput.nodes.map((node) => node.id)).toContain('supplier_delay');
+    // T4i (DL 14 Oct): the Agent sees the added risk as Olumi's and kept out of the Run; the user's own risk carries neither.
+    const added = graph.nodes.find((node) => node.id === 'hiring_stalls')!;
+    expect(projectEntity(added as never)).toMatchObject({ id: 'hiring_stalls', kind: 'risk', proposed_by: 'olumi', analysis_participation: 'retained_excluded' });
+    const stated = projectEntity(graph.nodes.find((node) => node.id === 'supplier_delay')! as never);
+    expect(stated).not.toHaveProperty('proposed_by');
+    expect(stated).not.toHaveProperty('analysis_participation');
   });
 });

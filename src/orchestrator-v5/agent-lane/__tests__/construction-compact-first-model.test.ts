@@ -127,13 +127,14 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     expect(retry).toContain('DECISION-CRITICAL');
   });
 
-  it('NEVER retries twice — still oversized means refuse, not keep asking', async () => {
+  it('NEVER a third retry — still oversized after both bounded retries means refuse, not keep asking', async () => {
     const s = structuredSequence(candidate(20), candidate(20));
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
     expect(out.ok).toBe(false);
     expect(out['refusal']).toBe('model_too_large');
-    expect(s.calls).toHaveLength(2);
+    // DL rulings 04:00Z/04:07Z 14 Oct: the retry here is ADOPTED (no smaller rejection) yet still over, so ONE more runs; never a third.
+    expect(s.calls).toHaveLength(3);
     expect(registered(dp.paths)).toBe(0); // nothing written
   });
 });

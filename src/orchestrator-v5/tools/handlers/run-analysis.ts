@@ -1,3 +1,4 @@
+import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
@@ -1214,7 +1215,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
-      plotPayload.goal_constraints = wireGoalConstraints(withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints));
+      plotPayload.goal_constraints = wireGoalConstraints(withholdRetainedLimitFrames(snapshot.rawPersistedGraph ?? snapshot.graph,
+        withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints)));
       const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
       if (frameWithheld.length > 0) {
         log.info(
@@ -1998,6 +2000,35 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
+    const unresolvedLimits = unresolvedRetainedLimits(snapshot.rawPersistedGraph ?? snapshot.graph);
+    const retainedLimitReason = retainedLimitWithheldLine(snapshot.rawPersistedGraph ?? snapshot.graph);
+    if (unresolvedLimits.length > 0) {
+      const ids = unresolvedLimits.map((c) => c.constraint_id);
+      const optionIds = new Set(finalWireOptions.flatMap((o) => {
+        const id = optionIdOf(o as Record<string, unknown>);
+        return id === undefined ? [] : [id];
+      }));
+      response = withholdOptionLimitScores(response, new Map(ids.map((id) => [id, optionIds])));
+      response = withholdOptionGoalFigures(response, optionIds, {
+        code: RETAINED_LIMIT_WITHHOLD_CODE, severity: 'warning', source: 'cee',
+        message: retainedLimitReason, constraint_ids: ids,
+      });
+      // Existing per-limit/joint refusal carriers. CEE's retained-question evidence, not an engine claim.
+      const env = response as Record<string, unknown>;
+      // Older engine envelopes carry the aggregate joint here instead of on each option.
+      const legacyConstraints = env.constraint_analysis;
+      if (legacyConstraints !== null && typeof legacyConstraints === 'object' && !Array.isArray(legacyConstraints)) {
+        const { joint_probability: _joint, joint_probability_precision: _precision, ...kept } = legacyConstraints as Record<string, unknown>;
+        env.constraint_analysis = kept;
+      }
+      const priorJoint = env.joint_withheld as { constraint_ids?: string[] } | undefined;
+      env.joint_withheld = { reason: 'limit_unscored', constraint_ids: [...new Set([...(priorJoint?.constraint_ids ?? []), ...ids])] };
+      response = appendInferenceWarning(response, {
+        code: 'CONSTRAINT_TARGET_UNRELIABLE', severity: 'warning', source: 'cee', constraint_ids: ids,
+        reason: unresolvedLimits.some((c) => c.retained_unresolved_limit?.reason === 'retained_limit_quantity_unresolved')
+          ? 'retained_limit_quantity_unresolved' : 'retained_limit_equivalence_unresolved', message: retainedLimitReason,
+      });
+    }
     const identicalArms = detectIdenticalArms(response, finalWireOptions);
 
     // --- 5. Check analysis status (V5 alpha hardening Phase 2.3) ---------
@@ -2893,12 +2924,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
     const sentRun = plotPayload;
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
+      // Hiring row 3 (14 Oct): read with the period-end withhold's own inputs, so a change goal's conditional licence holds here too.
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, periodEndInputs),
       snapshot.rawPersistedGraph ?? graphForAnalysis,
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun,
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
@@ -3041,7 +3073,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       return disclosedHeadline !== null && headline !== null
         ? disclosedHeadline + summary.slice(headline.length) : summary;
     })();
-    const summary = composedSummary;
+    const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

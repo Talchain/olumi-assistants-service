@@ -6,11 +6,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
+import { sentencesOf } from '../reply/compose-reply.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
-import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
+import { RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
+// Fixture-only held AI premise for the completed-Run controls; the captured JSON is unchanged.
+FX.graph.nodes.find((n: Rec) => n.id === 'launch_date_missed').observed_state = {
+  value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred',
+};
 const SCENARIO = '3ad403fc-caf8-48e4-bd5b-578e20c1c48a';
 const HASH = '0123456789abcdef';
 const AT = '2026-10-13T01:00:00.000Z';
@@ -32,6 +38,15 @@ let turnToolResult: Rec | undefined;
 let licensedRecord: Rec | undefined;
 let modelWords = '';
 let claimCurrent = false;
+let originalLoop = false;
+// Historical AI-written Run receipts still need their original replay controls. Generate those receipts with
+// the unopted-in loop; T1r rows and ordinary presses below exercise the real result-first hook unchanged.
+vi.mock('../runtime/agent-loop.js', async (original) => {
+  const actual = await original<typeof import('../runtime/agent-loop.js')>();
+  return { ...actual, runAgentTurn: (...args: Parameters<typeof actual.runAgentTurn>) => actual.runAgentTurn(
+    originalLoop ? { ...args[0], stopAfterSuccessfulRun: undefined } : args[0], args[1], args[2]),
+  };
+});
 const rows: Rec[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -113,13 +128,57 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    claimCurrent = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    claimCurrent = false; originalLoop = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
   } });
 
+  it.each(['in_place_by_period', 'not_stated'])('T1r (a): timing %s licenses the saved result with one call and no narration', async (reading) => {
+    timing = reading;
+    const response = await press();
+    expect(response.statusCode).toBe(200);
+    const live = response.json();
+    expect(bodies).toHaveLength(1);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.chip.parameters.effects_timing).toBe(reading);
+    const licence = goalChanceLicenceForAgent(block);
+    expect(licence).toBeDefined();
+    expect(goalChanceLicenceForAgent(live.blocks.find((b: Rec) => b.type === 'analysis_result'))).toEqual(licence);
+    expect(live.narration).toEqual({ status: 'pending', run_key: live.suggested_actions.find((a: Rec) =>
+      a.id.startsWith('agent-explain-run:')).id.slice('agent-explain-run:'.length) });
+    expect(rows.at(-1)?.assistant_message).toBe(live.assistant_text);
+    expect(writes).toEqual([]);
+  });
+
+  it('T1r (d): an unlicensed goal chance keeps the host explanation and next step without narration', async () => {
+    timing = 'later_or_partial';
+    const response = await press();
+    expect(response.statusCode).toBe(200);
+    const live = response.json();
+    expect(bodies).toHaveLength(1);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.chip.parameters.effects_timing).toBe('later_or_partial');
+    expect(goalChanceLicenceForAgent(block)).toBeUndefined();
+    expect(live.narration.status).toBe('pending');
+    expect(live.assistant_text.includes(RUN_RESULT_READY_TEXT)).toBe(true);
+    const withheld = goalChanceWithheldForAgent(block, graph);
+    expect(withheld).toBeDefined();
+    const hostSentences = sentencesOf(withheld!.say);
+    expect(hostSentences.length).toBeGreaterThan(0);
+    expect(live.assistant_text.split('\n').filter((line: string) => line.endsWith('?'))).toEqual([
+      '• No figure is set for "Launch date missed" yet, so the analysis treats it as zero. How likely or how large is "Launch date missed" today?',
+    ]);
+    expect(live.assistant_text.split('\n').flatMap(sentencesOf).filter((s: string) => hostSentences.includes(s)), JSON.stringify({ text: live.assistant_text, hostSentences })).toEqual(hostSentences);
+    expect(live.suggested_actions.find((a: Rec) => a.id === `agent-explain-run:${live.narration.run_key}`)).toEqual({
+      id: `agent-explain-run:${live.narration.run_key}`, label: 'Explain this result', message: 'Explain this result',
+    });
+    expect(rows.at(-1)?.assistant_message).toBe(live.assistant_text);
+    expect(writes).toEqual([]);
+  });
+
   it.each(['in_place_by_period', 'not_stated', 'later_or_partial'])('hiring Run: agent timing %s binds the actual licence and reaches the reply', async (reading) => {
+    originalLoop = true; // Original post-tool interpretation's licensed-input contract.
     timing = reading;
     const r = await press(); expect(r.statusCode, r.body).toBe(200);
     if (process.env.R1_EVIDENCE) writeFileSync(`${process.env.R1_EVIDENCE}-${reading}.json`, JSON.stringify({
@@ -205,7 +264,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
     expect(replay.json().assistant_text).toBe(first.json().assistant_text);
     expect(replay.json().blocks).toEqual(first.json().blocks);
-    expect(first.json().narration.status).toBe('ready');
+    expect(first.json().narration.status).toBe('pending');
     expect(first.json().suggested_actions).toContainEqual(expect.objectContaining({ id: expect.stringMatching(/^agent-explain-run:/) }));
     expect(replay.json().suggested_actions).toEqual(first.json().suggested_actions);
     expect(replay.json().narration).toEqual(first.json().narration);
@@ -228,7 +287,8 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(runs).toHaveLength(1);
   });
 
-  it.each(['throw', 'http500'] as const)('completed Run survives interpretation %s and resends identically without calls', async (failure) => {
+  it.each(['throw', 'http500'] as const)('original AI-loop completed Run survives interpretation %s and resends identically without calls', async (failure) => {
+    originalLoop = true;
     interpretationFailure = failure;
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
     const first = await press(request);
@@ -261,6 +321,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     ['ordinary', 'moved'], ['ordinary', 'cold'], ['ordinary', 'missing-current-key'],
     ['recovered', 'moved'], ['recovered', 'cold'], ['recovered', 'missing-current-key'],
   ] as const)('%s replay with %s identity keeps identical text and non-current controls', async (path, identity) => {
+    originalLoop = true;
     claimCurrent = true;
     if (path === 'recovered') interpretationFailure = 'http500';
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
@@ -271,6 +332,12 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(live.narration.status).toBe(path === 'ordinary' ? 'ready' : 'unavailable');
     if (path === 'ordinary') expect(live.assistant_text).toContain('The result is current.');
     const callCount = bodies.length;
+    // T1h: an answer now stores the narration it was sent with, so after a restart its Run is known. The original is
+    // unknown only for a row written before migration 20261013230000; that is the row a cold replay must not relabel.
+    if (identity === 'cold') {
+      expect(rows.find(r => r.turn_id === request.turn_id)?.run_narration, 'precondition: the route stores the narration it sent').toEqual(live.narration);
+      for (const r of rows) delete r.run_narration;
+    }
     const savedRows = structuredClone(rows);
     if (identity === 'moved') {
       STATE.run_state.computed_at = '2026-10-13T02:00:00.000Z';
@@ -302,6 +369,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   });
 
   it('a cold saved AI-loop answer cannot borrow the current Run identity', async () => {
+    originalLoop = true;
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
     const first = await press(request);
     expect(first.statusCode, first.body).toBe(200);
@@ -310,6 +378,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(savedText).toBe(first.json().assistant_text);
     expect(turnToolResult?.ran).toBe(true);
     expect(modelWords.length).toBeGreaterThan(0);
+    // T1h: a row written before migration 20261013230000 carries no narration, so its original Run is unknown.
+    expect(row.run_narration, 'precondition: the route stores the narration it sent').toEqual(first.json().narration);
+    for (const r of rows) delete r.run_narration;
     const savedRows = structuredClone(rows);
     const callCount = bodies.length;
     await app.close(); vi.resetModules(); await freshApp();
@@ -357,6 +428,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   });
 
   it('a moved AI Run-loop resend preserves its committed words without current blocks or Explain', async () => {
+    originalLoop = true;
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
     const first = await press(request);
     expect(first.statusCode, first.body).toBe(200);
@@ -399,6 +471,6 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     behavior = 'run'; bodies = [];
     const retry = await press({ chip: replay.json().suggested_actions.find((a: Rec) => a.action_type === 'run_analysis') });
     expect(retry.statusCode).toBe(200); expect(runs).toHaveLength(1);
-    expect(turnToolResult?.ran).toBe(true);
+    expect(retry.json()._agent.tool_calls).toEqual([{ name: 'run_analysis', ok: true, mutated: false }]);
   });
 });
