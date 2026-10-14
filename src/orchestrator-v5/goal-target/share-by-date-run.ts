@@ -314,6 +314,21 @@ export function capacityRatioOutOfReach(graph: unknown, optionId: string): strin
     + `by ${sayDate(share.deadline)}. Even at ${months(low)} months, it gets about ${best}% done by then${arithmetic}.`;
 }
 
+/**
+ * DL (14 Oct, Paul's legacy brief: "Add two developers" read "Chance not shown yet" with no reason): a deadline-forecast
+ * option whose exact 0 or 1 the Run did not earn is withheld (the licence rule is unchanged), and says why in plain words,
+ * naming what that result rests on (the option's own basis line), with one next step. Never a percentage, never "certain".
+ */
+export function shareUnearnedCertaintyLine(graph: unknown, optionId: string, side: 'meets' | 'falls_short'): string | undefined {
+  const share = shareByDateGoalForChanceOf(graph);
+  if (share === null) return undefined;
+  const target = `${months(share.threshold_raw)}% of ${deliverableOf(share)} by ${sayDate(share.deadline)}`;
+  const basis = shareOptionEstimateWords(graph, optionId);
+  const rests = basis.startsWith('using ') ? `that rests on ${basis.slice('using '.length)}` : 'that rests on figures Olumi can’t yet confirm';
+  return `No chance is shown for this option: this model has it ${side === 'meets' ? 'reaching' : 'falling short of'} ${target} `
+    + `in every run, but ${rests}. Worth discussing: how much it would speed up the work, and from when.`;
+}
+
 /** The share goal's deliverable ("next feature launch" from "% of next feature launch"): one read of the goal's unit. */
 function deliverableOf(share: { readonly goal: Rec }): string {
   return String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
