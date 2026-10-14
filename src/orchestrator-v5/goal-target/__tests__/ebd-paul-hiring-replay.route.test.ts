@@ -298,7 +298,10 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
       [call('propose_goal_deadline', { deadline_words: DEADLINE_WORDS, rationale: PAUL.deadline }), say('Please confirm the date.')]);
     seen.push(t2);
     const deadline = proposed(t2, 'propose_goal_deadline');
-    expect(cardOf(t2, deadline.proposal_id)).toBe('Is your deadline 12 April 2027 (6 months from 12 October 2026)? Your words: “launch deadline in six months time”. Basis supplied for this interpretation: ' + PAUL.deadline);
+    // ⛔ DLf5 (#2997 Codex check, DL rule): EXPECTATION CHANGED, old "Your words: …" (user_stated) → new "… Olumi’s
+    // interpretation; check the date and reference before approving." His sentence holds two durations ("in the next three
+    // months", "in six months time"), so WHICH is the deadline is Olumi's reading for him to check. The date is unchanged.
+    expect(cardOf(t2, deadline.proposal_id)).toBe('Is your deadline 12 April 2027 (6 months from 12 October 2026)? Your words: “launch deadline in six months time”. Olumi’s interpretation; check the date and reference before approving. Basis supplied for this interpretation: ' + PAUL.deadline);
     const t2yes = await turn(approve(t2, deadline.proposal_id));
     seen.push(t2yes);
     expect(t2yes._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));

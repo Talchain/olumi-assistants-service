@@ -5418,16 +5418,18 @@ export function createAgentCapabilities(
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
       const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
-      // ⛔ DLf5 Codex check (blocking 1): a typed "as of D" dates the deadline ONLY beside its words ("<words>, as of D") or
-      // opening the deadline's own clause ("As of D, our deadline is <words>"). "Revenue was 2m as of D, and our launch
-      // deadline is …" keeps the host reference, whatever the model echoes.
+      // ⛔ DLf5 Codex check (blocking 1) + buddy r2/r3: a typed "as of D" dates the deadline ONLY as part of the deadline's
+      // own phrase: right after its words ("<words>, as of D"), or opening it with nothing between but the reader's own lead
+      // words ("As of D, our deadline is <words>", read by `readStatedDeadline`, lead words only). "Revenue was 2m as of D,
+      // and/whereas/plus our launch deadline is …" keeps the host reference, and the card becomes Olumi's reading to check.
       const beside = (date: string): boolean =>
-        new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}\\s*,?\\s*as of\\s+${date}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)
+        new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}\\s*,?\\s*as of\\s+${date}(?=\\s*(?:$|[.;!?]))`, 'u').test(typed)
         || typed.split(/[.;!?\n]/).some(sentence => {
-          const open = new RegExp(`^as of\\s+${date}\\s*,?([^,]*?)(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(sentence.trim());
-          return open !== null && !/(?:^|[^\p{L}])(?:and|but|or|nor|so|yet|whereas|while|whilst|although|though|because|since|however|unless|if|when|whenever|after|before|until|which|who)(?=$|[^\p{L}])/u.test(open[1]!);
+          const open = new RegExp(`^as of\\s+${date}\\s*,?\\s*(.*?)(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(sentence.trim());
+          return open !== null && (open[1]!.trim() === '' || readStatedDeadline(`${open[1]!.trim()} ${plainOf(words)}`, '1900-01-01', { leadWordsOnly: true }) !== null);
         });
       const asOf = typedAsOfDates.find(date => date === args.reference_date && beside(date));
+      const echoedAsOfSetAside = asOf === undefined && typedAsOfDates.some(date => date === args.reference_date);
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       if (args.reference_date !== undefined && args.reference_date !== asOf) {
@@ -5441,16 +5443,13 @@ export function createAgentCapabilities(
       // ⛔ DLf5 Codex check (blocking 2): "Our office lease expires in six months, and our launch deadline is in nine months"
       // with the quote "in six months" credited the lease. A message holding MORE THAN ONE date or duration phrase (read by
       // the one reader, as `eventDateSpans` does; an "as of D" reference is not one) offers the card as Olumi's reading.
-      // The one exception: a quote that itself says "deadline", inside one sentence of a message naming "deadline" ONCE, is bound
-      // to the deadline by the user's own words ("…our launch deadline in six months time", Paul's served turn 3).
-      const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? [])].reverse().map(plainOf).find(writes) ?? typed;
-      const deadlineWord = /(?:^|[^\p{L}])deadline(?=$|[^\p{L}])/gu;
-      const boundByItsWords = [...plainOf(words).matchAll(deadlineWord)].length === 1 && [...source.matchAll(deadlineWord)].length === 1
-        && !/[.;!?]/.test(plainOf(words).replace(/[.!?]+$/, ''));
+      // The message the words came from (verified messages, newest first); words from no message are counted alone.
+      const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse().map(plainOf)
+        .find(writes) ?? plainOf(words);
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        origin === 'human', datePhrasesIn(source) <= 1 || boundByItsWords);
+        origin === 'human', !echoedAsOfSetAside && datePhrasesIn(source) <= 1);
     },
 
     /**

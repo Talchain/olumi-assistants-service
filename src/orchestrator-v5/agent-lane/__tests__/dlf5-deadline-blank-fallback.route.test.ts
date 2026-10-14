@@ -157,7 +157,8 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
       { deadline_words: '6 months from today', reference_date: '2026-09-01' });
     expect(saved).toEqual({ deadline: '2027-04-13', reference: '2026-10-13', stated: 6 });
     expect(detail).toContain('Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: \u201c6 months from today\u201d.');
-    expect(detail).not.toContain('Olumi\u2019s interpretation');
+    // The model's echoed date was set aside, so the reading is Olumi's for the user to check (buddy r3: class, not words).
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
     expect(changes).toBe(1);
   });
 
@@ -177,21 +178,50 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
     const { saved, detail } = await offerAndApprove('As of 2026-09-01 revenue was 2m whereas our launch deadline is six months.',
       { deadline_words: 'six months', reference_date: '2026-09-01' });
     expect(saved).toEqual({ deadline: '2027-04-13', reference: '2026-10-13', stated: 6 });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
+  });
+  it.each([
+    ['As of 2026-01-01 revenue was \u00a32m plus our launch deadline is in six months.', 'in six months', '2026-01-01'],
+    ['As of 2026-01-01, revenue was \u00a32m; our launch deadline is in six months.', 'in six months', '2026-01-01'],
+    ['Our launch deadline is in six months, as of 2026-01-01 revenue was \u00a32m.', 'in six months', '2026-01-01'],
+  ])('buddy r3: "%s" (echo %s) keeps the host reference: the as-of is not part of the deadline\u2019s phrase', async (message, deadline_words, reference_date) => {
+    const { saved, detail } = await offerAndApprove(message, { deadline_words, reference_date });
+    expect(saved).toEqual({ deadline: '2027-04-13', reference: '2026-10-13', stated: 6 });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
+  });
+  it('the as-of that IS part of the deadline\u2019s phrase still dates it: "As of 2026-11-01, our deadline is six months"', async () => {
+    const { saved, detail } = await offerAndApprove('As of 2026-11-01, our deadline is six months.', { deadline_words: 'six months', reference_date: '2026-11-01' });
+    expect(saved).toEqual({ deadline: '2027-05-01', reference: '2026-11-01', stated: 6 });
     expect(detail).not.toContain('Olumi\u2019s interpretation');
+  });
+  it('buddy r3: a quote holding the deadline AND another phrase is never the user\u2019s ("deadline is in nine months and our lease expires in six months")', async () => {
+    const { detail } = await offerAndApprove('Our deadline is in nine months and our lease expires in six months.',
+      { deadline_words: 'deadline is in nine months and our lease expires in six months', reference_date: '' });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
   });
   it('buddy r2: "… lease expires in six months, and our launch deadline is in 180 days" quoting the lease → Olumi\u2019s reading', async () => {
     const { detail } = await offerAndApprove('Our office lease expires in six months, and our launch deadline is in 180 days.',
       { deadline_words: 'in six months', reference_date: '' });
     expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
   });
-  it('the exception: a quote that itself names the deadline, in a message naming "deadline" once, stays the user\u2019s', async () => {
+  // Buddy r4: a "deadline"-word exception was attacked every round ("supplier deadline … launch"), so none is kept (DL rule):
+  // with two durations, even a quote naming the deadline is Olumi's reading. The right date is still offered and saved.
+  it('two durations: even a quote naming the deadline is Olumi\u2019s reading, with the right date', async () => {
     const { detail, saved } = await offerAndApprove('Our office lease expires in six months, and our launch deadline is in nine months.',
       { deadline_words: 'launch deadline is in nine months', reference_date: '' });
-    expect(detail).toContain('Your words: \u201claunch deadline is in nine months\u201d.');
-    expect(detail).not.toContain('Olumi\u2019s interpretation');
+    expect(detail).toContain('Your words: \u201claunch deadline is in nine months\u201d. Olumi\u2019s interpretation; check the date and reference before approving.');
     expect(saved).toEqual({ deadline: '2027-07-13', reference: '2026-10-13', stated: 9 });
   });
-  it('the exception never holds when "deadline" names two things: "lease deadline … launch deadline" → Olumi\u2019s reading', async () => {
+  it.each([
+    ['Our office lease deadline is in six months, and our launch deadline is in nine months.', 'lease deadline is in six months', ''],
+    ['Our supplier deadline is in six months; our launch must happen in nine months.', 'supplier deadline is in six months', ''],
+    ['Our launch deadline is in six months\nAs of 2026-10-01, revenue was \u00a32m.', 'in six months', '2026-10-01'],
+  ])('buddy r4: "%s" (quote "%s", echo "%s") → Olumi\u2019s reading for the user to check, on the host reference', async (message, deadline_words, reference_date) => {
+    const { detail, saved } = await offerAndApprove(message, { deadline_words, reference_date });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
+    expect(saved?.reference).toBe('2026-10-13');
+  });
+  it('"lease deadline … launch deadline" → Olumi\u2019s reading', async () => {
     const { detail } = await offerAndApprove('Our office lease deadline is in six months, and our launch deadline is in nine months.',
       { deadline_words: 'lease deadline is in six months', reference_date: '' });
     expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
