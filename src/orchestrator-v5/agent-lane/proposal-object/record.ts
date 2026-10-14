@@ -529,9 +529,9 @@ export function heldRecordAppliesAt(hold: PendingAction, record: ProposalRecord,
   return p !== undefined ? heldCardAppliesAt(p, graph, graphHash) : record.base_graph_hash === graphHash;
 }
 
-/** The predicate {@link proposalFieldsWire} reads for records built from `holds` on `graph` (by proposal id). */
+/** The predicate {@link proposalFieldsWire} reads for records built from `holds` on `graph`: each record by its own carrier (revision and proposal id). */
 export function heldRecordsApplyAt(holds: readonly PendingAction[], graph: unknown, graphHash: string | undefined): (r: ProposalRecord) => boolean {
-  return (r) => holds.some((h) => heldProposalId(h) === r.proposal_id && heldRecordAppliesAt(h, r, graph, graphHash));
+  return (r) => holds.some((h) => h.id === r.revision && heldProposalId(h) === r.proposal_id && heldRecordAppliesAt(h, r, graph, graphHash));
 }
 
 /**

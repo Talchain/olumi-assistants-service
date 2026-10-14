@@ -3284,8 +3284,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const current = await readBackState(dispatch, scenarioId);
         const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
         if (!record || !original) editsFailure = 'not_held';
+        // Bound to the model the card was SHOWN on (the current one, or its own base) and still applying NOW by the one rule
+        // the turn showed it by (#3031 buddy: a card shown after an unrelated approval was refused here by its base hash).
         else if (record.revision !== editsForThisCard.revision || record.digest !== editsForThisCard.digest
-          || record.base_graph_hash !== editsForThisCard.graph_hash || current.graphHash !== editsForThisCard.graph_hash) editsFailure = 'stale';
+          || (editsForThisCard.graph_hash !== current.graphHash && editsForThisCard.graph_hash !== record.base_graph_hash)
+          || originalCarrier === undefined || !heldRecordAppliesAt(originalCarrier, record, current.graph, current.graphHash)) editsFailure = 'stale';
         else if (record.approve_action.id !== (body['chip'] as { id?: unknown })?.id || record.approve_action.message !== message) editsFailure = 'refused';
         else {
           if (editsForThisCard.fields.length > 0) {

@@ -179,6 +179,67 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
     expect((cold2._proposal_fields?.proposals ?? []).map((a: Rec) => a.proposal_id)).not.toContain(p.proposal_id);
   }, 90_000);
 
+  /** DGAI's press of a card it shows (SuggestedChips: the record's revision and digest, the SHOWN `graph_hash`, `fields: []`). */
+  const editsPress = (chip: Rec, fieldsOf: Rec, session: string): Rec => {
+    const pid = String(chip.id).slice('agent-approve-proposal:'.length);
+    const rec = (fieldsOf.proposals as Rec[]).find((x) => x.proposal_id === pid)!;
+    expect(rec, JSON.stringify(fieldsOf)).toBeDefined();
+    return { message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: session,
+      proposal_edits: { proposal_id: pid, revision: rec.revision, digest: rec.digest, graph_hash: fieldsOf.graph_hash, fields: [] } };
+  };
+  const authorised = (body: Rec): Rec[] => (body._agent.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change');
+
+  it('⭐ #3031 buddy: the card SHOWN after an unrelated approval, pressed as DGAI presses it (edits bound to the shown hash) → the date is saved; warm, and cold', async () => {
+    for (const temperature of ['warm', 'cold'] as const) {
+      const w = world(); const turn = await route(w);
+      const { deadline, links, session } = await bothCards(w, turn);
+      const afterLinks = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+      let shown = afterLinks._proposal_fields as Rec; let at = session;
+      if (temperature === 'cold') {
+        const p = agentProposals.outstanding(w.sid, null).find((x) => approvalChipIdFor(x.proposal_id) === deadline.id)!;
+        agentProposals.discard(p.proposal_id);
+        at = randomUUID();
+        shown = (await turn({ message: 'Where are we?', source: 'composer', agent_session_id: at }))._proposal_fields as Rec;
+      }
+      expect(shown?.graph_hash, `${temperature}: shown on the CURRENT model`).toBe(hash(w.read()));
+      expect(shown.graph_hash, 'the model moved since the card was made').not.toBe(hash(FX.graph as Rec));
+      const pressed = await turn(editsPress(deadline, shown, at));
+      expect(authorised(pressed), `${temperature}: ${JSON.stringify(authorised(pressed))}`).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+      expect(goal(w.read()).goal_horizon?.deadline, temperature).toBe(DEADLINE);
+    }
+  }, 180_000);
+
+  it('#3031 buddy: the same press bound to the card’s ORIGINAL reply (its own base hash) after the unrelated approval → saved; an arbitrary hash → refused', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: 'Why can I barely see the connections?', source: 'composer' }, [say('The connections are recorded.')]);
+    const deadline = chipOf(first, 'propose_goal_deadline'); const session = first._agent.session_id;
+    const offered = first._proposal_fields as Rec;
+    expect(offered?.graph_hash).toBe(hash(FX.graph as Rec));
+    const second = await turn({ message: 'Please fill in what is missing.', source: 'composer', agent_session_id: session },
+      [call('propose_link_strengths', LINK_ARGS), say('Here are the link strengths to approve.')]);
+    const links = chipOf(second, 'propose_link_strengths');
+    await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect(hash(w.read())).not.toBe(offered.graph_hash);
+    // CONTRAST first: a hash the card was never shown on → refused, nothing written.
+    const wrong = editsPress(deadline, { ...offered, graph_hash: 'f'.repeat(16) }, session);
+    const refused = await turn(wrong);
+    expect(authorised(refused)).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'edits_superseded' })]);
+    expect(goal(w.read()).goal_horizon ?? null).toBeNull();
+    const pressed = await turn(editsPress(deadline, offered, session));
+    expect(authorised(pressed), JSON.stringify(authorised(pressed))).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    expect(goal(w.read()).goal_horizon?.deadline).toBe(DEADLINE);
+  }, 120_000);
+
+  it('NEGATIVE (#3031 buddy): the card shown after the unrelated approval, then its goal renamed (the hash unchanged, no turn between) → the edits press is refused, nothing written', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, links, session } = await bothCards(w, turn);
+    const shown = (await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session }))._proposal_fields as Rec;
+    const g = w.read(); const before = hash(g); goal(g).label = 'Team productivity'; expect(hash(g)).toBe(before); w.replace(g);
+    const pressed = await turn(editsPress(deadline, shown, session));
+    expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'edits_superseded' })]);
+    expect(goal(w.read()).goal_horizon ?? null).toBeNull();
+  }, 90_000);
+
   it('NEGATIVE: the goal’s TARGET changed (with the links) → the card lapses, said; its press writes nothing', async () => {
     const w = world(); const turn = await route(w);
     const { deadline, session } = await bothCards(w, turn);
