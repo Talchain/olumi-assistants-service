@@ -26,6 +26,7 @@ import { sayFigure } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { thresholdReasonOf, type ThresholdReason } from '../compose/claim-safety-cage.js';
 import { GOAL_FIGURES_MISSING_CURRENT_LEVEL } from '../../orchestrator/context/option-result-source.js';
+import { launchWindowGapWords, launchWindowOf } from '../goal-target/goal-target-basis.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -332,8 +333,13 @@ export function thresholdReasonSentence(carried: ThresholdReason, goal: Node, gr
   const unknown = `Olumi can't show each option's chance of reaching your ${g} target in this Run.`;
   const say = (): string => {
     switch (carried.reason) {
-      case 'missing_goal_baseline':
-        return `Olumi can't show each option's chance of reaching your ${g} target yet: the model doesn't have ${g}'s current level to measure from.`;
+      case 'missing_goal_baseline': {
+        // AIE MA1: measured over the window from launch, the goal has no current level to miss.
+        const launch = launchWindowOf(goal);
+        return launch === undefined
+          ? `Olumi can't show each option's chance of reaching your ${g} target yet: the model doesn't have ${g}'s current level to measure from.`
+          : `Olumi can't show each option's chance of reaching your ${g} target yet. ${launchWindowGapWords(g, launch)}`;
+      }
       case 'root_goal':
         if (carried.root_case === 'root_value_source') return `Olumi can't show the chance of reaching your ${g} target: nothing in the model is linked to ${g}, and it has no current level, so the options have nothing to move.`;
         if (carried.root_case === 'root_intercept') return `Olumi can't show the chance of reaching your ${g} target: nothing in the model is linked to ${g}, and the way Olumi built it doesn't let today's level be compared with the target.${OLUMI_BUILT}`;
