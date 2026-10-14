@@ -10,20 +10,22 @@
  * Corpus: T5-integrated D4 r2's registered brief and recorded drafter answer (`tests/fixtures/calendar-deadline-text/
  * t5-integrated-d4-r2.json`, `_source`). `asTheTextAsks` changes four goal fields of that answer to the shape the D4_B text
  * and the field ask for: a constructed answer, not the drafter's behaviour, which is measured on the served build.
- * Texts by identity: `tests/fixtures/calendar-deadline-text/deadline-words.json` (AIE_TEXT_PENDING until the AIE's texts).
+ * Texts by identity: `tests/fixtures/calendar-deadline-text/deadline-words.json` (the AIE's exact texts, #94 6164650110).
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief, DEADLINE_QUOTE_CLAUSE } from '../runtime/build-model.js';
+import { buildModelFromBrief, DEADLINE_CLAIM_QUESTION } from '../runtime/build-model.js';
+import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 
 type Rec = Record<string, any>;
 const D4 = JSON.parse(readFileSync('tests/fixtures/calendar-deadline-text/t5-integrated-d4-r2.json', 'utf8')) as { brief: string; text: string };
-const TEXTS = JSON.parse(readFileSync('tests/fixtures/calendar-deadline-text/deadline-words.json', 'utf8')) as { field_description: string; quote_clause: string };
+const TEXTS = JSON.parse(readFileSync('tests/fixtures/calendar-deadline-text/deadline-words.json', 'utf8')) as { field_description: string; claim_question: string };
 const sid = '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d';
 /** The goal's complete statement, verbatim from the brief, with the earlier words that identify "that quarter". */
 const QUOTE = 'Without a change, we expect it to reach 10 weeks next quarter. We want to reduce it by at least 15% relative to today\'s 8-week level by the end of that quarter.';
 const WORDS = 'by the end of that quarter';
-const ASKED = `Which date does "${WORDS}" mean? It is the deadline your brief sets for "median delivery cycle", but the model does not hold it yet, so no result answers whether it is met by then. Your brief says: "${QUOTE}"`;
+/** Olumi's reading, never "the deadline your brief sets": the claim is Olumi's interpretation of the source (AIE). */
+const ASKED = `Olumi reads "${WORDS}" as a calendar deadline for "median delivery cycle". Which date does that mean? The model does not yet hold a confirmed date for this reading. Retained wording: "${QUOTE}"`;
 
 /** The recorded D4 answer with its goal as the D4_B text and the field ask: no count, the full quote, the claimed point. */
 const asTheTextAsks = (goal: Rec = {}): Rec => {
@@ -44,7 +46,7 @@ async function construct(draft: Rec, brief = D4.brief): Promise<{ sent: Rec; gra
   return { sent, graph, asked: (result.open_questions ?? []) as string[] };
 }
 const goalNode = (graph: Rec): Rec => (graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
-const deadlineAsks = (asked: readonly string[]): string[] => asked.filter((q) => /^Which date does |get there within \d+ months\?/.test(q));
+const deadlineAsks = (asked: readonly string[]): string[] => asked.filter((q) => /^Which date does |^Olumi reads |get there within \d+ months\?/.test(q));
 
 describe('GEN D4 item B: a calendar deadline the drafter claims is asked with its words and their statement', () => {
   it('PRECONDITION: the recorded answer counts the quarter as 3 months, and the build asks that count', async () => {
@@ -85,10 +87,18 @@ describe('GEN D4 item B: a calendar deadline the drafter claims is asked with it
     expect(deadlineAsks(asked)).toEqual(['Does "median delivery cycle" get there within 3 months? The model holds no deadline yet, so no result answers that.']);
   });
 
-  it('the SENT request carries the field\'s text, and the question\'s clause is the fixture\'s, by identity', async () => {
+  it('the SENT request carries the field\'s text, and the question is the fixture\'s, by identity', async () => {
     const { sent } = await construct(asTheTextAsks());
     const goal = (sent.schema as Rec).properties.goal.properties as Rec;
     expect(goal.deadline_words.description).toBe(TEXTS.field_description);
-    expect(DEADLINE_QUOTE_CLAUSE).toBe(TEXTS.quote_clause);
+    expect(DEADLINE_CLAIM_QUESTION).toBe(TEXTS.claim_question);
+  });
+
+  it('BOUND TO THE ADOPTED GOAL (AIE): a retry that re-chose the goal is never asked the first draft\'s quote', () => {
+    const first = { ...(JSON.parse(D4.text) as Rec).goal, horizon_months: null, source_quote: QUOTE, deadline_words: WORDS };
+    expect(calendarDeadlineClaim(D4.brief, first, { ...first, source_quote: null, deadline_words: null }), 'contrast: the same goal, retried')
+      .toEqual({ words: WORDS, quote: QUOTE, goal: 'median delivery cycle' });
+    expect(calendarDeadlineClaim(D4.brief, first, { ...first, metric: 'Delivery throughput' })).toBeUndefined();
+    expect(calendarDeadlineClaim(D4.brief, first, { ...first, value: (first.value as number) + 5 })).toBeUndefined();
   });
 });

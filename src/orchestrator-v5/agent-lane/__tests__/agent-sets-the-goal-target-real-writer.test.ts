@@ -227,7 +227,8 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     const parsed = SystemEventTurnPayloadSchema.safeParse(events[0]);
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
     expect(events[0]!['event']).toEqual({ kind: 'goal_target_edit', goal_node_id: 'goal_mrr', constraint_type: 'at_least', raw_value: 60000, unit: '£', base_graph_hash: baseHash });
-    expect(innerStatus.at(-1), 'the product accepted and committed it').toBe(200);
+    // By identity, not position: the automatic Run's own turn (Paul #94 6166259456) now follows the write.
+    expect(innerStatus[inner.findIndex((b) => b['kind'] === 'system_event')], 'the product accepted and committed it').toBe(200);
 
     // What the REAL handler stored: the goal's >= row and its own raw target, stamped as the user's.
     expect(graphNow().goal_constraints?.filter((c) => c.node_id === 'goal_mrr'), JSON.stringify(graphNow().goal_constraints))

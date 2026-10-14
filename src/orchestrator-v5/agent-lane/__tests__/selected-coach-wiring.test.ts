@@ -12,7 +12,10 @@ import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
-const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
+// USER VOCABULARY (Paul, 14 Oct, agreed; CLAUDE.md §3): the template gains its VOCABULARY section (after STYLE) and three
+// phrases follow it ("qualitative what-ifs", "improve the user's reasoning", "assumption, what-if"): 7,431 → 8,006 bytes
+// (+575). Reversing exactly those four edits on the new template reproduces 170ac5e7….
+const TEMPLATE_SHA = '557b1cf20d5f58cdcf536475937f4691cfe255def6c6b9b816af68e412e0f2f8';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
@@ -35,7 +38,10 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // BYPASS1 (14 Oct): the AIE's Q4 next-step rule appended last (#94 6158232014, verbatim): 21,188 → 22,225 bytes. Every
 // captured body differs from staging's only by this HOST and, on the Agent call that offers tools, the stated-figure rule
 // after the shared instructions (10 leaves; 0 unexplained).
-const HOST_SHA = '94d4e35f5fa29a4ba645ba7c03d18438d1540a612d815d3ed9f204e81270be08';
+// + T2A5 (#3002, AIE rulings on #94 6157593360, key T2A5): the AIE's coach sentence only (`coach-route-v0_2.ts`, "Links whose band
+//   the user themselves stated …"): +7 bytes in the host contract (22,225 → 22,232 bytes). The previous head's (staging 14b1e544) SENT bytes reproduce
+//   94d4e35f… / 2896fa86…; replacing exactly the AIE's three texts with staging's on the SENT bodies gives them byte for byte.
+const HOST_SHA = 'c716ececa934ccdbff3c7baa660ce804071471244d42f0360cfcc9fc0c62c019';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -73,8 +79,11 @@ const HOST_SHA = '94d4e35f5fa29a4ba645ba7c03d18438d1540a612d815d3ed9f204e81270be
 // + #2994 AMEND (AIE Q2): the host contract above only: 32,007 → 32,185 bytes. The previous head's SENT prefix reproduces
 //   1a6ad616…; swapping in this HOST gives exactly this, and the captured bodies differ only by the five AIE constants.
 // + BYPASS1: the host contract above only: 32,185 → 33,222 bytes; staging's SENT prefix with this HOST swapped in.
-const RENDERED_SHA = '2896fa86c033bf4ba49b8fafb95e5e91f7e862a855a8998e1c9f6bbf1add6c73';
-const RENDERED_BYTES = 33_222;
+// + T2A5 (#3002): the host contract above only: 33,222 → 33,229 bytes (+7, the AIE's coach sentence); same leaf-diff proof.
+// + USER VOCABULARY (Paul, 14 Oct): the template edits above only: 33,229 → 33,804 bytes (+575). Derived from the SENT
+//   body; reversing exactly those four edits on the SENT prefix reproduces ce179434… and 33,229 bytes.
+const RENDERED_SHA = '125f58683dd0b151cb252b11ff9459710783984bf4f206613f8388bdce9a2aec';
+const RENDERED_BYTES = 33_804;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.

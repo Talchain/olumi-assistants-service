@@ -235,7 +235,7 @@ describe('every press reaches its typed path, never the free Agent turn', () => 
     const payload = { kind: 'message', scenario_id: scenario, turn_id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1', message: 'pressed', source: 'chip', chip: { id: 'agent-next-review-decision' } };
     const first = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
     const again = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
-    expect(first.assistant_text).toBe('I can’t review this decision yet: it needs a current analysis first.');
+    expect(first.assistant_text).toBe('I can’t review this model yet: it needs a current analysis first.');
     expect(again.assistant_text).toBe(first.assistant_text);
     expect(again.suggested_actions.map((a) => a.id)).toEqual(['agent-run-analysis']);
   });

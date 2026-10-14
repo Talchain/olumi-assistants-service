@@ -68,7 +68,7 @@ export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedG
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never),
       safe_summary: 'Recorded your steady-state judgement', impact: 'low', rerun_recommended: true } });
   return { kind: 'mutated', mutatedGraph: graph, horizonBasisWrite, handlerFacts: [fact as HandlerFact],
-    confirmation: `Recorded as your judgement: ‘${label}’ stays about the same over ${approved.months} months unless you act. Then run the analysis again.` };
+    confirmation: `Recorded as your judgement: ‘${label}’ stays about the same over ${approved.months} months unless you act.` };
 }
 
 /** No unrelated graph bytes may move in this approval. */

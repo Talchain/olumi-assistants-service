@@ -1,5 +1,7 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -57,6 +59,7 @@ import {
   assessConstructionSize,
   retryInstruction,
   keepsEveryUserStatedIdentity,
+  keepsEveryUserStatedIdentityWhenGoalRechosen,
   nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
@@ -125,8 +128,11 @@ const QUANTITY_FRAME = {
     'With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit.' },
 } as const;
 
-/** GEN D4 item B: the clause after the deadline question, carrying the goal's verified statement. AIE_TEXT_PENDING. */
-export const DEADLINE_QUOTE_CLAUSE = ' Your brief says: "<quote>"';
+/**
+ * GEN D4 item B: the claim path's complete question (the AIE's exact text, #94 6164650110). It is Olumi's reading of the
+ * source, asked once; it never says the brief set the date, and it sets, saves or approves nothing.
+ */
+export const DEADLINE_CLAIM_QUESTION = 'Olumi reads "<deadline words>" as a calendar deadline for "<goal name>". Which date does that mean? The model does not yet hold a confirmed date for this reading. Retained wording: "<complete verified goal.source_quote>"';
 
 /**
  * ⭐ STRICT ONLY AT THE OPENAI BOUNDARY (DL #75 5916270318, option D). OpenAI's strict json_schema needs every property in
@@ -237,11 +243,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // (packet 20dfa110, item 6).
       source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
         'For a target actually stated in the brief, including a stated event or deliverable, copy the complete relevant statement VERBATIM. Preserve any stated speaker, subject, figure, comparator, unit, reference, denominator, period, qualifications, conditions and negation. Include consecutive complete sentences when they are needed for that meaning; do not shorten qualifications, stitch unrelated passages or add words or a speaker name not present in the source. null when the brief states no target. A quote does not itself verify the claim, create a numerical target or confirm that its complete meaning is saved.' },
-      // ⭐ GEN D4 ITEM B (DL GO 14 Oct; AIE_TEXT_PENDING, `tests/fixtures/calendar-deadline-text/deadline-words.json`): the
-      // drafter's claim that the goal's deadline is a calendar point, in its own words; checked against `source_quote` and
-      // only asked, never stored (`calendar-deadline-claim.ts`). Optional in the contract, required in what is sent.
+      // ⭐ GEN D4 ITEM B (DL GO 14 Oct; the AIE's exact field text, #94 6164650110, `tests/fixtures/calendar-deadline-text/
+      // deadline-words.json`): Olumi's claim that the goal's deadline is a calendar point, in the source's words; checked
+      // against `source_quote` and only asked, never stored (`calendar-deadline-claim.ts`). Optional in the contract,
+      // required in what is sent.
       deadline_words: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
-        'When the goal’s deadline is a calendar point rather than a number of months (for example the end of that quarter, by Q3, by March), copy the words that state that deadline VERBATIM from goal.source_quote, for example "by the end of that quarter". null when the deadline is a number of months, when the goal has no stated deadline, or when the words are a launch reference, runway, learning or measurement window rather than the goal’s deadline. These words are only used to ask the user which date is meant; they do not set a deadline.' },
+        'For a calendar deadline belonging to this goal whose date genuinely needs clarification, copy the complete applicable deadline wording VERBATIM from goal.source_quote. The quote must preserve the complete goal meaning, including consecutive sentences needed to identify words such as \'that quarter\', with all relevant speakers, conditions and qualifications. null when the source does not support this deadline for this goal, when that linkage is missing, conflicting or ambiguous, when the date is already known, or when the words instead describe a launch reference, runway, forecast horizon, learning or measurement window without being this goal\'s deadline. Do not turn a calendar point into a guessed month count. This is Olumi\'s source-linked interpretation for a clarification only; it does not verify human goal ownership, set or save a date, approve a change or permit a Run.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -688,6 +695,35 @@ export function keepsEveryGoalCondition(first: CandidateModel['goal'], retry: Ca
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
+/** A redraft that re-chooses the goal may add conditions, never lose one the first goal held (by identity, as above). */
+function keepsTheFirstGoalConditions(first: CandidateModel['goal'], retry: CandidateModel['goal']): boolean {
+  const conditions = (g: CandidateModel['goal']): string[] => {
+    const also = g?.basis?.also_required;
+    return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string').map(canonicalLabel) : [];
+  };
+  const kept = conditions(retry);
+  return conditions(first).every((c) => kept.includes(c));
+}
+
+/**
+ * The construction retry's issue for an unattested event goal (`unattestedEventGoal`), and the Agent's clarification when the
+ * redraft still holds it: the AIE's texts (packet `AIE-UNATTESTED-GOAL-RETRY-AND-CLARIFICATION-TEXTS-20261014.json`, sha256
+ * 5b8c2f0e…, #94 6163837638), byte for byte, extracted programmatically. Each optional source clause follows the whole core
+ * text only with a COMPLETE verbatim statement of the brief (`wholeStatementIn`); otherwise it is omitted. The event's words
+ * and the drafted question are retained wording, never verified goal ownership (packet quotation_rules 1).
+ */
+export const UNATTESTED_GOAL_RETRY_ISSUE = 'The drafted event goal has not been verified as the brief’s governing aim. Read the complete retained brief and choose its supported governing goal, preserving that goal’s own quantity, unit, comparator, reference, period and conditions. Keep every further target of the same purpose with its AND meaning, and retain all limits, source qualifications and unresolved viewpoints. Preserve the event in its actual stated role, such as a goal deadline, launch reference, measurement or learning window, or separate aim; do not assign it a role the source does not support. A matching figure, unit, comparator, number of targets or copied goal label does not establish quantity identity. If the full meaning is missing, conflicting or ambiguous, retain the original words and unresolved issue instead of inventing a goal or converting a condition into one.';
+export const UNATTESTED_GOAL_CLARIFICATION = 'Olumi could not prepare a draft that faithfully preserves the brief’s governing aim and conditions. This draft was not saved. Read the complete retained brief and explain the specific unresolved meaning or preparation limitation. Ask a focused clarification only if the goal or success reading is genuinely missing, conflicting or ambiguous; do not re-ask a purpose or target that is already clear. When the retained aim is clear but this preparation path cannot preserve it, say so and continue with useful reasoning or evidence review supported by the current model. Offer another draft or approval step only through an actual available permitted preparation path, with the full current source and conditions; do not promise that another attempt will save a model or calculate a chance.';
+const retainedWording = (u: UnattestedEventGoal, brief: string): string =>
+  (u.words !== null && wholeStatementIn(brief, u.words) ? ` Retained event wording: "${u.words}".` : '')
+  + (u.governing !== null && wholeStatementIn(brief, u.governing) ? ` Retained intent wording: "${u.governing}".` : '');
+function unattestedEventIssue(u: UnattestedEventGoal, brief: string): string {
+  return UNATTESTED_GOAL_RETRY_ISSUE + retainedWording(u, brief);
+}
+function unattestedEventClarification(u: UnattestedEventGoal, brief: string): string {
+  return UNATTESTED_GOAL_CLARIFICATION + retainedWording(u, brief);
+}
+
 export function retrySchemaPinningGoal(
   goal: CandidateModel['goal'],
   /**
@@ -696,6 +732,8 @@ export function retrySchemaPinningGoal(
    * before the key) pins to "no question" (null).
    */
   decisionQuestion?: string | null,
+  /** False only for the redraft of an unattested event goal (`unattestedEventIssue`): the goal is re-chosen, the question stays pinned. */
+  pinGoal = true,
 ): Record<string, unknown> {
   const schema = buildCandidateSchema();
   const properties = schema['properties'] as Record<string, Record<string, unknown>>;
@@ -703,7 +741,7 @@ export function retrySchemaPinningGoal(
     ? { type: 'string', enum: [decisionQuestion] }
     : { type: 'null' };
   const goalSchema = properties['goal'];
-  if (goalSchema === undefined) return schema;
+  if (goalSchema === undefined || !pinGoal) return schema;
   goalSchema['properties'] = {
     // Recovery Batch C (AIE request check, 12 Oct): an EVENT goal's kind and deliverable are part of the goal, so a pinned
     // retry keeps them (else the retry could not say "event_by_date" and the event reading was lost); a quantity goal pins
@@ -914,10 +952,14 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
+        // ⛔ THE USER'S STATED SETTING IS NEVER OLUMI'S (capacity authorship row 7, DL 14 Oct). A setting the drafter called the
+        // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
+        // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
+        // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
         if (intervention.provenance === 'explicit' && unknownBaseline
           && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
-          interventions.push({ ...intervention, provenance: 'ai_proposed' });
+          interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
         } else {
           interventions.push(intervention);
         }
@@ -1073,11 +1115,33 @@ function perOneRangeRule(written: string): string {
  * writes outside a question gets the retry's own per-one words; the retry stays the backstop, unchanged. A brief that
  * writes no range is sent exactly as before, byte for byte.
  */
-export function firstConstructInput(brief: string): string {
+export function firstConstructInput(brief: string, context?: ConstructionContext): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
-  return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  const input = notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  if (context === undefined) return input;
+  return `${input}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`
+    + (context.messages !== undefined && context.messages.length > 0 ? `\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(context.messages)}` : '')
+    + (context.objections !== undefined && context.objections.length > 0 ? `\n\n${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}` : '');
 }
+
+/**
+ * ⭐ A REVISED DRAFT SEES THE CURRENT SAVED MODEL (current-model caller, DL 14 Oct; AIE 6807d4e3 `completion_scope`): the
+ * model as the agent already reads it (`projectModelContext`), so the revision keeps its structure. It is CONTEXT ONLY: it
+ * goes into the drafter's input and never into the text every quote, attestation and number check reads (`brief`), so
+ * nothing in the saved model can pass as the user's words. What the user set in it is carried by the caller with its own
+ * stamp, never re-authored by this draft. (Drafter text: AIE pending.)
+ */
+export interface ConstructionContext {
+  readonly current_model: Record<string, unknown>;
+  /** The conversation's later messages (PL #94 07:32Z Q1): context, never verified words of the user. */
+  readonly messages?: readonly string[];
+  /** The objections the user recorded (S8 `statement`, verbatim): context the revision must not contradict. */
+  readonly objections?: readonly string[];
+}
+export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model, to revise (Olumi\'s record of the model, not the user\'s words; keep its structure and the labels of what you keep):';
+export const LATER_MESSAGES_CONTEXT_LEAD = 'Messages in this conversation after the brief (context only: their origin is not verified, so never quote them as the user\'s words or take a figure from them as stated):';
+export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier findings (context: keep the revised draft consistent with them):';
 
 /** A missing option-to-goal mechanism, read from what admission actually kept. */
 export interface OutcomePathIssue {
@@ -1672,6 +1736,8 @@ export async function buildModelFromBrief(
   wideningCallStructured?: CallStructuredModel,
   /** Test-only observer of the candidate and shared admission path at the widening boundary. */
   observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
+  /** A revised draft's current saved model, as context only (`firstConstructInput`); omitted → today's input, byte for byte. */
+  context?: ConstructionContext,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
@@ -1684,7 +1750,7 @@ export async function buildModelFromBrief(
     const out = await callStructured({
       model: budget.model,
       instructions: buildInstructions,
-      input: firstConstructInput(brief),
+      input: firstConstructInput(brief, context),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
       schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),
@@ -1811,6 +1877,14 @@ export async function buildModelFromBrief(
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
   const firstCandidate = candidate;
+  // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
+  const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
+  /**
+   * The redraft still holds the unattested event as its goal: as an event, or under ANY kind with the event's own label
+   * (⛔ Codex FAIL 3026 r1: a retry keeping "Urgent launch" with `kind: null` registered). Identity, never a word match.
+   */
+  const stillTheUnattestedEvent = (c: CandidateModel): boolean => unattestedEventGoal(c, brief, false) !== null
+    || (unattested !== null && canonicalLabel(c.goal.metric) === canonicalLabel(unattested.event));
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
@@ -1908,7 +1982,8 @@ export async function buildModelFromBrief(
   // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue),
+    ...(unattested !== null ? [unattestedEventIssue(unattested, brief)] : [])];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1929,7 +2004,12 @@ export async function buildModelFromBrief(
      * `compactionKeepsWhatOptionsDo` on the moving candidate). It returns what adoption sets, against the first draft, or null.
      */
     const first = { candidate, admitted, preparation, size, keptApart, linksSetAside, mechanismsUnmodelled, costsOffRevenue } as const;
-    const judgeRetry = (text: string) => {
+    /**
+     * `accepted`: the model the retry edits (the first draft, or the redraft a first retry adopted). Its goal conditions are
+     * the ones a second size retry must keep (⛔ Codex post-merge 3026: compaction was checked against the ORIGINAL event
+     * draft, so a condition the accepted redraft added was lost).
+     */
+    const judgeRetry = (text: string, accepted: CandidateModel) => {
       const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(text) as CandidateModel));
       const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: first.keptApart, setAside: first.linksSetAside }, retryApart);
       // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
@@ -1968,14 +2048,33 @@ export async function buildModelFromBrief(
       // not merely of the refusal path.
       // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
       // fact and relationship the user stated must still be there by name.
-      const keepsUserMaterial = keepsEveryUserStatedIdentity(first.size, retrySize);
+      // A redraft that re-chose an unattested event goal keeps the user's material with the goal node exempt and the user's
+      // target kept as its goal (`keepsEveryUserStatedIdentityWhenGoalRechosen`); every other retry exactly as before.
+      // ⛔ The redraft goal's own target is credited only as ADMISSION RETAINED it (Codex post-merge 3026: a redraft with
+      // `target_stated: false` registered productivity without its ≥10% target, credited from the raw candidate).
+      const admittedGoal = retryAdmitted.nodes.find((n) => n.kind === 'goal') as Record<string, unknown> | undefined;
+      // Read through the one goal-record authority (S5), never the node's fields.
+      const held = admittedGoal === undefined ? null : readGoalRecord(retryAdmitted, String(admittedGoal.id))?.target ?? null;
+      const retainedTarget = {
+        metric: String(admittedGoal?.description ?? admittedGoal?.label ?? ''),
+        // The comparator is the goal's own claim (admission writes the node's comparator later, from it); the figure is what it RETAINED.
+        operator: String(held?.comparator ?? retryCandidate.goal.operator),
+        value: typeof held?.raw === 'number' && Number.isFinite(held.raw) ? held.raw : null,
+        unit: held?.unit ?? null,
+        frame: held?.frame ?? null,
+      };
+      const keepsUserMaterial = unattested === null ? keepsEveryUserStatedIdentity(first.size, retrySize)
+        : keepsEveryUserStatedIdentityWhenGoalRechosen(first.size, retrySize, retainedTarget);
       // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
       const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(first.preparation, retryPreparation, retryRaw, retryAdmitted);
       if (!(
         (needsSizeRetry ? retrySize.nodes <= first.size.nodes && retrySize.edges <= first.size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
         keepsUserMaterial && keepsEveryUserNumber(firstCandidate, first.candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
         // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
-        keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal) &&
+        // A redraft of an unattested event goal re-chooses the goal: adopted only when it is no longer one, losing no condition.
+        (unattested === null ? keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal)
+          : (accepted === firstCandidate ? keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal)
+            : keepsEveryGoalCondition(accepted.goal, retryCandidate.goal)) && !stillTheUnattestedEvent(retryCandidate)) &&
         // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
         // gap — but it must never cover LESS, and when coverage is the only reason
         // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
@@ -1986,7 +2085,7 @@ export async function buildModelFromBrief(
           || (retryOpen < gapCount(first.preparation) && keepsEveryRegisteredOption)
           // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
           || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(first.admitted).size && keepsEveryRegisteredOption)
-          || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          || (chainsAsked.length > 0 && keepsEveryRegisteredOption) || unattested !== null) &&
         // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
         (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(first.admitted))) &&
         // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
@@ -2054,9 +2153,11 @@ export async function buildModelFromBrief(
             : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
           max_output_tokens: budget.max_output_tokens,
           reasoning_effort: budget.reasoning_effort,
-          schema: strictForTheDrafter(retrySchemaPinningGoal(first.candidate.goal, first.candidate.decision_question), { providerBoundary: false }),
+          // The redraft of an unattested event goal re-chooses the goal (unpinned); a second size retry keeps the goal it chose.
+          schema: strictForTheDrafter(unattested === null ? retrySchemaPinningGoal(first.candidate.goal, first.candidate.decision_question)
+            : retrySchemaPinningGoal(previous.goal, first.candidate.decision_question, attempt === 2), { providerBoundary: false }),
         });
-        const adopted = retry.text.length > 0 ? judgeRetry(retry.text) : null;
+        const adopted = retry.text.length > 0 ? judgeRetry(retry.text, previous) : null;
         if (adopted !== null) {
           carriedWithheld = adopted.carriedWithheld;
           leftOut = adopted.leftOut;
@@ -2095,6 +2196,12 @@ export async function buildModelFromBrief(
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
   // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
   const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
+
+  // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
+  // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
+  if (unattested !== null && stillTheUnattestedEvent(candidate)) {
+    return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) };
+  }
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {
@@ -2372,8 +2479,10 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
-    // The FIRST draft's goal: a retry is pinned to it, and its schema does not carry the claim or the quote.
-    const calendarDeadline = calendarDeadlineClaim(brief, firstCandidate.goal as Parameters<typeof calendarDeadlineClaim>[1]);
+    // The FIRST draft's goal carries the claim and the quote (a retry's schema carries neither); it is asked only while the
+    // adopted goal is still that goal (AIE #94 6164650110): a retry that re-chose the goal asks nothing on this path.
+    const calendarDeadline = calendarDeadlineClaim(brief, firstCandidate.goal as Parameters<typeof calendarDeadlineClaim>[1],
+      candidate.goal as Parameters<typeof calendarDeadlineClaim>[2]);
     const claimedHorizon = candidate.goal?.horizon_months;
     const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
       ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
@@ -2393,11 +2502,10 @@ export async function buildModelFromBrief(
       openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
     } else if (statedGoal.horizon.status === 'absent' && calendarDeadline !== undefined) {
       // ⭐ GEN D4 ITEM B (DL GO 14 Oct): a calendar point the drafter claimed, checked inside the goal's own verified
-      // statement (`calendar-deadline-claim.ts`), is asked with today's not-held wording plus that statement, so "that
-      // quarter" is asked with the words that identify it. Only asked: nothing is stored. AIE_TEXT_PENDING (the clause).
-      const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
-      openQuestions.unshift(`Which date does "${calendarDeadline.words}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`
-        + DEADLINE_QUOTE_CLAUSE.split('<quote>').join(calendarDeadline.quote));
+      // statement (`calendar-deadline-claim.ts`), is asked as Olumi's reading with that statement, so "that quarter" is
+      // asked with the words that identify it (the AIE's question, #94 6164650110). Only asked: nothing is stored.
+      openQuestions.unshift(DEADLINE_CLAIM_QUESTION.split('<deadline words>').join(calendarDeadline.words)
+        .split('<goal name>').join(calendarDeadline.goal).split('<complete verified goal.source_quote>').join(calendarDeadline.quote));
     }
     // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
     // its `goal_scope` entry). First, because the ruling requires it clarified or named before
@@ -2482,9 +2590,12 @@ export async function buildModelFromBrief(
   const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
   observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
+  // ⭐ RESTORED (Paul, #94 6166259456): both arms run on the served seam: non-obvious options through a different mechanism,
+  // and risks against the options. Every added item is Olumi's (`markOlumiOptions`, `draft_widening`, `proposed_by`), the
+  // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
-    admit: admitWidened });
+    admit: admitWidened, optionsArm: true, risksArm: true });
   if (widened !== null) {
     admitted = widened.admitted;
     size = assessConstructionSize(admitted);

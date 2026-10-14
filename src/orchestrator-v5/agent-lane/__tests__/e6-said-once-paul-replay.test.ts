@@ -10,7 +10,8 @@
  *   (1) a row and its Why? are said once per state; a shown item cools only itself, so the next item may follow
  *       (Batch R round 2: E6's whole-policy item rule was removed after the independent check, CHECK-R P1);
  *   (2) the same holds for the chip: the build reply's thin-draft risks offer counts as RC-WIDEN's risks row shown;
- *   (3) no risk is added at draft time; the thin-draft offer suggests it for approval.
+ *   (3) E6 parked the draft-time risk; it is RESTORED (Paul #94 6166259456). Beside a widened risk the thin-draft offer is
+ *       not made: Paul's served graph held ONE risk, Olumi's own, and the offer read "Olumi found one risk in your brief".
  *
  * The replay drives the real selector, wire, Why? and chip functions over Paul's own stored graph and turn sequence;
  * the per-turn glue mirrors the route (`agent-v1-turn.ts` guidance + thin-offer lines). No new strings.
@@ -69,7 +70,9 @@ describe('E6 replay of Paul\'s served session: each suggestion and its Why? are 
     expect(served.filter(s => s === 'RC-WIDEN=c39931bcb63d'), 'served: W6 offered 8 times, then pressed').toHaveLength(9);
     const history: AnswerGuidance[] = [];
     const first = replay(() => SERVED, history);
-    expect(first[0]!.risksChip, 'construction shows the thin-draft risks offer').toBe(true);
+    // The served graph's only risk is Olumi's widened one, so construction makes no thin offer (it would call it the brief's);
+    // W6 is still shown once, by the selector, under the same served key.
+    expect(first[0]!.risksChip, 'no thin offer beside Olumi\'s widened risk').toBe(false);
     const recorded = history.flatMap(h => Object.entries(h.entries).map(([k, v]) => `${k}=${v.state_key_hash}`));
     expect(recorded).toContain('RC-WIDEN=c39931bcb63d');
     expect(recorded).toContain('RC-STRENGTHEN-ITEM:deb43dafd281=d44e7cf3e76d');
@@ -78,7 +81,11 @@ describe('E6 replay of Paul\'s served session: each suggestion and its Why? are 
   for (const [name, graph] of [['served build (with Olumi\'s draft-time risk)', SERVED], ['E6 build (no draft-time risk)', E6_DRAFT]] as const) {
     it(`${name}: the risks suggestion is shown in ONE reply, and no row (with its Why?) repeats across 13 replies`, () => {
       const replies = replay(() => graph);
-      expect(replies.filter(r => r.risksChip).map(r => r.turn), 'the "Suggest risks" offer, once').toEqual([1]);
+      const offered = replies.filter(r => r.risksChip).map(r => r.turn);
+      expect(offered, 'the "Suggest risks" offer, once').toHaveLength(1);
+      // Construction offers it only where no widened risk is on the draft (the served graph's one risk is Olumi's).
+      if (graph === E6_DRAFT) expect(offered).toEqual([1]);
+      else expect(offered).not.toContain(1);
       const rows = replies.flatMap(r => r.row === undefined ? [] : [r.row]);
       expect(new Set(rows).size, `each row once: ${JSON.stringify(rows)}`).toBe(rows.length);
       // Batch R round 2 (independent check P1): the whole-policy item rule is removed. Items cool per item and fall through,
@@ -99,8 +106,8 @@ describe('E6 replay of Paul\'s served session: each suggestion and its Why? are 
   });
 });
 
-describe('E6 (3): a risk Olumi cannot apply is suggested, never added at draft time', () => {
-  it('Paul\'s draft is risk-deficient, yet the served seam adds no risk and makes no call; the thin-draft offer suggests it', async () => {
+describe('E6 (3): with the risks arm unset, nothing is added; the thin-draft offer suggests it (the served build now sets both arms)', () => {
+  it('Paul\'s draft is risk-deficient; with no arm set, widening adds no risk and makes no call; the thin-draft offer suggests it', async () => {
     expect(diagnoseDraft(E6_DRAFT).risks, 'POSITIVE CONTROL: the deficiency the served build widened on').not.toBeNull();
     const provider = vi.fn<CallStructuredModel>();
     const admit = vi.fn(() => { throw new Error('no re-admission expected'); });

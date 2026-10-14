@@ -4,10 +4,10 @@ import { explainRun } from './fixtures/run-explanation-follow-up.js';
  * ⭐ THE EXPLICIT RUN AFTER AN OPENAI APPROVAL (RC #63; Codex 5805970015: "served Agent
  * approval calls approvalChipsFor after authorise_change and that helper returns no chips").
  *
- * Fast path 2 applies the approved values and — by design — runs nothing. Without an offer
- * the user had no Run to press on the Agent route. After a change, and ONLY when the
- * canonical readiness in the SAME response admits a run, the reply offers one typed Run chip;
- * clicking it takes fast path 3. Nothing runs implicitly.
+ * ⭐ ADOPTED (Paul, #94 6166259456, confirmed 14 Oct): after a COMMITTED change, and ONLY when the canonical readiness
+ * of the saved revision admits a run, the existing Run runs ONCE, automatically, in the same turn, and no Run chip is
+ * offered (it already ran). This supersedes "fast path 2 runs nothing; one typed Run chip is offered". The negatives
+ * stand: no admission → no Run and no chip; a replay never runs again; a refused approval runs nothing.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -37,6 +37,14 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 type Chip = { id: string; label: string; message: string; action_type?: string };
+/** The Explain press's interpreting call: no tools at all, `tool_choice: 'none'` (agent-v1-turn.ts `interpretSelectedRun`). */
+const isInterpretingCall = (body: Record<string, unknown>): boolean => body['tool_choice'] === 'none'
+  && Array.isArray(body['tools']) && (body['tools'] as unknown[]).length === 0;
+/** That call's request: the last input item's JSON (`{ request, canonical_state }`). */
+const interpretingRequestOf = (body: Record<string, unknown>): { request?: string; canonical_state?: { ok?: boolean } } => {
+  const last = (body['input'] as { content?: { text?: string }[] }[]).at(-1);
+  return JSON.parse(last?.content?.[0]?.text ?? '{}') as { request?: string; canonical_state?: { ok?: boolean } };
+};
 
 describe('the explicit Run is offered after a change the canonical readiness admits', () => {
   let app: FastifyInstance;
@@ -59,6 +67,12 @@ describe('the explicit Run is offered after a change the canonical readiness adm
   let approvalReads = 0;
   /** Scripted model outputs for an agent-loop turn, consumed in order before the default behaviour. */
   let script: Record<string, unknown>[] = [];
+  /** The Run response's own stamp (its result's graph hash, its `computed_at`); null → an unstamped Run, as before. */
+  let runStampedAt: string | null = null;
+  /** The preceding Run's delta the read (`current_read`) and the Run response carry; undefined → a first Run. */
+  let runDelta: unknown;
+  /** The interpreting call's words (tool-less, `tool_choice: 'none'`); null → the default answer below. */
+  let interpretation: string | null = null;
   /** A route instance on FRESH modules: an empty process cache and an empty proposal store. */
   async function buildRouteApp(): Promise<FastifyInstance> {
     vi.resetModules();
@@ -74,12 +88,17 @@ describe('the explicit Run is offered after a change the canonical readiness adm
         analysis_ready: readiness,
         analysis_state: runs > 0 ? { ...analysisState, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } } : analysisState,
         ...(runs > 0 ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } } } : {}),
+        ...(runs > 0 && runDelta !== undefined ? { current_read: { run_delta: runDelta } } : {}),
       };
     });
     a.post('/orchestrate/v2/turn', async (req) => {
       const b = req.body as { kind?: string; event?: { from: string; to: string }; chip?: { action_type?: string } };
       if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
       if (b.chip?.action_type === 'run_analysis') runs += 1;
+      if (b.chip?.action_type === 'run_analysis' && runStampedAt !== null) {
+        return { assistant_text: 'ok', blocks: [{ type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: {} }], analysis_ready: readiness,
+          analysis_state: { run_state: { kind: 'complete_current', computed_at: runStampedAt } }, ...(runDelta !== undefined ? { run_delta: runDelta } : {}) };
+      }
       return { assistant_text: 'ok', blocks: b.chip?.action_type === 'run_analysis' ? [{ type: 'analysis_result', data: {} }] : [], analysis_ready: readiness };
     });
     await a.register(agentV1TurnRoute);
@@ -92,6 +111,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       modelBodies.push(body);
       const runCall = runPressToolResponse(body);
       if (runCall) return runCall;
+      if (interpretation !== null && isInterpretingCall(body)) {
+        return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }] }), { status: 200 });
+      }
       if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
@@ -107,7 +129,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; graphReads = 0; approvalReads = 0; script = []; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; graphReads = 0; approvalReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -122,23 +144,23 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     return t2.json() as { suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } };
   }
 
-  it('RED: approval applied and the canonical readiness admits a run → ONE typed Run chip, and nothing ran', async () => {
+  it('⭐ (adopted, Paul #94) approval applied and the canonical readiness admits a run → the Run runs ONCE in the same turn; no Run chip', async () => {
     readiness = { status: 'needs_user_input', may_run: true };
     const b = await proposeThenApprove();
     expect(b._diagnostic_trace.fast_path).toBe('approve');
     expect(edges, 'the approval really applied').toHaveLength(1);
-    expect(approvalReads, 'Accept retains both existing graph reads').toBe(2);
-    expect(postWriteReads).toBe(1);
-    expect(b.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([
-      expect.objectContaining({ id: 'agent-run-analysis', label: 'Run analysis', action_type: 'run_analysis' }),
-    ]);
-    expect(runs, 'the offer runs nothing').toBe(0);
+    expect(runs, 'the existing Run, once, after the commit').toBe(1);
+    // The Run moves the analysis, so the final read is a fresh read after it (the capability's own check + that one).
+    expect(postWriteReads).toBe(2);
+    expect(b.suggested_actions.filter((c) => c.action_type === 'run_analysis'), 'it already ran: no Run chip').toEqual([]);
   });
 
-  it('the offered chip, echoed as the UI sends it, enters the loop — one run and same-turn interpretation', async () => {
+  it('the Run chip, pressed as the UI sends it, still enters the loop — one run and same-turn interpretation', async () => {
     readiness = { status: 'ready', may_run: true };
-    const b = await proposeThenApprove();
-    const run = b.suggested_actions.find((c) => c.action_type === 'run_analysis')!;
+    await proposeThenApprove();
+    const { RUN_OFFER_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    const run = { ...RUN_OFFER_CHIP } as Chip;
+    runs = 0;
     modelBodies = [];
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: run.message, source: 'chip', chip: { id: run.id, action_type: run.action_type },
@@ -198,10 +220,11 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       .some((a) => a.id === 'agent-suggest-what-it-needs'), 'a carried chip follows the same rule').toBe(offered);
   });
 
-  it('CONTROL: approval applied and a run is admitted → Run, and NOT the next-step chip', async () => {
+  it('CONTROL: approval applied and a run is admitted → it RAN, and neither a Run chip nor the next-step chip is offered', async () => {
     readiness = { status: 'ready', may_run: true };
     const b = await proposeThenApprove();
-    expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-run-analysis']);
+    expect(runs).toBe(1);
+    expect(b.suggested_actions.map((c) => c.id)).toEqual([]);
   });
 
   it('OPPOSITE CONTROL (C6 turnReadCache): after a VERIFIED commit the route answers from that verified read — it makes no second post-write read that could fail', async () => {
@@ -214,7 +237,13 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const b = await proposeThenApprove() as unknown as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
     expect(edges, 'the approval really committed').toHaveLength(1);
     expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'the approval reports it applied').toBe(true);
-    expect(postWriteReads, 'ONE post-write read: the capability\'s own check, reused by the final readback').toBe(1);
+    // Adopted (Paul #94): the automatic Run follows the commit, so the final readback is a second post-write read after
+    // it (the capability's own check is still reused up to the Run). That read is refused here: the reply still never
+    // claims a ready model is blocked, and borrows no result.
+    expect(runs, 'the automatic Run ran on the verified commit').toBe(1);
+    // The capability's own check; the Run's own post-run read (refused here, so it is not kept); the final readback's
+    // one retry of it (refused too). A read that fails is never answered from an older one.
+    expect(postWriteReads, 'the capability\'s check, the Run\'s post-run read, the final read').toBe(3);
     expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), 'a ready model is never given a blocked claim').toBe(false);
   });
 
@@ -278,6 +307,77 @@ describe('the explicit Run is offered after a change the canonical readiness adm
    * ⛔ Independent review of #1792 (5806213240): the durable row keeps the words only, so a
    * retry of the SAME turn_id after a lost response replayed with no Run and no approve control.
    */
+  /**
+   * ⭐ THE AUTOMATIC RUN IS INTERPRETED IN ITS OWN TURN (DL, after #3038; Paul #94 6166259456: "science-based AI coaching
+   * after every implemented change"). The Run follows the approval, so no Agent read it: ONE interpreting call, the Explain
+   * press's own, over THIS Run (its run-fact identity on the read), and its words are the reply's coaching on the new result.
+   */
+  describe('the automatic Run is interpreted in its own turn', () => {
+    const RUN_AT = '2026-10-01T12:00:00.000Z';
+    const COACHING = 'This Run reads the model as you just saved it, with the link from Team size to Velocity included.';
+    /** The preceding Run's delta: the approved link entered the analysis (one typed row, complete coverage). */
+    const LINK_ENTERED = {
+      attribution_case: 'C1_attributable', input_coverage: 'complete', win_probabilities: [], goal_chances: [], flip_thresholds: [],
+      leader: { changed: false, noise_verdict: 'not_noise_qualified' },
+      input_changes: [{ entity_kind: 'link', field: 'presence', link: { from: 'f1', to: 'o1' }, before: null, after: { raw: true } }],
+    };
+    const CODE_LINE = 'The link from ‘Team size’ to ‘Velocity’ is now part of the analysis.';
+    const approveAndRun = async () => {
+      readiness = { status: 'ready', may_run: true };
+      interpretation = COACHING;
+      const b = await proposeThenApprove() as unknown as { assistant_text: string; suggested_actions: Chip[] };
+      expect(runs, 'the automatic Run ran once').toBe(1);
+      return b;
+    };
+
+    it('RED: approve → the Run runs → ONE interpreting call over THIS Run; the reply carries its coaching', async () => {
+      runStampedAt = RUN_AT;
+      const b = await approveAndRun();
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls, 'one interpreting call').toHaveLength(1);
+      const sent = interpretingRequestOf(calls[0]!);
+      const { RUN_EXPLANATION_MESSAGE } = await import('../run-explanation.js');
+      expect(sent.request, 'the Explain press\'s own request').toBe(RUN_EXPLANATION_MESSAGE);
+      expect(sent.canonical_state?.ok, 'over the canonical read after the Run').toBe(true);
+      expect(b.assistant_text).toContain(COACHING);
+    });
+
+    it('RED (compare): with the preceding Run\'s delta, the call is given the Run record and the reply leads with it', async () => {
+      runStampedAt = RUN_AT;
+      runDelta = LINK_ENTERED;
+      const b = await approveAndRun();
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0]!['instructions']), 'what changed, from the delta\'s typed row').toContain(`Run record: "${CODE_LINE}`);
+      expect(b.assistant_text).toContain(`${CODE_LINE}`);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(b.assistant_text.indexOf(CODE_LINE)).toBeLessThan(b.assistant_text.indexOf(COACHING));
+    });
+
+    it('ADVERSARIAL: the read selects another Run (same hash, another computed_at) → no interpreting call, no coaching', async () => {
+      runStampedAt = '2026-10-01T11:59:00.000Z';
+      const b = await approveAndRun();
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).not.toContain(COACHING);
+    });
+
+    it('CONTRAST: a Run with no stamp to bind → no interpreting call', async () => {
+      const b = await approveAndRun();
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).not.toContain(COACHING);
+    });
+
+    it('CONTRAST: a turn that commits nothing runs nothing and interprets nothing', async () => {
+      readiness = { status: 'ready', may_run: true };
+      runStampedAt = RUN_AT;
+      interpretation = COACHING;
+      const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.' } });
+      expect(t1.statusCode).toBe(200);
+      expect(runs).toBe(0);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+    });
+  });
+
   describe('a durable replay re-offers the original typed actions, re-validated on today\'s state', () => {
     const replay = async (payload: Record<string, unknown>) => {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
@@ -285,17 +385,18 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       return r.json() as { suggested_actions: Chip[]; _agent: { replayed?: boolean }; _provider_calls: unknown[] };
     };
 
-    it('RED: approve with a stable turn_id, lose the response, retry → the same ONE Run chip, zero runs, no model call, no extra write', async () => {
+    it('approve with a stable turn_id (it ran once), lose the response, retry → the replay runs NOTHING more, no Run chip, no model call, no extra write', async () => {
       readiness = { status: 'needs_user_input', may_run: true };
       const T = '11111111-2222-4333-8444-555555555555';
       const first = await proposeThenApprove(T);
-      expect(first.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toHaveLength(1);
+      expect(runs, 'the approving turn ran the analysis once').toBe(1);
+      expect(first.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toHaveLength(0);
       const writesBefore = edges.length; const callsBefore = modelBodies.length;
       // The retry is byte-identical to the first request (the UI resends it).
       const again = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Yes, make that change.', source: 'chip', chip: { id: lastApproveId }, turn_id: T });
       expect(again._agent.replayed, 'the real replay path').toBe(true);
-      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([expect.objectContaining({ id: 'agent-run-analysis' })]);
-      expect(runs, 'the replay runs nothing').toBe(0);
+      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([]);
+      expect(runs, 'the replay runs nothing more').toBe(1);
       expect(modelBodies.length - callsBefore, 'no model call').toBe(0);
       expect(edges.length - writesBefore, 'no second write').toBe(0);
     });
@@ -377,17 +478,18 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       } finally { await fresh.close(); }
     };
 
-    it('RED: approve, lose the response, the process restarts, retry → the SAME Run offer from the durable row; 0 runs, 0 model calls, 0 writes', async () => {
+    it('approve (it ran once), lose the response, the process restarts, retry → no Run offer was persisted and none is invented; no second run, 0 model calls, 0 writes', async () => {
       readiness = { status: 'needs_user_input', may_run: true };
       const T = '61111111-2222-4333-8444-555555555555';
       await proposeThenApprove(T);
+      expect(runs, 'the approving turn ran the analysis once').toBe(1);
       const row = rows.get(`${SCENARIO}:${T}`)!;
-      expect(row.pending_actions, 'the offer was persisted with the answer row').toEqual([expect.objectContaining({ chip_id: 'agent-run-analysis', action: { kind: 'run_analysis' } })]);
+      expect((row.pending_actions as { chip_id?: string }[]).some((p) => p.chip_id === 'agent-run-analysis'), 'it ran: no Run offer persisted').toBe(false);
       const writes = edges.length; const calls = modelBodies.length;
       const again = await onFresh(approveBody(T));
       expect(again._agent.replayed, 'the real replay path, on a fresh instance').toBe(true);
-      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([expect.objectContaining({ id: 'agent-run-analysis' })]);
-      expect(runs).toBe(0);
+      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([]);
+      expect(runs).toBe(1);
       expect(modelBodies.length - calls).toBe(0);
       expect(edges.length - writes).toBe(0);
     });

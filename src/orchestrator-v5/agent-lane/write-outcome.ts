@@ -65,7 +65,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   partially_applied: 'only part of it was saved',
   not_applied: 'none of it was applied',
   model_changed_while_proposing: 'the model changed while it was being put together',
-  model_already_exists: 'a model already exists for this decision',
+  model_already_exists: 'a model already exists for this scenario',
   read_only_preview: 'this preview cannot change the model',
   approve_on_card: 'a typed “yes” cannot adopt an Olumi suggestion — press the displayed adoption card to include it',
   // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
@@ -75,7 +75,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
   construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
-  registration_refused: 'it could not be saved to this decision — ask me to try again',
+  registration_refused: 'it could not be saved to this scenario — ask me to try again',
   option_name_ambiguous: 'the model uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
   /**
    * ⛔ EVERY CODE A WRITE TOOL RETURNS HAS WORDS (fix/agent-never-shows-instructions-or-codes). Until now these fell
@@ -84,13 +84,13 @@ const REFUSAL_WORDS: Record<string, string> = {
    * (`withheld_on_chip_turn`) and `buildModelFromBrief` (`construction_unavailable`, `empty_brief`). A compound part's
    * `reason` reads through this same map (`unresolved_effect_relationship` is the option-level writer's refusal).
    */
-  not_found: 'Olumi could not read this decision’s model, so nothing was changed — ask me to try again',
+  not_found: 'Olumi could not read this scenario’s model, so nothing was changed — ask me to try again',
   unsupported_compound: 'this proposal mixes changes that cannot be applied together, so nothing was changed — ask me to propose them one at a time',
   unparsable_arguments: 'the request could not be read, so nothing was changed — ask me again',
   unknown_tool: 'that change cannot be made here, so nothing was changed',
   withheld_on_chip_turn: 'a suggestion button cannot approve a change — approving has its own button',
   construction_unavailable: 'building a model is not available right now — ask me to try again later',
-  empty_brief: 'there was no description of the decision to build it from — tell me what you are deciding',
+  empty_brief: 'there was no brief to build it from — tell me about the question you are working on',
   unresolved_effect_relationship: 'the option does not act on that factor, so no level could be set for it',
 };
 
@@ -518,7 +518,11 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
 
   const code = String(r.refusal ?? '');
   const unconfirmed = UNCONFIRMED_WORDS[code];
-  if (unconfirmed !== undefined) return unconfirmed;
+  // A capability's own unconfirmed receipt (the link set's, AIE packet 2b19ae59) is said instead of the generic words; a
+  // re-encoded sibling disclosure keeps them beside it.
+  if (unconfirmed !== undefined) {
+    return typeof r.follow_up === 'string' && !Array.isArray(r.reencoded_siblings) ? withoutAgentDirections(r.follow_up).text : unconfirmed;
+  }
   const mutated = r.mutated === true;
   // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
   if (code === 'approval_required' && !mutated) return exactlyOneCardWaits ? APPROVAL_REQUIRED_WORDS : APPROVAL_REQUIRED_BUTTON_WORDS;

@@ -1,13 +1,17 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
+import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
-import { latestLinkBands } from '../../goal-target/input-claim-context.js';
+import { linkBandSource } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds, riskOccurrenceRecordedWords, riskOccurrenceSubject,
+  SET_RISK_OCCURRENCE_OP, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -167,6 +171,15 @@ const notWrittenReason = (value: number, factor: string): string =>
   + `and ask for ${factor}\u2019s figure only if the user wants to set it. Never send 0 or any placeholder to mean "not set": leave level out.`;
 
 /** What the Agent is told to say about a named input that cannot hold a value. */
+/** AIE packet 6e52e896 `event_risk.risk_occurrence_note`, byte for byte: a risk root that can take Olumi's range, named without one. */
+const RISK_OCCURRENCE_NEEDED_NOTE = 'These risks have no held occurrence likelihood. If the event and listed window are clear and supported, propose one through the available propose_assumptions tool with that risk alone, user_stated false, a grounded basis, and occurrence_range: the low and high chance, in percent, that it happens at least once within within_months. Nothing was proposed for these risks in this call. If event meaning or window is unresolved, preserve its source and clarify only that missing part.';
+/** AIE packet 6e52e896 `event_risk.card_note`, byte for byte: what the Agent is told beside the card. */
+const RISK_OCCURRENCE_PROPOSED_NOTE = 'Show the card exactly as public_label. It proposes Olumi’s estimated occurrence likelihood within the stated window, not a human figure or a measurement. It stays Olumi’s after approval. Occurrence, the effect relationship’s existence, and its effect size remain distinct; its effect size is still Olumi’s placeholder. Only the bound approval button applies the shown change; it does not Run the model.';
+/** AIE packet 6e52e896 `event_risk.mixed_refusal`, byte for byte. */
+const RISK_OCCURRENCE_ALONE_DETAIL = 'Olumi’s starting assumption for a risk needs its own approval. Nothing was proposed: propose the risk alone in one call, and any other values in another.';
+/** AIE packet 6e52e896 `event_risk.unknown_save`, byte for byte: the unknown outcome (no recorded / not-recorded inference). */
+const RISK_OCCURRENCE_UNKNOWN_SAVE = 'The save could not be confirmed. Check the current model before retrying.';
+
 const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
   'NOT in this proposal. Tell the user plainly, before they approve, that each was left out and why; describe its ' +
@@ -278,11 +291,11 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
-import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
-import { approvedGraphHeld, humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
+import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -1151,6 +1164,42 @@ interface GraphRead {
 
 // An edited graph can still carry an earlier Run. Its old result must not be
 // given a display name derived from the new intervention level.
+/**
+ * ⭐ THE COMPARISON WITH THE PRECEDING RUN, for the model (Paul #94 6166259456; DL 14 Oct). ONE reader for both the state
+ * read (`get_canonical_state`) and a Run's own output: the delta the model may be shown (`selectedRunDeltaForModel`) and,
+ * where none is licensed or its C1 was checked down, Olumi's own leader-free record of what changed (`rerunRecordForModel`).
+ * Both undefined for a first Run.
+ */
+async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel> }> {
+  const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
+  const delta = await selectedRunDeltaForModel(scenarioId, g, g.run_delta);
+  const optionNames = optionNameAliasesForCurrentRun(g);
+  // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
+  // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
+  // model delta (context byte-unchanged) and for a first Run.
+  // SD-1 (rehearsal12): a licensed delta whose C1 the projection checked down (several changes, or partial coverage)
+  // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
+  const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
+    && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
+  // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
+  // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
+  // This fallback shares the selected-delta budget; incomplete coverage must not start a second deadline.
+  const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
+    : await rerunPairReadForRunDelta(scenarioId, requestId, g.run_delta, Math.max(0, evidenceDeadlineAt - Date.now()));
+  const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
+    [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
+    pairRead?.frameRefitLinks);
+  return { delta, rerunRecord };
+}
+
+/** What a Run's output tells the model to do with its comparison facts (Paul #94 6166259456). */
+export const RUN_COMPARISON_NOTE = 'This Run has a preceding Run of this model. In your reply, coach on this Run\u2019s new result: what it '
+  + 'means for the user\u2019s goal and decision, grounded in the model\u2019s own reasoning and the science behind the analysis. Then '
+  + 'compare it with the preceding Run: what changed in the model between the two Runs (from rerun_record or run_delta) and how each '
+  + 'option\u2019s result moved, using only the figures given here. Where these facts cannot support a quantity (a figure withheld, a '
+  + 'change not recorded, or a movement no change is shown to cause), say so plainly instead of estimating. Never present the '
+  + 'preceding Run\u2019s result as the current one.';
+
 function optionNameAliasesForCurrentRun(g: Omit<GraphRead, 'run_delta'>): ReturnType<typeof optionNameAliases> {
   const kind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   // The graph read has already checked the Run against the canonical analysis
@@ -2208,6 +2257,36 @@ function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews:
 
 /** D1 (AIE AMEND, 12 Oct), verbatim: the pending offer's words for Olumi's first estimate of a link nobody had sized. */
 export const D1_PENDING_FIRST_ESTIMATE = 'an estimate from Olumi that has not yet been applied';
+/**
+ * ⭐ #3002 (DL; Codex CHECK-3002-783a55b8 item 3 and its buddy review): the HOST names, on the card itself, EVERY link the set
+ * leaves out and why, by the model's own labels for its ids, so the user never relies on the Agent saying it. The receipt
+ * repeats these sentences from the stored card, only once the write is read back whole (`applyLinkStrengthSet`).
+ * The unknown-origin and third-party sentences are the AIE's exact texts (packet 2b19ae59, #94 6163353417); the definitional
+ * and held-figure ones keep their reasons in the same frame, AIE_TEXT_PENDING.
+ */
+const LEFT_OUT_CARD_LEAD = 'Left out of this change set: ';
+/** A link left out, by the model's labels; a third party's carries the source it is attributed to, whole. */
+export interface LeftOutLink { readonly pair: string; readonly source?: string }
+const attributed = (x: LeftOutLink): string => `${x.pair}, attributed to "${x.source ?? ''}"`;
+const LEFT_OUT_CARD = {
+  unknown_origin: (xs: readonly LeftOutLink[]) => xs.length === 1
+    ? `Left out of this change set: ${xs[0]!.pair}, because the proposed band's source is unverified. Its current relationship and source are kept.`
+    : `Left out of this change set: ${xs.map((x) => x.pair).join('; ')}, because the proposed bands' sources are unverified. Their current relationships and sources are kept.`,
+  third_party: (xs: readonly LeftOutLink[]) => xs.length === 1
+    ? `Left out of this change set: ${xs[0]!.pair}. The proposed band is attributed to "${xs[0]!.source}"; it is not presented as your judgement or a new Olumi estimate. Its current relationship and source are kept.`
+    : `Left out of this change set: ${xs.map(attributed).join('; ')}. These bands are not presented as your judgement or new Olumi estimates. Their current relationships and sources are kept.`,
+  definitional: (xs: readonly LeftOutLink[]) => `${LEFT_OUT_CARD_LEAD}${xs.map((x) => x.pair).join('; ')}, because a calculation the model declares defines ${
+    xs.length === 1 ? 'it. Its current relationship is kept.' : 'them. Their current relationships are kept.'}`,
+  user_figure: (xs: readonly LeftOutLink[]) => `${LEFT_OUT_CARD_LEAD}${xs.map((x) => x.pair).join('; ')}, because ${
+    xs.length === 1 ? 'it holds the user\u2019s own figure. Its current relationship is kept.' : 'they hold the user\u2019s own figure. Their current relationships are kept.'}`,
+} as const;
+export const leftOutCard = (reason: keyof typeof LEFT_OUT_CARD, xs: readonly LeftOutLink[]): string => xs.length === 0 ? '' : LEFT_OUT_CARD[reason](xs);
+/** The Agent's notes for a card that leaves links out: the AIE's exact texts (packet 2b19ae59). */
+const LINK_SET_APPROVAL_SCOPE_NOTE = 'Nothing has changed yet. One approval applies only the changes listed as included on the current card, together or none; it does not apply any link listed as left out.';
+const LINK_SET_UNKNOWN_AGENT_NOTE = 'Some proposed links were left out because the source of their bands could not be verified (`left_out_unknown_origin`). Name those directed relationships as the current card does. Their existing values and sources are kept; do not call the proposed bands the user\'s or Olumi\'s. Do not re-ask source already retained: explain the actual missing or conflicting binding, and use a focused clarification or useful evidence review where supported.';
+const LINK_SET_THIRD_PARTY_AGENT_NOTE = 'Some proposed links were left out as attributed third-party bands (`left_out_third_party`). Name the directed relationships and their cited sources as the current card does; preserve the complete claims and their verification state. Say that this proposal does not change those links, not that the bands are absent from the model or have never been recorded. Do not ask the user to claim the source\'s view as their own. If the user independently supplies a new judgement, retain that new statement separately and use only an actually supported bound proposal; agreement or approval does not rewrite the original source.';
+/** The user's line when a link set's save cannot be confirmed: the AIE's exact text (packet 2b19ae59, `card_receipt`). */
+export const LINK_SET_SAVE_NOT_CONFIRMED = 'The save could not be confirmed. Check the current model before retrying.';
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -2651,7 +2730,7 @@ export function createAgentCapabilities(
         const p = settingProvenanceOf(((node?.interventions ?? {}) as Record<string, unknown>)[fid], after!.nodes.find((x) => x.id === fid));
         return p.origin === 'ai' && !p.structural;
       }).map(labelOf);
-      return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
+      return `Added "${String(node?.label ?? id)}", linked from the question and acting on ${factorIds.map(labelOf).join(', ')}.`
         + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
@@ -3494,31 +3573,54 @@ export function createAgentCapabilities(
 
   /**
    * ⭐ B RESTATED GOAL (`draft-replacement.ts`; DL ruling (B), PL 6116779075, AIE 0244): the three gates over ONE read, at
-   * the offer and again at the approval. `allowed` = the message turns the offer already bound (none at the offer; the
-   * typed goal's turn at the approval). What was found, in plain words; empty = an unreviewed draft whose only human
-   * material is the brief's own. A record that cannot be read is listed too: unknown authority never permits replacement.
+   * the offer and again at the approval. `found` = what still refuses, in plain words; empty = a draft the revision may
+   * replace. A record that cannot be read is listed too: unknown authority never permits replacement.
+   *
+   * ⭐ CURRENT-MODEL CALLER (PL #94 07:32Z, DL-ACKed): later human work no longer refuses by itself; it is KEPT.
+   *   · G1: each human-stamped item is carried by identity onto the revised draft (`carryHumanItems`); an unknown author,
+   *     a target for the goal and the steady-horizon judgement still refuse.
+   *   · G2: later saved changes are in the saved model, which the revision reads as context; an incomplete ledger, or no
+   *     record that the draft is the one built from the brief, still refuses.
+   *   · G3: at the OFFER (`'offer'`) every later message is bound to it and read as context, never as the user's verified
+   *     words; at the APPROVAL, `allowed` = the turns the offer bound plus the typed goal's, and any other message refuses.
+   *   · Objections the user recorded are context; objections that cannot be read still refuse.
+   * `later` says whether the draft holds any later material at all (an unedited draft is prepared exactly as before).
    */
+  type DraftGate = { readonly found: string[]; readonly items: readonly HumanItem[]; readonly bound: readonly string[];
+    readonly messages: readonly string[]; readonly objections: readonly string[]; readonly later: boolean };
   const unreviewedDraftGate = async (
-    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, allowed: readonly string[],
-  ): Promise<string[]> => {
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, allowed: readonly string[] | 'offer',
+  ): Promise<DraftGate> => {
     const brief = typeof g.brief_text === 'string' ? g.brief_text.trim() : '';
-    if (brief === '') return ['no saved brief that this draft was built from'];
-    const found = humanMaterialAfterTheDraft(g.raw);
+    if (brief === '') return { found: ['no saved brief that this draft was built from'], items: [], bound: [], messages: [], objections: [], later: false };
+    const items = humanItemsAfterTheDraft(g.raw);
+    const found = items.filter((i) => i.carry === undefined).map((i) => i.words);
+    let bound: string[] = [];
+    let messages: string[] = [];
+    let objections: string[] = [];
+    let laterWrites = false;
     try {
       if (opts.readCommittedTurnLedger === undefined) throw new Error('turn_ledger_unavailable');
       const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id);
-      found.push(...writesBesidesTheConstruction(ledger, ctx.scenario_id, brief), ...messagesBesidesTheBrief(ledger, brief, allowed, ctx.turn_id));
+      const writes = laterWritesThan(ledger, ctx.scenario_id, brief);
+      if (typeof writes === 'string') found.push(writes);
+      else laterWrites = writes > 0;
+      const later = (ledger.later_user_messages ?? []).filter((m) => m.turn_id !== ctx.turn_id);
+      if (allowed === 'offer') {
+        bound = later.map((m) => m.turn_id);
+        messages = later.map((m) => m.text);
+      }
+      found.push(...messagesBesidesTheBrief(ledger, brief, allowed === 'offer' ? bound : allowed, ctx.turn_id));
     } catch {
       found.push('a saved history that could not be read');
     }
     try {
       if (opts.readStatedObjections === undefined) throw new Error('stated_objections_reader_unavailable');
-      const objections = await opts.readStatedObjections(ctx.scenario_id, ctx.request_id);
-      if (objections.length > 0) found.push(`${objections.length} objection${objections.length === 1 ? '' : 's'} you recorded`);
+      objections = (await opts.readStatedObjections(ctx.scenario_id, ctx.request_id)).map((o) => o.statement);
     } catch {
       found.push('recorded objections that could not be read');
     }
-    return found;
+    return { found, items, bound, messages, objections, later: items.length > 0 || laterWrites || messages.length > 0 || objections.length > 0 };
   };
   const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
   const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
@@ -3533,6 +3635,10 @@ export function createAgentCapabilities(
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
+  /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
+  const withdrawnProposals = new Set<string>();
+  /** How many times this turn's draft (by its cache key) was re-issued after a withdrawal: each re-issue's id is fresh. */
+  const reissuedDrafts = new Map<string, number>();
 
   /**
    * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
@@ -3543,8 +3649,8 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
-    const found = await unreviewedDraftGate(ctx, g, []);
-    if (found.length > 0) return { refused: { ok: false, mutated: false, refusal: DRAFT_GATE_REFUSAL, detail: '' }, found };
+    const gate = await unreviewedDraftGate(ctx, g, 'offer');
+    if (gate.found.length > 0) return { refused: { ok: false, mutated: false, refusal: DRAFT_GATE_REFUSAL, detail: '' }, found: gate.found };
     const typedGoal = (ctx.user_turn_text ?? '').trim();
     if (callStructured === undefined || ctx.turn_id === undefined || g.graph_identity_hash === '' || typedGoal === '') {
       return notOffered('revised_draft_unavailable', 'A revised draft cannot be prepared here, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
@@ -3553,8 +3659,13 @@ export function createAgentCapabilities(
     const input = revisedDraftBrief(g.brief_text as string, typedGoal);
     let out: ToolResult;
     try {
+      // The current saved model (the agent's own view of it), the later messages and the objections, as CONTEXT only; an
+      // unedited draft is prepared exactly as before, byte for byte (its current model is the draft itself).
+      const context: ConstructionContext | undefined = gate.later ? { current_model: projectModelContext(g),
+        ...(gate.messages.length > 0 ? { messages: gate.messages } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : undefined;
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
-        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured)));
+        // No widening for a revised draft (prepare-only card): it stays exactly as served before the arms were restored.
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context)));
     } catch {
       out = { ok: false, mutated: false };
     }
@@ -3573,6 +3684,14 @@ export function createAgentCapabilities(
       return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
     }
     Object.assign(candidate, limits.replacement);
+    // What the user set is carried by identity, with its own stamp; a node it needs that the revision lacks → nothing offered.
+    const kept = carryHumanItems(candidate, gate.items, (n) => levelFrameOf(n as never));
+    if (kept.missing.length > 0) {
+      return notOffered('revised_draft_not_prepared', `The revised draft does not hold ${kept.missing.join('; ')}, so nothing was offered and the model is unchanged. `
+        + 'Tell the user plainly which of their changes a revised draft would lose.');
+    }
+    Object.assign(candidate, kept.replacement);
+    // The drafter's targets are its reading of the user's goal: `limitsKeptBy` stores them `inferred`, never `explicit`.
     const held = targetsHeldBy(candidate);
     if (held.length === 0) {
       return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
@@ -3583,6 +3702,25 @@ export function createAgentCapabilities(
       ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`
       : ` at month ${basis.period_months}${basis.reference === 'launch' ? ' after launch' : ''}`;
     const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
+    /**
+     * ⭐ AGAINST THE CURRENT SAVED MODEL (PL #94 07:32Z Q2): after later work, the card names what the user set that is kept,
+     * and every part the revision ADDS (a part the user removed and the drafter brought back included) or OMITS, by kind and
+     * label, before an explicit approval. The goal and the decision are named by the card's own goal clause.
+     */
+    const partKey = (n: Record<string, unknown>): string | null => (typeof n?.label === 'string' && n.kind !== 'goal' && n.kind !== 'decision'
+      ? `${String(n.kind)}:${canonicalLabel(n.label)}` : null);
+    const partsOf = (raw: unknown): Map<string, string> => new Map(nodesOf(raw).flatMap((n) => {
+      const k = partKey(n);
+      return k === null ? [] : [[k, `\u2018${n.label as string}\u2019`] as const];
+    }));
+    const now = partsOf(g.raw);
+    const next = partsOf(candidate);
+    const added = [...next].filter(([k]) => !now.has(k)).map(([, w]) => w);
+    const omitted = [...now].filter(([k]) => !next.has(k)).map(([, w]) => w);
+    const againstCurrent = !gate.later ? ''
+      : (kept.carried.length > 0 ? `Kept as you set them: ${kept.carried.join('; ')}. ` : '')
+        + (added.length > 0 ? `Added to the current model: ${added.join(', ')}. ` : '')
+        + (omitted.length > 0 ? `Not in the revised draft: ${omitted.join(', ')}. ` : '');
     const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
       + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
       + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
@@ -3594,6 +3732,7 @@ export function createAgentCapabilities(
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
       + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
         : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
+      + againstCurrent
       + 'Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
@@ -3602,7 +3741,7 @@ export function createAgentCapabilities(
       base_graph_identity_hash: g.graph_hash,
       operations: [{ op: 'replace_draft', path: sid, value: {
         candidate, candidate_hash: candidateHash, base_identity: g.graph_identity_hash, brief_text: g.brief_text,
-        goal_turn_id: ctx.turn_id, typed_goal: typedGoal,
+        goal_turn_id: ctx.turn_id, typed_goal: typedGoal, bound_turn_ids: gate.bound,
         operation_id: constructionOperationId(sid, `replace_draft:${g.graph_identity_hash}:${candidateHash}`),
       } }],
       provenance: { authored_by: 'model_proposed', basis: 'A revised draft prepared from the stored brief and the goal the user typed; only its own card replaces the draft.' },
@@ -3624,15 +3763,40 @@ export function createAgentCapabilities(
       pending = prepareRevisedDraft(ctx, g, goal);
       revisedDrafts.set(key, pending);
     }
-    const draft = await pending;
+    let draft = await pending;
     if ('refused' in draft) {
       return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', [{
         words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
-    // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
-    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
-      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    /**
+     * ⭐ A WITHDRAWN CARD IS RE-ISSUED FRESH, NEVER RETURNED DEAD (served marketing turn 02 on 00a51f7d; Codex
+     * CHECK-3020-45e7c1e3 item 1; DL r2): the turn's one draft is reused, so a target call after `withdraw_proposal` returned
+     * the withdrawn id as offered, and the reply described a card the user never saw. Refusing it (r1) left NO card after
+     * propose → withdraw → propose → withdraw → propose. So the next call issues the SAME prepared card under a FRESH id, bound
+     * to the current revision; the withdrawn id stays consumed by its own `withdraw_proposal` call, so ONE live card ends the
+     * turn. Only a recorded withdrawal re-issues: a card merely gone from the store (evicted) is offered again under its id.
+     */
+    if (withdrawnProposals.has(draft.proposal.proposal_id)) {
+      const { proposal_id: _withdrawn, ...content } = draft.proposal;
+      const reissues = (reissuedDrafts.get(key) ?? 0) + 1;
+      reissuedDrafts.set(key, reissues);
+      draft = { proposal: createProposal({ ...content, base_graph_identity_hash: g.graph_hash,
+        provenance: { ...content.provenance, basis: `${content.provenance.basis ?? ''} Offered again after a withdrawal this turn (${reissues}).` } }),
+        held: draft.held };
+      revisedDrafts.set(key, Promise.resolve(draft));
+    }
+    if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
+    /**
+     * Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is never "held". Held only
+     * by the exact label. A card target that carries this figure, comparator and unit under another label is UNKNOWN, never
+     * "not in the draft" (served marketing turn 02 on 00a51f7d: "new customers" read NOT on ‘New customers in first 3 months’,
+     * so the AI withdrew the card and nothing reached Paul). NOT held only when no card target carries the figure at all.
+     */
+    const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
+      && unitsConflict(target.unit, t.unit) === null);
+    const holds: boolean | 'unknown' = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)) ? true
+      : sameFigure.length > 0 ? 'unknown' : false;
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,
@@ -3642,7 +3806,11 @@ export function createAgentCapabilities(
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
         + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
-        + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+        // The AIE's exact texts (packet 281e8b3d, #94 6162120876): the 'unknown' note, and the residual for a figure no card
+        // target carries (no value/comparator/unit miss is proof the target is absent from the complete model).
+        + (holds === true ? '' : holds === 'unknown'
+          ? ' The requested target could not be verified against the card\u2019s complete meaning. Do not say it is included or excluded. If this reply actually offers the current card, explain the uncertainty and ask the user to check the goal, target, reference, period and conditions before approving.'
+          : ` The host did not find a matching target entry for ${targetFigure(target.value, target.unit)} in this card. Do not claim that the requested target is absent from the complete model unless its full meaning was checked. Explain the limitation and what the current card actually contains.`),
     };
   };
 
@@ -3656,7 +3824,7 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
-      goal_turn_id?: unknown; operation_id?: unknown };
+      goal_turn_id?: unknown; operation_id?: unknown; bound_turn_ids?: unknown };
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -3665,7 +3833,9 @@ export function createAgentCapabilities(
     if (before.graph_identity_hash !== v.base_identity) {
       return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
     }
-    const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
+    // The messages the offer bound (read as its context), then the typed goal's turn; any other message refuses.
+    const bound = Array.isArray(v.bound_turn_ids) ? v.bound_turn_ids.filter((t): t is string => typeof t === 'string') : [];
+    const { found } = await unreviewedDraftGate(ctx, before, [...bound, v.goal_turn_id]);
     if (found.length > 0) {
       const label = (id: string): string => String((((v.candidate as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? [])
         .find((n) => n?.id === id)?.label ?? id);
@@ -3680,6 +3850,18 @@ export function createAgentCapabilities(
       expected_graph_identity_hash: v.base_identity,
       operation_id: v.operation_id,
     });
+    /**
+     * ⛔ A DEFINITE REFUSAL WROTE NOTHING (DL 14 Oct, Codex 3023 r2: a 409 with zero writes was receipted `mutated:true`). Every
+     * 409 the register route returns is refused before any write (`assist.v1.scenario-graph-register.ts`: GRAPH_STALE,
+     * OPERATION_ID_REUSED, SHARE_BY_DATE_SERVER_OWNED …, each "nothing written"), so it is said as not replaced, exactly as
+     * the hiring-times apply above says its STALE. Only an AMBIGUOUS failure reads the model back (AIE 6122431786 §4).
+     */
+    if (reg.status === 409) {
+      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+      return /STALE/.test(code)
+        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
+        : notApplied('not_applied', 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
+    }
     /**
      * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
      * registration acknowledged for the bytes it stored from this exact candidate (`graph_identity_hash`, "the server has the
@@ -3739,7 +3921,7 @@ export function createAgentCapabilities(
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(parent.proposal_id, receipts);
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
-      follow_up: 'Recorded as your judgement. Then run the analysis again.' };
+      follow_up: 'Recorded as your judgement.' };
   };
 
   /**
@@ -3794,6 +3976,98 @@ export function createAgentCapabilities(
     const reading = goalReadingWords(projection) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
       follow_up: goalReadingRecordedWords(reading, answer) };
+  };
+
+  /**
+   * ⭐ HIRING PATH (a) (DL 14 Oct): Olumi's occurrence range for an unvalued risk ROOT, as its own card (`risk-occurrence.ts`).
+   * The card is the proposal's whole content: Olumi's range over the goal's period, its basis, and the node as stored (the
+   * writer's stale gate). Card-only; nothing is written here.
+   */
+  const proposeRiskOccurrence = async (ctx: AgentToolContext, g: GraphRead,
+    risk: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string; goal_id: string;
+      goal: Record<string, unknown> }): Promise<ToolResult> => {
+    const operations: ProposalOperation[] = [{ op: SET_RISK_OCCURRENCE_OP, path: risk.id,
+      value: { event_risk: risk.block, expected_node: structuredClone(risk.node), goal_id: risk.goal_id, expected_goal: structuredClone(risk.goal) } }];
+    const proposal = createProposal({
+      scenario_id: ctx.scenario_id,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: g.graph_hash,
+      operations,
+      provenance: { authored_by: 'model_proposed', basis: 'a starting assumption for a risk, offered for the user to adopt or correct' },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
+      public_label: `${riskOccurrenceCardWords(risk.label, risk.block)}\nOlumi's proposed basis for this estimate (any claimed earlier `
+        + `statement remains unverified unless shown with its verified source): \u201c${risk.basis}\u201d`,
+    });
+    proposals.put(proposal);
+    const preview = await readinessIfApplied(ctx, operations);
+    return {
+      ok: true, mutated: false,
+      proposal_id: proposal.proposal_id,
+      public_label: proposal.public_label,
+      base_revision: g.graph_hash,
+      risk_assumption: { risk: risk.label, chance_low_percent: Number((risk.block.occurrence.p_low * 100).toFixed(6)),
+        chance_high_percent: Number((risk.block.occurrence.p_high * 100).toFixed(6)), within_months: risk.block.horizon.months,
+        basis: risk.basis, olumis_estimate: true },
+      note: RISK_OCCURRENCE_PROPOSED_NOTE + stillBlockedNote(preview),
+    };
+  };
+
+  /**
+   * The press on that card: ONE commit through the atomic level door's `risk_occurrence` member, alone, then a read-back
+   * holding exactly the card's node with its block. Receipt only on that; the range stays Olumi's (`basis: 'olumi'`).
+   */
+  const applyRiskOccurrence = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const pid = parent.proposal_id;
+    const v = (op.value ?? {}) as { event_risk?: unknown; expected_node?: unknown; goal_id?: unknown; expected_goal?: unknown };
+    if (!isPlainRecord(v.event_risk) || !isPlainRecord(v.expected_node) || typeof v.goal_id !== 'string' || !isPlainRecord(v.expected_goal)
+      || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
+    }
+    // A retry continues only from THIS proposal's own landed write (its partial progress, or its own commit in the ledger).
+    const ownCommitInLedger = async (): Promise<boolean> => opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(pid)), () => false);
+    const ownWriteLanded = proposals.partialProgressOf(pid) !== undefined || await ownCommitInLedger();
+    const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
+      goal_id: v.goal_id, expected_goal: v.expected_goal, own_write_landed: ownWriteLanded };
+    // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
+    // that moved since the card was made writes nothing, whatever the analysis hash says (Codex r1 on #3013).
+    if (!riskOccurrenceGoalHolds(approved, before.raw)) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied', reason: 'model_changed_since_approval',
+        detail: 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.', receipts: [] };
+    }
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(pid), links: [], levels: [], risk_occurrence: approved });
+    // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op. Landed
+    // means THIS proposal's own write: committed by the door, or an unconfirmed commit whose own turn the ledger holds. An equal
+    // re-read is never that identity: nothing written beside another writer's equal block reads the same (buddy on #3013 r3).
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const written = applyRiskOccurrenceEdit(before.raw, approved);
+      const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
+      const landed = postimage !== undefined && (res.status === 'committed' || await ownCommitInLedger());
+      if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+        landed: [op.path], receipts: [], expected_postimage: postimage });
+    }
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
+    }
+    // Not confirmed: no receipt, and no readiness from the stored graph (`may_run` follows only a verified read-back).
+    const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+      detail: RISK_OCCURRENCE_UNKNOWN_SAVE, readiness_after: readinessViewOf(undefined) };
+    if (res.status === 'unconfirmed') return notConfirmed;
+    // The read-back verifies the WHOLE bound postimage: the risk holds exactly the card's range, and the goal its window is
+    // stated over is still exactly as bound (Codex r1: a concurrent 3 → 6 month change still said the 3-month receipt).
+    const check = await readGraph(ctx.scenario_id);
+    const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
+    if (check === null || !isDeepStrictEqual(held, { ...approved.expected_node, event_risk: approved.event_risk })
+      || !riskOccurrenceGoalHolds(approved, check.raw)) return notConfirmed;
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(pid, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
+      follow_up: riskOccurrenceRecordedWords(String(approved.expected_node.label), approved.event_risk) };
   };
 
   /**
@@ -3939,6 +4213,7 @@ export function createAgentCapabilities(
     });
     if (res.status === 'unconfirmed') {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
+        follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
         detail: 'These links were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were recorded or not recorded.' };
     }
     if (res.status === 'stale') {
@@ -3976,9 +4251,29 @@ export function createAgentCapabilities(
         // placeholder proves only its changed prior and review; review never earns sizing or authorship by itself.
         && (l.intent === 'confirm_current' || approvedPlaceholderMove || !approvalSizes(e));
     });
-    if (!holds) {
+    /**
+     * ⭐ #3002 card_receipt (AIE packet 2b19ae59): the receipt, the card's left-out links included, is said only once the WHOLE
+     * postimage reads back, otherwise the save is unconfirmed, in the AIE's words, and nothing says it was recorded or left
+     * unchanged. Whole means all three (buddy r1 on 0bbc66bc: an approved link's spread or source could move unseen):
+     *  · every approved link as approved (`holds`);
+     *  · the graph the analysis reads is the one the writer committed (`res.graph_hash`): every size and spread, each link's
+     *    direction and its source and sizing marks, and every figure that decides a Run;
+     *  · everything but the approved links byte-equal to the approved read, so each left-out link (its review stamp and
+     *    display included) and everything else are as they were when approved.
+     * (Not via the link writer's own scope rule: this module never names the internal option writer, the consent manifest's
+     * one-consumer rule.)
+     */
+    const approvedKeys = new Set(sent.map((l) => `${l.from}::${l.to}`));
+    const allButApproved = (raw: unknown): unknown => {
+      const g = isPlainRecord(raw) ? raw : {};
+      return { ...g, edges: (Array.isArray(g.edges) ? g.edges : []).filter((e) => !(isPlainRecord(e) && approvedKeys.has(`${String(e.from)}::${String(e.to)}`))) };
+    };
+    const retained = check !== null && check.graph_hash === res.graph_hash
+      && isDeepStrictEqual(allButApproved(check.raw), allButApproved(approvedRead.raw));
+    if (!holds || !retained) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
-        detail: 'These links were sent as one change, but reading the model back did not show all of them as approved. Say exactly that; never say they were recorded or not recorded.' };
+        follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
+        detail: 'These links were sent as one change, but reading the model back did not show all of them as approved, with everything else as it was. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
     /**
@@ -4015,15 +4310,18 @@ export function createAgentCapabilities(
       + ' Give a figure, or ask Olumi to estimate it.';
     const accepts = (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
       + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '');
+    // #3002: the links the card left out, said again in the card's own stored words (the host's, by id → label; a restored
+    // proposal carries the same card), so the receipt never reads as if the whole set was recorded.
+    const omitted = parent.public_label.split(LEFT_OUT_CARD_LEAD).slice(1).map((x) => ` ${LEFT_OUT_CARD_LEAD}${x.trim().replace(/\.$/, '')}.`).join('');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
       follow_up: counted
         ? `Recorded ${mixedLinkSetHeading(sent.length - changedUnsized - reviewedUnsized.length, changedUnsized, reviewedUnsized.length)}.`
-          + `${listed.length > 0 ? ` ${listed.join('; ')}.` : ''}${accepts}${countedTail}`
+          + `${listed.length > 0 ? ` ${listed.join('; ')}.` : ''}${accepts}${omitted}${countedTail}`
         : `Recorded ${placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
-        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}`,
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}${omitted}`,
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -4075,6 +4373,11 @@ export function createAgentCapabilities(
         const v = (o.value as { normalised?: unknown } | undefined)?.normalised;
         const n = byId.get(optionId);
         if (n !== undefined && typeof v === 'number') n.interventions = { ...((n.interventions ?? {}) as Record<string, unknown>), [factorId]: { value: v } };
+      } else if (o.op === SET_RISK_OCCURRENCE_OP) {
+        // The risk's occurrence as the card would write it: the verdict reads the level's presence only.
+        const n = byId.get(o.path) as Record<string, unknown> | undefined;
+        const block = (o.value as { event_risk?: unknown } | undefined)?.event_risk;
+        if (n !== undefined && block !== undefined) n.event_risk = block;
       } else if (o.op === 'set_factor_value') {
         const n = byId.get(o.path);
         const v = (o.value as { value?: unknown } | undefined)?.value;
@@ -4269,8 +4572,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
-      const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
+      const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
       // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
       // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
       let statedObjectionsUnreadable = false;
@@ -4284,22 +4586,6 @@ export function createAgentCapabilities(
       const scopeIssues = g.goal_scope_reconciliation ?? [];
       const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
-      // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
-      // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
-      // model delta (context byte-unchanged) and for a first Run.
-      // SD-1 (rehearsal12): a licensed delta whose C1 the projection checked down (several changes, or partial coverage)
-      // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
-      const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
-        && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
-      // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
-      // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
-      // This fallback shares the selected-delta budget; incomplete coverage must not start a second deadline.
-      const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
-        : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta,
-          Math.max(0, evidenceDeadlineAt - Date.now()));
-      const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
-        [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
-        pairRead?.frameRefitLinks);
       // Opt-in interpreter section. The default state remains the ordinary Agent's assembly.
       let explanationSection: Record<string, unknown> | undefined;
       if (options?.section === 'run_explanation') {
@@ -4908,10 +5194,10 @@ export function createAgentCapabilities(
      * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
      * `propose_link_strength` holds one link and refuses a band the user did not type.
      *
-     * Each link here is the user's estimate only when the Agent quotes THIS message's words for it as `from_words` (the
-     * user's exact words, naming an end and the band) AND the host's reading of this message agrees (`latestLinkBands`):
-     * words binding both resolved ends, words naming an end of the ONE link the request selects, or "<X> effects … to
-     * <band>" for a link leaving X. Earlier messages credit nothing here until T2A5's quote (T2A3 DL ruling).
+     * Each link here is the user's estimate only when the Agent quotes the user's complete statement for it as `from_words`
+     * and the host verifies that quote (`linkBandSource`, T2A5): verbatim in a verified message, this one or earlier, whole,
+     * bound to this directed link by its own words, agreed by its message and not superseded. Copied or unknown material
+     * (the conversation reads this band for this link, unverified) keeps an unknown origin: nothing is prepared.
      * Otherwise it is OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
      * (`olumi_estimate`), never as the user's. A strength that is already the user's own is never replaced by an
      * estimate. Directions are kept (a reversal is one link, in the user's words). One proposal, one chip, one commit.
@@ -4930,8 +5216,15 @@ export function createAgentCapabilities(
       const shown: Shown[] = [];
       const already: string[] = [];
       const definitional: string[] = [];
+      /** Links whose band's origin stays UNKNOWN: left out and named on the card, the rest of the set still offered. */
+      const unknownOrigin: string[] = [];
+      /** Links whose band the Agent declared a third party's: never written, left out and named with the source it cites. */
+      const thirdParty: LeftOutLink[] = [];
       // ⭐ F1: links left out because they hold the user's own figure, each in the refusal's own words.
       const heldFigures: string[] = [];
+      /** The same links as `definitional` and `heldFigures`, by the model's labels, for the card's own naming (#3002). */
+      const definitionalPairs: string[] = [];
+      const heldFigurePairs: string[] = [];
       const seen = new Set<string>();
       for (const l of asked) {
         const name = `"${String(l?.from_label ?? '')}" \u2192 "${String(l?.to_label ?? '')}"`;
@@ -4974,6 +5267,7 @@ export function createAgentCapabilities(
         const definition = definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null);
         if (definition !== null) {
           definitional.push(definitionalLinkRefusalText(g.raw, definition));
+          definitionalPairs.push(`"${from.label}" \u2192 "${to.label}"`);
           continue;
         }
         const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
@@ -5014,22 +5308,59 @@ export function createAgentCapabilities(
         const heldFigure = currentBand === band ? null : userFigureHeld(edge);
         if (heldFigure !== null) {
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
+          heldFigurePairs.push(pair);
           continue;
         }
-        // The user's statement for this exact link in THIS message decides (`latestLinkBands`): words naming both ends, a
-        // selection binding exactly this ONE directed link with words naming an end of it, or "<X> effects" for links
-        // leaving X. The model's `user_stated` is not source authority (PL 22:07Z): attributed or questioned words fail.
+        // The selection binds exactly ONE directed link only when nothing else is selected. The model's `user_stated` is not
+        // source authority (PL 22:07Z): attributed or questioned words fail.
         const selection = ctx.grounded_selection;
         const bound = selection?.unresolved === 'none' && selection.element_ids.length === 0 ? ctx.grounded_links ?? [] : [];
-        // ⛔ T2A3 (DL ruling, Codex FAIL on c78b4ad4): it is the user's only with the Agent's own quote of it (`from_words`,
-        // the tool's contract and staging's rule). No quote is the Agent saying "not the user's" ("Alice says…", "strong
-        // evidence"), and the host reading never overrides it; the reading stays a veto on a quote. Earlier messages credit
-        // nothing here (staging never did): the tool asks for THIS message's words, so history waits for T2A5's quote.
-        const quoted = typeof l.from_words === 'string' && wordsTheUserWrote(l.from_words, ctx.user_turn_text)
-          && bandTheUserWrote(band, l.from_words) && [String(from.label ?? ''), String(to.label ?? '')].some((end) =>
-            factorTheUserNamed(end, l.from_words as string, { options: [], others: g.nodes.map((n) => String(n.label ?? '')).filter((x) => x !== end) }));
-        const thisMessage = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, { bound });
-        const stated = quoted ? thisMessage : null;
+        // ⭐ T2A5 (AIE rulings on 6157593360): the Agent reads whose words they are and quotes the user's complete statement
+        // as `from_words`; the host verifies it (`linkBandSource`): verbatim in a verified message, this one or earlier, whole,
+        // bound to this directed link by its own words, agreed by its message and not superseded. Unverified, while the
+        // conversation reads this band for this link, is copied or unknown material: its origin stays unknown and nothing is
+        // prepared, never relabelled Olumi's estimate. Anything else is Olumi's own new estimate, shown as such on the card.
+        const said = ctx.verified_user_messages !== undefined && ctx.verified_user_messages.join('\n') === ctx.user_text
+          ? ctx.verified_user_messages : (ctx.user_text ?? '').split('\n').filter((m) => m.trim() !== '');
+        const typed = ctx.user_turn_text ?? '';
+        const source = linkBandSource(l.from_words, band, { messages: typed.trim() !== '' && said[said.length - 1] !== typed ? [...said, typed] : said,
+          ...(typed.trim() !== '' ? { thisMessage: typed } : {}), ...(ctx.unverified_user_text !== undefined ? { unverified: ctx.unverified_user_text } : {}) },
+          g.nodes, from.id, to.id, bound);
+        /**
+         * ⭐ KNOWN-ORIGIN TRANSPORT (#3002, DL 14 Oct after Codex CHECK-3002-783a55b8): the Agent DECLARES whose band it is
+         * (`origin`), the host verifies it mechanically, and only a verified origin is written.
+         *  · USER: `origin` user and a quote that verifies (`linkBandSource`) in a message the user TYPED in this process. Restored
+         *    and reseeded rows (chip text is stored as a user message) are never verified (`authorshipWords`), so a match there is
+         *    not a receipt. `user_text_complete` is not read here: it is false on every route turn from the first.
+         *  · OLUMI: `origin` olumi, NO quote, Olumi's own `basis`, and the conversation does not read this band for this link.
+         *  · Anything else stays UNKNOWN and is never written: a third party's band (`origin` third_party, named with the
+         *    `source` it cites), an absent origin, and a quote or a claim that does not verify. The card names each link left out.
+         */
+        const nonBlank = (x: unknown): x is string => typeof x === 'string' && x.trim() !== '';
+        const declared = l.origin;
+        /**
+         *  · STORED (the host's own pre-mortem / Strengthen card, `linkStrengthsCardArgs`; not in the AI's schema): the card offers
+         *    the band the link already holds, so its STORED origin is carried by identity, never a new act (AIE packet 2b19ae59,
+         *    producer AMEND: not-user is not Olumi's). A stored Olumi estimate stays Olumi's and the card reviews it; the user's
+         *    stays the user's ("already", below); any other stored band is unknown, left out and named.
+         */
+        const storedOlumis = declared === 'stored' && !nonBlank(l.from_words) && currentBand === band
+          && (linkSizing(edge) === 'olumi_estimate' || linkSizing(edge) === 'olumi_accepted');
+        const origin = declared === 'user'
+          ? (nonBlank(l.from_words) && source.verified ? 'human' : 'unknown')
+          : declared === 'olumi' && !nonBlank(l.from_words) && nonBlank(l.basis)
+            ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
+            : storedOlumis ? 'ai' : 'unknown';
+        // An UNKNOWN band is left out and named, never written; the links whose origin IS known are still offered (Paul's
+        // served set: his named links are his, "all other listed effects to moderate" names no link, so those stay unknown).
+        // A band the user's OWN strength already sits in changes nothing whoever names it: it goes on to "already" below.
+        if (origin === 'unknown' && !(keepsUsers && linkSizing(edge) === 'user')) {
+          // A third party's band is named with the source it is attributed to, whole (never cut); without a source it is unknown.
+          if (declared === 'third_party' && nonBlank(l.source)) thirdParty.push({ pair, source: l.source.replace(/\s+/g, ' ').trim() });
+          else unknownOrigin.push(pair);
+          continue;
+        }
+        const stated = origin === 'human' ? [band] : null;
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
@@ -5071,13 +5402,19 @@ export function createAgentCapabilities(
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, wasEdge: edge,
           sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
+      const unknownLeftOut = { ...(unknownOrigin.length > 0 ? { left_out_unknown_origin: unknownOrigin } : {}),
+        ...(thirdParty.length > 0 ? { left_out_third_party: thirdParty.map(attributed) } : {}) };
+      if (ops.length === 0 && unknownOrigin.length + thirdParty.length > 0 && heldFigures.length === 0 && definitional.length === 0) {
+        return { ok: false, mutated: false, refusal: 'origin_unknown', link: unknownOrigin[0] ?? thirdParty[0]?.pair, ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
+          detail: `${UNKNOWN_ORIGIN_DETAIL} Nothing was prepared for any of the links.` };
+      }
       if (ops.length === 0) {
         if (heldFigures.length > 0 && definitional.length === 0) {
-          return { ok: false, mutated: false, refusal: 'user_figure_held', left_out_user_figures: heldFigures, ...(already.length > 0 ? { already } : {}),
+          return { ok: false, mutated: false, refusal: 'user_figure_held', left_out_user_figures: heldFigures, ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
             detail: 'Nothing was prepared: every link left holds the user\u2019s own figure. Tell the user exactly what `left_out_user_figures` says, and never offer a band as their estimate for those links.' };
         }
         if (definitional.length > 0) {
-          return { ok: false, mutated: false, refusal: 'definitional_link', definitional, ...(already.length > 0 ? { already } : {}),
+          return { ok: false, mutated: false, refusal: 'definitional_link', definitional, ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
             ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
             detail: 'Nothing was prepared: every link left is defined by a calculation the model declares. Tell the user exactly what `definitional` says. Never offer to change those links.' };
         }
@@ -5110,6 +5447,9 @@ export function createAgentCapabilities(
       const keptNotTheirs = keptNotTheirsAll.length - keptPlaceholders;
       const reviewOnlyLinks = shown.filter(reviewKeepsPlaceholder);
       const unsizedChanges = shown.filter(x => !x.keeps && remainsPlaceholder(x));
+      const asLinks = (pairs: readonly string[]): LeftOutLink[] => pairs.map((pair) => ({ pair }));
+      const leftOutSentences = [leftOutCard('unknown_origin', asLinks(unknownOrigin)), leftOutCard('third_party', thirdParty),
+        leftOutCard('definitional', asLinks(definitionalPairs)), leftOutCard('user_figure', asLinks(heldFigurePairs))].filter((x) => x !== '');
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -5130,7 +5470,8 @@ export function createAgentCapabilities(
             // from Olumi that has not yet been applied"; the typed `whose` stays the contract, and no receipt after a confirmed
             // write says it (the approval's words are the narrator's own).
             : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x) === 'Olumi\u2019s first estimate for a link nobody had sized'
-              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; '),
+              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; ')
+          + (leftOutSentences.length > 0 ? `. ${leftOutSentences.join(' ')}` : ''),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
@@ -5149,7 +5490,11 @@ export function createAgentCapabilities(
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
-        note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
+        ...unknownLeftOut,
+        // A card that leaves links out says what one approval applies (the AIE's texts, packet 2b19ae59); a whole set, as before.
+        note: (leftOutSentences.length > 0 ? `${LINK_SET_APPROVAL_SCOPE_NOTE} ` : 'Nothing has changed yet. ONE approval records every link in this set, all together or none. ')
+          + (unknownOrigin.length > 0 ? `${LINK_SET_UNKNOWN_AGENT_NOTE} ` : '')
+          + (thirdParty.length > 0 ? `${LINK_SET_THIRD_PARTY_AGENT_NOTE} ` : '')
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0
@@ -5831,6 +6176,10 @@ export function createAgentCapabilities(
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true; kept?: true }[] = [];
       const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'unverified_brief' | 'already_accepted' }[] = [];
+      // ⭐ Hiring path (a): an unvalued risk ROOT takes Olumi's occurrence range on its own card (`risk-occurrence.ts`).
+      const riskRanges: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string;
+        goal_id: string; goal: Record<string, unknown> }[] = [];
+      const riskRangeNeeded: { label: string; within_months: number }[] = [];
 
       for (const given of input) {
         let a = given;
@@ -5851,7 +6200,21 @@ export function createAgentCapabilities(
           if (!ambiguous.some((x) => x.requested === requested)) ambiguous.push(describeAmbiguity(g, requested, res.candidates));
           continue;
         }
-        if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
+        if (res.kind === 'other') {
+          const subject = res.node.kind === 'risk' ? riskOccurrenceSubject(g.raw, res.node.id) : undefined;
+          if (subject?.kind === 'eligible' && a?.user_stated === false && a?.keep !== true && a?.revise !== true) {
+            const range = isPlainRecord(a?.occurrence_range) ? a.occurrence_range : undefined;
+            const block = range === undefined ? undefined : olumiOccurrenceBlock(range.low_percent, range.high_percent, subject.window_months);
+            if (block === undefined) riskRangeNeeded.push({ label: res.node.label, within_months: subject.window_months });
+            else if (!riskRanges.some((r) => r.id === res.node.id)) {
+              riskRanges.push({ id: res.node.id, label: res.node.label, node: subject.node, block, basis: String(a?.basis ?? ''),
+                goal_id: subject.goal_id, goal: subject.goal });
+            }
+            continue;
+          }
+          notAFactor.push({ label: res.node.label, kind: String(res.node.kind) });
+          continue;
+        }
         const node = res.node;
         /**
          * ⭐ KEEP OLUMI'S ESTIMATE (52f8cd, lease #75 5925744661). Served `b47db0b5`, guest `9390a1b4`: Examine → "4 hours a
@@ -5990,6 +6353,12 @@ export function createAgentCapabilities(
         });
       }
 
+      if (riskRanges.length > 0) {
+        if (adopted.length > 0 || riskRanges.length > 1) {
+          return { ok: false, mutated: false, refusal: 'risk_occurrence_with_other_changes', detail: RISK_OCCURRENCE_ALONE_DETAIL };
+        }
+        return proposeRiskOccurrence(ctx, g, riskRanges[0]!);
+      }
       // ⛔ A keep is its own approval: "accept Olumi's estimate" and "change this figure" are different acts, and one card
       // saying both would let one Yes stand for either. The Agent proposes them in separate calls.
       if (adopted.some((x) => x.kept) && adopted.some((x) => !x.kept)) {
@@ -6003,6 +6372,7 @@ export function createAgentCapabilities(
           ...(notKeepable.length > 0 ? { not_keepable: notKeepable, not_keepable_note: NOT_KEEPABLE_NOTE } : {}),
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
+          ...(riskRangeNeeded.length > 0 ? { risk_occurrence_needed: riskRangeNeeded, risk_occurrence_note: RISK_OCCURRENCE_NEEDED_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
           ...(scaleAmbiguous.length > 0 ? { scale_ambiguous: scaleAmbiguous, scale_ambiguous_note: SCALE_AMBIGUOUS_NOTE } : {}),
@@ -6115,6 +6485,7 @@ export function createAgentCapabilities(
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
         // so the user is never asked to approve a value that cannot be saved.
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
+        ...(riskRangeNeeded.length > 0 ? { risk_occurrence_needed: riskRangeNeeded, risk_occurrence_note: RISK_OCCURRENCE_NEEDED_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
         ...(scaleAmbiguous.length > 0 ? { scale_ambiguous: scaleAmbiguous, scale_ambiguous_note: SCALE_AMBIGUOUS_NOTE } : {}),
@@ -6733,6 +7104,7 @@ export function createAgentCapabilities(
         const p = proposals.get(id);
         if (p === undefined || p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return notFound;
         proposals.discard(id);
+        withdrawnProposals.add(id);
       }
       return {
         ok: true, mutated: false, proposal_id: id, withdrawn: true,
@@ -7314,6 +7686,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === CONFIRM_GOAL_READING_OP) return applyGoalReading(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
@@ -10366,8 +10739,9 @@ export function createAgentCapabilities(
       };
     },
 
-    async runAnalysis(ctx, args): Promise<ToolResult> {
-      if (approvalAppliedThisRequest) {
+    async runAnalysis(ctx, args, opts): Promise<ToolResult> {
+      // The Agent never runs an analysis as part of an approval; the route's automatic Run after a committed change does.
+      if (approvalAppliedThisRequest && opts?.afterCommittedChange !== true) {
         return {
           ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
           detail:
@@ -10469,6 +10843,30 @@ export function createAgentCapabilities(
       // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
       const identityAskSay = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw, postRunRead.brief_text) : null;
       const identityCard = result !== undefined ? identityCardFor(ctx, postRunRead) : undefined;
+      // ⭐ COACH ON THE NEW RESULT, AGAINST THE PRECEDING RUN (Paul #94 6166259456; DL 14 Oct). When the post-run read selected
+      // THIS Run (its run-fact identity: scenario, graph hash, computed_at) and holds a preceding Run's delta, the model gets the
+      // SAME comparison facts the state read gives (`runComparisonFacts`) with this Run's output, and is told to coach and
+      // compare (`RUN_COMPARISON_NOTE`). The model writes it; no host prose. A first Run, or a read of another Run, adds nothing.
+      let runComparison: Record<string, unknown> | undefined;
+      // Only a Run whose own response carries a run-over-run delta has a preceding Run, so no other Run spends a read on it.
+      if (result !== undefined && runIdentity !== undefined && r.json.run_delta !== undefined) {
+        if (postRunRead === undefined) {
+          try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
+        }
+        const readRun = postRunRead === null || postRunRead === undefined ? undefined : {
+          scenario_id: ctx.scenario_id,
+          graph_hash_at_run: (postRunRead.analysis_result as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
+          computed_at: (postRunRead.analysis_state as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at,
+        };
+        if (postRunRead && postRunRead.run_delta !== undefined
+          && compareAnalysisRunFactIdentity(runIdentity, readRun).status === 'match') {
+          const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
+          if (delta !== undefined || rerunRecord !== undefined) {
+            runComparison = { ...(delta !== undefined ? { run_delta: delta } : {}), ...(rerunRecord !== undefined ? { rerun_record: rerunRecord } : {}),
+              note: RUN_COMPARISON_NOTE };
+          }
+        }
+      }
       return {
         ok: r.status === 200,
         mutated: false,
@@ -10502,6 +10900,7 @@ export function createAgentCapabilities(
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
         // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
         ...withIdentityCard(identityCard),
+        ...(runComparison !== undefined ? { run_comparison: runComparison } : {}),
       };
     },
   };
@@ -10594,7 +10993,8 @@ export function createAgentCapabilities(
         // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
-        return { ...r, readiness_after: readinessViewOf(after?.raw), ...nextStepFactOf(after) };
+        // A result that set its own readiness keeps it (an unconfirmed save says "not checked", never the stored graph's `may_run`).
+        return { ...r, readiness_after: 'readiness_after' in r ? r.readiness_after : readinessViewOf(after?.raw), ...nextStepFactOf(after) };
       }
       return r;
     },

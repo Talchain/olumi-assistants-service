@@ -35,7 +35,8 @@ import { ProposalStore } from '../proposal.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { proposalPendingAction } from '../durable-proposal.js';
-import { readExecutableHeldProposalOffers } from '../held-approval-offers.js';
+import { agentProposals, executableProposalId, readExecutableHeldProposalOffers } from '../held-approval-offers.js';
+import { declineChipIdFor } from '../proposal-object/record.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -51,8 +52,10 @@ const call = (name: string, args: Rec) => ({ output: [{ type: 'function_call', n
 const DEADLINE_ARGS = { deadline_words: 'three months', rationale: 'We have an urgent launch date in the next three months.' };
 /** Served turn 04's two links, as served turn 05 recorded them ("slight"; "moderate"). */
 const LINK_ARGS = { links: [
-  { from_label: 'Mid-weight developers', to_label: 'Code quality degradation', strength: 'weak' },
-  { from_label: 'Code quality degradation', to_label: 'Productivity', strength: 'moderate' },
+  // ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it:
+  // Olumi's own new estimate, with its basis (the hiring card's served shape).
+  { from_label: 'Mid-weight developers', to_label: 'Code quality degradation', strength: 'weak', origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model' },
+  { from_label: 'Code quality degradation', to_label: 'Productivity', strength: 'moderate', origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model' },
 ], rationale: 'Olumi’s starting estimates for the quality pathway, for you to adopt or correct.' };
 
 function world() {
@@ -86,8 +89,11 @@ function world() {
 }
 
 let script: Rec[] = [];
+/** The existing Run path's own turn (`runAnalysis` → `/orchestrate/v2/turn`, stage `analyse`): each request, the saved graph it ran on, and the reply. */
+const runTurns: { body: Rec; graphAtRun: Rec }[] = [];
+let runTurnReply: { status: number; json: Rec } = { status: 500, json: {} };
 const apps: FastifyInstance[] = [];
-beforeEach(() => { script = []; });
+beforeEach(() => { script = []; runTurns.length = 0; runTurnReply = { status: 500, json: {} }; });
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
@@ -101,6 +107,10 @@ async function route(w: ReturnType<typeof world>) {
   const app = Fastify({ logger: false }); apps.push(app);
   app.post('/assist/v1/scenarios/:id/graph', async () => w.graphWire());
   app.post('/assist/v1/scenarios/:id/versions', async () => w.versions());
+  app.post('/orchestrate/v2/turn', async (req, reply) => {
+    runTurns.push({ body: req.body as Rec, graphAtRun: w.read() });
+    return reply.code(runTurnReply.status).send(runTurnReply.json);
+  });
   await app.register(agentV1TurnRoute); await app.ready();
   return async (over: Rec, steps: Rec[] = []): Promise<Rec> => {
     script = [...steps];
@@ -153,6 +163,91 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
     expect(w.read().edges).toEqual(withLinks.edges);
     expect(String(cold.assistant_text)).not.toMatch(LAPSE);
     expect((cold.suggested_actions as Rec[] ?? []).some((c) => c.id === deadline.id)).toBe(false);
+  }, 90_000);
+
+  // ⛔ Codex r2 on #3024 (`/private/tmp/check3024-r2/independent.test.ts:362`), adopted RED → GREEN: a COLD session after an
+  // unrelated approval (the process's in-memory proposal gone) still offers the exact waiting card, by its own rule.
+  it('⭐ COLD: after an unrelated link approval and a cold session, the exact waiting deadline card is still offered (chip and fields)', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, links, session } = await bothCards(w, turn);
+    await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    const p = agentProposals.outstanding(w.sid, null).find((x) => approvalChipIdFor(x.proposal_id) === deadline.id)!;
+    expect(p, 'the deadline card is still outstanding').toBeDefined();
+    agentProposals.discard(p.proposal_id);
+    const cold = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() });
+    expect(w.onLatestRow(deadline.id)).toBe(true);
+    expect((cold.suggested_actions ?? []).some((a: Rec) => a.id === deadline.id), JSON.stringify(cold.suggested_actions)).toBe(true);
+    expect((cold._proposal_fields?.proposals ?? []).map((a: Rec) => a.proposal_id)).toContain(p.proposal_id);
+    expect(executableProposalId(p.proposal_id, w.sid, null, hash(w.read()), w.read())).toBe(p.proposal_id);
+    const offers = await readExecutableHeldProposalOffers({ scenarioId: w.sid, userId: null, graphHash: hash(w.read()), graph: w.read(),
+      latest: await (live.store as Rec).readMostRecentPendingActions(w.sid), rows: w.rows, store: live.store } as never);
+    expect(offers.map((x: Rec) => x.proposal_id)).toContain(p.proposal_id);
+    // CONTRAST: its goal renamed (the hash unchanged) → a cold session neither offers the card nor projects its fields.
+    const g = w.read(); goal(g).label = 'Team productivity'; w.replace(g);
+    const cold2 = await turn({ message: 'And now?', source: 'composer', agent_session_id: randomUUID() });
+    expect((cold2.suggested_actions ?? []).some((a: Rec) => a.id === deadline.id)).toBe(false);
+    expect((cold2._proposal_fields?.proposals ?? []).map((a: Rec) => a.proposal_id)).not.toContain(p.proposal_id);
+  }, 90_000);
+
+  /** DGAI's press of a card it shows (SuggestedChips: the record's revision and digest, the SHOWN `graph_hash`, `fields: []`). */
+  const editsPress = (chip: Rec, fieldsOf: Rec, session: string): Rec => {
+    const pid = String(chip.id).slice('agent-approve-proposal:'.length);
+    const rec = (fieldsOf.proposals as Rec[]).find((x) => x.proposal_id === pid)!;
+    expect(rec, JSON.stringify(fieldsOf)).toBeDefined();
+    return { message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: session,
+      proposal_edits: { proposal_id: pid, revision: rec.revision, digest: rec.digest, graph_hash: fieldsOf.graph_hash, fields: [] } };
+  };
+  const authorised = (body: Rec): Rec[] => (body._agent.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change');
+
+  it('⭐ #3031 buddy: the card SHOWN after an unrelated approval, pressed as DGAI presses it (edits bound to the shown hash) → the date is saved; warm, and cold', async () => {
+    for (const temperature of ['warm', 'cold'] as const) {
+      const w = world(); const turn = await route(w);
+      const { deadline, links, session } = await bothCards(w, turn);
+      const afterLinks = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+      let shown = afterLinks._proposal_fields as Rec; let at = session;
+      if (temperature === 'cold') {
+        const p = agentProposals.outstanding(w.sid, null).find((x) => approvalChipIdFor(x.proposal_id) === deadline.id)!;
+        agentProposals.discard(p.proposal_id);
+        at = randomUUID();
+        shown = (await turn({ message: 'Where are we?', source: 'composer', agent_session_id: at }))._proposal_fields as Rec;
+      }
+      expect(shown?.graph_hash, `${temperature}: shown on the CURRENT model`).toBe(hash(w.read()));
+      expect(shown.graph_hash, 'the model moved since the card was made').not.toBe(hash(FX.graph as Rec));
+      const pressed = await turn(editsPress(deadline, shown, at));
+      expect(authorised(pressed), `${temperature}: ${JSON.stringify(authorised(pressed))}`).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+      expect(goal(w.read()).goal_horizon?.deadline, temperature).toBe(DEADLINE);
+    }
+  }, 180_000);
+
+  it('#3031 buddy: the same press bound to the card’s ORIGINAL reply (its own base hash) after the unrelated approval → saved; an arbitrary hash → refused', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: 'Why can I barely see the connections?', source: 'composer' }, [say('The connections are recorded.')]);
+    const deadline = chipOf(first, 'propose_goal_deadline'); const session = first._agent.session_id;
+    const offered = first._proposal_fields as Rec;
+    expect(offered?.graph_hash).toBe(hash(FX.graph as Rec));
+    const second = await turn({ message: 'Please fill in what is missing.', source: 'composer', agent_session_id: session },
+      [call('propose_link_strengths', LINK_ARGS), say('Here are the link strengths to approve.')]);
+    const links = chipOf(second, 'propose_link_strengths');
+    await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect(hash(w.read())).not.toBe(offered.graph_hash);
+    // CONTRAST first: a hash the card was never shown on → refused, nothing written.
+    const wrong = editsPress(deadline, { ...offered, graph_hash: 'f'.repeat(16) }, session);
+    const refused = await turn(wrong);
+    expect(authorised(refused)).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'edits_superseded' })]);
+    expect(goal(w.read()).goal_horizon ?? null).toBeNull();
+    const pressed = await turn(editsPress(deadline, offered, session));
+    expect(authorised(pressed), JSON.stringify(authorised(pressed))).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    expect(goal(w.read()).goal_horizon?.deadline).toBe(DEADLINE);
+  }, 120_000);
+
+  it('NEGATIVE (#3031 buddy): the card shown after the unrelated approval, then its goal renamed (the hash unchanged, no turn between) → the edits press is refused, nothing written', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, links, session } = await bothCards(w, turn);
+    const shown = (await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session }))._proposal_fields as Rec;
+    const g = w.read(); const before = hash(g); goal(g).label = 'Team productivity'; expect(hash(g)).toBe(before); w.replace(g);
+    const pressed = await turn(editsPress(deadline, shown, session));
+    expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'edits_superseded' })]);
+    expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   }, 90_000);
 
   it('NEGATIVE: the goal’s TARGET changed (with the links) → the card lapses, said; its press writes nothing', async () => {
@@ -289,4 +384,48 @@ describe('the one rule (`heldCardStillApplies`), read at press, at lapse and by 
     expect(refused).toMatchObject({ ok: false, mutated: false });
     expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   });
+});
+
+describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the existing Run, once, in the same turn', () => {
+  const analyseTurns = () => runTurns.filter((r) => r.body.stage === 'analyse');
+  const RUN_OK = { status: 200, json: { analysis_ready: { status: 'ready', may_run: true }, analysis_state: { run_state: 'complete_current' },
+    blocks: [{ type: 'analysis_result', data: { results: [] } }] } };
+
+  it('⭐ approving the link card COMMITS it → the existing Run runs ONCE, after the save, on the saved model; no Run chip is offered', async () => {
+    const w = world(); const turn = await route(w);
+    const { links, session } = await bothCards(w, turn);
+    expect(analyseTurns(), 'offering cards commits nothing, so nothing ran').toEqual([]);
+    const before = JSON.stringify(w.read());
+    runTurnReply = RUN_OK;
+    const pressed = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect((pressed._agent.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change')).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    const runs = analyseTurns();
+    expect(runs, JSON.stringify(runTurns.map((r) => r.body))).toHaveLength(1);
+    expect(runs[0]!.body).toMatchObject({ scenario_id: w.sid, stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    // Bound to the NEW revision: the Run read the model with the approved links already saved.
+    expect(JSON.stringify(runs[0]!.graphAtRun)).not.toBe(before);
+    expect(hash(runs[0]!.graphAtRun)).toBe(hash(w.read()));
+    expect((pressed.suggested_actions ?? []).some((a: Rec) => a.id === 'agent-run-analysis'), 'it already ran: no Run chip').toBe(false);
+  }, 90_000);
+
+  it('CONTRAST: a turn that commits nothing (a typed question; a declined card) runs nothing', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, session } = await bothCards(w, turn);
+    runTurnReply = RUN_OK;
+    await turn({ message: 'What does the deadline card do?', source: 'composer', agent_session_id: session }, [say('It sets the goal’s date.')]);
+    await turn({ message: 'Not now.', source: 'chip_click', chip: { id: declineChipIdFor(String(deadline.id).slice('agent-approve-proposal:'.length)) }, agent_session_id: session });
+    expect(analyseTurns()).toEqual([]);
+  }, 90_000);
+
+  it('A FAILED Run says so, borrows no result, and the saved change stands: the Run chip is offered to try again', async () => {
+    const w = world(); const turn = await route(w);
+    const { links, session } = await bothCards(w, turn);
+    runTurnReply = { status: 500, json: {} };
+    const pressed = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect(analyseTurns()).toHaveLength(1);
+    expect(String(pressed.assistant_text)).toContain('The analysis didn’t run this time. Your model was updated this turn');
+    expect(String(pressed.assistant_text)).not.toContain('Nothing in your model changed');
+    expect(pressed.analysis_result ?? null).toBeNull();
+    expect((pressed.suggested_actions ?? []).some((a: Rec) => a.id === 'agent-run-analysis'), 'the Run is offered to try again').toBe(true);
+  }, 90_000);
 });

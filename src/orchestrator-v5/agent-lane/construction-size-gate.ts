@@ -153,6 +153,32 @@ export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, af
     && before.brief_stated_keys.limits.every((k) => l.has(k));
 }
 
+/**
+ * The same check for a redraft that RE-CHOSE an unattested event goal (`unattestedEventGoal`, build-model.ts; DL ruling 14 Oct).
+ * The first draft's goal node is the drafter's unattested claim, so its identity alone is not required. A user's limit is
+ * kept either as a limit or as the redraft goal's own target BY ITS FULL IDENTITY: the same quantity (its label, read as
+ * every identity key reads it) and the same comparator, figure, unit and frame — as the goal's admitted target row (a level
+ * goal), or as the goal itself (a change goal holds its target on the goal node). ⛔ Codex FAIL 3026 r1: terms alone let
+ * "Code quality +10 %" stand in for productivity's +10 %, and let two same-sentence targets collapse into one.
+ * A user-stated node is kept as itself, or as the redraft's goal under the same label (the quantity the user's target named
+ * became the goal: T5 D2's "Conversion rate"). Every relationship, and every other node and limit, by identity as above.
+ */
+export function keepsEveryUserStatedIdentityWhenGoalRechosen(before: ConstructionSizeVerdict, after: ConstructionSizeVerdict,
+  retryGoal: { readonly metric: string; readonly operator: string; readonly value: number | null; readonly unit?: string | null; readonly frame?: string | null }): boolean {
+  const n = new Set(after.brief_stated_keys.nodes);
+  const e = new Set(after.brief_stated_keys.edges);
+  const l = new Set(after.brief_stated_keys.limits);
+  /** `quantity|op|value|unit|frame`: the key without its kind, so a factor's limit and the goal's target on it compare. */
+  const quantityAndTerms = (k: string): string => k.slice(k.indexOf(':') + 1);
+  const asGoal = new Set(after.brief_stated_keys.limits.filter((k) => k.startsWith('goal:')).map(quantityAndTerms));
+  if (retryGoal.value !== null) {
+    asGoal.add([keyLabel(retryGoal.metric), retryGoal.operator, retryGoal.value, retryGoal.unit ?? '', retryGoal.frame ?? ''].join('|'));
+  }
+  return before.brief_stated_keys.nodes.every((k) => k.startsWith('goal:') || n.has(k) || n.has(`goal:${quantityAndTerms(k)}`))
+    && before.brief_stated_keys.edges.every((k) => e.has(k))
+    && before.brief_stated_keys.limits.every((k) => l.has(k) || asGoal.has(quantityAndTerms(k)));
+}
+
 /** An admitted edge the user themselves stated. */
 const isBriefStatedEdge = (e: unknown): boolean =>
   typeof e === 'object' &&

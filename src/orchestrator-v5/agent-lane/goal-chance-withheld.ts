@@ -409,6 +409,23 @@ export function goalChanceLineOwed(
 }
 
 /** The latest Run this turn's typed sentence; a later Run without a warning clears an earlier one. */
+/**
+ * The options this turn's withheld `say` covers, from the SAME record `goalChanceSayFromThisTurn` reads: its `option_ids`,
+ * or `'all'` when it names none (#416 / #422). `undefined` when this turn's latest Run withheld nothing.
+ */
+export function goalChanceWithheldOptionsFromThisTurn(toolResults: readonly unknown[]): readonly string[] | 'all' | undefined {
+  let options: readonly string[] | 'all' | undefined;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    const firstPass = recordOf(rec?.first_analysis);
+    const chance = recordOf(rec?.goal_chance) ?? recordOf(firstPass?.goal_chance);
+    if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') {
+      options = Array.isArray(chance.option_ids) ? chance.option_ids.filter((id): id is string => typeof id === 'string') : 'all';
+    } else if (rec?.ran === true || firstPass?.ran === true) options = undefined;
+  }
+  return options;
+}
+
 export function goalChanceSayFromThisTurn(toolResults: readonly unknown[]): string | null {
   let say: string | undefined;
   for (const r of toolResults) {

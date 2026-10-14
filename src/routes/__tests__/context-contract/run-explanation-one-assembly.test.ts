@@ -193,7 +193,12 @@ describe('Explain scoped assembly safety', () => {
       // head's (which reproduces 111192bc…); every changed leaf is exactly the five AIE constants, nothing else.
       // BYPASS1: the AIE's Q4 host entry only: 36,964 → 38,001 bytes (captured against staging's body; the tool-less Explain
       // carries no stated-figure rule).
-      .toBe('22670bbd50f8c219bf262af8b8bff60d3adbbfb7207c8c8a8374ed60e2a0ff49');
+      // T2A5 (#3002, AIE T2A5): the AIE's coach sentence only: 38,001 → 38,008 bytes. The previous head's (staging 14b1e544) SENT
+      // instructions reproduce 22670bbd…; replacing exactly the AIE's three texts with staging's on the SENT body gives them.
+      // USER VOCABULARY (Paul, 14 Oct; CLAUDE.md §3): the coach template's VOCABULARY section and three phrases only:
+      // 38,008 → 38,583 bytes (+575). Captured from the SENT body against staging 687c0d50's; reversing exactly those edits
+      // on the SENT body reproduces staging's body byte for byte.
+      .toBe('0755d3985c9ebebba18736a26bce337008864c705d13531f3b46e8f74f5abb20');
   },60000);
 });
 

@@ -606,22 +606,20 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
   }, 120_000);
 
-  it('#2854 served-500 row, E6 (DL 12 Oct): a construction turn whose widening provider WOULD add an Olumi risk is never asked; no risk is added and the turn completes 200 through the real route', async () => {
-    let asked = 0;
+  it('#2854 served-500 row: a construction turn whose draft is WIDENED (an Olumi risk with draft_widening and no relies_on) completes 200 through the real route and names it', async () => {
     const t = await thinConstruction(1, () => {
       wideningAnswer = (graph) => {
-        asked += 1;
         const id = (kind: string, label: string) => graph.nodes.find((n) => n.kind === kind && n.label === label)!.id;
         return { risk_suggestions: [{ label: 'Feature release slips', category: 'timing', mechanism: 'relies_on',
           hits_id: id('option', 'Raise to £59'), through_id: id('factor', 'Pro plan price'), through_direction: 'positive',
           affects_id: graph.nodes.find((n) => n.kind === 'goal')!.id, direction: 'negative',
           relies_on: 'shipping the feature release with the new price', watch_for: 'the release date moves later' }] };
       };
-    }, undefined, 1);
-    expect(asked, 'E6: the risks arm is PARKED in the served seam').toBe(0);
-    expect(graphNow().nodes.filter((n) => (n as { draft_widening?: unknown }).draft_widening !== undefined)).toHaveLength(0);
+    }, undefined, 2);
+    const widened = graphNow().nodes.filter((n) => (n as { draft_widening?: { provenance?: string } }).draft_widening?.provenance === 'ai_suggested_widen');
+    expect(widened.map((n) => n.label), 'control: the route really widened this draft').toEqual(['Feature release slips']);
+    expect((widened[0] as { relies_on?: unknown }).relies_on).toBeUndefined();
     expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
-    expectThinPress(t);
   });
 
   it('P05b-8c CONTRAST: a non-construction turn on the one-risk graph has no relabelled risks press', async () => {

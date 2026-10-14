@@ -204,6 +204,8 @@ export interface CandidateModel {
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
+      /** Internal: a setting the drafter called the user's that the verifier could not credit — UNKNOWN origin, never Olumi's. */
+      user_material_unverified?: true;
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -414,6 +416,8 @@ export interface ConstructedLevel {
   range?: InterventionV3T['range'];
   estimate?: true;
   basis?: string;
+  /** UNKNOWN origin, as `observed_state.user_material_unverified`: never the user's, never Olumi's (`settingProvenanceOf`). */
+  user_material_unverified?: true;
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -1770,7 +1774,7 @@ function markProductIdentities(
         ? `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds up each effect separately.` +
           oppositeSentence + separateSentence + routesDisagreeSentence + differSentence + aroundSentence +
           ` If it adds them up, this model cannot show which option does better on "${labelOf(goalId)}": treat its ` +
-          'figures then as a rough approximation, not a decision.'
+          'figures then as a rough approximation, not a basis to decide on.'
         : `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds effects up, and its figures for ` +
           `"${outcomeLabel}" are then an approximation` +
           (oneWay
@@ -2423,7 +2427,7 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
   const shape = loopLabels.length === 2 ? 'are linked both ways' : 'are linked in a loop';
   const yours = links.filter((l) => l.yours).map((l) => `"${l.from}" to "${l.to}"`);
   const built = links.filter((l) => !l.yours).map((l) => l.fromDecision
-    ? `the link from "${l.from}" to "${l.to}" is how the decision holds that option`
+    ? `the link from "${l.from}" to "${l.to}" is how the question holds that option`
     : `the link from "${l.from}" to "${l.to}" is what that option sets`);
   const yourPart = yours.length === 0 ? '' : ` You linked ${yours.join(' and ')};`;
   return `${quoted(loopLabels)} ${shape} (${chain(loopLabels)}).${yourPart} ${built.join('; ')}. A model cannot hold a loop, `
@@ -4335,6 +4339,7 @@ function admitOnce(
         (iv as { derived_total?: unknown }).derived_total === true);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
+      if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }
@@ -5348,7 +5353,7 @@ function admitOnce(
       field_path: `nodes[${label}].category`,
       before: 'controllable',
       after: 'external',
-      reason: `No option in this decision changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
+      reason: `No option in this model changes "${label}", so it is held at its value as context while the options are compared, not treated as a lever. If one of the options should change it, say which and it can be connected.`,
       severity: 'info',
     } as RepairEntry);
   }
