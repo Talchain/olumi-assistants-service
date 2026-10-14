@@ -17,6 +17,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { approvalChipsFor, proposalsAwaitingApproval } from '../approval-chips.js';
 import { runAgentTurn, type CallModel } from '../runtime/agent-loop.js';
 import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
+import { limitsKeptBy } from '../runtime/draft-replacement.js';
 import { ProposalStore } from '../proposal.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -107,6 +108,29 @@ const scripted = (calls: Call[]): CallModel => {
   }) as unknown as CallModel;
 };
 
+describe('#3020 r2 buddy: the revised draft re-stamps only its OWN targets (`limitsKeptBy`)', () => {
+  const base = { nodes: [{ id: 'budget', kind: 'factor', label: 'Budget' }], goal_constraints: [
+    { constraint_id: 'agent-lane:budget:<=', node_id: 'budget', operator: '<=', value: 100000, unit: 'GBP/year', label: 'Budget', provenance: 'explicit' }] };
+  const candidate = (goal: Rec) => ({ nodes: [goal, { id: 'budget', kind: 'goal', label: 'Budget' }].slice(0, goal.id === 'budget' ? 1 : 2),
+    goal_constraints: [{ constraint_id: `agent-lane:${goal.id}:>=`, node_id: goal.id, operator: '>=', value: 20, unit: 'customers',
+      label: goal.label, provenance: 'explicit', value_frame: 'level', role: 'goal_target' }] });
+  it('a limit carried onto the node the revised draft now uses as its goal keeps the user\u2019s origin; the draft\u2019s own target is inferred', () => {
+    const out = limitsKeptBy(base, candidate({ id: 'budget', kind: 'goal', label: 'Budget' }));
+    expect(out.conflict).toBe(false);
+    const rows = out.replacement.goal_constraints as Rec[];
+    expect(rows.find((r) => r.constraint_id === 'agent-lane:budget:<=')).toMatchObject({ provenance: 'explicit', value: 100000 });
+    expect(rows.find((r) => r.role === 'goal_target')).toMatchObject({ provenance: 'inferred' });
+  });
+  it('the drafter\u2019s goal loses a user source for its figure (relabelled ‘Partner sign-ups’); a definitional source is kept', () => {
+    const goal = { id: 'partner_sign_ups', kind: 'goal', label: 'Partner sign-ups', goal_threshold_raw: 20, goal_threshold_unit: 'customers' };
+    const stamped = (limitsKeptBy(base, candidate({ ...goal, threshold_source: 'brief_extraction' })).replacement.nodes as Rec[]).find((n) => n.id === goal.id)!;
+    expect(stamped).not.toHaveProperty('threshold_source');
+    expect(stamped).toMatchObject({ goal_threshold_raw: 20, goal_threshold_unit: 'customers' });
+    const definitional = (limitsKeptBy(base, candidate({ ...goal, threshold_source: 'definitional' })).replacement.nodes as Rec[]).find((n) => n.id === goal.id)!;
+    expect(definitional).toMatchObject({ threshold_source: 'definitional' });
+  });
+});
+
 describe('marketing turn 02: an unverifiable card target is unknown, never "not in it", and the card reaches the user', () => {
   it('⭐ RED→GREEN: both target calls → ONE card awaiting approval (customers UNKNOWN, never "NOT in") → approve → the cold read holds both', async () => {
     const s = server();
@@ -134,6 +158,11 @@ describe('marketing turn 02: an unverifiable card target is unknown, never "not 
     const wire = (rows: Rec[]) => (wireGoalConstraints(rows) as Rec[]).map(({ provenance: _p, ...rest }) => rest);
     expect(wire(targetRows(s.graph()))).toEqual(wire(targetRows(s.graph()).map((r) => ({ ...r, provenance: 'explicit' }))));
     expect(targetRows(s.graph())).toHaveLength(2);
+    // The goal node carries no user source for the drafter's figure (buddy r2: `threshold_source` attested a figure, never its
+    // quantity); its figure, comparator and period are unchanged, so the Run reads the same target.
+    const goalNode = (s.graph().nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goalNode).not.toHaveProperty('threshold_source');
+    expect(goalNode).toMatchObject({ goal_threshold_raw: 15, goal_direction: '>', goal_deadline_as_stated: '3 months' });
   });
 
   it('⭐ RED→GREEN: a card withdrawn this turn is re-issued under a FRESH id, never returned dead (the served propose → withdraw → propose)', async () => {
