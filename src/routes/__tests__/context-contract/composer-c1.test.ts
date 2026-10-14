@@ -51,7 +51,9 @@ function snapshot(s: Snapshot, trigger: Trigger): Snapshot {
 const carriers = (w: Awaited<ReturnType<typeof capture>>) => valueAt(w.calls.flatMap(c => c.payloads), 'eligible_intervention');
 function assertWholeAnswer(b: Obj, science = why): void {
   expect(b._answer_shape).toBeUndefined();
-  expect(b.assistant_text).toBe(`${reply}\n\nSuggest risks\n\nWhy? ${science}`);
+  // Reply-face P1: the card's action label is a button (guidance.slot1), never a paragraph of the AI's answer.
+  expect(b.assistant_text).toBe(`${reply}\n\nWhy? ${science}`);
+  expect(String(b.assistant_text).split('\n\n')).not.toContain('Suggest risks');
   expect(String(b.assistant_text)).toContain('3%');
   // Host-authored disclosure as a plain paragraph the chat renders (R3-1: the UI escapes HTML); model text cannot replace its body.
   expect(String(b.assistant_text)).toContain(`Why? ${science}`);
@@ -71,7 +73,9 @@ it('A1 recorded conversation: one W6 carrier, whole answer, science verbatim, pl
   expect(carriers(w)).toEqual([{ policy_id: 'RC-WIDEN', variant_id: 'W6', name: row('RC-WIDEN').name, why,
     trigger: row('RC-WIDEN').trigger_predicate.variants![6].when }]);
   assertWholeAnswer(w.response);
-  expect(String(w.response.assistant_text).split('\n\n')).toContain(object(object(object(w.response.guidance).slot1).primary_action).label);
+  // The action stays on the guidance row as a button, never as text in the reply (reply-face P1).
+  expect(object(object(object(w.response.guidance).slot1).primary_action).label).toBe('Suggest risks');
+  expect(String(w.response.assistant_text).split('\n\n')).not.toContain('Suggest risks');
   expect(object(object(w.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W6' });
 });
 it('OV1 a goal-path figure you gave with no range: the Outside View is the one carrier (typed signal, no keyword)', async () => {
@@ -199,8 +203,9 @@ describe('E6 Why-once on the route: a second Strengthen item on the same state c
     expect(String(first.response.assistant_text)).not.toContain('<details>');
     expect(String(second.response.assistant_text)).not.toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
     expect(object(b.primary_action).label).toBe('Give your estimate');
-    expect(String(second.response.assistant_text).split('\n\n')).toContain(object(b.primary_action).label);
-    expect(second.response.assistant_text).toBe(`${reply}\n\nGive your estimate`);
+    // Reply-face P1: the next item's action is carried by its guidance row (a button), never as a paragraph of the AI's answer.
+    expect(String(second.response.assistant_text).split('\n\n')).not.toContain(object(b.primary_action).label);
+    expect(second.response.assistant_text).toBe(reply);
     expect(object(carriers(second)[0]).why, 'the model is told the same method; only the display changes').toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
   });
 });
@@ -320,7 +325,7 @@ it('X4 carrier whole answer: long headline and action labels retained verbatim, 
   recordC2('X4', w);
   expect(carriers(w)).toHaveLength(1);
   expect(w.response._answer_shape).toBeUndefined();
-  expect(w.response.assistant_text).toBe(`${text}\n\nSuggest risks\n\n${disclosure}`);
+  expect(w.response.assistant_text).toBe(`${text}\n\n${disclosure}`);
   expect(String(w.response.assistant_text)).toContain(`- ${longLabel}`);
   for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
   expect(String(w.response.assistant_text).split('\n\n')).toContain(disclosure);

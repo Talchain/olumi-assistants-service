@@ -216,8 +216,13 @@ const NOT_A_FACTOR_NOTE =
 /** E5: the hiring-times op (its union member and `record.ts` entry are EBD's one-writer edits to `proposal.ts`; DL, 12 Oct). */
 const SET_HIRING_TIMES: StructuredProposal['operations'][number]['op'] = 'set_hiring_times';
 const SET_OPTION_CAPACITY_CHANGE: StructuredProposal['operations'][number]['op'] = 'set_option_capacity_change';
-/** E5: the applied hiring-times card's follow-up (DL ACK of SYS1-E5-STRINGS §3 pending). */
-const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished. Run the analysis so it uses them; do not state a chance before it returns.";
+/**
+ * E5: the applied hiring-times card's follow-up. ⛔ `follow_up` IS WHAT THE USER READS (reply-face P1, as #3153): the user's
+ * sentence only. The direction for the Agent is `HIRING_TIMES_NOTE`. A committed change runs the analysis itself: never ask for a Run.
+ */
+const HIRING_TIMES_APPLIED = "These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished.";
+/** For the Agent only, on a committed change (the automatic Run then follows when readiness admits it). */
+const HIRING_TIMES_NOTE = 'The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
 
 /** The approval-facing disclosure of what was left out (empty when nothing was). */
 function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): string {
@@ -3616,7 +3621,7 @@ export function createAgentCapabilities(
         source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }]
       : [];
     proposals.markApplied(pid, receipts);
-    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: HIRING_TIMES_APPLIED };
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: HIRING_TIMES_APPLIED, note: HIRING_TIMES_NOTE };
   };
 
   /**
