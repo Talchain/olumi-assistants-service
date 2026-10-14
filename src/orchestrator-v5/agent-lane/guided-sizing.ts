@@ -140,6 +140,9 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
     ? { ...heldGraph, nodes: nodes.filter(n => record(n)?.kind !== 'option' || scope.has(String(record(n)?.id))) }
     : graph;
   const verdict = targetTestabilityOf(targetGraph, identityEvaluations, scoredGoalId);
+  // C1 (Paul's funding test, 14 Oct): with no goal target no sizing can produce a chance, so none is offered; the one ask
+  // is the target (`modelGapOf`). A press would only re-ask (`agent-v1-turn.ts` S1 card).
+  if (verdict.kind === 'no_target') return undefined;
   const carveouts = verdict.kind !== 'not_testable' ? [] : verdict.failures.filter(f => f.case === 'c').flatMap(f => f.links ?? [])
     .filter(l => hasOlumiSize(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph, verdict.goal_id, identityEvaluations));
   if (placeholders.length < (wordsOnly ? 1 : 2) && carveouts.length === 0) return undefined;
