@@ -1,4 +1,4 @@
-import { bandTheUserWrote, clausesOf, factorTheUserNamed, linkEffectQuoteContextMiss, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { bandTheUserWrote, clausesOf, factorTheUserNamed, linkEffectQuoteContextMiss, quoteSpansIn, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 
 type Entity = { readonly id: string; readonly label: string };
@@ -190,4 +190,40 @@ export function linkBandTheUserStated(
   band: InfluenceBand, verifiedText: string | readonly string[] | undefined, nodes: readonly Entity[], from: string, to: string,
 ): boolean {
   return latestLinkBands(verifiedText, nodes, from, to)?.includes(band) ?? false;
+}
+
+/** One spelling for a quote and the message it is checked against: typographic quotes plain, runs of space single. */
+const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[ \t]+/g, ' ').trim();
+
+/**
+ * ⭐ T2A5 (AIE rulings on 6157593360, 14 Oct): whose band a link set's `strength` is. The AI reads the meaning and quotes the
+ * user's complete, still-operative statement as `from_words`; the host only VERIFIES it, mechanically:
+ * - verbatim in a VERIFIED user message, this one or an earlier one (the latest that holds it);
+ * - a whole statement of that message: a substring that drops "Alice says …", "Olumi suggested …" or "I disagree" is not;
+ * - bound to THIS directed link by the quote's own words (both ends, or in THIS message "<X> effects" or the one bound
+ *   selection), so one named end never binds;
+ * - agreed by its whole message's reading (attribution, framing, dispute and disowning still reject it), and not superseded
+ *   by a later verified message.
+ * `copied`: no verified quote, yet the conversation (verified or not) reads THIS band for THIS link, so the band is copied
+ * or unknown material, never Olumi's own new estimate (`statementOrigin` makes it unknown).
+ */
+export function linkBandSource(quote: unknown, band: InfluenceBand, conversation: {
+  readonly messages: readonly string[]; readonly thisMessage?: string; readonly unverified?: string;
+}, nodes: readonly Entity[], from: string, to: string, bound: readonly Link[]): { readonly verified: boolean; readonly copied: boolean } {
+  const messages = conversation.messages.map(plainQuote);
+  const now = conversation.thisMessage === undefined ? -1 : messages.lastIndexOf(plainQuote(conversation.thisMessage));
+  const reading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, i === now ? { bound } : undefined);
+  const said = typeof quote === 'string' ? plainQuote(quote) : '';
+  const whole = (message: string): boolean => said !== '' && quoteSpansIn(message, said).some((at) =>
+    /(?:^|[.!?;:\n])\s*$/.test(message.slice(0, at)) && (/[.!?;:]$/.test(said) || /^\s*(?:$|[.!?;:\n])/.test(message.slice(at + said.length))));
+  let k = -1;
+  for (let i = messages.length - 1; i >= 0 && k < 0; i -= 1) if (whole(messages[i]!)) k = i;
+  const verified = k >= 0 && (reading(k, said)?.includes(band) ?? false) && (reading(k, messages[k]!)?.includes(band) ?? false)
+    && messages.slice(k + 1).every((m, j) => { const later = reading(k + 1 + j, m); return later === null || later.includes(band); });
+  // The still-operative reading: THIS message's first, else the latest of the earlier ones (a withdrawal or a later band
+  // supersedes); unverified words count too, since their origin is unknown.
+  const operative = (now >= 0 ? reading(now, messages[now]!) : null) ?? latestLinkBands(now >= 0 ? messages.slice(0, now) : messages, nodes, from, to);
+  const copied = !verified && ((operative?.includes(band) ?? false)
+    || (latestLinkBands(conversation.unverified, nodes, from, to)?.includes(band) ?? false));
+  return { verified, copied };
 }

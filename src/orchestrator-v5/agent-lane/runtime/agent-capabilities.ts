@@ -1,7 +1,7 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
-import { latestLinkBands } from '../../goal-target/input-claim-context.js';
+import { linkBandSource } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -4771,10 +4771,10 @@ export function createAgentCapabilities(
      * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
      * `propose_link_strength` holds one link and refuses a band the user did not type.
      *
-     * Each link here is the user's estimate only when the Agent quotes THIS message's words for it as `from_words` (the
-     * user's exact words, naming an end and the band) AND the host's reading of this message agrees (`latestLinkBands`):
-     * words binding both resolved ends, words naming an end of the ONE link the request selects, or "<X> effects … to
-     * <band>" for a link leaving X. Earlier messages credit nothing here until T2A5's quote (T2A3 DL ruling).
+     * Each link here is the user's estimate only when the Agent quotes the user's complete statement for it as `from_words`
+     * and the host verifies that quote (`linkBandSource`, T2A5): verbatim in a verified message, this one or earlier, whole,
+     * bound to this directed link by its own words, agreed by its message and not superseded. Copied or unknown material
+     * (the conversation reads this band for this link, unverified) keeps an unknown origin: nothing is prepared.
      * Otherwise it is OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
      * (`olumi_estimate`), never as the user's. A strength that is already the user's own is never replaced by an
      * estimate. Directions are kept (a reversal is one link, in the user's words). One proposal, one chip, one commit.
@@ -4879,20 +4879,24 @@ export function createAgentCapabilities(
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
           continue;
         }
-        // The user's statement for this exact link in THIS message decides (`latestLinkBands`): words naming both ends, a
-        // selection binding exactly this ONE directed link with words naming an end of it, or "<X> effects" for links
-        // leaving X. The model's `user_stated` is not source authority (PL 22:07Z): attributed or questioned words fail.
+        // The selection binds exactly ONE directed link only when nothing else is selected. The model's `user_stated` is not
+        // source authority (PL 22:07Z): attributed or questioned words fail.
         const selection = ctx.grounded_selection;
         const bound = selection?.unresolved === 'none' && selection.element_ids.length === 0 ? ctx.grounded_links ?? [] : [];
-        // ⛔ T2A3 (DL ruling, Codex FAIL on c78b4ad4): it is the user's only with the Agent's own quote of it (`from_words`,
-        // the tool's contract and staging's rule). No quote is the Agent saying "not the user's" ("Alice says…", "strong
-        // evidence"), and the host reading never overrides it; the reading stays a veto on a quote. Earlier messages credit
-        // nothing here (staging never did): the tool asks for THIS message's words, so history waits for T2A5's quote.
-        const quoted = typeof l.from_words === 'string' && wordsTheUserWrote(l.from_words, ctx.user_turn_text)
-          && bandTheUserWrote(band, l.from_words) && [String(from.label ?? ''), String(to.label ?? '')].some((end) =>
-            factorTheUserNamed(end, l.from_words as string, { options: [], others: g.nodes.map((n) => String(n.label ?? '')).filter((x) => x !== end) }));
-        const thisMessage = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, { bound });
-        const stated = quoted ? thisMessage : null;
+        // ⭐ T2A5 (AIE rulings on 6157593360): the Agent reads whose words they are and quotes the user's complete statement
+        // as `from_words`; the host verifies it (`linkBandSource`): verbatim in a verified message, this one or earlier, whole,
+        // bound to this directed link by its own words, agreed by its message and not superseded. Unverified, while the
+        // conversation reads this band for this link, is copied or unknown material: its origin stays unknown and nothing is
+        // prepared, never relabelled Olumi's estimate. Anything else is Olumi's own new estimate, shown as such on the card.
+        const said = ctx.verified_user_messages !== undefined && ctx.verified_user_messages.join('\n') === ctx.user_text
+          ? ctx.verified_user_messages : (ctx.user_text ?? '').split('\n').filter((m) => m.trim() !== '');
+        const typed = ctx.user_turn_text ?? '';
+        const source = linkBandSource(l.from_words, band, { messages: typed.trim() !== '' && said[said.length - 1] !== typed ? [...said, typed] : said,
+          ...(typed.trim() !== '' ? { thisMessage: typed } : {}), ...(ctx.unverified_user_text !== undefined ? { unverified: ctx.unverified_user_text } : {}) },
+          g.nodes, from.id, to.id, bound);
+        const origin = statementOrigin(source.verified, source.copied);
+        if (origin === 'unknown') return refuseSet('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
+        const stated = origin === 'human' ? [band] : null;
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)

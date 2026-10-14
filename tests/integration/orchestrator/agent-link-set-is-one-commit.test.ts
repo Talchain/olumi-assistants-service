@@ -444,8 +444,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const confidenceUserStated = (): number => censusConfidenceParameters(persisted).confidence_parameters_user_stated;
     const confidence0 = confidenceUserStated();
     const { caps, ctx } = agent(`set ${PAUL_STRONG}; all other listed effects to moderate.`);
+    // ⭐ T2A5 (AIE 6157593360): INPUT CHANGED, old `from_words` PAUL_STRONG → new `set ${PAUL_STRONG}`: the quote is his
+    // COMPLETE statement (a substring is not a receipt). Every expectation below is unchanged.
     const links = [
-      ...STRONG.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong', from_words: PAUL_STRONG })),
+      ...STRONG.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong', from_words: `set ${PAUL_STRONG}` })),
       ...MODERATE.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'moderate', from_words: 'all other listed effects to moderate' })),
     ];
     // His own link, put back unmarked (`placeholderBase`), is not a placeholder: naming its band stays a REVIEW (#2257).
@@ -496,7 +498,17 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   const pathOf = (k: Key): string => `${L[k][2]}::${L[k][3]}`;
   // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
   // EXPECTATION CHANGED: unquoted, old capacityQuality user_stated → new model_proposed; the quoted run keeps the old outcome.
-  it.each([[undefined, 'model_proposed'], ['set human capacity\u2019s effect on delegation quality to strong', 'user_stated']] as const)('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link (from_words %s)', async (quote, want) => {
+  // ⭐ T2A5 (AIE 6157593360): EXPECTATION CHANGED for the unquoted run, old (T2A3) model_proposed → new origin unknown: his
+  // own words, not quoted by the AI, are never relabelled Olumi's estimate, and nothing is prepared.
+  it('T2A3 plural: the singular "X\u2019s effect on Y", NOT quoted, keeps an unknown origin: nothing prepared', async () => {
+    placeholderBase();
+    const words = 'set human capacity\u2019s effect on delegation quality to strong';
+    const { caps, ctx } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: ['capacityQuality', 'capacityOverhead'].map((k) => ({ from_label: L[k as Key][0], to_label: L[k as Key][1], strength: 'strong' })) as never, rationale: words });
+    expect(p).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(linkSizing(edge('capacityQuality'))).not.toBe('user');
+  });
+  it.each([['set human capacity\u2019s effect on delegation quality to strong', 'user_stated']] as const)('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link (from_words %s)', async (quote, want) => {
     const { authors } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead'], quote);
     expect(authors).toEqual({ [pathOf('capacityQuality')]: want, [pathOf('capacityOverhead')]: 'model_proposed' });
     expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
@@ -519,8 +531,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     placeholderBase();
     const said = 'The effect of human assistant capacity on delegation quality is very strong.';
     const { caps, ctx } = agent(said);
+    // ⭐ T2A5 (AIE 6157593360): INPUT CHANGED, old `from_words` "human assistant capacity on delegation quality is very strong"
+    // → new: his complete sentence. Every expectation below is unchanged.
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: L.capacityQuality[0], to_label: L.capacityQuality[1], strength: 'very strong',
-      from_words: 'human assistant capacity on delegation quality is very strong' }] as never, rationale: said });
+      from_words: said }] as never, rationale: said });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     expect(String(p.public_label)).toContain('your estimate');
     expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);

@@ -450,9 +450,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'Use it when the user gives strengths for more than one link in one message, or asks Olumi to size links for them '
       + '(they ask what you recommend, then agree to it). This does NOT change anything: it prepares ONE change and returns its id, '
       + 'which you keep for authorise_change: show the user what each link will hold, never the id, before they approve. '
-      + 'A link is recorded as the user\u2019s own ONLY when its `from_words` are the user\u2019s exact words from THIS message naming that link '
-      + '(one of its ends) AND its band; naming the band a link already sits in keeps it as it is. '
-      + 'Every other link is recorded as OLUMI\u2019S ESTIMATE, applied with their approval \u2014 never as theirs \u2014 and you must say which are which. '
+      + 'A link band is recorded as the user\u2019s own only when from_words quotes their complete, still-operative statement about that directed link, character for character from a verified user message in this conversation, including the words identifying its speaker or source, qualification and any negation. Use their latest applicable statement. A report of someone else\u2019s view, a question or dispute, or a band word about evidence rather than this link\u2019s effect does not establish their own link estimate. Bind the quote to this actual link through its stated ends or the current unambiguous directed selection; naming one endpoint alone is insufficient. Retain the full source and any competing statements separately. If positive human authorship cannot be verified, preserve the held origin or unknown; omission of from_words does not make copied or unknown material Olumi\u2019s estimate. Only an explicitly new, grounded Olumi proposal may be labelled Olumi\u2019s estimate, with its own basis and complete approval card. Naming an existing band retains its source and values. '
       + 'Directions are kept: a link the user says runs the other way is propose_link_strength, one link at a time. '
       + 'A strength the user set themselves is never replaced by an estimate. The set is written whole or not at all.' + SLIGHT_IS_WEAK,
     parameters: obj({
@@ -463,7 +461,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
           to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
           strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
-          from_words: { type: 'string', description: 'ONLY when the user named this link\u2019s band: their exact words from THIS message that name this link (one of its ends) and the band. Leave it out for Olumi\u2019s estimate.' },
+          from_words: { type: 'string', description: 'For a positively verified user-authored band only: copy the complete latest applicable statement about this directed link verbatim from a verified user message, retaining speaker/source, qualification and negation. A report, question, dispute, or evidence-strength word is not the user\u2019s own link estimate. Otherwise omit human-credit words and preserve the original source separately; omission alone grants neither AI authorship nor a new estimate.' },
         }, ['from_label', 'to_label', 'strength']),
       },
       rationale: { type: 'string', description: 'What the user asked for, in their words.' },
