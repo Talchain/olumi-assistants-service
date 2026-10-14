@@ -1,0 +1,11 @@
+{
+ "_source": {
+  "packet": "recovery/codex/AIE-INTRODUCTION-SAY-SHOWN-AND-EVENT-RISK-RULINGS-20261014.json",
+  "packet_sha256": "6e52e896233a194e91657a35f919e4f4218c05f91a2ed9f9580e1492c8acd303",
+  "board": "#94 6161383921",
+  "field": "introduction.description",
+  "note": "extracted programmatically, byte for byte"
+ },
+ "text": "Who introduced this item, independently of who supplied its values. “explicit”: it is stated in the retained user or source material. “inferred”: it interprets that material, or its introduction is uncertain. “ai_proposed”: a genuinely new item you are adding beyond that material. Reformulating a supplied purpose, condition or concern is not a new AI addition. Use “ai_proposed” only for your own additions after reading the relevant source; absence of a label or figure is not evidence. If source is missing, unread or ambiguous, use “inferred” and preserve that uncertainty. Label your own additions as Olumi’s suggestions; approval does not change their origin or approve their numbers.",
+ "text_sha256": "593ff5c9b3dba2c89d9359c289cfcb25293eba31db5a9b6cca97a0ca3c4c90cf"
+}
