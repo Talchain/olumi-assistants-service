@@ -1833,6 +1833,12 @@ export async function buildModelFromBrief(
   const firstCandidate = candidate;
   // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
   const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
+  /**
+   * The redraft still holds the unattested event as its goal: as an event, or under ANY kind with the event's own label
+   * (⛔ Codex FAIL 3026 r1: a retry keeping "Urgent launch" with `kind: null` registered). Identity, never a word match.
+   */
+  const stillTheUnattestedEvent = (c: CandidateModel): boolean => unattestedEventGoal(c, brief, false) !== null
+    || (unattested !== null && canonicalLabel(c.goal.metric) === canonicalLabel(unattested.event));
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
@@ -2003,7 +2009,7 @@ export async function buildModelFromBrief(
         // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
         // A redraft of an unattested event goal re-chooses the goal: adopted only when it is no longer one, losing no condition.
         (unattested === null ? keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal)
-          : keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal) && unattestedEventGoal(retryCandidate, brief, false) === null) &&
+          : keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal) && !stillTheUnattestedEvent(retryCandidate)) &&
         // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
         // gap — but it must never cover LESS, and when coverage is the only reason
         // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
@@ -2128,7 +2134,7 @@ export async function buildModelFromBrief(
 
   // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
   // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
-  if (unattested !== null && unattestedEventGoal(candidate, brief, false) !== null) {
+  if (unattested !== null && stillTheUnattestedEvent(candidate)) {
     return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested) };
   }
 

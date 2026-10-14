@@ -26,10 +26,14 @@ const draft = (): Rec => JSON.parse(FX.raw_text) as Rec;
 const EVENT_WORDS = 'We have an urgent launch date in the next three months.';
 const GOVERNING = 'Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?';
 
-/** The redraft: the brief's governing goal (productivity ≥ +10 % against today), the launch kept as a condition. */
+/**
+ * The redraft: the brief's governing goal (productivity ≥ +10 % against today), the launch kept as a condition. It takes the
+ * first draft's own target quantity, "Productivity change by launch", as its goal: a user's target survives a re-chosen goal
+ * only by its full identity, the same quantity and the same terms (⛔ Codex FAIL 3026 r1).
+ */
 const redraft = (): Rec => {
   const d = draft();
-  d.goal = { kind: null, deliverable: null, metric: 'Productivity', operator: '>=', target_stated: true, value: 10, unit: '%', horizon_months: 3,
+  d.goal = { kind: null, deliverable: null, metric: 'Productivity change by launch', operator: '>=', target_stated: true, value: 10, unit: '%', horizon_months: 3,
     provenance: 'explicit', frame: 'change_abs', baseline_known: false, baseline_value: null, baseline_provenance: 'inferred', scope: null,
     quantity_frame: 'change', basis: { reference: 'today', denominator: "today's productivity", period_months: 3, period_kind: 'at_end',
       effect_unit: "% of today's productivity", effects_at_period_end: false,
@@ -39,9 +43,9 @@ const redraft = (): Rec => {
   d.factors = (d.factors as Rec[]).filter((f) => f.label !== 'Productivity change by launch');
   d.links = (d.links as Rec[]).filter((l) => l.to !== 'Urgent launch' && l.to !== 'Productivity change by launch' && l.from !== 'Productivity change by launch')
     .concat([
-      { from: 'Delivery capacity', to: 'Productivity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null },
-      { from: 'Code quality score', to: 'Productivity', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null },
-      { from: 'Launch delay from onboarding', to: 'Productivity', direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null },
+      { from: 'Delivery capacity', to: 'Productivity change by launch', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null },
+      { from: 'Code quality score', to: 'Productivity change by launch', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null },
+      { from: 'Launch delay from onboarding', to: 'Productivity change by launch', direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null },
     ]);
   d.unknown_concerns = (d.unknown_concerns as Rec[]).map((u) => ({ ...u, concerns: (u.concerns as string[]).filter((c) => !c.includes('Urgent launch')) }));
   return d;
@@ -81,7 +85,7 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(calls[1]!.input).toContain(GOVERNING);
     expect(JSON.stringify(calls[1]!.schema.properties.goal.properties.metric)).not.toContain('Urgent launch');
     const goal = goalOf(graph!);
-    expect(goal).toMatchObject({ label: 'Productivity', goal_direction: '>=', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs' });
+    expect(goal).toMatchObject({ label: 'Productivity change by launch', goal_direction: '>=', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs' });
     expect(goal.goal_target_basis?.also_required).toEqual(['maintaining code quality', 'launch completed by the urgent launch date']);
     // The user's limit is kept; no node or row carries "Urgent launch" as a goal.
     expect((graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value])).toEqual([['Hiring cost', '<=', 200000]]);
@@ -106,31 +110,100 @@ describe('an unattested event is never saved as the goal; the one existing retry
   });
 
   /**
+   * ⛔ Codex FAIL 3026 r1 (independent probes): the exception compared only comparator, figure, unit and frame, so another
+   * quantity carrying the same "≥ +10 %" consumed productivity's target and was saved, stamped `from_brief`. The user's
+   * target is kept only by its FULL identity: the same quantity and the same terms.
+   */
+  it.each(['Code quality', 'Revenue', 'Urgent launch'])('a redraft whose goal is another quantity with the user\'s terms (%s, at least +10 per cent) is not adopted: nothing is saved', async (metric) => {
+    const r = redraft();
+    r.goal.metric = metric;
+    r.links = (r.links as Rec[]).map((l) => (l.to === 'Productivity change by launch' ? { ...l, to: metric } : l));
+    const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(r)]);
+    expect(calls).toHaveLength(2);
+    expect(graph).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+  });
+
+  it('a redraft that keeps the unattested event under another kind ("Urgent launch", kind null, every user limit kept) is still unattested: nothing is saved', async () => {
+    const d = draft();
+    d.goal = { ...d.goal, kind: null, deliverable: null };
+    expect(unattestedEventGoal(d as unknown as CandidateModel, FX.brief, false), 'PRECONDITION: no longer typed as an event').toBeNull();
+    const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(d)]);
+    expect(calls).toHaveLength(2);
+    expect(graph).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+  });
+
+  /**
+   * The same rule at adoption, told apart by the call count: real T5 D2 r1 drafts, where rep 7 (smaller, still over the
+   * limit) keeps "Feature launch" with `kind: null`. Adopted, it would earn #3019's second size retry (a third call); it is
+   * refused at adoption, so the first draft stands and the user is asked after two calls.
+   */
+  it('a smaller retry still over the limit that keeps the unattested event under another kind is refused at adoption: no second size retry', async () => {
+    const D2 = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-r1.json', 'utf8')) as Rec;
+    const RETRIES = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-v3-retries.json', 'utf8')) as Rec;
+    const unkind = (d: Rec): Rec => ({ ...structuredClone(d), goal: { ...d.goal, kind: null, deliverable: null } });
+    expect(RETRIES.retry_rep7.goal).toMatchObject({ kind: 'event_by_date', metric: 'Feature launch' });
+    const { graph, result, calls } = await construct([JSON.stringify(D2.draft_call1), JSON.stringify(unkind(RETRIES.retry_rep7)),
+      JSON.stringify(unkind(RETRIES.retry_rep6))], D2.brief);
+    expect(calls).toHaveLength(2);
+    expect(graph).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+  });
+
+  /** Two targets the user stated in one sentence with the same terms: productivity and code quality, each ≥ +10 %. */
+  const PAIR_QUESTION = 'Should I hire a Tech lead or two developers to increase productivity by at least 10% and code quality by at least 10%?';
+  const withQualityTarget = (d: Rec): Rec => ({ ...d, decision_question: PAIR_QUESTION, constraints: [...(d.constraints as Rec[]),
+    { metric: 'Code quality score', operator: '>=', value: 10, unit: '%', provenance: 'explicit', frame: 'change_abs', role: 'target' }] });
+  it('two same-terms targets never collapse: a redraft that takes one as its goal and drops the other is not adopted', async () => {
+    const r = { ...redraft(), decision_question: PAIR_QUESTION };
+    const { graph, result, calls } = await construct([JSON.stringify(withQualityTarget(draft())), JSON.stringify(r)], FX.brief.replace(GOVERNING, PAIR_QUESTION));
+    expect(calls).toHaveLength(2);
+    expect(graph).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+  });
+
+  it('CONTRAST: the same redraft keeping the other target is adopted, with the goal and both of the user\'s rows', async () => {
+    const { graph, result, calls } = await construct([JSON.stringify(withQualityTarget(draft())), JSON.stringify(withQualityTarget(redraft()))],
+      FX.brief.replace(GOVERNING, PAIR_QUESTION));
+    expect(result.ok, JSON.stringify(result).slice(0, 800)).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(goalOf(graph!)).toMatchObject({ label: 'Productivity change by launch', goal_threshold_raw: 10, goal_threshold_frame: 'change_abs' });
+    expect((graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value, c.provenance])).toEqual(expect.arrayContaining([
+      ['Code quality score', '>=', 10, 'explicit'], ['Hiring cost', '<=', 200000, 'inferred']]));
+  });
+
+  /**
    * #3019's second size retry edits the ADOPTED model. When the first retry re-chose an unattested goal, the second keeps the
    * goal it chose (pinned to it), never the event. Real T5 D2 r1 drafts (`tests/fixtures/size-retry`): the first pass (over
    * the limit), rep 7 (still over) and rep 6 (within). Scripted: rep 7 and rep 6 answer with the brief's own goal, conversion
-   * above 15 %, in place of "Feature launch" (their links into the goal point at it; nothing else changes).
+   * above 15 %, in place of "Feature launch". The goal takes the user's own target quantity, "Conversion rate"
+   * (its factor and target row become the goal; links into either point at it; nothing else changes). Its link out of
+   * "Conversion rate" cannot stand once that is the goal, so rep 7 carries one more Olumi-proposed link to stay over the
+   * limit as served (31 links) — the second size retry this row pins runs only on a model still over it.
    */
   it('a second size retry after the goal was re-chosen is pinned to the re-chosen goal; its within-limit answer registers with every other target and limit kept', async () => {
     const D2 = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-r1.json', 'utf8')) as Rec;
     const RETRIES = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-v3-retries.json', 'utf8')) as Rec;
-    const regoal = (draft: Rec): Rec => {
+    const regoal = (draft: Rec, extraLinks: readonly Rec[] = []): Rec => {
       const d = structuredClone(draft);
-      d.goal = { ...d.goal, kind: null, deliverable: null, metric: 'Launch conversion rate', operator: '>', target_stated: true, value: 15, unit: '%',
+      d.goal = { ...d.goal, kind: null, deliverable: null, metric: 'Conversion rate', operator: '>', target_stated: true, value: 15, unit: '%',
         horizon_months: 3, frame: 'level', quantity_frame: 'level', basis: null,
         source_quote: 'Success means a conversion rate of over 15% and at least 20 new customers during the first three months after launch.' };
       d.constraints = (d.constraints as Rec[]).filter((c) => c.metric !== 'Conversion rate');
-      d.links = (d.links as Rec[]).map((l) => (l.to === 'Feature launch' ? { ...l, to: 'Launch conversion rate' } : l));
+      d.factors = (d.factors as Rec[]).filter((f) => f.label !== 'Conversion rate');
+      d.links = (d.links as Rec[]).map((l) => (l.to === 'Feature launch' ? { ...l, to: 'Conversion rate' } : l)).filter((l) => l.from !== l.to).concat(extraLinks);
       return d;
     };
     expect(unattestedEventGoal(D2.draft_call1 as CandidateModel, D2.brief, false), 'PRECONDITION: the served first pass is unattested').not.toBeNull();
-    const { graph, result, calls, registeredBrief } = await construct([JSON.stringify(D2.draft_call1), JSON.stringify(regoal(RETRIES.retry_rep7)), JSON.stringify(regoal(RETRIES.retry_rep6))], D2.brief);
+    const { graph, result, calls, registeredBrief } = await construct([JSON.stringify(D2.draft_call1), JSON.stringify(regoal(RETRIES.retry_rep7, [{ from: 'Annual marketing spend', to: 'Unknown conversion lift', direction: 'positive',
+      provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null }])), JSON.stringify(regoal(RETRIES.retry_rep6))], D2.brief);
     expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
     expect(calls).toHaveLength(3);
     const metricOf = (call: Rec): unknown => call.schema.properties.goal.properties.metric;
     expect(metricOf(calls[1]!), 'the redraft re-chooses the goal: unpinned').not.toHaveProperty('enum');
-    expect(metricOf(calls[2]!), 'the second size retry keeps the goal the first chose').toEqual({ type: 'string', enum: ['Launch conversion rate'] });
-    expect(goalOf(graph!)).toMatchObject({ label: 'Launch conversion rate', goal_direction: '>', goal_threshold_raw: 15 });
+    expect(metricOf(calls[2]!), 'the second size retry keeps the goal the first chose').toEqual({ type: 'string', enum: ['Conversion rate'] });
+    expect(goalOf(graph!)).toMatchObject({ label: 'Conversion rate', goal_direction: '>', goal_threshold_raw: 15 });
     // Compaction after the redraft keeps every other target and limit the user stated, by quantity, comparator and figure.
     const rows = (graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value]);
     expect(rows).toEqual(expect.arrayContaining([['New customers in first 3 months', '>=', 20], ['Annual marketing spend', '<=', 100000],
@@ -144,17 +217,24 @@ describe('an unattested event is never saved as the goal; the one existing retry
     d.goal = { ...d.goal, metric: 'Launch the app', deliverable: 'the app launch', source_quote: 'We must launch the app by March 2027 with the current team.' };
     expect(briefAttestsEventByDate(brief, d.goal as never), 'PRECONDITION: attested').toBe(true);
     expect(unattestedEventGoal(d as unknown as CandidateModel, brief, false)).toBeNull();
-    const { calls } = await construct([JSON.stringify(d)], brief);
+    const { graph, result, calls } = await construct([JSON.stringify(d)], brief);
     expect(calls.every((c) => !String(c.input).includes('is an event the brief does not state as its goal'))).toBe(true);
+    expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(goalOf(graph!)).toMatchObject({ id: 'event_goal', goal_threshold_unit: '% of the app launch', goal_deadline_as_stated: 'by March 2027' });
   });
 
   it('CONTRAST: a goal that is not an event (marketing\'s two targets) is never re-asked by this rule', async () => {
     const d = draft();
-    d.goal = { ...redraft().goal };
+    d.goal = { ...redraft().goal, metric: 'Productivity' };
     d.constraints = [...(d.constraints as Rec[]).filter((c) => c.role !== 'target'),
       { metric: 'Code quality score', operator: '>=', value: 75, unit: 'score out of 100', provenance: 'explicit', frame: 'level', role: 'target' }];
     expect(unattestedEventGoal(d as unknown as CandidateModel, FX.brief, false)).toBeNull();
-    const { calls } = await construct([JSON.stringify(d)]);
+    const { graph, result, calls } = await construct([JSON.stringify(d)]);
     expect(calls.every((c) => !String(c.input).includes('is an event the brief does not state as its goal'))).toBe(true);
+    expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(goalOf(graph!)).toMatchObject({ label: 'Productivity', goal_threshold_raw: 10 });
+    expect((graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value])).toEqual(expect.arrayContaining([['Code quality score', '>=', 75]]));
   });
 });
