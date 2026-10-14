@@ -27,7 +27,9 @@ export type PressBlocker =
    * asked before any target (DL ruling on C1's check 3005); `goal_target_missing`, the user's goal has no target, so no other
    * answer can unlock a chance.
    */
-  | { readonly kind: 'missing_input'; readonly ask: string; readonly also_unbuilt?: string; readonly cause?: 'objective_provisional' | 'goal_target_missing' }
+  | { readonly kind: 'missing_input'; readonly ask: string; readonly also_unbuilt?: string; readonly cause?: 'objective_provisional' | 'goal_target_missing';
+      /** The input can be proposed for the user to approve, by this tool (AIE Q4: "offer that actual step instead"). */
+      readonly proposable_by?: { readonly tool: 'propose_assumptions'; readonly node_id: string; readonly field: 'occurrence_range'; readonly window_months: number } }
   | { readonly kind: 'missing_implementation'; readonly what: string }
   | { readonly kind: 'confirm'; readonly by: 'identity_card' | 'confirm_reading' }
   | { readonly kind: 'run_again'; readonly why: 'precision_missing' | 'not_returned' }
