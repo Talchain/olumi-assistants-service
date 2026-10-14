@@ -9,7 +9,7 @@ export interface AnswerGuidance {
   readonly entries: Readonly<Record<string, { readonly status: GuidanceRecord['status']; readonly state_key_hash: string; readonly variant_id?: Variant; readonly slot?: number }>>;
 }
 export const GUIDANCE_HISTORY_LIMIT = 20;
-const KEY = /^(RC-WIDEN|RC-WHAT-CHANGES|RC-PREMORTEM|RC-COACH-EDITS|RC-STRENGTHEN-ITEM:[0-9a-f]{12})$/;
+const KEY = /^(RC-WIDEN|RC-WHAT-CHANGES|RC-PREMORTEM|RC-COACH-EDITS|RC-OUTSIDE-VIEW|RC-STRENGTHEN-ITEM:[0-9a-f]{12})$/;
 const HASH = /^[0-9a-f]{12}$/;
 const ENTRY_KEYS = new Set(['status', 'state_key_hash', 'variant_id', 'slot']);
 

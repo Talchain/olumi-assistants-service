@@ -16,7 +16,7 @@ const why = (row('RC-WIDEN').why_now as unknown as Readonly<Record<string, strin
 const message = 'Our churn is 3%. What should we examine next?';
 const reply = 'Our churn is 3%.\n\n- Name another risk.\n- Test it with customer evidence.\n\nWhich risk could change your plan?';
 const response = (text = reply): Obj => ({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }] });
-type Trigger = 'W6' | 'P4' | 'S1' | 'none';
+type Trigger = 'W6' | 'P4' | 'S1' | 'OV' | 'none';
 function snapshot(s: Snapshot, trigger: Trigger): Snapshot {
   // Synthetic canonical-state controls; no derived selector signal or selector double.
   const g = s.graph;
@@ -29,6 +29,10 @@ function snapshot(s: Snapshot, trigger: Trigger): Snapshot {
   if (trigger !== 'W6') g.nodes.push({ id: 'risk1', kind: 'risk', label: 'Delivery risk' }, { id: 'risk2', kind: 'risk', label: 'Retention risk' });
   for (const n of g.nodes) {
     if (n.observed_state) object(n.observed_state).source = 'user';
+    // RC-OUTSIDE-VIEW's trigger is a user figure with NO range: only the OV control leaves one; every other control states one.
+    const os = n.observed_state ? object(n.observed_state) : undefined;
+    const figure = typeof os?.raw_value === 'number' ? os.raw_value : os?.value;
+    if (os && trigger !== 'OV' && typeof figure === 'number') os.range = { low: figure * 0.8, high: figure * 1.2, meaning: 'min_max', source: 'user' };
     delete n.nonlinear_identity; delete n.temporal_identity; delete n.goal_horizon_months;
   }
   g.edges = g.edges.filter(e => g.nodes.some(n => n.id === e.from) && g.nodes.some(n => n.id === e.to));
@@ -69,6 +73,18 @@ it('A1 recorded conversation: one W6 carrier, whole answer, science verbatim, pl
   assertWholeAnswer(w.response);
   expect(String(w.response.assistant_text).split('\n\n')).toContain(object(object(object(w.response.guidance).slot1).primary_action).label);
   expect(object(object(w.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W6' });
+});
+it('OV1 a goal-path figure you gave with no range: the Outside View is the one carrier (typed signal, no keyword)', async () => {
+  const ov = row('RC-OUTSIDE-VIEW');
+  const w = await run('OV', { providerReply: () => response('Our churn is 3%.') });
+  expect(carriers(w)).toEqual([{ policy_id: 'RC-OUTSIDE-VIEW', variant_id: null, name: ov.name, why: ov.science_basis.summary,
+    trigger: ov.trigger_predicate.all.join(' AND ') }]);
+  const slot1 = object(object(w.response.guidance).slot1);
+  expect(slot1).toMatchObject({ policy_id: 'RC-OUTSIDE-VIEW', priority: 'P5' });
+  expect(object(slot1.primary_action)).toMatchObject({ label: ov.primary_action.label, intent: 'outside_view' });
+  expect(String(w.response.assistant_text)).toContain(`Why? ${ov.science_basis.summary}`);
+  expect(JSON.stringify(w.response)).not.toMatch(/reference class/i);
+  // Contrast: the same message and model with a range on every figure ('none') carries nothing (A2 below).
 });
 it('A2 no trigger: no carrier, no Why?, direct grounded answer', async () => {
   const w = await run('none', { providerReply: () => response('Our churn is 3%.') });

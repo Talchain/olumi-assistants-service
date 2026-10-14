@@ -249,7 +249,10 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('CE-NO-RESULT-CLAIM', !banned(reply, /\b(the result (has )?changed|now leads|is now ahead|the answer is now)\b/iu, [...model, ...(inputs.edited_labels ?? [])]));
   }
   // Fail immediately on implementation/policy drift, rather than quietly leaving a rule unchecked.
-  const expected = POLICY.method_turns[policy_id].post_checks.map(rule => rule.id);
+  // RC-OUTSIDE-VIEW has no method turn (its press is a discuss): an id without one is drift too.
+  const turn = (POLICY.method_turns as Partial<Record<MethodTurnId, { readonly post_checks: readonly { readonly id: string }[] }>>)[policy_id];
+  if (turn === undefined) throw new Error(`No method turn for ${policy_id}`);
+  const expected = turn.post_checks.map(rule => rule.id);
   if (failed.some(id => !expected.some(expectedId => expectedId === id))) throw new Error('Unknown text post-check id');
   return { pass: failed.length === 0, failed, targets };
 }

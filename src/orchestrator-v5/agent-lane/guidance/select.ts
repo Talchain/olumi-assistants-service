@@ -148,6 +148,17 @@ function evaluate(id: PolicyId, s: GuidanceSignals): Evaluation {
     if (LIMIT_REASONS.includes(s['run.withheld_reason'] ?? '')) return none();
     return { candidates: [{ policy_id: id, priority: 'P4', fields: keyOf({ plan_option_id: planOf(s), non_sq_option_ids: sorted(options) }) }] };
   }
+  if (id === 'RC-OUTSIDE-VIEW') {
+    // ⭐ DSK-TR-002 RE-GROUNDED (old #1711 used a keyword scan of chat; rejected): a goal-path factor whose value is the user's
+    // single figure, with no range. Typed signals only; a factor whose range is not recorded is never a candidate.
+    const factors = s['model.goal_path_factors'];
+    if (s['model.goal_present'] === false) return none();
+    if (s['model.goal_present'] === undefined || !factors) return none('pending_signal');
+    const candidates: Draft[] = factors.filter(f => f.value_authorship === 'yours' && f.has_range === false)
+      .sort((a, b) => a.goal_distance - b.goal_distance || compareId(a.factor_id, b.factor_id))
+      .map(f => ({ policy_id: id, priority: 'P5', item: f.factor_id, fields: keyOf({ factor_id: f.factor_id, value_hash: f.value_hash }) }));
+    return { candidates, reason: candidates.length ? undefined : 'not_eligible' };
+  }
   const sinceRun = s['since_run.goal_path_user_edits'];
   if (!sinceRun || sinceRun.status === 'pending') return none('pending_signal');
   const edits = sinceRun.edits.filter(e => EDIT_KINDS.has(e.kind));
@@ -184,6 +195,7 @@ function selected(d: Draft, s: GuidanceSignals): SelectedRow | undefined {
     }
   } else if (d.policy_id === 'RC-STRENGTHEN-ITEM') primary_action = { label: POLICY.rows[2].primary_action.label, action_kind: 'edit_inline', target: d.item };
   else if (d.policy_id === 'RC-PREMORTEM') primary_action = { label: POLICY.rows[3].primary_action.label, action_kind: 'discuss', intent: 'pre_mortem' };
+  else if (d.policy_id === 'RC-OUTSIDE-VIEW') primary_action = { label: POLICY.rows[5].primary_action.label, action_kind: 'discuss', intent: 'outside_view' };
   else primary_action = { label: POLICY.rows[4].primary_action.label, action_kind: 'discuss' };
   return { policy_id: d.policy_id, priority: d.priority, ...(d.variant ? { variant: d.variant } : {}),
     ...(d.target ? { target: d.target } : {}), ...(d.item ? { item: d.item } : {}), primary_action, state_key_hash: stateKeyHash(d.fields), copy };

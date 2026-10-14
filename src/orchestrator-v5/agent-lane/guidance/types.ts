@@ -1,6 +1,6 @@
 import type { TippingPoint } from '../decision-sensitivity.js';
 
-export type PolicyId = 'RC-WIDEN' | 'RC-WHAT-CHANGES' | 'RC-STRENGTHEN-ITEM' | 'RC-PREMORTEM' | 'RC-COACH-EDITS';
+export type PolicyId = 'RC-WIDEN' | 'RC-WHAT-CHANGES' | 'RC-STRENGTHEN-ITEM' | 'RC-PREMORTEM' | 'RC-COACH-EDITS' | 'RC-OUTSIDE-VIEW';
 export type Priority = 'P1' | 'P2' | 'P3' | 'P4' | 'P5';
 export type Variant = 'W1' | 'W2Z' | 'W2' | 'W3' | 'W4' | 'W5' | 'W6' | 'W7' | 'S1' | 'S2' | 'S3L' | 'S3V';
 export type Target = 'options' | 'risks' | 'factors';
@@ -25,6 +25,8 @@ export interface GoalPathFactor {
   readonly value_authorship: ValueAuthorship;
   readonly goal_distance: number;
   readonly value_hash?: string;
+  /** Whether the stored value carries a range (`observed_state.range`). Absent = not recorded: RC-OUTSIDE-VIEW stays silent. */
+  readonly has_range?: boolean;
 }
 export interface GoalPathEdit {
   readonly kind: string;

@@ -46,6 +46,8 @@ export interface GoalPathFactor {
   readonly goal_distance: number;
   /** 12-hex hash of the factor's stored value (`observed_state` value, raw value, unit, baseline, cap). */
   readonly value_hash: string;
+  /** The stored value carries a range (`observed_state.range` present): RC-OUTSIDE-VIEW asks only about a single figure. */
+  readonly has_range?: boolean;
 }
 
 export type DecisionSensitivitySignal =
@@ -198,6 +200,12 @@ const numeric = (v: unknown): number | undefined => {
   return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
 };
 
+/** A range on the stored value, in any shape: only a value with NO range is a single figure (RC-OUTSIDE-VIEW). */
+function hasStoredRange(observed: unknown): boolean {
+  const range = (observed as { range?: unknown } | null | undefined)?.range;
+  return range !== undefined && range !== null;
+}
+
 /**
  * `model.same_lever` (RC rule @24883c2d, `build-cases.py same_lever_of`): F1's detector supplies the overlapping pairs
  * (its threshold and overlap rule, unchanged); the contract keeps a pair only when BOTH options are in the comparison
@@ -313,6 +321,7 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
         value_authorship: valueAuthorshipOf(n.observed_state),
         goal_distance: dist.get(n.id as string) ?? 99,
         value_hash: factorValueHash(n),
+        has_range: hasStoredRange(n.observed_state),
       });
     }
   }
