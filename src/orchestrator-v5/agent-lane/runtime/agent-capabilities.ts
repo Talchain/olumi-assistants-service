@@ -4048,8 +4048,30 @@ export function createAgentCapabilities(
     }
   };
 
+  /** How many date or duration phrases one message holds: every word start, read by the one reader over the words after
+   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does); overlapping readings are one phrase. */
+  const datePhrasesIn = (text: string): number => {
+    const plain = text.replace(/(?:^|[^\p{L}\p{N}])as of\s+\d{4}-\d{2}-\d{2}(?=$|[^\p{L}\p{N}])/gu, ' ');
+    const spans: (readonly [number, number])[] = [];
+    for (const start of plain.matchAll(/\S+/gu)) {
+      const tail = plain.slice(start.index);
+      for (const word of tail.matchAll(/\S+/gu)) {
+        const end = word.index + word[0].length;
+        if (end > 80) break;
+        if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true }) !== null) spans.push([start.index, start.index + end]);
+      }
+    }
+    let phrases = 0;
+    let reach = -1;
+    for (const [from, to] of spans.sort((a, b) => a[0] - b[0])) {
+      if (from >= reach) phrases += 1;
+      reach = Math.max(reach, to);
+    }
+    return phrases;
+  };
+
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReference = true): Promise<ToolResult> => {
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4068,7 +4090,8 @@ export function createAgentCapabilities(
       // A resolved source owns both its date and stated count; a model date is only an interpretation fallback.
       const stated: StatedDeadline | null = parsed ?? (modelDate === undefined ? null
         : { words, form: 'date' as const, date: modelDate, reference: today });
-      const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
+      // `userReading` false: the user's words, but WHICH of their phrases is the deadline is Olumi's reading (DLf5 Codex check).
+      const authoredBy = userWords && userReading && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
           ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'));
@@ -5392,7 +5415,16 @@ export function createAgentCapabilities(
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
       const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
-      const asOf = typedAsOfDates.find(date => date === args.reference_date);
+      // ⛔ DLf5 Codex check (blocking 1): a typed "as of D" dates the deadline ONLY beside its words ("<words>, as of D") or
+      // opening the deadline's own clause ("As of D, our deadline is <words>"). "Revenue was 2m as of D, and our launch
+      // deadline is …" keeps the host reference, whatever the model echoes.
+      const beside = (date: string): boolean =>
+        new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}\\s*,?\\s*as of\\s+${date}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)
+        || typed.split(/[.;!?\n]/).some(sentence => {
+          const open = new RegExp(`^as of\\s+${date}\\s*,?([^,]*?)(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(sentence.trim());
+          return open !== null && !/(?:^|[^\p{L}])(?:and|but)(?=$|[^\p{L}])/u.test(open[1]!);
+        });
+      const asOf = typedAsOfDates.find(date => date === args.reference_date && beside(date));
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       if (args.reference_date !== undefined && args.reference_date !== asOf) {
@@ -5403,10 +5435,14 @@ export function createAgentCapabilities(
       }
       if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
         detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
+      // ⛔ DLf5 Codex check (blocking 2): "Our office lease expires in six months, and our launch deadline is in nine months"
+      // with the quote "in six months" credited the lease. A message holding MORE THAN ONE date or duration phrase (read by
+      // the one reader, as `eventDateSpans` does; an "as of D" reference is not one) offers the card as Olumi's reading.
+      const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? [])].reverse().map(plainOf).find(writes) ?? typed;
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        origin === 'human', true);
+        origin === 'human', datePhrasesIn(source) <= 1);
     },
 
     /**

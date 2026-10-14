@@ -123,6 +123,7 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
     expect(callOf(offered, 'propose_goal_deadline'), JSON.stringify(offered._agent?.tool_calls)).toMatchObject({ ok: true });
     const chips = (offered.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'));
     expect(chips, JSON.stringify(offered.suggested_actions)).toHaveLength(1);
+    expect(String(chips[0]!.detail), 'one phrase in the message: the user\u2019s own reading').not.toContain('Olumi\u2019s interpretation');
     expect(goalNow().goal_horizon?.deadline, 'nothing saved before the approval').toBeUndefined();
     expect(deadlineChanges.get(scenario) ?? 0).toBe(0);
     await send({ agent_session_id: session, message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
@@ -136,5 +137,38 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
     expect(teamCall!.refusal, 'the deadline is held, so the forecast is offered').not.toBe('deadline_not_held');
     expect(teamCall).toMatchObject({ ok: true });
     expect(deadlineChanges.get(scenario), 'the team turn leaves the saved deadline alone').toBe(1);
+  });
+
+  /** The Codex check on 394c95eb: offer the card, press its approve chip, read the saved goal back. */
+  const offerAndApprove = async (message: string, args: Json) => {
+    const session = `dlf5-${randomUUID()}`;
+    script[message] = { name: 'propose_goal_deadline', args: { deadline_date: '', rationale: 'The user stated their launch deadline.', ...args } };
+    const offered = await send({ agent_session_id: session, message });
+    expect(callOf(offered, 'propose_goal_deadline'), JSON.stringify(offered._agent?.tool_calls)).toMatchObject({ ok: true });
+    const chips = (offered.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'));
+    expect(chips, JSON.stringify(offered.suggested_actions)).toHaveLength(1);
+    await send({ agent_session_id: session, message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
+    return { detail: String(chips[0]!.detail), saved: { deadline: goalNow().goal_horizon?.deadline, reference: goalNow().goal_horizon_reference_date,
+      stated: goalNow().goal_horizon_stated_months }, changes: deadlineChanges.get(scenario) ?? 0 };
+  };
+
+  it('Codex blocking 1: an "as of" date in ANOTHER clause never dates the deadline, whatever the model echoes (was 2027-03-01)', async () => {
+    const { detail, saved, changes } = await offerAndApprove('Revenue was 2m as of 2026-09-01, and our launch deadline is 6 months from today.',
+      { deadline_words: '6 months from today', reference_date: '2026-09-01' });
+    expect(saved).toEqual({ deadline: '2027-04-13', reference: '2026-10-13', stated: 6 });
+    expect(detail).toContain('Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: \u201c6 months from today\u201d.');
+    expect(detail).not.toContain('Olumi\u2019s interpretation');
+    expect(changes).toBe(1);
+  });
+
+  it.each([
+    ['in six months', { deadline: '2027-04-13', reference: '2026-10-13', stated: 6 }],
+    ['in nine months', { deadline: '2027-07-13', reference: '2026-10-13', stated: 9 }],
+  ] as const)('Codex blocking 2: two durations in one message ("%s" quoted) → Olumi\u2019s reading for the user to check, never theirs', async (deadline_words, want) => {
+    const { detail, saved, changes } = await offerAndApprove('Our office lease expires in six months, and our launch deadline is in nine months.',
+      { deadline_words, reference_date: '' });
+    expect(detail).toContain(`Your words: \u201c${deadline_words}\u201d. Olumi\u2019s interpretation; check the date and reference before approving.`);
+    expect(saved).toEqual(want);
+    expect(changes).toBe(1);
   });
 });
