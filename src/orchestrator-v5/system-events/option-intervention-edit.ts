@@ -99,6 +99,7 @@ import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHo
 import { deadlineGoalStillBound } from '../agent-lane/proposal-object/still-applies.js';
 import { applyGoalReadingEdit, goalReadingPostimageIsScoped, type ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, riskOccurrencePostimageIsScoped, type ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
+import { applyCohortForecastEdit, cohortForecastPostimageIsScoped, type ApprovedCohortForecast } from '../goal-target/cohort-forecast-write.js';
 import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
@@ -872,6 +873,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly goalReading?: ApprovedGoalReading;
     /** ⭐ Olumi's occurrence range for a risk root, its `event_risk` only (`risk-occurrence.ts`): ONE append, alone. */
     readonly riskOccurrence?: ApprovedRiskOccurrence;
+    /** ⭐ Science PR-4b: the user's own cohort forecast for an option, its `cohort_forecast` only: ONE append, alone. */
+    readonly cohortForecast?: ApprovedCohortForecast;
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
@@ -917,6 +920,14 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     || input.goalReading !== undefined || input.goalSteady !== undefined || input.teamTime !== undefined
     || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
     return { kind: 'refused', reason: 'risk_occurrence_not_alone' };
+  }
+  // The user's cohort forecast is one approved card, never part of a compound edit.
+  if (input.cohortForecast !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.goalReading !== undefined || input.goalSteady !== undefined || input.teamTime !== undefined || input.riskOccurrence !== undefined
+    || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'cohort_forecast_not_alone' };
   }
   const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
   if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
@@ -974,7 +985,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   }
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
-    goalReading: _callerReading, riskOccurrence: _callerRisk, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    goalReading: _callerReading, riskOccurrence: _callerRisk, cohortForecast: _callerForecast, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -1283,6 +1294,31 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     valueConfirmations = [written.confirmation];
   }
+  /**
+   * ⭐ THE USER'S COHORT FORECAST FOR AN OPTION (science PR-4b) — the risk range's own shape: alone (checked above), on the
+   * persisted base, through the one writer in memory, scoped to that option's `cohort_forecast`, then the ONE append and
+   * read-back below. The field is in the analysis hash, so the caller's base is checked here too.
+   */
+  const cohortForecast = input.cohortForecast;
+  if (cohortForecast !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyCohortForecastEdit(before, cohortForecast);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `cohort_forecast_${written.reason}` };
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !cohortForecastPostimageIsScoped(projectGraphForPersistence(before), graph, cohortForecast)) {
+      return { kind: 'refused', reason: 'cohort_forecast_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
   let horizonBasisWrite: HorizonBasisWrite | undefined;
   const goalSteady = input.goalSteady;
   if (goalSteady !== undefined) {
@@ -1323,7 +1359,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = [written.confirmation];
   }
   const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
-    + (goalHorizon !== undefined ? 1 : 0) + (goalReading !== undefined ? 1 : 0) + (riskOccurrence !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
+    + (goalHorizon !== undefined ? 1 : 0) + (goalReading !== undefined ? 1 : 0) + (riskOccurrence !== undefined ? 1 : 0) + (cohortForecast !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

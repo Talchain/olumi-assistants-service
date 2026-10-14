@@ -26,6 +26,7 @@ import { hiringTimesStillApply, type ApprovedHiringTimes } from '../../goal-targ
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { goalReadingProjectionOf } from '../../goal-target/goal-reading-write.js';
 import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurrence.js';
+import { cohortForecastCardHolds, SET_COHORT_FORECAST_OP } from '../../goal-target/cohort-forecast-write.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -70,6 +71,8 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   if (op.op === 'set_goal_deadline') return deadlineSubjectHolds(op, graph) === true;
   // A risk occurrence card: its own writer's gate (its goal as bound, its node as shown; #3013).
   if (op.op === SET_RISK_OCCURRENCE_OP) return riskOccurrenceCardHolds(op, graph);
+  // A cohort forecast card: its own writer's gate (the option as shown, the two targets as read).
+  if (op.op === SET_COHORT_FORECAST_OP) return cohortForecastCardHolds(op, graph);
   return false;
 }
 
@@ -82,6 +85,7 @@ export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, 
   if (p.operations.length !== 1) return false;
   const op = p.operations[0]!;
   if (op.op === SET_RISK_OCCURRENCE_OP) return !riskOccurrenceCardHolds(op, graph);
+  if (op.op === SET_COHORT_FORECAST_OP) return !cohortForecastCardHolds(op, graph);
   return op.op === 'set_goal_deadline' && deadlineSubjectHolds(op, graph) === false;
 }
 

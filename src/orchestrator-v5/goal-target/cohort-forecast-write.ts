@@ -1,0 +1,165 @@
+/**
+ * ⭐ AIE SAME-COHORT LAW, THE WRITER (science PR-4b; the reader and the licence are `cohort-forecast.ts` / `goal-targets-joint.ts`).
+ *
+ * Marketing's two targets ("conversion over 15% AND 20 new customers within the first three months after launch") can be
+ * scored together only on ONE cohort: how many people an option reaches over the window, and how likely they are to convert.
+ * This is the one writer of an option's `cohort_forecast`, from the user's own words only:
+ *  · the people reached, ONE figure the user stated for that option (S2 statement, form `point`);
+ *  · the conversion as the RANGE the user gave in answer to Olumi's ONE explicit question, which range it is as likely to fall
+ *    inside as outside (S2 statement, form `range`, `answering` that question). That is the user's own middle half. A range
+ *    given any other way is never read as one: no automatic percentile, min–max or 90% interval (AIE #94 6174707160; SCIENCE
+ *    → AIE 6176146776, option A). The card quotes the words and the question, and only the press records them;
+ *  · the user's own answer that the count target counts converts among those same people (S2, verified quote). Without it the
+ *    targets' dependence is unknown and nothing is written (no independence is assumed).
+ * Reached ONLY through the atomic level door's `cohort_forecast` member, alone in its commit, after the user pressed the card
+ * (card-only, `hasCardOnlyOperations`). The node as stored and the two target rows are the stale gate. Pure.
+ */
+import { isDeepStrictEqual } from 'node:util';
+
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
+
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
+import { cohortTargetsOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
+import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
+
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** The proposal op (`proposal.ts`): `path` is the option's id, `value` is what {@link approvedCohortForecastOf} reads. */
+export const SET_COHORT_FORECAST_OP = 'set_cohort_forecast' as const;
+
+/** What the card carries and the door writes. */
+export interface ApprovedCohortForecast {
+  readonly option_id: string;
+  readonly cohort_forecast: CohortForecast;
+  /** The option node exactly as stored when the card was made: the stale gate. */
+  readonly expected_node: Readonly<Rec>;
+  /** The two target rows exactly as stored when the card was made (the thresholds the forecast is read against). */
+  readonly expected_targets: readonly Readonly<Rec>[];
+  /** The user's verified words: the people reached, the conversion range, and the same-cohort answer. */
+  readonly statements: { readonly people: UserStatement; readonly conversion: UserStatement; readonly same_cohort: UserStatement };
+  /** THIS proposal's own write already landed: only then is a node holding exactly the card's forecast a verified no-op. */
+  readonly own_write_landed?: boolean;
+}
+
+/** The stored goal-target rows of `graph` (`role: 'goal_target'`), in stored order. */
+export function storedTargetRowsOf(graph: unknown): Rec[] {
+  const rows: unknown = isRec(graph) ? graph.goal_constraints : undefined;
+  return (Array.isArray(rows) ? rows : []).filter((r): r is Rec => isRec(r) && r.role === GOAL_TARGET_ROLE);
+}
+
+/** Whole numbers of people a quote states ("about 500 people", "1,200"). Each is one figure (a point has both ends equal). */
+export function peopleFiguresIn(quote: string): { low: number; high: number }[] {
+  return [...quote.matchAll(/(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(?![\d.,]*\d)(?!\s*(?:%|percent|per\s*cent))/giu)]
+    .map((m) => Number(m[1]!.replace(/,/g, ''))).filter((n) => Number.isInteger(n) && n >= 1).map((n) => ({ low: n, high: n }));
+}
+
+/** Percentage ranges a quote states ("12–18%", "between 12 and 18 percent", "12% to 18%"), low below high. */
+export function percentRangesIn(quote: string): { low: number; high: number }[] {
+  const n = '(\\d{1,2}(?:\\.\\d{1,2})?)';
+  const pct = '\\s*(?:%|percent|per\\s*cent)';
+  const re = new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
+  return [...quote.matchAll(re)].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
+}
+
+/** Olumi's ONE question whose answer is the user's own middle half of the conversion (the reading's only door). */
+export const COHORT_MIDDLE_HALF_QUESTION = 'Which range is the conversion as likely to fall inside as outside (an even chance)?';
+
+const sayPeople = (n: number): string => `${n.toLocaleString('en-GB')} ${n === 1 ? 'person' : 'people'}`;
+
+/** The card: the user's words, Olumi's reading of them, and what pressing records. */
+export function cohortForecastCardWords(optionLabel: string, f: CohortForecast, s: ApprovedCohortForecast['statements'],
+  rateLabel: string, countLabel: string, period: string): string {
+  return [
+    `From your messages: ‘${s.people.source}’ · ‘${s.conversion.source}’ · ‘${s.same_cohort.source}’`,
+    `Record for ‘${optionLabel.trim()}’: it reaches ${sayPeople(f.people_reached)}${period}, and its ‘${rateLabel}’ is as likely `
+      + `to fall inside ${f.conversion_middle_half_pct[0]}–${f.conversion_middle_half_pct[1]}% as outside it (your answer to which range is an even chance).`,
+    `‘${countLabel}’ counts the people who convert among those same people, as you said. The number reached is held fixed.`,
+  ].join('\n');
+}
+
+export const cohortForecastRecordedWords = (optionLabel: string, f: CohortForecast): string =>
+  `Recorded from your words: ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, and its conversion is as likely to fall `
+  + `inside ${f.conversion_middle_half_pct[0]}–${f.conversion_middle_half_pct[1]}% as outside it.`;
+
+export type CohortForecastRefusal = 'invalid_graph' | 'invalid_forecast' | 'option_not_found' | 'option_changed' | 'targets_changed';
+
+export type CohortForecastEditResult =
+  | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: CohortForecastRefusal };
+
+export function applyCohortForecastEdit(persistedGraph: unknown, approved: ApprovedCohortForecast): CohortForecastEditResult {
+  if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) {
+    return { kind: 'refused', reason: 'invalid_graph' };
+  }
+  // Only a well-formed forecast whose figures are exactly the user's verified statements, by the user, is ever written here.
+  const f = readCohortForecast({ kind: 'option', cohort_forecast: approved.cohort_forecast });
+  const s = approved.statements;
+  if (f === undefined || !isDeepStrictEqual(f, approved.cohort_forecast) || f.author !== 'user'
+    || s.people.form !== 'point' || s.people.low !== f.people_reached || s.people.high !== f.people_reached
+    || s.conversion.form !== 'range' || s.conversion.low !== f.conversion_middle_half_pct[0] || s.conversion.high !== f.conversion_middle_half_pct[1]
+    || s.conversion.answering !== COHORT_MIDDLE_HALF_QUESTION
+    || s.same_cohort.form !== 'holds_now') {
+    return { kind: 'refused', reason: 'invalid_forecast' };
+  }
+  // The two targets exactly as the card read them, and still the two the user's answer names.
+  const targets = storedTargetRowsOf(persistedGraph);
+  if (!isDeepStrictEqual(targets, approved.expected_targets) || cohortTargetsOf(targets, f) === undefined) {
+    return { kind: 'refused', reason: 'targets_changed' };
+  }
+  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.option_id && n.kind === 'option');
+  if (matches.length !== 1) return { kind: 'refused', reason: 'option_not_found' };
+  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], { ...approved.expected_node, cohort_forecast: approved.cohort_forecast })) {
+    return { kind: 'unchanged' };
+  }
+  if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'option_changed' };
+
+  const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
+  const option = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.option_id)!;
+  option.cohort_forecast = structuredClone(approved.cohort_forecast);
+  const label = String(option.label ?? approved.option_id).trim();
+  const fact = EditGraphHandlerFactSchema.parse({
+    fact_type: 'edit_graph',
+    fact_version: 1,
+    noop: false,
+    result: {
+      edit_kind: 'parameter_update',
+      status: 'applied',
+      operations_count: 1,
+      affected_entities: [{ kind: 'option', label: label.slice(0, 120) }],
+      graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
+      graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
+      safe_summary: 'Recorded from your words an option’s people reached and conversion range',
+      impact: 'low',
+      rerun_recommended: true,
+    },
+  });
+  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact], confirmation: cohortForecastRecordedWords(label, f) };
+}
+
+/** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
+export function cohortForecastPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedCohortForecast): boolean {
+  const written = applyCohortForecastEdit(before, approved);
+  return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+}
+
+/** The card as its stored operation carries it, or `undefined` if malformed. */
+export function approvedCohortForecastOf(op: { readonly path: string; readonly value?: unknown }): ApprovedCohortForecast | undefined {
+  const v = isRec(op.value) ? op.value : {};
+  const f = readCohortForecast({ kind: 'option', cohort_forecast: v.cohort_forecast });
+  const st = isRec(v.statements) ? v.statements : {};
+  const people = userStatementOf(st.people), conversion = userStatementOf(st.conversion), same = userStatementOf(st.same_cohort);
+  if (f === undefined || !isRec(v.expected_node) || !Array.isArray(v.expected_targets) || !v.expected_targets.every(isRec)
+    || people === undefined || conversion === undefined || same === undefined) return undefined;
+  return { option_id: op.path, cohort_forecast: f, expected_node: v.expected_node, expected_targets: v.expected_targets,
+    statements: { people, conversion, same_cohort: same } };
+}
+
+/** A held forecast card still applies to `graph` exactly when its own writer would not refuse it there. */
+export function cohortForecastCardHolds(op: { readonly path: string; readonly value?: unknown }, graph: unknown): boolean {
+  const approved = approvedCohortForecastOf(op);
+  return approved !== undefined && applyCohortForecastEdit(graph, approved).kind !== 'refused';
+}

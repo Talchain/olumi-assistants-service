@@ -116,6 +116,7 @@
       "src/orchestrator-v5/context/freshness.ts": 1,
       "src/orchestrator-v5/context/graph-hash.ts": 7,
       "src/orchestrator-v5/context/recent-changes.ts": 1,
+      "src/orchestrator-v5/goal-target/cohort-forecast-write.ts": 1,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 3,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 2,
@@ -826,7 +827,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 27,
     "goalUnitOf": 5,
-    "goal_constraints": 454,
+    "goal_constraints": 455,
     "goal_deadline_as_stated": 11,
     "goal_direction": 100,
     "goal_horizon": 51,
@@ -855,7 +856,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2481,
+  "total_references": 2482,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

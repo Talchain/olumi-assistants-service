@@ -298,6 +298,9 @@ import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type To
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
+import { applyCohortForecastEdit, approvedCohortForecastOf, COHORT_MIDDLE_HALF_QUESTION, cohortForecastCardWords, cohortForecastRecordedWords, percentRangesIn,
+  peopleFiguresIn, SET_COHORT_FORECAST_OP, storedTargetRowsOf, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
+import { cohortTargetsOf, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -4146,6 +4149,50 @@ export function createAgentCapabilities(
   };
 
   /**
+   * ⭐ SCIENCE PR-4b: the press on the user's cohort forecast card. ONE commit through the atomic level door's `cohort_forecast`
+   * member, alone, then a read-back holding exactly the card's option with its forecast and the two targets as the card read
+   * them. Receipt only on that; the figures stay the user's (`author: 'user'`), as their verified words state them.
+   */
+  const applyCohortForecast = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const pid = parent.proposal_id;
+    const card = approvedCohortForecastOf(op);
+    if (card === undefined || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
+    }
+    const ownCommitInLedger = async (): Promise<boolean> => opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(pid)), () => false);
+    const approved: ApprovedCohortForecast = { ...card,
+      own_write_landed: proposals.partialProgressOf(pid) !== undefined || await ownCommitInLedger() };
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(pid), links: [], levels: [], cohort_forecast: approved });
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const written = applyCohortForecastEdit(before.raw, approved);
+      const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
+      const landed = postimage !== undefined && (res.status === 'committed' || await ownCommitInLedger());
+      if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+        landed: [op.path], receipts: [], expected_postimage: postimage });
+    }
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
+    }
+    const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+      detail: RISK_OCCURRENCE_UNKNOWN_SAVE, readiness_after: readinessViewOf(undefined) };
+    if (res.status === 'unconfirmed') return notConfirmed;
+    const check = await readGraph(ctx.scenario_id);
+    const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
+    if (check === null || !isDeepStrictEqual(held, { ...approved.expected_node, cohort_forecast: approved.cohort_forecast })
+      || !isDeepStrictEqual(storedTargetRowsOf(check.raw), approved.expected_targets)) return notConfirmed;
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(pid, receipts);
+    const label = typeof approved.expected_node.label === 'string' ? approved.expected_node.label : op.path;
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
+      follow_up: cohortForecastRecordedWords(label, approved.cohort_forecast) };
+  };
+
+  /**
    * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
    * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
    * held when the card was made (`expected_deadline`), plus the analysis revision read at approval (no write in between).
@@ -5946,6 +5993,85 @@ export function createAgentCapabilities(
       proposals.put(proposal);
       return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
         base_revision: g.graph_hash, team_time: a };
+    },
+
+    /**
+     * ⭐ AIE SAME-COHORT LAW (science PR-4b; `goal-target/cohort-forecast-write.ts`): ONE option's cohort forecast from the
+     * user's own words, three verified S2 statements: the people it reaches over the goal's window (a point), the range the
+     * conversion is as likely to fall inside as outside (ONLY as the answer to {@link COHORT_MIDDLE_HALF_QUESTION}; any other
+     * range is never read as a middle half, AIE #94 6174707160), and their answer that the count target counts converts among
+     * those same people. Prepares one card; only its press writes (card-only). Nothing is estimated here.
+     */
+    async proposeCohortForecast(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const nodes = ((g.raw as { nodes?: unknown }).nodes as unknown[] | undefined ?? []).filter(isPlainRecord);
+      const wanted = typeof args?.option_label === 'string' ? args.option_label.trim().toLowerCase() : '';
+      const named = nodes.filter((n) => n.kind === 'option' && typeof n.label === 'string' && n.label.trim().toLowerCase() === wanted);
+      if (wanted === '' || named.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'option_not_found',
+          detail: 'Name ONE option exactly as the model labels it. Nothing was prepared.' };
+      }
+      const option = named[0]!;
+      const optionId = String(option.id);
+      const targets = storedTargetRowsOf(g.raw);
+      const rate = targets.filter((t) => typeof t.unit === 'string' && t.unit.trim() === '%');
+      const count = targets.filter((t) => !rate.includes(t));
+      if (targets.length !== 2 || rate.length !== 1 || count.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'targets_not_cohort',
+          detail: 'This forecast is for a goal with exactly two targets: a percentage of the people reached and a count of them. Nothing was prepared.' };
+      }
+      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text };
+      const people = verifyStatements([{ ...(isPlainRecord(args?.people) ? args.people : {}), form: 'point' }], texts,
+        { subject: { quantity: 'people_reached', option_id: optionId }, unit: 'people', forms: ['point'], figuresIn: peopleFiguresIn });
+      const conversion = verifyStatements([{ ...(isPlainRecord(args?.conversion) ? args.conversion : {}), form: 'range' }], texts,
+        { subject: { quantity: 'conversion_middle_half', option_id: optionId }, unit: '%', forms: ['range'], figuresIn: percentRangesIn });
+      const same = verifyStatements([{ quote: isPlainRecord(args?.same_cohort) ? args.same_cohort.quote : undefined, form: 'holds_now' }], texts,
+        { subject: { quantity: 'same_cohort' }, unit: '', forms: ['holds_now'], figuresIn: () => [] });
+      for (const v of [people, conversion, same]) {
+        if (v.kind === 'refused') return { ok: false, mutated: false, refusal: v.refusal, detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+      }
+      const p = (people as Extract<typeof people, { kind: 'verified' }>).statements[0]!;
+      const c = (conversion as Extract<typeof conversion, { kind: 'verified' }>).statements[0]!;
+      const s = (same as Extract<typeof same, { kind: 'verified' }>).statements[0]!;
+      // ⛔ AIE #94 6174707160: a range is the user's middle half only as their answer to that one question, never by Olumi's reading.
+      if (c.answering !== COHORT_MIDDLE_HALF_QUESTION) {
+        return { ok: false, mutated: false, refusal: 'middle_half_not_asked',
+          detail: `A range is recorded as an even chance only when the user gives it in answer to: "${COHORT_MIDDLE_HALF_QUESTION}" `
+            + 'Ask that, and pass their answer with answering set to those exact words. Their range as they said it is kept, never re-read. Nothing was prepared.' };
+      }
+      const f: CohortForecast = { people_reached: p.low!, conversion_middle_half_pct: [c.low!, c.high!],
+        same_cohort: { rate_target_node_id: String(rate[0]!.node_id), count_target_node_id: String(count[0]!.node_id), stated_by: 'user' },
+        author: 'user' };
+      if (cohortTargetsOf(targets, f) === undefined) {
+        return { ok: false, mutated: false, refusal: 'targets_not_cohort',
+          detail: 'The two targets are not a percentage and a whole number of people over the same window. Nothing was prepared.' };
+      }
+      const approved: ApprovedCohortForecast = { option_id: optionId, cohort_forecast: f, expected_node: structuredClone(option),
+        expected_targets: structuredClone(targets), statements: { people: p, conversion: c, same_cohort: s } };
+      const dry = applyCohortForecastEdit(g.raw, approved);
+      if (dry.kind !== 'mutated') {
+        return { ok: false, mutated: false, refusal: dry.kind === 'unchanged' ? 'already_held' : `cohort_forecast_${dry.reason}`,
+          detail: dry.kind === 'unchanged' ? 'That forecast is already held for this option.' : 'This forecast cannot be recorded on the current model. Nothing was prepared.' };
+      }
+      const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id);
+      const goal = nodes.find((n) => n.kind === 'goal');
+      const basis = goal === undefined ? undefined : goalTargetBasisOf(goal);
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: SET_COHORT_FORECAST_OP, path: optionId, value: { cohort_forecast: f, expected_node: approved.expected_node,
+          expected_targets: approved.expected_targets, statements: approved.statements } }],
+        provenance: { authored_by: 'user_stated', basis: p.source },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: cohortForecastCardWords(String(option.label), f, approved.statements, labelOf(rate[0]!.node_id), labelOf(count[0]!.node_id),
+          basis === undefined ? '' : ` ${periodWords(basis)}`) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some((o) => o.op === SET_COHORT_FORECAST_OP && o.path === optionId)) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        cohort_forecast: { option: String(option.label), people_reached: f.people_reached, conversion_middle_half_percent: f.conversion_middle_half_pct },
+        note: 'Show the card as it is. Only the user’s press records it; then each option needs its own forecast before the chance of meeting both targets can be said.' };
     },
 
     /** THE USER approves the interpreted deadline and its actual source.
@@ -7909,6 +8035,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === CONFIRM_GOAL_READING_OP) return applyGoalReading(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_COHORT_FORECAST_OP) return applyCohortForecast(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
