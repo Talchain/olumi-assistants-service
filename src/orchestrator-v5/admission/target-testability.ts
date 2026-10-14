@@ -33,6 +33,7 @@ import { NodeV3 } from '../../schemas/cee-v3.js';
 import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
+import { LAUNCH_WINDOW_UNBUILT, launchWindowOf, launchWindowQuestion, periodWords } from '../goal-target/goal-target-basis.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -471,6 +472,12 @@ export interface UntestableTargetParts {
   readonly asked: { readonly from: string; readonly to: string } | null;
   /** The unit the (c) question asks the amount in (the goal's for a link into it, the link's target's upstream); null when unitless. */
   readonly askedIn: string | null;
+  /**
+   * ⭐ AIE MA1: (a) on a goal measured over a window from launch (`launchWindowOf`) — it has no level today, so (a) asks
+   * for the window (its forecast, or first whether a second target counts the same people), never "today's level". No
+   * writer yet takes that answer into the Run, so the step carries `LAUNCH_WINDOW_UNBUILT` beside it.
+   */
+  readonly launchWindow: boolean;
 }
 
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
@@ -533,9 +540,17 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question
     : `You set this link as ${bandTheUserSet}. To test your ${change === undefined ? `${figure} target` : `target (${change})`} I need it in ${unit || 'the goal unit'}: `
       + `${question[0]!.toLowerCase()}${question.slice(1)}`;
+  // AIE MA1: a goal measured over the window from launch has no level today; (a) is that window's forecast.
+  const launch = launchWindowOf(goal);
+  // The census-counted read: a second stated target row (another node's), named in the cohort question.
+  const rows: unknown = launch === undefined ? undefined : graph.goal_constraints;
+  const otherTarget = !Array.isArray(rows) ? undefined : rows.filter(isRec).flatMap((r) => r.role === 'goal_target'
+    && typeof r.node_id === 'string' && r.node_id !== goal.id ? [labelOf(r.node_id)] : [])[0];
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
-    ? [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
+    ? launch !== undefined
+      ? [`it needs a forecast of ${name} ${periodWords(launch)}`, `a forecast of ${name} ${periodWords(launch)}`, launchWindowQuestion(name, launch, otherTarget)]
+      : [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
       identityCase || lever === undefined ? null : askedAfterTheBand(linkQuestion())]
@@ -557,6 +572,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
       // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
       : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
+    launchWindow: launch !== undefined && cases.includes('a'),
   };
 }
 
@@ -569,7 +585,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
  * owns the step. Otherwise: no step.
  */
 export function targetBlockerOf(parts: UntestableTargetParts, identityCardOffered = false): PressBlocker | null {
-  const unbuilt = parts.untestableComparatorUnlock !== 'unbuilt' ? undefined : `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’`;
+  const unbuilt = parts.untestableComparatorUnlock === 'unbuilt' ? `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’`
+    : parts.launchWindow ? LAUNCH_WINDOW_UNBUILT : undefined;
   if (parts.question !== null) return { kind: 'missing_input', ask: parts.question, ...(unbuilt === undefined ? {} : { also_unbuilt: unbuilt }) };
   if (unbuilt !== undefined) return { kind: 'missing_implementation', what: unbuilt };
   return identityCardOffered ? { kind: 'confirm', by: 'identity_card' } : null;
