@@ -196,7 +196,7 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
   if (factorLine !== null) lines.push(factorLine);
 
   // F1: a non-factor root on the goal's path, treated as zero, with its ask.
-  const rootLine = treatedAsZeroReplyLine(graph, analysisReady);
+  const rootLine = treatedAsZeroReplyLine(graph, analysisReady, analysisResult);
   const rootIds = rootLine !== null ? unvaluedRootIds(graph) : new Set<string>();
 
   // F2: a factor ancestor the Run defaulted to 0 (PLoT's GOAL_ANCESTOR_DATA_GAP, read by its one reader against this

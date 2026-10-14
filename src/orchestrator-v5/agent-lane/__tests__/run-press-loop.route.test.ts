@@ -13,6 +13,10 @@ import { RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
+// Fixture-only held AI premise for the completed-Run controls; the captured JSON is unchanged.
+FX.graph.nodes.find((n: Rec) => n.id === 'launch_date_missed').observed_state = {
+  value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred',
+};
 const SCENARIO = '3ad403fc-caf8-48e4-bd5b-578e20c1c48a';
 const HASH = '0123456789abcdef';
 const AT = '2026-10-13T01:00:00.000Z';

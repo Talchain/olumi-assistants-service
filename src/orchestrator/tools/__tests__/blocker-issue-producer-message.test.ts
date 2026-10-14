@@ -134,7 +134,7 @@ describe('blockerIssue — the producer authored the sentence, so the producer k
     expect(issue?.message).not.toContain('is not connected to any option');
   });
 
-  it('KEEPS the unreachable-factor remedy, which is the actionable one', () => {
+  it('R5: describes the unmoved factor as a limitation without demanding a mapping', () => {
     const issue = blockerIssue(
       {
         factor_id: 'fac_orphan',
@@ -148,7 +148,7 @@ describe('blockerIssue — the producer authored the sentence, so the producer k
 
     expect(issue?.code).toBe('UNREACHABLE_CONTROLLABLE_FACTOR');
     expect(issue?.message).toBe(
-      'Choose which option changes for "Support Response Time" and by how much.',
+      'No option changes "Support Response Time"; it remains part of the current model.',
     );
   });
 

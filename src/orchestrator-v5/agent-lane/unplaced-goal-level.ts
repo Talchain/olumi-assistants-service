@@ -111,7 +111,8 @@ function phraseNamesOnlyTheGoal(brief: string, a: { index: number; matchedText: 
   return phrase.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '')
     .every((w) => PLAIN_WORDS.has(w) || own.has(singular(w)));
 }
-const sentenceAround = (text: string, start: number, end: number): string => spanAround(text, start, end, /[.!?\n]/g);
+/** The sentence of `text` around [start, end), verbatim (a decimal point inside a figure is not a break). */
+export const sentenceAround = (text: string, start: number, end: number): string => spanAround(text, start, end, /[.!?\n]/g);
 
 export function briefGoalLevel(candidate: CandidateModel, brief: string | null | undefined): BriefGoalLevel | null {
   const goal = candidate.goal;

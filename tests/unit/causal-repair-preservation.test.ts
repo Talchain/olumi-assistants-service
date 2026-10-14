@@ -99,6 +99,10 @@ describe("captured causal repair boundary", () => {
     const relation = parsed.edges.find((edge) => edge.from === ids.two && edge.to === ids.risk)!;
     const resolvedControl = projectGraphForPersistence(applyPatchOperations(parsed, [{ op: "remove_edge", path: `${relation.from}::${relation.to}` }]));
     expect(computeAnalysisAffectingGraphHash(reopened)).not.toBe(computeAnalysisAffectingGraphHash(resolvedControl));
+    expect(resolveRunAdmission(resolvedControl).willProceed).toBe(false);
+    resolvedControl.nodes.find(n => n.id === ids.risk)!.observed_state = {
+      value: 0.2, raw_value: 0.2, source: "cee_inference", extractionType: "inferred",
+    };
     expect(resolveRunAdmission(resolvedControl).willProceed).toBe(true);
   });
   it("keeps the existing cycle and unsupported-direction refusals", () => {
@@ -168,6 +172,11 @@ describe("captured causal repair boundary", () => {
     const discardedRisk = applyPatchOperations(graph, [{
       op: "remove_edge", path: `${ids.two}::${ids.risk}`,
     }]);
+    expect(resolveRunAdmission(projectGraphForPersistence(discardedRisk)).willProceed).toBe(false);
+    // Explicit held risk premise for this positive control after its sole parent is removed.
+    discardedRisk.nodes.find(n => n.id === ids.risk)!.observed_state = {
+      value: 0.2, raw_value: 0.2, source: "cee_inference", extractionType: "inferred",
+    };
     // Existing compute-discard waiver still covers the unrelated offered value.
     expect(resolveRunAdmission(projectGraphForPersistence(discardedRisk)).willProceed).toBe(true);
   });

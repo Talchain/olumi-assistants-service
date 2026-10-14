@@ -21,6 +21,7 @@ import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { goalFiguresWithheldWarnings, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
+import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
 import { unresolvedRetainedLimits, retainedLimitWithheldLine } from '../../graph/retained-limit.js';
 import type { PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
@@ -123,6 +124,57 @@ export function jointWithheldLine(n: number, reason: JointWithholdReason, unsupp
   // Independent check r1 item 7: a joint figure that came back WITHOUT its precision was calculated; say what is missing.
   if (reason === 'precision_missing') return `The chance of meeting ${all} together isn’t shown: this run did not say how precise it is. Run the analysis again to get it with its precision.`;
   return `The chance of meeting ${all} together isn’t calculated yet. Run the analysis again to get it.`;
+}
+
+/**
+ * ⛔ Amendment 7: the targets whose own starting value is OLUMI's estimate (never the goal's own, withheld at admission).
+ * ONE predicate: the joint waits on exactly these (`goalTargetsBlockOf`), and the coaching ask names the first of them.
+ */
+export function olumiBaseTargetsOf(graph: unknown, targets: readonly GoalCondition[]): GoalCondition[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  return targets.filter((t) => {
+    const n = nodes.find((x) => x.id === t.node_id);
+    const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
+    return n?.kind !== 'goal' && os !== undefined && isOlumiEstimateValue(os);
+  });
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step for a withheld joint chance, typed by the same
+ * reason `jointWithheldLine` says. A change target that can't be combined, or a strict comparison the joint did not keep,
+ * is a CAPABILITY gap: said as such, never asked. Olumi's own assumed starting value is the user's to give, asked for the
+ * named target in its own unit (`olumiBase`, from `olumiBaseTargetsOf`: today's level, as target-testability's case (d)
+ * asks it); a writer takes that answer and the joint no longer waits on it. A missing precision or result is the line's
+ * own "Run the analysis again". No typed cause, no step: a condition that can't be named or a figure not used as stated
+ * (an input might or might not unlock it), an `olumi_base` whose target is not identified, `no_option` (the reason
+ * does not say whether the options are missing or were not scored), and a condition withheld or unscored (its own note).
+ */
+export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupported: readonly string[] = [],
+  olumiBase: readonly GoalCondition[] = []): PressBlocker | null {
+  const all = n === 2 ? 'both targets' : 'all of the targets';
+  switch (reason) {
+    case 'target_not_supported':
+      return { kind: 'missing_implementation', what: unsupported.length > 0
+        ? `the chance of meeting ${all} together while ${listWords(unsupported.map((x) => `‘${x}’`))} ${unsupported.length === 1 ? 'is' : 'are'} stated as a change`
+        : `the chance of meeting ${all} together` };
+    case 'strict_not_preserved':
+      return { kind: 'missing_implementation', what: `the chance of meeting ${all} together with the strict comparison you stated` };
+    case 'olumi_base': {
+      const first = olumiBase[0];
+      return first === undefined ? null
+        : { kind: 'missing_input', ask: `What's today's level of ${first.label}${first.unit !== '' ? `, in ${first.unit}` : ''}?` };
+    }
+    case 'precision_missing':
+    case 'not_returned':
+      return { kind: 'run_again', why: reason };
+    // #2992: a condition withheld or unscored has its own note saying why, so the joint has no step of its own.
+    case 'figure_not_preserved':
+    case 'condition_not_named':
+    case 'no_option':
+    case 'condition_unscored':
+    case 'condition_withheld':
+      return null;
+  }
 }
 
 /** Amendment 6: true whatever the targets' dependence; never a product of the marginals. */
@@ -232,11 +284,7 @@ export function goalTargetsBlockOf(args: {
   // ⛔ Amendment 7: a LEVEL target read against OLUMI's own starting value is the most sensitive to it, and the goal's own
   // such target is withheld at admission (`admit-model.ts`, the kept guard). The same holds for every target row: its own
   // chance is not said, and the joint that includes it waits (never relabelled as the user's).
-  const olumiBase = new Set(targets.filter((t) => {
-    const n = nodes.find((x) => x.id === t.node_id);
-    const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
-    return n?.kind !== 'goal' && os !== undefined && isOlumiEstimateValue(os);
-  }).map((t) => t.constraint_id));
+  const olumiBase = new Set(olumiBaseTargetsOf(args.graph, targets).map((t) => t.constraint_id));
 
   const records = (isRec(args.envelope) ? readOptionResultSources(args.envelope) : []).find((s) => s.length > 0) ?? [];
   const recordOf = new Map<string, Rec>();

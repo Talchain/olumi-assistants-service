@@ -107,8 +107,9 @@ describe('goalChanceLineOwed', () => {
     expect(src).toContain('}], RUN_RESULT_READY_TEXT, { graph: state.graph });');
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
-    expect(src).toContain('withDisclosures(narrationText, owed)');
-    expect(src).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
+    // BYPASS1: the owed lines said are `owedShown` (all of them on a host reply; on the AI's own, the lines it lacks).
+    expect(src).toContain('withDisclosures(narrationText, owedShown)');
+    expect(src).toContain('withDisclosures(narrationText, [...owedShown, ...decisionLines])');
   });
   it('R13 MUTANT: a raw-tool-only owed line loses the final scoped owner', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');

@@ -32,7 +32,7 @@
 # validate-with-engine.ts (3 × TS18046 unknown), pipeline-trace.ts (2 × TS2322),
 # evidence-pack-cli.ts (1 × TS2322), migrate-prompts.ts (1 × TS2345). Count
 # 282→291 = exactly those 9. Fixing them is a separate, out-of-scope change.
-# count=291
+# count=283
 scripts/admin/__tests__/set-model-configs.test.ts
 scripts/evidence-pack-cli.ts
 scripts/migrate-prompts.ts
@@ -50,7 +50,6 @@ src/orchestrator-v5/__tests__/short-confirm-route-level.test.ts
 src/orchestrator-v5/__tests__/turn-executor-failure-responses.test.ts
 src/orchestrator-v5/__tests__/turn-executor-handler.test.ts
 src/orchestrator-v5/__tests__/turn-executor-validator-log-privacy.test.ts
-src/orchestrator-v5/coaching/__tests__/decision-review-enricher.test.ts
 src/orchestrator-v5/compose/__tests__/chip-generator.test.ts
 src/orchestrator-v5/compose/__tests__/output-safety.test.ts
 src/orchestrator-v5/compose/__tests__/phase3-blocks.test.ts
@@ -66,7 +65,6 @@ src/orchestrator-v5/routing/__tests__/route-with-tool-use.test.ts
 src/orchestrator-v5/signals/__tests__/coaching-signals.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/add-constraint-risk-forwarding.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/add-constraint.test.ts
-src/orchestrator-v5/tools/handlers/__tests__/adjust-edge-strength.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/explain-results.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/explanation-fallback.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/integration-bef4470b.test.ts
@@ -74,7 +72,6 @@ src/orchestrator-v5/tools/handlers/__tests__/integration-explain-results-post-an
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis-timing.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis.test.ts
-src/orchestrator-v5/tools/handlers/__tests__/set-factor-value.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/what-would-flip-counterfactual-extension.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/what-would-flip.test.ts
 src/orchestrator-v5/tools/handlers/d1-shared/__tests__/mutation-persistence.test.ts
@@ -111,7 +108,6 @@ tests/unit/cee.value-uncertainty.test.ts
 tests/unit/cil-phase2-analysis-ready.test.ts
 tests/unit/decision-review-route-grounding.test.ts
 tests/unit/decision-review-science-claims-route.test.ts
-tests/unit/deterministic-sweep-mixed-fixture.test.ts
 tests/unit/draft-coaching-narrow.test.ts
 tests/unit/golden-fixtures.test.ts
 tests/unit/graph-validator.coaching-refs.test.ts
@@ -123,7 +119,6 @@ tests/unit/orchestrator/context/decision-continuity.test.ts
 tests/unit/orchestrator/contract-validator.test.ts
 tests/unit/orchestrator/deterministic/response-composer-contract.test.ts
 tests/unit/orchestrator/envelope.test.ts
-tests/unit/orchestrator/graph-structure-validator.test.ts
 tests/unit/orchestrator/patch-validation.test.ts
 tests/unit/orchestrator/pipeline/phase5-model-receipt.test.ts
 tests/unit/orchestrator/tools/draft-graph.test.ts

@@ -36,6 +36,10 @@ describe('G2: AI reading is required and carried into this Run, with Olumi origi
     ['', 'invalid', false],
   ] as const)('%s / %s → licensed=%s', async (words, effects_timing, licensed) => {
     const graph = structuredClone(FX.graph);
+    // Positive timing/licence fixture: explicitly hold its sampled risk; original captured bytes stay untouched.
+    graph.nodes.find((n: Rec) => n.id === 'launch_date_missed').observed_state = {
+      value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred',
+    };
     const before = JSON.stringify(graph);
     const store = {
       readMostRecentPendingActions: async () => [],

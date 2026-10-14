@@ -1,4 +1,5 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
+import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource } from '../../goal-target/input-claim-context.js';
@@ -6,6 +7,8 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
@@ -1016,6 +1019,19 @@ const deadlineRefusalDetail = {
   horizon_not_modelled: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. No full month completes between the reference date and deadline.`,
 } as const;
 
+/**
+ * ⭐ COACH (BYPASS1 fold-in): the ONE typed next step of a read (`next-step-blocker.ts`), for every result that hands the
+ * AI the model's state: `get_canonical_state`, the build's post-build state and an approval's `readiness_after`. The host
+ * no longer says the step on a reply the AI wrote, so the AI must hold it wherever it reads the model.
+ */
+function nextStepFactOf(read: { readonly raw: unknown; readonly analysis_state?: unknown; readonly analysis_ready?: unknown;
+  readonly analysis_result?: unknown } | null | undefined): { next_step_blocker?: NonNullable<ReturnType<typeof nextStepBlockerForAgent>> } {
+  if (read === null || read === undefined) return {};
+  const step = nextStepBlockerForAgent({ raw: read.raw, analysis_state: read.analysis_state, analysis_ready: read.analysis_ready,
+    analysis_result: read.analysis_result });
+  return step === null ? {} : { next_step_blocker: step };
+}
+
 interface GraphRead {
   readonly scenario_revision?: number;
   readonly run_revision?: number | null;
@@ -1374,8 +1390,10 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
                 ...(point === 'stated_figure' ? { point: 'user_figure' } : point === 'midpoint' ? { point: 'olumi_midpoint' } : {}) } };
             })(),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
-            ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
-            ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
+            // Any kind (T4i, DL 14 Oct): an excluded factor, risk or outcome reaches the Agent with its exclusion mark, as an
+            // option does, so it is never described as part of the Run.
+            ...(n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
+            ...(n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded'
               ? { analysis_participation: n.analysis_participation } : {}),
             // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
             ...(n.kind === 'option' && (n.option_status === 'removed' || n.option_status === 'infeasible') ? { option_status: n.option_status } : {}),
@@ -3716,6 +3734,60 @@ export function createAgentCapabilities(
   };
 
   /**
+   * ⭐ G: the approved answer to the goal's open question, through the atomic level door's `goal_reading` member (ONE commit,
+   * alone). The writer's gate is the stored reading the card showed; applied only on the door's committed outcome AND a
+   * read-back holding that reading without its question, every other member unchanged.
+   */
+  const applyGoalReading = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const pid = parent.proposal_id;
+    const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown; expected_goal?: unknown };
+    const expected = v.expected_basis;
+    const answer = typeof v.answer_words === 'string' ? v.answer_words : undefined;
+    if (!isPlainRecord(expected) || !isPlainRecord(v.expected_goal) || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
+    }
+    const approved = { goal_id: op.path, expected_basis: expected, ...(answer !== undefined ? { answer_words: answer } : {}),
+      expected_goal: v.expected_goal };
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: approved });
+    // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op instead
+    // of reading its own landed write as another writer's change. Only a landed one: committed, or an unconfirmed commit whose
+    // re-read holds exactly that postimage. An unconfirmed write that did not land leaves the base as it was, so a plain retry
+    // goes through again (Codex buddy r2).
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const written = applyGoalReadingEdit(before.raw, approved);
+      const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
+      const landed = postimage !== undefined && (res.status === 'committed'
+        || isDeepStrictEqual((await readGraph(ctx.scenario_id).catch(() => null))?.raw, postimage));
+      if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+        landed: [op.path], receipts: [], expected_postimage: postimage });
+    }
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
+    }
+    const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+      detail: 'Your answer was sent but could not be confirmed in the saved model.' };
+    if (res.status === 'unconfirmed') return notConfirmed;
+    const check = await readGraph(ctx.scenario_id);
+    const goal = check?.nodes.find((n) => n.id === op.path && n.kind === 'goal') as Record<string, unknown> | undefined;
+    const basis = goalTargetBasisOf(goal);
+    // The receipt says the card's reading, so the read-back holds the card's WHOLE projection (label, target, horizon, period
+    // and reading): any member moved after the commit is never "confirmed" under the new words (Codex check r2 on #2995).
+    const projection = check === null ? undefined : goalReadingProjectionOf(check.raw, op.path);
+    if (check === null || goal === undefined || basis === undefined || basis.open_question !== undefined
+      || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))
+      || !isDeepStrictEqual(projection, v.expected_goal)) return notConfirmed;
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(pid, receipts);
+    const reading = goalReadingWords(projection) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
+      follow_up: goalReadingRecordedWords(reading, answer) };
+  };
+
+  /**
    * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
    * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
    * held when the card was made (`expected_deadline`), plus the analysis revision read at approval (no write in between).
@@ -4079,7 +4151,9 @@ export function createAgentCapabilities(
   };
 
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true): Promise<ToolResult> => {
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true,
+    /** The sentence the words were read from, quoted on the card (the route's card, ruling A). */
+    readFrom?: string): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4140,6 +4214,7 @@ export function createAgentCapabilities(
       const rationale = typeof args.rationale === 'string' ? args.rationale : '';
       const sourceDetail = rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
+      const quoted = readFrom === undefined || readFrom.trim() === stated.words.trim() ? '' : ` in “${readFrom.trim().replace(/[.!?]+$/, '')}”`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4150,7 +4225,7 @@ export function createAgentCapabilities(
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
+        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”${quoted}.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
       });
       proposals.put(proposal);
       return {
@@ -4238,6 +4313,9 @@ export function createAgentCapabilities(
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
+        // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
+        // host contract tells the AI to end its reply with that step; no host line says it.
+        ...nextStepFactOf(g),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
@@ -5237,7 +5315,9 @@ export function createAgentCapabilities(
       // a fraction). This path writes a LEVEL target, so it would silently turn the user's change into a level. Refused by
       // name until a change can be edited as a change; the goal doors refuse it too (`add-constraint.ts`, `goal-target-edit.ts`).
       if (isChangeFrame((goal as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
-        return { ok: false, mutated: false, refusal: 'goal_is_a_change',
+        const held = heldChangeTargetAnswer({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, user_text: ctx.user_text, user_turn_text: ctx.user_turn_text, graph: g, goal_id: goal.id, requested: { operator: TARGET_OPERATOR[type], value, unit }, rationale: args.rationale, proposals });
+        if (held !== undefined) return held;
+        return { ok: false, mutated: false, refusal: 'goal_is_a_change', saved_goal: savedGoalMeaningOf(g.raw, goal.id),
           detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
             + 'Tell the user plainly, and never offer a level target in its place.' };
       }
@@ -7212,6 +7292,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === CONFIRM_GOAL_READING_OP) return applyGoalReading(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
@@ -8677,6 +8758,8 @@ export function createAgentCapabilities(
        * the turn deadline and the (K, H) prior fact before the one dispatch.
        */
       let firstAnalysis: Record<string, unknown> | undefined;
+      /** The read after the first pass, when one ran: the next step is that Run's (its joint, its targets). */
+      let postRunState: { raw: unknown; analysis_state: unknown; analysis_ready: unknown; analysis_result: unknown } | undefined;
       if (built.mutated === true && built.replayed !== true && opts.firstAnalysis !== undefined) {
         const outcome = await opts.firstAnalysis({
           scenarioId: ctx.scenario_id,
@@ -8690,6 +8773,8 @@ export function createAgentCapabilities(
         // typed leader permission — never the run's own receipt. A failed read describes nothing.
         const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
         const read = postRun !== null && postRun.status === 200 ? postRun.json : {};
+        if (postRun !== null && postRun.status === 200) postRunState = { raw: read.graph, analysis_state: read.analysis_state,
+          analysis_ready: read.analysis_ready, analysis_result: read.analysis_result };
         firstAnalysis = describeFirstAnalysisForAgent(outcome, {
           analysisState: read.analysis_state,
           analysisResult: read.analysis_result,
@@ -8744,6 +8829,8 @@ export function createAgentCapabilities(
         // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
         // get_canonical_state, so the first reply never contradicts the Run control.
         ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
+        // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
+        ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
@@ -10415,7 +10502,9 @@ export function createAgentCapabilities(
         return card === undefined ? undefined : { words: card.words,
           // A throw in the shared tail never takes the turn down: the same refusal the door already says.
           issue: async (subject, args) => {
-            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference); } catch {
+            // Ruling A (DL 14 Oct): the words are the user's, quoted with their sentence; that they are THIS goal's deadline is the
+            // drafter's reading, so every route card is Olumi's interpretation to check (approval stays approval, never authorship).
+            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference, undefined, true, false, card.quote); } catch {
               return { ok: false, mutated: false, refusal: 'deadline_not_placed', detail: deadlineRefusalDetail.horizon_not_modelled };
             }
           } };
@@ -10484,7 +10573,7 @@ export function createAgentCapabilities(
         // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
-        return { ...r, readiness_after: readinessViewOf(after?.raw) };
+        return { ...r, readiness_after: readinessViewOf(after?.raw), ...nextStepFactOf(after) };
       }
       return r;
     },
