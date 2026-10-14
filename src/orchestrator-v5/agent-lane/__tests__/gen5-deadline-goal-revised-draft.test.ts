@@ -120,8 +120,9 @@ describe('GEN #5: a deadline goal typed after the draft opens the revised-draft 
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.mutated).toBe(false);
     expect(r.revised_draft).toEqual({ replaces_goal: 'Development speed', holds_deadline_goal: true });
-    expect(r.public_label).toBe('Replace the early draft with a revised one built from your brief and the goal you just gave: '
-      + '‘a high-quality MVP’ done by its deadline (the date is confirmed separately) (the draft modelled ‘Development speed’). '
+    // The AIE's card clause, byte for byte (packet B card_without_date), on construction's deliverable, not the tool's trigger.
+    expect(r.public_label).toBe('Replace the early draft with a revised one built from your brief and the goal you just gave '
+      + '(the draft modelled ‘Development speed’): ‘a high-quality MVP’, with the deadline date still to be confirmed. '
       + 'Options: ‘Hire 2 developers’, ‘Hire 3 developers’, ‘Hire 4 developers’, ‘Interim tech lead while raising’, ‘Carry on as now’. '
       + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.');
     expect(r.note).not.toContain('NOT in the revised draft');
@@ -140,8 +141,11 @@ describe('GEN #5: a deadline goal typed after the draft opens the revised-draft 
     // Never "run the analysis again" on a goal with no date: the deadline Paul typed goes on its own card, not asked again.
     const ask = eventModelAsk(s.graph());
     expect(ask).not.toBeNull();
-    expect(applied.follow_up).toBe('Your model is now the revised draft shown on the card you approved. The earlier analysis was of the old draft. '
-      + `Its deadline date is not held yet: if the user has stated the deadline, call propose_goal_deadline with their exact words; otherwise ask: ${ask}`);
+    // The AIE's committed fact (packet B follow_up_committed_fact), byte for byte, only after the matching read-back; no Run.
+    expect(applied.follow_up).toBe('The approved revised draft was committed and matches the readback. The earlier analysis belongs to the earlier '
+      + 'draft. No resolved deadline date is held for this deliverable. Where the user\'s deadline wording is retained, call propose_goal_deadline '
+      + `with those exact words; only when that wording is genuinely absent, ask: ${ask} Do not run the analysis.`);
+    expect(applied.follow_up).not.toMatch(/run the analysis again/i);
     // …and that card is on the replaced model's own goal, from his words in the earlier message.
     const next = await caps.proposeGoalDeadline!({ ...turn('Yes, that card is right.', 'funding-turn-0004'),
       user_text: `${FX.brief_text}\n${FX.deliver_turn}\nYes, that card is right.` } as never,
@@ -150,6 +154,17 @@ describe('GEN #5: a deadline goal typed after the draft opens the revised-draft 
     expect(next.revised_draft).toBeUndefined();
     expect(proposals.get(next.proposal_id)!.operations[0]).toMatchObject({ op: 'set_goal_deadline', path: 'event_goal' });
     expect(s.commits()).toBe(1);
+  });
+
+  it('a calendar date typed in the message is not saved by this card: the date is still to be confirmed, on its own card', async () => {
+    const s = server();
+    const { caps } = lane(s, deliverCandidate);
+    const r = await caps.proposeGoalDeadline!(turn('We must deliver a high-quality MVP by 30 April 2027.') as never,
+      { deadline_words: 'by 30 April 2027', rationale: 'Paul: deliver a high-quality MVP by 30 April 2027.', deliverable: 'a high-quality MVP' }) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.public_label).toContain('‘a high-quality MVP’, with the deadline date still to be confirmed.');
+    expect(r.public_label).not.toContain('30 April 2027');
+    expect(s.commits()).toBe(0);
   });
 
   it('KNOWN GAP (3): Paul\'s own goal words ("ready to pilot … within 6 months") name no event the brief reader attests → not offered, nothing written', async () => {
