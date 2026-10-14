@@ -78,7 +78,9 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string, re
       }
       const startedAt = epoch;
       const read = await inner(path, fresh ? withoutFresh(body) : body);
-      signal.throwIfAborted(); // A late success must never populate the cache after its deadline.
+      // An answer given after the reads were cut is the reader's own (degraded) answer: returned, never kept, so no
+      // later reader of the turn is given it (S1; `ANALYSIS_READ_SETTLE_MS`).
+      if (signal.aborted) return read;
       kept = read.status === 200 ? { read: copy(read), epoch: startedAt } : undefined;
       return read;
     });

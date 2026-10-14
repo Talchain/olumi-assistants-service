@@ -17,6 +17,8 @@ import type { ProposalEditsRequest } from '../proposal-object/amend.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
+import { AnalysisReadDeadlineError } from '../../session/analysis-read-deadline.js';
+import { log } from '../../../utils/telemetry.js';
 
 // AIE 6141593167: exact option-level authorship contract at both entry points.
 const OPTION_LEVEL_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a level the user supplied for this option and factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact. On an option in `status_quo_held`, a level is permitted only with true and verified user words saying that carrying on changes this factor and giving that level. Never restate the factor's starting value: carrying on as now already keeps that, so such a level is not recorded."} as const;
@@ -1023,12 +1025,47 @@ export interface AgentCapabilities {
   researchControlShowable?(ctx: AgentToolContext, query: string): Promise<boolean>;
 }
 
+/** A tool whose read of the model did not finish in its budget (S1): the call's outcome is not known here. */
+export const STATE_READ_UNFINISHED = 'state_read_unfinished';
+
+/**
+ * ⭐ ONE BOUNDARY FOR EVERY TOOL CALL (S1, RCA 14 Oct 16:18Z). A read of the model that does not finish inside its
+ * budget (`AnalysisReadDeadlineError`) throws out of the capability. With no boundary it ended the whole turn as a 502,
+ * after the model had been saved: the build tool's read-back hit the deadline, and the reply was lost.
+ *
+ * Here that throw becomes a typed result the AI and the route can act on. The result says only what is known: the read
+ * did not finish, so whether this call changed the model is UNKNOWN (`outcome_unknown`). It never says saved, never
+ * says failed, and is never "no Run". `mutated: false` keeps a change that is not verified from triggering anything
+ * that depends on a commit. The route's own final read of the turn decides what the user sees. Every other error
+ * (a model read failure, a revision conflict) keeps its own handling in the route.
+ */
 export async function dispatchTool(
   name: string,
   rawArgs: string,
   ctx: AgentToolContext,
   caps: AgentCapabilities,
   mode: AgentLaneMode = 'full',
+): Promise<ToolResult> {
+  try {
+    return await dispatchToolUnbounded(name, rawArgs, ctx, caps, mode);
+  } catch (err) {
+    if (!(err instanceof AnalysisReadDeadlineError)) throw err;
+    log.warn({ event: 'agent_lane.tool_read_unfinished', tool: name, scenario_id: ctx.scenario_id, err: String(err) },
+      'agent-lane: a tool\u2019s read of the model did not finish in time; its outcome is unknown, the turn continues');
+    return {
+      ok: false, mutated: false, refusal: STATE_READ_UNFINISHED, outcome_unknown: true,
+      detail: 'A read of the model did not finish in time, so whether this call changed the model is not known. '
+        + 'Do not say it was saved or that it failed.',
+    };
+  }
+}
+
+async function dispatchToolUnbounded(
+  name: string,
+  rawArgs: string,
+  ctx: AgentToolContext,
+  caps: AgentCapabilities,
+  mode: AgentLaneMode,
 ): Promise<ToolResult> {
   // Second layer. A model can name a tool it was never given; this refuses it
   // before any capability is reached, and says so rather than failing quietly.
