@@ -359,12 +359,13 @@ function statusQuoReadingOf(a: {
 }
 
 /**
- * AIE packet 281e8b3d `zero.line` (#94 6162120876), byte for byte: the plain zero-spread cell's line, label-free, the status quo
- * included. True under both arms of `zeroSpread` (equal deciles, or a std within tolerance): it says only that the recorded
- * results do not establish certainty, never a statistical diagnosis, a figure or a forecast.
+ * The plain zero-spread cell's line, label-free, the status quo included (capacity e2e c0998b2e judge row 3: the AIE packet
+ * 281e8b3d `zero.line` hid what zero spread means). True under both arms of `zeroSpread` (equal deciles, or a std within
+ * tolerance: "barely vary", "fixed, or nearly"), and it says no figure, forecast or future event; it names the one input
+ * that can unlock a chance (a range on a figure the user is unsure of).
  */
-export const ZERO_SPREAD_LINE = 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
-  + 'You can review whether the model reflects the uncertainties that matter for this option.';
+export const ZERO_SPREAD_LINE = 'Chance not shown: this option’s simulated results barely vary in this model, because the figures it rests on are fixed, or nearly, '
+  + 'so a chance would only read as certain or impossible. Worth checking: which of those figures you are unsure of; giving them a range can let the Run show a chance.';
 
 /** The goal's target as the face says it: the shared formatter's rate separator (" / month") is the panel's, the face's is "a month". */
 const zeroSpreadFigure = (value: number, unit: string): string => sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');

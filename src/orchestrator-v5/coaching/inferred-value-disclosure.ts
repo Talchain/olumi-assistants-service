@@ -285,11 +285,24 @@ export function deriveOlumiLinkStrengths(graph: unknown): OlumiAuthoredValue[] {
 /**
  * ⭐ WHAT THE DISCLOSURE COUNTS: every Olumi-authored value the model carries into the analysis — factor baselines
  * ({@link deriveInferredValues}, unchanged), option levels and link strengths.
+ *
+ * `sentOptionIds`: the options this Run actually sent. An option the Run left out (Olumi's suggestion the user has not
+ * added) is not computed on, so its levels and links are not "behind this" (capacity e2e c0998b2e turn 02: "I supplied 2
+ * of the values" counted the left-out part-time option's level beside the one starting value the chance named). The same
+ * rule the chance census applies to its `optionIds` (`goalChanceEstimateCensus`).
  */
-export function deriveOlumiAuthoredValues(graph: unknown): OlumiAuthoredValue[] {
+export function deriveOlumiAuthoredValues(graph: unknown, sentOptionIds?: { has(id: string): boolean }): OlumiAuthoredValue[] {
+  const g = asRecord(graph);
+  const leftOut = sentOptionIds === undefined ? new Set<unknown>() : new Set<unknown>(recordsOf(g?.nodes)
+    .filter((n) => n.kind === 'option' && typeof n.id === 'string' && !sentOptionIds.has(n.id)).map((n) => n.id));
+  const analysed = leftOut.size === 0 || g === null ? graph : {
+    ...g,
+    nodes: recordsOf(g.nodes).filter((n) => !leftOut.has(n.id)),
+    edges: recordsOf(g.edges).filter((e) => !leftOut.has(e.from) && !leftOut.has(e.to)),
+  };
   return [
-    ...deriveInferredValues(graph).map((r): OlumiAuthoredValue => ({ kind: 'factor_baseline', factor_id: r.factor_id })),
-    ...deriveOlumiOptionLevels(graph),
-    ...deriveOlumiLinkStrengths(graph),
+    ...deriveInferredValues(analysed).map((r): OlumiAuthoredValue => ({ kind: 'factor_baseline', factor_id: r.factor_id })),
+    ...deriveOlumiOptionLevels(analysed),
+    ...deriveOlumiLinkStrengths(analysed),
   ];
 }

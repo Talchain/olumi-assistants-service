@@ -53,11 +53,11 @@ function plotResponse(graph: Fixture['graph'], warnings: readonly Rec[]): V2RunR
   return JSON.parse(JSON.stringify(body)) as V2RunResponseEnvelope;
 }
 
-async function summaryFor(f: Fixture, warnings: readonly Rec[]): Promise<string> {
+async function summaryFor(f: Fixture, warnings: readonly Rec[], goalId = 'mrr'): Promise<string> {
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph: f.graph,
     options: f.graph.nodes.filter((n) => n.kind === 'option'),
-    goal_node_id: 'mrr',
+    goal_node_id: goalId,
     rawPersistedGraph: f.graph,
   };
   const plotClient: PLoTClient = {
@@ -115,6 +115,37 @@ describe('WIRE — the run summary counts every Olumi value the model carries in
     (option?.interventions as Record<string, Rec>).pro_plan_price.source = 'user_specified';
     const summary = await summaryFor(f, f.response.inference_warnings);
     expect(summary).toContain(sentence(21));
+    expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
+  });
+});
+
+/** The served capacity read (e2e c0998b2e, capacity/reads/01-02-range.json), verbatim. */
+const CAPACITY = resolve(dirname(fileURLToPath(import.meta.url)), '../../../coaching/__tests__/fixtures/served-capacity-e2e-c0998b2e-graph.json');
+const capacity = (): Fixture => ({ ...(JSON.parse(readFileSync(CAPACITY, 'utf8')) as { graph: Fixture['graph'] }), response: { inference_warnings: [] } });
+const ONE = ' I supplied the value behind this, because your brief did not state it. It is mine rather than yours.';
+
+describe('WIRE — a value on an option the Run left out is not "behind this" (capacity e2e c0998b2e, judge row 7)', () => {
+  it('⭐ RED on served capacity: Olumi\'s part-time option is left out of the Run, so its level is not counted — "I supplied the value", never "2 of the values"', async () => {
+    const f = capacity();
+    // PRECONDITION (the capture): the part-time option is Olumi's suggestion and its level is Olumi's; the one Olumi
+    // starting value is the specialist capacity; the user's unconfirmed setting is stamped as such, never Olumi's.
+    const partTime = f.graph.nodes.find((n) => n.id === 'add_part_time_specialist')!;
+    expect(partTime.proposed_by).toBe('olumi');
+    expect((partTime.interventions as Record<string, Rec>).additional_specialists.source).toBe('cee_hypothesis');
+    expect((f.graph.nodes.find((n) => n.id === 'additional_specialists')!.observed_state as Rec).user_material_unverified).toBe(true);
+    const summary = await summaryFor(f, [], 'weekly_support_capacity');
+    expect(summary).toContain(ONE);
+    expect(summary).not.toMatch(/I supplied \d+ of the values/);
+    expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
+  });
+
+  it('CONTRAST: the same option added by the user is sent, so Olumi\'s level on it IS behind this — "2 of the values"', async () => {
+    const f = capacity();
+    const partTime = f.graph.nodes.find((n) => n.id === 'add_part_time_specialist')!;
+    delete partTime.proposed_by;
+    partTime.provenance = 'from_brief';
+    const summary = await summaryFor(f, [], 'weekly_support_capacity');
+    expect(summary).toContain(sentence(2));
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 });

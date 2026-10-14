@@ -3059,7 +3059,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // strengths — not only baselines. Served journey A said "6 of the values"
     // over 22.
     const inferredValueDisclosure = buildInferredValueDisclosure(
-      deriveOlumiAuthoredValues(graphForAnalysis),
+      deriveOlumiAuthoredValues(graphForAnalysis, submittedIds),
     );
     // ⭐ AIQ 5895379601 (1): Olumi's readings of the goal (its direction, its today level) are said once, through the
     // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
