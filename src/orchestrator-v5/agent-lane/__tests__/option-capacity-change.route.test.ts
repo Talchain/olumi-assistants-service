@@ -170,6 +170,16 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(shareOptionEstimateWords(after, LEGACY)).toContain('your figure of 15% of developer time for ‘Legacy-code fixing time’ with this option (20% of developer time today)');
   });
 
+  it('⛔ rollback fails closed: without the freed-time branch, the carrier reads as unreadable (withheld), never r = 1', async () => {
+    const w = world();
+    await press(w, (await offer(w)).proposal_id);
+    const g = w.graph();
+    delete node(g, CARRIER).observed_state.extra_share_by_date.ratio_source.complement_of; // what a reverted compiler sees
+    const after = projectGraphForPersistence(g as never) as Rec;
+    expect(node(after, CARRIER).observed_state.extra_share_by_date.ratio_source_unreadable).toBe(true);
+    expect(shareChanceInputFailure(after, LEGACY)).toMatch(/missing or unreadable now\.$/);
+  });
+
   it('⭐ in reach (team time 5–7 months): the option shows its own licensed chance, with what it rests on', async () => {
     const w = world();
     await press(w, (await offer(w)).proposal_id);

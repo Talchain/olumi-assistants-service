@@ -141,7 +141,9 @@ export function withOptionCapacityChange(graph: unknown, a: ApprovedOptionCapaci
       capacity_ratio: freedTimeRatio(a), lead_low: 0, lead_high: 0, unit: `% of ${a.deliverable} per month`,
       deadline: a.deadline, reference_date: a.reference_date,
       ratio_basis: { capacity: a.deliverable, relation: 'freed_time', source: { label: a.factor_label, unit: a.unit, today: a.today, withOption: a.to } },
-      ratio_source: { factor_ids: [], set_ids: [a.factor_id], settings: { [a.factor_id]: a.to }, complement_of: { source_id: a.factor_id, total: a.total } },
+      // `factor_ids` names this carrier, which holds no figure: a compiler without the freed-time branch (a revert) reads it as
+      // unreadable and withholds, never r = 1 (a silent copy of carrying on).
+      ratio_source: { factor_ids: [a.carrier_id], set_ids: [a.factor_id], settings: { [a.factor_id]: a.to }, complement_of: { source_id: a.factor_id, total: a.total } },
       // The relation is Olumi's reading, adopted by the user's press: positive evidence for the relation, never their authorship.
       ratio_relation: { kind: 'freed_time', reading: 'olumi', adopted_by: 'user_press' },
       statements: a.statements.map((s) => structuredClone(s)) } } });
