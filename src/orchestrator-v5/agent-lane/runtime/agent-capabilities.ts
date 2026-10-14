@@ -3577,12 +3577,14 @@ export function createAgentCapabilities(
       ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`
       : ` at month ${basis.period_months}${basis.reference === 'launch' ? ' after launch' : ''}`;
     const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
+    // The AIE's card clauses (packet B, 14 Oct), with construction's own deliverable, never the tool's short trigger. A date in
+    // the draft is Olumi's proposed reading; with none, the date is still to be confirmed (this card does not save one).
     const eventDeadline = event === null ? undefined : goalDeadlineFromRecord(candidate, String(event.goal.id));
-    const eventWords = eventDeadline === undefined ? ' (the date is confirmed separately)' : ` (${sayDate(eventDeadline)})`;
-    const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
-      + (held.length > 0 ? `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period}`
-        : `\u2018${event!.deliverable}\u2019 done by its deadline${eventWords}`)
-      + ` (the draft modelled \u2018${goal.label}\u2019). `
+    const card = (held.length > 0
+      ? `Replace the early draft with a revised one built from your brief and the goal you just gave: `
+        + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
+      : `Replace the early draft with a revised one built from your brief and the goal you just gave (the draft modelled \u2018${goal.label}\u2019): `
+        + (eventDeadline === undefined ? `\u2018${event!.deliverable}\u2019, with the deadline date still to be confirmed.` : `\u2018${event!.deliverable}\u2019 by ${sayDate(eventDeadline)} (Olumi\u2019s proposed reading).`) + ' ')
       + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
       + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
       + (limits.uncertain.length > 0 ? limits.uncertain.map(({ previous, proposed }) =>
@@ -3719,13 +3721,15 @@ export function createAgentCapabilities(
     // deadline the user already typed goes on its own card, never asked for again.
     const eventPart = draftedTeamPartOf(after.raw);
     const eventAsk = eventModelAsk(after.raw);
-    const replaced = 'Your model is now the revised draft shown on the card you approved. The earlier analysis was of the old draft.';
+    // The AIE's committed fact (packet B), only here: after the writer and the matching whole-postimage read-back above.
+    const committed = 'The approved revised draft was committed and matches the readback. The earlier analysis belongs to the earlier draft.';
     return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
       follow_up: eventPart === null || eventAsk === null
         ? 'Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.'
         : goalDeadlineFromRecord(after.raw, String(eventPart.goal.id)) === undefined
-          ? `${replaced} Its deadline date is not held yet: if the user has stated the deadline, call propose_goal_deadline with their exact words; otherwise ask: ${eventAsk}`
-          : `${replaced} Before it can be analysed, ask: ${eventAsk}` };
+          ? `${committed} No resolved deadline date is held for this deliverable. Where the user's deadline wording is retained, call `
+            + `propose_goal_deadline with those exact words; only when that wording is genuinely absent, ask: ${eventAsk} Do not run the analysis.`
+          : `${committed} Before it can be analysed, ask: ${eventAsk} Do not run the analysis.` };
   };
 
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
