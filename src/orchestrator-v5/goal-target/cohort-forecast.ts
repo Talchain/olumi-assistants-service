@@ -87,3 +87,20 @@ export function targetForecastWireOf(optionNode: unknown, targetRows: readonly u
     conditions: targets.map((t) => ({ constraint_id: t.row.constraint_id, quantity: t.quantity, threshold: t.threshold })),
   };
 }
+
+/**
+ * The Run's wire options with each option's `target_forecast` attached where it holds one for exactly the two stored targets
+ * (`role` marks them) and every condition names a sent row; the same objects, in order, everywhere else.
+ */
+export function withTargetForecasts<O extends object>(options: readonly O[], graph: unknown, storedRows: unknown, sentRows: unknown,
+  role: string): O[] {
+  const targetRows = (Array.isArray(storedRows) ? storedRows : []).filter((r) => isRec(r) && r.role === role);
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
+  const sentIds = new Set((Array.isArray(sentRows) ? sentRows : []).flatMap((r) => isRec(r) && typeof r.constraint_id === 'string' ? [r.constraint_id] : []));
+  if (targetRows.length !== 2) return [...options];
+  return options.map((opt) => {
+    const id = isRec(opt) ? (typeof opt.option_id === 'string' ? opt.option_id : typeof opt.id === 'string' ? opt.id : undefined) : undefined;
+    const forecast = id === undefined ? undefined : targetForecastWireOf(nodes.find((n) => isRec(n) && n.id === id), targetRows);
+    return forecast !== undefined && forecast.conditions.every((c) => sentIds.has(c.constraint_id)) ? { ...opt, target_forecast: forecast } : opt;
+  });
+}

@@ -610,6 +610,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // the exact false claim the field exists to prevent.
       "analysis_participation",
       "category",
+      // Science PR-4, 14 Oct (AIE same-cohort law) — THE VALUE-BEARING DECISION: `cohort_forecast` IS value-bearing in
+      // meaning (people reached and a conversion range, attested by its REQUIRED `author` and the user's `same_cohort`
+      // answer), but it lives on OPTION nodes only, which `schema-v3.ts` provenance binding settles before `carriesValue` is
+      // read, so joining `carriesValue` would be inert; it does not join `NODE_QUANTITY_FIELDS` either: a forecast of who an
+      // option reaches is not a level of the option node's own metric. Read only by `goal-target/cohort-forecast.ts`.
+      "cohort_forecast",
       // MG F1, 1 Oct (schemas 0.69.0; spec §1 §3 §5 §5b) — THE VALUE-BEARING DECISION for six fields: NONE is
       // value-bearing and none joins `carriesValue` (nor `NODE_QUANTITY_FIELDS`). `goal_period` (per what period) and
       // `goal_horizon` (by when) are FRAMES, siblings of `goal_threshold_frame` / `goal_horizon_months`. `goal_stated_as`

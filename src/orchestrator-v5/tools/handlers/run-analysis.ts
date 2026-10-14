@@ -61,7 +61,7 @@ import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowI
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
 import { GOAL_TARGET_ROLE } from '../../goal-target/goal-targets-joint.js';
-import { targetForecastWireOf } from '../../goal-target/cohort-forecast.js';
+import { withTargetForecasts } from '../../goal-target/cohort-forecast.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
@@ -1220,8 +1220,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
-      plotPayload.goal_constraints = wireGoalConstraints(withholdRetainedLimitFrames(snapshot.rawPersistedGraph ?? snapshot.graph,
+      const wireRows = wireGoalConstraints(withholdRetainedLimitFrames(snapshot.rawPersistedGraph ?? snapshot.graph,
         withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints)));
+      plotPayload.goal_constraints = wireRows;
+      // AIE same-cohort law (science PR-4, `cohort-forecast.ts`): an option holding a cohort forecast for exactly the goal's two
+      // targets sends it beside its interventions, so ISL scores both targets and their joint on ONE cohort's draws. Sent only
+      // when every condition names a row this Run sends (PLoT refuses any other); no forecast held → no key (byte-identical wire).
+      plotPayload.options = withTargetForecasts(finalWireOptions, graphForAnalysis, snapshot.goal_constraints, wireRows, GOAL_TARGET_ROLE);
       const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
       if (frameWithheld.length > 0) {
         log.info(
@@ -1234,23 +1239,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           'run_analysis sent a percent limit unframed: its target level is not held as a percentage out of 100 (wire copy only; no magnitudes)',
         );
       }
-    }
-    // AIE same-cohort law (science PR-4, `cohort-forecast.ts`): an option holding a cohort forecast for exactly the goal's two
-    // targets sends it beside its interventions, so ISL scores both targets and their joint on ONE cohort's draws. Sent only
-    // when every condition names a row this Run sends (PLoT refuses any other); no forecast held → no key (byte-identical wire).
-    const sentConstraintIds = new Set((Array.isArray(plotPayload.goal_constraints) ? plotPayload.goal_constraints as unknown[] : [])
-      .flatMap((r) => isRecord(r) && typeof r.constraint_id === 'string' ? [r.constraint_id] : []));
-    const storedTargetRows = (Array.isArray(snapshot.goal_constraints) ? snapshot.goal_constraints as unknown[] : [])
-      .filter((r) => isRecord(r) && r.role === GOAL_TARGET_ROLE);
-    const forecastNodes = (graphForAnalysis as { nodes?: unknown }).nodes;
-    if (storedTargetRows.length === 2 && Array.isArray(forecastNodes)) {
-      plotPayload.options = finalWireOptions.map((opt) => {
-        const id = optionIdOf(opt as Record<string, unknown>);
-        const forecast = id === undefined ? undefined
-          : targetForecastWireOf(forecastNodes.find((n) => isRecord(n) && n.id === id), storedTargetRows);
-        return forecast !== undefined && forecast.conditions.every((c) => sentConstraintIds.has(c.constraint_id))
-          ? { ...opt, target_forecast: forecast } : opt;
-      });
     }
     // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
     //
