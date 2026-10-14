@@ -30,6 +30,7 @@
  * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
+import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
@@ -392,8 +393,14 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
     ? undefined
     : typed;
   const direction = operator !== undefined;
-  const months = attestation.status === 'attested' ? attestation.months : null;
-  const horizon = months !== null;
+  // ⭐ SCIENCE (AIE MA3; DL 16:43Z 14 Oct): a goal read over the window from LAUNCH holds its period in that reading
+  // (`goal_target_basis`). A month count stamped here reads as months FROM NOW (Oct → Jan), a different window from the
+  // three months after launch, and it made the risk-occurrence window a conflict (marketing's Run stayed blocked). So it is
+  // never stamped; the brief's count is held when it IS the reading's period, and is otherwise left unheld, as before.
+  const launch = launchWindowOf(node);
+  const attestedMonths = attestation.status === 'attested' ? attestation.months : null;
+  const months = launch === undefined ? attestedMonths : null;
+  const horizon = months !== null || (attestedMonths !== null && attestedMonths === launch?.period_months);
   if (!target && !horizon) return { nodes: [...nodes], held: none, horizon: attestation };
   const stamped = {
     ...node,
