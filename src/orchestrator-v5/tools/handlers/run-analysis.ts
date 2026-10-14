@@ -245,7 +245,6 @@ export {
   type HandlerInvocationFailedCause,
 } from '../handler-errors.js';
 import { currentProviderPolicy } from '../../../adapters/llm/provider-policy.js';
-import { agentFactorEnrichments } from '../../agent-lane/factor-review.js';
 
 // ============================================================================
 // Locked assistant_text templates (Refinement R1)
@@ -3125,11 +3124,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'PLoT refused the goal chance for an Olumi-side reason (Science §(g) defect row)',
       );
     }
-    // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
-    const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,
-      (response as Record<string, unknown>).factor_sensitivity, invocation.requestId, invocation.signal);
-    // Attached to the PLoT response before the one owned projection stamp (handler-ownership guard pins that line).
-    if (factorEnrichments !== undefined) (response as Record<string, unknown>).factor_enrichments = factorEnrichments;
+    // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
+    // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same
+    // bound Run (`persistedFactorReviewFor`). A Run fact stored before this change keeps its enrichment and is still read.
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
