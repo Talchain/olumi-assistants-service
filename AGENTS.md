@@ -19,7 +19,7 @@ Design every change as a reasoning enhancement: science-grounded, easy to unders
 **Product test (verbatim):** Does this help the team improve their understanding of the scenario, the model they've built, their reasoning and accelerate commitment to the optimal action — including working productively through uncertainty and disagreement — or does it merely give them another answer? If mainly the latter, we are drifting from Olumi's purpose. Science is the mechanism by which Olumi improves reasoning, not an authority that replaces it.
 
 **In practice:**
-- Never rank, pick or recommend an option ("best", "winner", "go with", "you should choose"). Results are what the current model implies, for further reasoning. A win share is never called a chance.
+- Never recommend or pick an option ("best", "winner", "go with", "you should choose"). A comparison or leader is a model-relative finding: say what the current model implies, what it rests on and what would change it, for further reasoning. A win share is never called a chance.
 - Olumi proposes; the user authors. Anything Olumi adds or estimates stays visibly Olumi's, provisional and easy to accept, change or reject.
 - Guidance is science-grounded (what matters most, what is uncertain or missing, where reasoning may be weak or biased), in plain words, said once.
 - If Olumi can't support something, it says so and coaches: it asks for the missing input or offers a scientifically grounded activity. It never invents a number or certainty.
