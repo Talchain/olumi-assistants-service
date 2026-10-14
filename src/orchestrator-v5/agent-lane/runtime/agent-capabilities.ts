@@ -3650,6 +3650,7 @@ export function createAgentCapabilities(
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
         + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
+        // AIE_TEXT_PENDING (marketing turn 02): the 'unknown' sentence, which replaces "NOT in the revised draft" in that case only.
         + (holds === true ? '' : holds === 'unknown'
           ? ` Whether this target (${targetFigure(target.value, target.unit)}) is the card\u2019s own could not be checked against the user\u2019s words: ask the user to check the targets on the card, and never say it is in the revised draft or that it is not.`
           : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
