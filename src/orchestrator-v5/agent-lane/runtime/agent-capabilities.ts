@@ -3502,7 +3502,7 @@ export function createAgentCapabilities(
     }).join(' and ');
 
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
-  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; readonly candidate: Record<string, unknown> }
+  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
 
@@ -3582,20 +3582,7 @@ export function createAgentCapabilities(
       public_label: card,
     });
     proposals.put(proposal);
-    return { proposal, held, candidate };
-  };
-
-  /**
-   * Every word and number of `call`, of ANY length ("UK" too: an unmatched qualifier fails safe to "not held"; DL), is one of
-   * `name`'s, exactly, singular or plural; the definite article alone is not a word of the quantity ("new customers in the
-   * first 3 months" names ‘New customers in first 3 months’; Codex buddy r2). "per", periods and numbers stay exact.
-   */
-  const namedWithin = (call: string, name: string): boolean => {
-    const tokens = (s: string): string[] => (s.toLowerCase().match(/\p{N}+(?:\.\p{N}+)?|\p{L}+/gu) ?? [])
-      .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
-    const own = new Set(tokens(name));
-    const named = tokens(call).filter((w) => w !== 'the');
-    return named.some((w) => /\p{L}/u.test(w)) && named.every((w) => own.has(w));
+    return { proposal, held };
   };
 
   /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
@@ -3616,24 +3603,8 @@ export function createAgentCapabilities(
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
     // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
-    // A figure per period is not the same figure as a total ("20 customers/month" is not "20 customers"; Codex buddy).
-    const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
-      && unitsConflict(target.unit, t.unit) === null && ratePeriodOf(target.unit) === ratePeriodOf(t.unit));
-    /**
-     * ⛔ …by the CARD'S TARGET, not only its exact label (served marketing-2992, 13 Oct 23:05Z: "new customers" against the
-     * card's ‘New customers in first 3 months’ read false, so the note said a target the card holds was NOT in it). The one
-     * held target with this figure, comparator and unit holds it when every word and number the call names is, exactly
-     * (singular or plural), a word or number of that target's own name, and the call's words name no other quantity of the
-     * candidate: "returning customers", "new customers in first 6 months" and "monthly new customers" are not it.
-     */
-    const candidateNodes = (Array.isArray(draft.candidate.nodes) ? draft.candidate.nodes : []) as GraphRead['nodes'];
-    const theOne = sameFigure.length === 1 ? sameFigure[0]! : undefined;
-    const theOneLabel = theOne === undefined ? undefined : candidateNodes.find((n) => n.id === theOne.node_id)?.label;
-    const named = resolveNamed({ nodes: candidateNodes }, target.measures, () => true);
-    const holds = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures))
-      || (theOne !== undefined && typeof theOneLabel === 'string' && theOneLabel.trim() !== ''
-        && (named.kind === 'none' || ((named.kind === 'one' || named.kind === 'other') && named.node.id === theOne.node_id))
-        && namedWithin(target.measures, theOneLabel));
+    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
+      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,

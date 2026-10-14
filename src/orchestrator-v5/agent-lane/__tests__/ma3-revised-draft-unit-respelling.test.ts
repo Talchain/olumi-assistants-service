@@ -169,51 +169,17 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     }
   });
 
-  it('(c) holds_this_target is bound to the card\'s target: "new customers" holds ‘New customers in first 3 months’; another quantity does not', async () => {
+  it('(c) holds_this_target is staging\'s exact-label binding (DL split ruling): a name the card holds under a longer label reads NOT held — it fails safe', async () => {
     const s = server();
     const { caps } = lane(s);
     const a = await caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
     const b = await caps.proposeGoalTarget!(turn as never, customers as never) as Rec;
+    expect(b.proposal_id).toBe(a.proposal_id);
     expect(a.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
-    expect(b.revised_draft, JSON.stringify(b)).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
-    expect(String(b.note)).not.toContain('is NOT in the revised draft');
-    // The card's own window in the user's words, with the article (Codex buddy r2): still the card's target.
-    const window = 'We want at least 20 new customers in the first 3 months.';
-    const w = await caps.proposeGoalTarget!({ ...turn, turn_id: 'turn-window', user_turn_text: window, user_text: `${FX.brief_text}\n${window}` } as never,
-      { ...customers, measures: 'new customers in the first 3 months', rationale: window } as never) as Rec;
-    expect(w, JSON.stringify(w)).toMatchObject({ ok: true, revised_draft: { holds_this_target: true } });
-    // CONTRAST (AIE 0452 AMEND 2): the same figure named as another of the card's quantities is not this target.
-    const other = await caps.proposeGoalTarget!(turn as never, { ...customers, measures: 'conversion rate' } as never) as Rec;
-    expect(other.proposal_id).toBe(a.proposal_id);
-    expect(other.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: false });
-    expect(String(other.note)).toContain('This target (20 customers) is NOT in the revised draft');
-    // CONTRAST: the same figure on a quantity the card does not hold — the turn also writes "20 returning customers".
-    const said = `${L20} We also want to keep 20 returning customers.`;
-    const returning = await caps.proposeGoalTarget!({ ...turn, turn_id: 'turn-returning', user_turn_text: said, user_text: `${FX.brief_text}\n${said}` } as never,
-      { ...customers, measures: 'returning customers', rationale: said } as never) as Rec;
-    expect(returning, JSON.stringify(returning)).toMatchObject({ ok: true, revised_draft: { replaces_goal: 'product feature launch', holds_this_target: false } });
-    expect(String(returning.note)).toContain('This target (20 customers) is NOT in the revised draft');
-    // CONTRAST (Codex buddy): another window, and a rate per month, on the same figure are not the card's three-month count.
-    for (const [said, args] of [
-      ["We want at least 20 new customers in first 6 months.", { ...customers, measures: 'new customers in first 6 months' }],
-      ["We want at least 20 new customers per month.", { ...customers, unit: 'customers/month' }],
-      // A short qualifier is still a qualifier (DL): "UK" is not a word of the card's target, so it is not held.
-      ["We want at least 20 new UK customers in the first 3 months.", { ...customers, measures: 'new UK customers' }],
-    ] as const) {
-      const r = await caps.proposeGoalTarget!({ ...turn, turn_id: `turn-${said.length}`, user_turn_text: said, user_text: `${FX.brief_text}\n${said}` } as never,
-        { ...args, rationale: said } as never) as Rec;
-      expect(r, `${said} ${JSON.stringify(r)}`).toMatchObject({ ok: true, revised_draft: { holds_this_target: false } });
-    }
-  });
-
-  it('(c) CONTRAST: the call\'s words that exactly name ANOTHER quantity of the revised draft are not the card\'s target', async () => {
-    const raw = JSON.parse(RAW) as Rec;
-    (raw.factors as Rec[]).push({ label: 'New customers', role: 'observable', baseline_known: false, baseline_value: null, unit: 'customers',
-      provenance: 'ai_proposed', plausible_max: null });
-    const s = server();
-    const b = await lane(s, JSON.stringify(raw)).caps.proposeGoalTarget!(turn as never, customers as never) as Rec;
-    expect(b, JSON.stringify(b)).toMatchObject({ ok: true });
+    // Known gap, kept on purpose: "new customers" vs the card's ‘New customers in first 3 months’. The class fix is the AI
+    // quoting the card's target (generation), never another word matcher. The card itself still shows both targets.
     expect(b.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: false });
+    expect(String(b.public_label)).toContain('‘New customers in first 3 months’ at least 20 customers');
   });
 
   it('(d) real path: card → approve → the saved model holds both targets and both limits → cold read → the PLoT body', async () => {
