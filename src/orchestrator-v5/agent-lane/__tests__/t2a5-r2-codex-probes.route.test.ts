@@ -128,7 +128,7 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   };
   const edgeNow = (from: string, to: string): Json => (graphOf.get(scenario) as Json).edges.find((e: Json) => e.from === from && e.to === to);
   /** The ONE prepared operation for this link, the card's own approve chip pressed, and the saved edge read back. */
-  const proposeAndApprove = async (session: string, message: string, extra: Json, link: Json, path: string) => {
+  const _proposeAndApprove = async (session: string, message: string, extra: Json, link: Json, path: string) => {
     proposeOn = { message, links: [link] };
     const body = await send({ agent_session_id: session, message, ...extra });
     expect(doors, 'the stubbed model reached the real link-set door once').toHaveLength(1);
@@ -141,7 +141,7 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     return { op: ops[0]!, label: String(doors[0]!.public_label), ctx: doors[0]!.ctx };
   };
   /** T2A5: the user's own words, not verifiably quoted, keep an unknown origin: no card, nothing written, the edge unchanged. */
-  const proposeRefused = async (session: string, message: string, extra: Json, link: Json) => {
+  const _proposeRefused = async (session: string, message: string, extra: Json, link: Json) => {
     const before = JSON.stringify(edgeNow(...CHURN));
     proposeOn = { message, links: [link] };
     const body = await send({ agent_session_id: session, message, ...extra });
@@ -153,7 +153,7 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   };
   const CHURN = ['monthly_churn', 'paying_subscribers'] as const;
   const CHURN_EDGE = { id: 'monthly_churn→paying_subscribers', kind: 'edge' };
-  const NEW_EDGE = { id: 'monthly_new_paying_subscribers→paying_subscribers', kind: 'edge' };
+  const _NEW_EDGE = { id: 'monthly_new_paying_subscribers→paying_subscribers', kind: 'edge' };
   const churnLink = (strength: string) => ({ from_label: 'Monthly churn', to_label: 'Paying subscribers', strength });
   const expectSaved = (author: 'user_stated' | 'model_proposed', magnitude: number) => {
     const saved = edgeNow(...CHURN);
@@ -191,15 +191,13 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     console.log('PROBE', JSON.stringify(result));
     return { door: door!, changed: JSON.stringify(graphOf.get(scenario)) !== before, chips };
   };
-  it.each(probes.flatMap(([name, words, selected]) => [false, true].flatMap(earlier => [false, true].map(quoted => ({name, words, selected, earlier, quoted})))))
-    ('prior overclaim $name earlier=$earlier quoted=$quoted', async ({name, words, selected, earlier, quoted}) => {
+  it.each(probes.flatMap(([name, words, selected]) => [false, true].flatMap(earlier => [false, true].map(quoted => ({name, words, selected, earlier, quoted})))))('prior overclaim $name earlier=$earlier quoted=$quoted', async ({name, words, selected, earlier, quoted}) => {
       const p = await runProbe(name, words, earlier, [{...churnLink('strong'), ...(quoted ? {from_words: words} : {})}], selected);
       expect.soft(p.door.refusal, 'unverified source must stay unknown').toBe('origin_unknown');
       expect.soft(p.door.operations, 'nothing prepared').toHaveLength(0);
       expect.soft(p.changed, 'nothing written').toBe(false);
     });
-  it.each([false, true].flatMap(earlier => [false, true].map(aiDenies => ({earlier, aiDenies}))))
-    ('third-party whole frame earlier=$earlier explicit third-party=$aiDenies', async ({earlier, aiDenies}) => {
+  it.each([false, true].flatMap(earlier => [false, true].map(aiDenies => ({earlier, aiDenies}))))('third-party whole frame earlier=$earlier explicit third-party=$aiDenies', async ({earlier, aiDenies}) => {
       const words = 'Alice supplied these estimates. Monthly churn has a strong effect on Paying subscribers.';
       const p = await runProbe('alice-frame', words, earlier, [{...churnLink('strong'), from_words: words,
         ...(aiDenies ? {user_stated: false, author: 'Alice', source: 'Alice', basis: 'Alice supplied these estimates; they are not the user’s.'} : {})}]);
@@ -212,7 +210,7 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     expect.soft(p.door.refusal).toBe('origin_unknown');
     expect.soft(p.changed).toBe(false);
   });
-  it.each([false, true])('withdrawal supersedes every target earlier=$earlier', async earlier => {
+  it.each([false, true])('withdrawal supersedes every target earlier=%s', async _earlier => {
     const words = 'Monthly churn has a strong effect on Paying subscribers. Monthly new paying subscribers has a strong effect on Paying subscribers.';
     const p = await runProbe('withdrawal', words, true, [churnLink('strong'), {from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong'}].map(l => ({...l, from_words:words})), [], 'I withdraw all my earlier estimates.');
     expect(p.door.refusal).toBe('origin_unknown');

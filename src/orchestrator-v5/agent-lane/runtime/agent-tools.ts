@@ -923,7 +923,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
-    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string }[];
+    // #3002 r2: the AI's own claim (`user_stated`, required in the tool schema; absent reads UNKNOWN) and Olumi's own basis.
+    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string;
+      user_stated?: boolean; basis?: string }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
