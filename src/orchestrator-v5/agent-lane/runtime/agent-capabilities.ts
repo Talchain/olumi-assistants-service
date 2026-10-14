@@ -10,7 +10,7 @@ import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goa
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
-import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
+import { draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
@@ -3521,7 +3521,7 @@ export function createAgentCapabilities(
     }).join(' and ');
 
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
-  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
+  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; /** The deadline goal's deliverable, when the draft holds one. */ readonly event: string | null }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
 
@@ -3565,7 +3565,10 @@ export function createAgentCapabilities(
     }
     Object.assign(candidate, limits.replacement);
     const held = targetsHeldBy(candidate);
-    if (held.length === 0) {
+    // ⭐ GEN #5 (Paul's funding test, 13 Oct): a deliverable done by its deadline (the event-by-date model) is a goal the user
+    // stated, as a figure target is; it holds no target row, so it is recognised by its own definition.
+    const event = draftedTeamPartOf(candidate);
+    if (held.length === 0 && event === null) {
       return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
     }
     const nodesOf = (raw: unknown) => ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []);
@@ -3574,8 +3577,12 @@ export function createAgentCapabilities(
       ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`
       : ` at month ${basis.period_months}${basis.reference === 'launch' ? ' after launch' : ''}`;
     const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
+    const eventDeadline = event === null ? undefined : goalDeadlineFromRecord(candidate, String(event.goal.id));
+    const eventWords = eventDeadline === undefined ? ' (the date is confirmed separately)' : ` (${sayDate(eventDeadline)})`;
     const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
-      + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
+      + (held.length > 0 ? `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period}`
+        : `\u2018${event!.deliverable}\u2019 done by its deadline${eventWords}`)
+      + ` (the draft modelled \u2018${goal.label}\u2019). `
       + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
       + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
       + (limits.uncertain.length > 0 ? limits.uncertain.map(({ previous, proposed }) =>
@@ -3601,13 +3608,13 @@ export function createAgentCapabilities(
       public_label: card,
     });
     proposals.put(proposal);
-    return { proposal, held };
+    return { proposal, held, event: event?.deliverable ?? null };
   };
 
-  /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
+  /** This target (or deadline goal) call's answer from the turn's one revised draft: the same card, or why it is not in it. */
   const offerRevisedDraft = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
-    target: { measures: string; value: number; unit: string; comparator: string },
+    target: { measures: string; value: number; unit: string; comparator: string } | { deliverable: string },
   ): Promise<ToolResult> => {
     const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}`;
     let pending = revisedDrafts.get(key);
@@ -3617,9 +3624,23 @@ export function createAgentCapabilities(
     }
     const draft = await pending;
     if ('refused' in draft) {
-      return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', [{
-        words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
-        onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
+      return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', ['deliverable' in target
+        ? { words: `\u2018${target.deliverable}\u2019 by its deadline`, onCanvas: false }
+        : { words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
+          onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
+    }
+    const offered = 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
+      + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
+      + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.';
+    if ('deliverable' in target) {
+      return {
+        ok: true, mutated: false,
+        proposal_id: draft.proposal.proposal_id,
+        public_label: draft.proposal.public_label,
+        base_revision: g.graph_hash,
+        revised_draft: { replaces_goal: goal.label, holds_deadline_goal: draft.event !== null },
+        note: offered + (draft.event !== null ? '' : ' This deadline goal is NOT in the revised draft: say so plainly, and never say it will be set.'),
+      };
     }
     // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
     const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
@@ -3630,9 +3651,7 @@ export function createAgentCapabilities(
       public_label: draft.proposal.public_label,
       base_revision: g.graph_hash,
       revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
-      note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
-        + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
-        + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
+      note: offered
         + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
   };
@@ -3696,8 +3715,17 @@ export function createAgentCapabilities(
         source_turn_id: registrationTurnId(ctx.scenario_id, v.operation_id) }]
       : [];
     proposals.markApplied(pid, receipts);
+    // A deadline goal is analysed only once its date and the team's time are held: the model's own next step, not a Run. A
+    // deadline the user already typed goes on its own card, never asked for again.
+    const eventPart = draftedTeamPartOf(after.raw);
+    const eventAsk = eventModelAsk(after.raw);
+    const replaced = 'Your model is now the revised draft shown on the card you approved. The earlier analysis was of the old draft.';
     return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
-      follow_up: 'Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.' };
+      follow_up: eventPart === null || eventAsk === null
+        ? 'Your model is now the revised draft, with the targets and limits shown on the card you approved. The earlier analysis was of the old draft; run the analysis again.'
+        : goalDeadlineFromRecord(after.raw, String(eventPart.goal.id)) === undefined
+          ? `${replaced} Its deadline date is not held yet: if the user has stated the deadline, call propose_goal_deadline with their exact words; otherwise ask: ${eventAsk}`
+          : `${replaced} Before it can be analysed, ask: ${eventAsk}` };
   };
 
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
@@ -5508,6 +5536,17 @@ export function createAgentCapabilities(
       const origin = statementOrigin(writes(typed) || writes(plainOf(ctx.user_text ?? '')) || heldHumanWords,
         writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')), ctx.user_text_complete);
       if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+      /**
+       * ⭐ GEN #5 (Paul's funding test, 13 Oct: "how these options change our ability to deliver a high-quality MVP within 6
+       * months" on a draft of "Development speed"): a deadline for a deliverable that is not the model's goal cannot land on that
+       * goal. With the deadline typed in THIS message, the answer is the same revised-draft card a stated figure opens, built by
+       * C's construction from the brief and this message; the gates still apply, and only the user's press replaces the draft.
+       */
+      const deliverable = typeof args?.deliverable === 'string' ? args.deliverable.trim() : '';
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (deliverable !== '' && writes(typed) && goals.length === 1 && draftedTeamPartOf(g.raw) === null && !isEventShareForecast(g.raw)) {
+        return offerRevisedDraft(ctx, g, goals[0]!, { deliverable });
+      }
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
       const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
