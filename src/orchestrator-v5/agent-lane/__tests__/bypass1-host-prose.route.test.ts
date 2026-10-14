@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { RUN_COMPARISON_NOTE } from '../runtime/agent-capabilities.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 
 type Json = Record<string, any>;
@@ -84,6 +85,8 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
   let outputs: Record<string, unknown>[][] = [];
   /** A served graph read, verbatim (its own canonical view); null → the b9-1 read above. */
   let served: Json | null = null;
+  /** The Run response's own state, when it differs from the read's (another Run's stamp); null → the read's. */
+  let runResponseState: Json | null = null;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
@@ -100,7 +103,7 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     app.post('/orchestrate/v2/turn', async () => ({
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: served?.graph_hash ?? READ.graph_hash,
       blocks: [served?.analysis_result ?? READ.analysis_result], analysis_ready: served?.analysis_ready ?? READ.analysis_ready,
-      analysis_state: served?.analysis_state ?? state,
+      analysis_state: runResponseState ?? served?.analysis_state ?? state,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => served ?? withCanonicalAnalysisView({
       graph, graph_hash: READ.graph_hash, analysis_state: state,
@@ -110,7 +113,7 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; served = null; });
+  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; served = null; runResponseState = null; });
   servedScenario = () => served === null ? null
     : { revision: (served.canonical_analysis_view as Json | undefined)?.staleness?.revision, graph: served.graph };
 
@@ -352,6 +355,60 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     served = withNotTestable(false);
     const run = await runPress();
     expect(saidTimes(run.assistant_text as string, served)).toEqual([1, 1]);
+  });
+
+  /**
+   * ⭐ COACH ON THE NEW RESULT, AGAINST THE PRECEDING RUN (Paul #94 6166259456; DL 14 Oct). The served capacity Run 2 read
+   * (CEE 351eeda0) holds its preceding Run's delta (`current_read.run_delta`, C1). The Run's own output to the AI now carries
+   * the comparison facts and the note, so the AI's reply can coach and compare; proven in the AI's actual request body.
+   */
+  const comparisonSent = (): Json | undefined => {
+    for (const body of sent) {
+      const parsed = JSON.parse(body) as Json;
+      const items = (parsed.input ?? []) as Json[];
+      for (const item of items) {
+        if (item.type !== 'function_call_output' || typeof item.output !== 'string') continue;
+        const out = JSON.parse(item.output) as Json;
+        if (out.run_comparison !== undefined) return out.run_comparison as Json;
+      }
+    }
+    return undefined;
+  };
+
+  /** The AI's own Run (a typed "Run it": its run_analysis call), whose tool output reaches the AI's next request. */
+  const aiRun = async (): Promise<Json> => {
+    outputs = [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
+      [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: 'Run it', source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const b = r.json() as Json;
+    expect((b._agent.tool_calls as { name: string }[]).map((c) => c.name)).toContain('run_analysis');
+    return b;
+  };
+
+  it('RED (coach and compare): after a Run with a preceding Run, the AI receives the comparison facts and the note', async () => {
+    served = CAPACITY;
+    expect(CAPACITY.current_read.run_delta).toBeDefined();
+    await aiRun();
+    const comparison = comparisonSent();
+    expect(comparison?.note).toBe(RUN_COMPARISON_NOTE);
+    expect(comparison?.run_delta !== undefined || comparison?.rerun_record !== undefined).toBe(true);
+  });
+
+  it('CONTRAST (coach and compare): a first Run (no preceding Run) gets no comparison', async () => {
+    served = CAPACITY_3017;
+    expect(CAPACITY_3017.current_read.run_delta).toBeUndefined();
+    await aiRun();
+    expect(comparisonSent()).toBeUndefined();
+  });
+
+  it('ADVERSARIAL (coach and compare): a read whose selected Run is not this Run (same hash, another computed_at) adds nothing', async () => {
+    served = CAPACITY;
+    runResponseState = { ...CAPACITY.analysis_state, run_state: { ...CAPACITY.analysis_state.run_state, computed_at: '2026-10-13T06:54:24.046Z' } };
+    await aiRun();
+    expect(comparisonSent()).toBeUndefined();
   });
 
   it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
