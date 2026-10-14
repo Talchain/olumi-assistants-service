@@ -57,7 +57,7 @@ function harness(mean: number) {
 const contextOf = (verified: string, interaction: Partial<AgentToolContext>) => ({ scenario_id: scenario, authenticated_user_id: null,
   request_id: 't2a', user_text: verified, user_turn_text: 'Please prepare the link.', ...interaction });
 const linkOf = (from: string, overrides: Record<string, unknown>) => ({ links: [{ from_label: from, to_label: 'MRR', strength: 'weak', ...overrides }],
-  rationale: 'Prepare the requested link strength.' });
+  rationale: 'Prepare the requested link strength.' }) as never;
 /** The door's answer alone, nothing approved: for the T2A5 refusals (origin unknown, nothing prepared). */
 async function offer(from: string, overrides: Record<string, unknown> = {}, verified = history, interaction: Partial<AgentToolContext> = {}, mean = 0.55) {
   const { caps, writes } = harness(mean);
@@ -256,7 +256,8 @@ describe('T2A3: a later statement supersedes an earlier one for the same link', 
     const words = 'Price has a weak effect on MRR.\nActually, Price has a strong effect on MRR.';
     const overrides = { strength, ...(quote === undefined ? {} : { from_words: quote }) };
     if (want === 'unknown') return expectUnknown('Price', overrides, words, { user_turn_text: 'Please prepare the link.' }, strength === 'weak' ? 0.55 : 0.3);
-    const result = await journey('Price', overrides, words, { user_turn_text: 'Please prepare the link.' }, strength === 'weak' ? 0.55 : 0.3);
+    // Only the quoted "strong" row reaches here (the rest are origin unknown): it MOVES the link from 0.3.
+    const result = await journey('Price', overrides, words, { user_turn_text: 'Please prepare the link.' }, 0.3);
     expect(author(result)).toBe(want);
   });
   // ⭐ T2A5 (buddy fd148466): EXPECTATION CHANGED, old model_proposed → new origin unknown: the superseded earlier "weak" is
@@ -400,7 +401,8 @@ describe('T2A3 buddy review 4 (Codex, read-only, 07323ca6)', () => {
     ['I do not withdraw my estimates. Price has a weak effect on MRR.', 'weak', 'user_stated', 'Price has a weak effect on MRR'],
     ['I estimate a weak effect of Price on MRR.', 'weak', 'user_stated', 'I estimate a weak effect of Price on MRR'],
   ] as const)('"%s" proposing %s → %s (from_words %s)', async (words, strength, want, quote?: string) => {
-    if (want === 'unknown') return expectUnknown('Price', { strength }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
+    // The two origin-unknown rows here both propose "weak": the link sits at 0.55, so the band MOVES it.
+    if (want === 'unknown') return expectUnknown('Price', { strength }, words, { user_turn_text: words }, 0.55);
     const result = await journey('Price', { strength, ...(quote === undefined ? {} : { from_words: quote }) }, words, { user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
     expect(author(result)).toBe(want);
     expect(result.edge.provenance.source).toBe(want === 'user_stated' ? 'user_specified' : 'cee_hypothesis');
