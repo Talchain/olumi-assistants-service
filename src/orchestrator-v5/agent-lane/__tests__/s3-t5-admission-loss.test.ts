@@ -137,3 +137,31 @@ describe('L2: a base the drafter produced is Olumi\'s unless the brief attests i
     expect(goal.observed_state).toMatchObject({ raw_value: 8, source: 'brief_extraction' });
   });
 });
+
+describe('GEN #3: the user\'s level for a goal with no target is asked, never dropped silently (D6: "about 80 features per week")', () => {
+  const D6 = (JSON.parse(readFileSync(new URL('./fixtures/s3-t5-d6-raw-20261012.json', import.meta.url), 'utf8')) as {
+    episodes: Record<string, Episode>;
+  }).episodes.D6_r1!;
+  const ASK = 'Your brief puts ‘Features completed per week’ at 80 features per week today, but with no target the model holds no level for it. '
+    + 'What level would count as success, and by when?';
+
+  it('PRECONDITION: the raw draft gives 80 as today\'s level with no target, and T5 saved no level and asked nothing', () => {
+    expect(rawGoal(D6)).toMatchObject({ value: null, target_stated: false, baseline_known: true, baseline_value: 80 });
+    expect(D6.t5_saved_goal).toMatchObject({ goal_threshold_raw: null, observed_state: null });
+  });
+
+  it('⭐ RED→GREEN: the build asks ONE question quoting the user\'s 80, and the goal still holds no figure', async () => {
+    const { goal, questions } = await build(D6);
+    expect(questions).toContain(ASK);
+    expect(questions.filter((q) => q === ASK)).toHaveLength(1);
+    // No figure in the model: no level, no threshold (a level with no scale would be renormalised by a guess later).
+    expect(goal.observed_state ?? null).toBeNull();
+    expect(goal.goal_threshold_raw ?? null).toBeNull();
+  });
+
+  it('CONTRAST: a level the brief does not write (the drafter\'s own 80) is not quoted as the user\'s, and nothing is asked', async () => {
+    const e: Episode = { ...D6, brief: D6.brief.replace('Our team currently completes about 80 features per week. ', '') };
+    const { questions } = await build(e);
+    expect(questions.some((q) => q.startsWith('Your brief puts'))).toBe(false);
+  });
+});
