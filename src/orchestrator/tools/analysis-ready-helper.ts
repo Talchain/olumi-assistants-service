@@ -1337,7 +1337,7 @@ function goalRootsWithoutStatusQuoLevel(
     // event_risk.v1: an event risk's level is its OCCURRENCE, which ISL draws (0/1 per draw);
     // it is never held at zero, so it needs no level today. Only a block the write doors accept counts, and Olumi's range
     // only over the goal's CURRENT window (`riskOccurrenceIsCurrent`): a stale one withholds and is asked again.
-    if (riskOccurrenceIsCurrent(node as unknown as Record<string, unknown>, graph)) continue;
+    if (riskOccurrenceIsCurrent(node, graph)) continue;
     if (!reachesGoal(node.id)) continue;
     gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }

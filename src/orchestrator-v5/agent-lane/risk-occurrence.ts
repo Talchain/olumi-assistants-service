@@ -93,8 +93,8 @@ export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
  * (`riskOccurrenceWindowMonths`); otherwise it is stale, readiness withholds, and the card is offered again over the current
  * window. A user's or a reference range keeps its own stated horizon (unchanged here).
  */
-export function riskOccurrenceIsCurrent(node: Rec, graph: unknown): boolean {
-  const block = EventRiskV1.safeParse(node.event_risk);
+export function riskOccurrenceIsCurrent(node: object, graph: unknown): boolean {
+  const block = EventRiskV1.safeParse((node as { event_risk?: unknown }).event_risk);
   if (!block.success) return false;
   return block.data.occurrence.basis !== 'olumi' || block.data.horizon.months === riskOccurrenceWindowMonths(graph);
 }
