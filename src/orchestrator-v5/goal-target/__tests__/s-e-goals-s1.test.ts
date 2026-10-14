@@ -266,9 +266,9 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, applied: true,
       follow_up: 'Your deadline for "meet our next feature-launch deadline" is now 7 April 2027.' }));
     expect(w.commits).toHaveLength(1);
-    // #3024: the writer request carries the card's bound goal (as offered) and that no own write had landed.
-    expect(w.commits[0]!.goal_horizon).toEqual({ goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07', stated_months: 6,
-      expected_goal: deadlineCardSubjectOf(atOffer, GOAL_ID), own_write_landed: false });
+    expect(w.commits[0]!.goal_horizon).toEqual({ goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07', stated_months: 6 });
+    // #3024: the writer also reads the card's bound goal (as offered), with no own write landed yet.
+    expect(w.commits[0]!.deadline_card).toEqual({ expected_goal: deadlineCardSubjectOf(atOffer, GOAL_ID), own_write_landed: false });
     const after = w.graph();
     expect(goalOf(after).goal_horizon).toEqual({ deadline: '2027-04-07' });
     // No structural pair: H and the date are held, but the analysis hash stays unchanged.

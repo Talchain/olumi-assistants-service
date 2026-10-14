@@ -3840,10 +3840,10 @@ export function createAgentCapabilities(
       levels: [],
       goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
         reference_date: (op.value as { reference?: string }).reference,
-        stated_months: (op.value as { stated_months?: number }).stated_months,
-        // The store-reading writer reads the same rule on the base it writes (Codex r1 on #3024).
-        ...((op.value as { expected_goal?: unknown }).expected_goal !== undefined
-          ? { expected_goal: (op.value as { expected_goal?: unknown }).expected_goal, own_write_landed: ownWriteLanded } : {}) },
+        stated_months: (op.value as { stated_months?: number }).stated_months },
+      // The store-reading writer reads the same rule on the base it writes (Codex r1 on #3024).
+      ...((op.value as { expected_goal?: unknown }).expected_goal !== undefined
+        ? { deadline_card: { expected_goal: (op.value as { expected_goal?: unknown }).expected_goal, own_write_landed: ownWriteLanded } } : {}),
     });
     // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
     if ((res.status === 'committed' || res.status === 'unconfirmed') ) {
