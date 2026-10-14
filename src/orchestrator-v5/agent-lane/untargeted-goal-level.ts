@@ -3,7 +3,7 @@
  * and 02:0xZ: the ledger keeps the raw value, unit and source quote; S3 T5 D6: "Our team currently completes about 80
  * features per week" drafted as today's level, explicit, with no target).
  *
- * A goal holds today's level only against its target's scale (`goal_threshold_cap`): with no target there is no scale, so
+ * A goal holds today's level only against its target's scale (the target's cap): with no target there is no scale, so
  * admission writes no level (`admit-model.ts`, the untargeted branch), and the user's figure vanished without a word. It is
  * still never written here as a model figure: a level with no scale would need renormalising, by a guess, once a target
  * arrives. Instead the drop is a ledger entry that keeps what the user said (value, unit, their sentence) and asks ONE
