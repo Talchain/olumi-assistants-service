@@ -397,11 +397,14 @@ function withIdentityCard(hint: { readonly available: true; readonly note: strin
 /**
  * `sayShown`: only the build's first pass and a Run, whose reply the host ends with `say` (SAY-SHOWN, `SAY_SHOWN_NOTE`), and
  * never where the identity ask owns that cause (`identity_ask_say` or the confirm card: the route then says the ask instead).
+ * Nor for a `say` that asks (Codex #3018 r1, served d4): the reply's one composer makes its question the ask (on the face)
+ * and its reason detail, and the never-re-ask egress drops a question already asked, so it is never shown as one line.
+ * The AIE's rule: the note goes only where the same bound line survives final egress (packet 6e52e896).
  */
 function withGoalChance(result: unknown, graph?: unknown, sayShown = false): { goal_chance?: GoalChanceWithheld } {
   const withheld = goalChanceWithheldForAgent(result, graph);
   if (withheld === undefined) return {};
-  return { goal_chance: sayShown ? { ...withheld, say_shown: SAY_SHOWN_NOTE } : withheld };
+  return { goal_chance: sayShown && !withheld.say.includes('?') ? { ...withheld, say_shown: SAY_SHOWN_NOTE } : withheld };
 }
 
 /** A raw graph-read body as the goal-certainty rule reads it: the same fields `readGraph` keeps. */

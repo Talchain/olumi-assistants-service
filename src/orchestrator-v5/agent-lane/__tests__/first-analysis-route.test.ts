@@ -184,7 +184,9 @@ async function buildApp(): Promise<FastifyInstance> {
     if (b.chip?.action_type === 'run_analysis') {
       s.injectRuns += 1;
       s.injectRunHashes.push(hashOf(s));
-      return { assistant_text: 'Ran.', blocks: [{ type: 'analysis_result', summary: 'x' }], analysis_ready: { status: 'ready' }, analysis_state: { leader_claim: knobs.leaderClaim } };
+      // SAY-SHOWN's Run carries its served warnings, computed against the model it ran on (as the first pass's block).
+      return { assistant_text: 'Ran.', blocks: [{ type: 'analysis_result', summary: 'x', ...(knobs.analysisResultExtra === undefined ? {}
+        : { computed_against_hash: hashOf(s), ...knobs.analysisResultExtra }) }], analysis_ready: { status: 'ready' }, analysis_state: { leader_claim: knobs.leaderClaim } };
     }
     if (b.kind === 'system_event') {
       s.forwarded += 1;
@@ -908,6 +910,40 @@ describe('SAY-SHOWN: the first pass tells the AI its `say` is shown, and the ret
     nextScenario(); modelBodies = [];
     const b = await narrated(`I built the comparison. ${gate!.why}.`);
     expect(timesIn(b.assistant_text, line)).toBe(1);
+  });
+
+  /** The latest Run's `goal_chance` as the AI's next request carried it (the Run tool's output, by its `ran`). */
+  const sentRunChance = (): Record<string, any> | undefined => modelBodies.flatMap((body) => (Array.isArray(body.input) ? body.input : []) as
+    { type?: string; output?: unknown }[]).filter((item) => item?.type === 'function_call_output')
+    .map((item) => JSON.parse(String(item.output)) as Record<string, any>).filter((out) => out.ran === true && out.goal_chance !== undefined).at(-1)?.goal_chance;
+  /** The build, then a Run the AI narrates with `words`. */
+  const ranRun = async (words: string) => {
+    await narrated('I built the comparison.');
+    modelBodies = [];
+    script = [callTool('run_analysis', { reason: 'The user requested a run.', effects_timing: null }), say(words)];
+    return turn(app, { message: 'Run the analysis please.' });
+  };
+
+  it('RED (a Run): the AI leaves the reason out → the bound `say` once, its own answer once, each typed action once', async () => {
+    const b = await ranRun('Compare the staffing assumptions with your team.');
+    const chance = sentRunChance();
+    expect(chance).toMatchObject({ withheld: true, say_shown: SAY_SHOWN_AIE });
+    expect(timesIn(b.assistant_text, chance!.say)).toBe(1);
+    expect(timesIn(b.assistant_text, 'Compare the staffing assumptions with your team.')).toBe(1);
+    const ids = (b.suggested_actions ?? []).map((a: { id: string }) => a.id);
+    expect(ids.length, 'contrast: the Run offers typed actions').toBeGreaterThan(0);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('RED (a Run that ranks): the gate drops the ranking and adds no reason of its own → the same reply as without it', async () => {
+    const unranked = await ranRun('Compare the staffing assumptions with your team.');
+    nextScenario(); modelBodies = [];
+    const ranked = await ranRun('Add one specialist is the best option. Compare the staffing assumptions with your team.');
+    const chance = sentRunChance();
+    expect(chance).toMatchObject({ say_shown: SAY_SHOWN_AIE });
+    expect(ranked.assistant_text).not.toContain('is the best option');
+    expect(ranked.assistant_text).toBe(unranked.assistant_text);
+    expect(timesIn(ranked.assistant_text, chance!.say)).toBe(1);
   });
 
   it('THE ONE EXCEPTION (DL ruling 14 Oct): an unknown current state still wins → its line, and no `say`', async () => {
