@@ -48,6 +48,10 @@ const CARD = 'Adopt Olumi’s starting assumption: the chance that ‘Code quali
   + `\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${BASIS}”`;
 const RECEIPT = 'Recorded Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
 const ROUTE_MS = 60_000;
+/** The lapse a held card is said with (`heldLapseSentence`, 'model_changed'). */
+const LAPSE = /no longer fits the model as it now stands, so it has lapsed/;
+const onLatestRow = (w: { rows: SessionTurnWithContent[] }, chipId: string): boolean =>
+  ((w.rows.find((r) => !r.turn_id.endsWith(':claim')) as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
 /** A claim that adopting the card licenses or readies the Run (PL 05:53Z: never made). */
 const NO_RUN_CLAIM = /\b(you can|can now|ready to|able to) run\b|licen[cs]/i;
 const riskOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === RISK)!;
@@ -259,6 +263,23 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(w.graph()).toEqual(SERVED.graph);
   }, ROUTE_MS);
 
+  it('#3024’s rule: an unrelated model edit never retires the waiting risk card; its press then writes', async () => {
+    const w = world({ ...structuredClone(SERVED), scenario_id: randomUUID() });
+    const turn = await route(w);
+    const { offer, chip } = await offerCard(turn);
+    const g = w.graph(); const before = computeAnalysisAffectingGraphHash(g as never);
+    (g.edges as Rec[]).find((e) => e.from === 'leadership_coverage')!.strength = { mean: 0.1, std: 0.05 };
+    expect(computeAnalysisAffectingGraphHash(g as never), 'the model moved').not.toBe(before);
+    w.replace(g);
+    const next = await turn({ message: 'And now?', source: 'composer', agent_session_id: offer._agent.session_id });
+    expect(String(next.assistant_text)).not.toMatch(LAPSE);
+    expect(onLatestRow(w, chip!.id), 'the card is still waiting').toBe(true);
+    const pressed = await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect((pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change')).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    expect(riskOf(w.graph()).event_risk).toEqual(BLOCK);
+    expect((w.graph().edges as Rec[]).find((e) => e.from === 'leadership_coverage')!.strength).toEqual({ mean: 0.1, std: 0.05 });
+  }, ROUTE_MS);
+
   it('⛔ Codex r1 STALE WINDOW: a card made for 14 Oct–14 Jan, the saved window moved to 14 Nov–14 Feb (hash unchanged) → the press writes nothing, no receipt', async () => {
     const w = world(DATED);
     const turn = await route(w);
@@ -273,6 +294,10 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(riskOf(w.graph())).not.toHaveProperty('event_risk');
     expect(w.graph()).toEqual(shifted);
     expect(JSON.stringify([pressed.assistant_text, w.writes])).not.toContain(JSON.stringify(RECEIPT).slice(1, -1));
+    // Codex r2: the obsolete card is retired and SAID (#3024's rule), never offered again as it stood.
+    expect(String(pressed.assistant_text)).toMatch(LAPSE);
+    expect((pressed.suggested_actions ?? []).some((c: Rec) => c.id === chip!.id)).toBe(false);
+    expect(onLatestRow(w, chip!.id)).toBe(false);
   }, ROUTE_MS);
 
   it('⛔ Codex r1 RACED READ-BACK: the goal moves from 3 to 6 months as the write lands → not confirmed: no receipt, no may_run', async () => {
@@ -289,6 +314,14 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(JSON.stringify([pressed.assistant_text, w.writes.at(-1)])).not.toContain(JSON.stringify(RECEIPT).slice(1, -1));
     expect(pressed.suggested_actions ?? []).toEqual([]);
     expect(String(pressed.assistant_text)).toMatch(/could not be confirmed/);
+    // Codex r2: the cold reopen admits no Run on the 3-month range under the 6-month goal; it asks the occurrence over 6 months.
+    expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: false });
+    expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
+      'How likely is ‘Code quality deterioration’ to happen at least once within 6 months? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+    sentBodies.length = 0;
+    await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() });
+    expect(sentReadiness()).toMatchObject({ checked: true, may_run: false });
+    expect(JSON.stringify(sentReadiness())).toContain(LABEL);
   }, ROUTE_MS);
 
   it('PL 05:53Z: NO saved goal period → no card, and the ask never promises one', async () => {

@@ -67,14 +67,31 @@ export function riskOccurrenceGoalHolds(approved: Pick<ApprovedRiskOccurrence, '
   return now !== undefined && isDeepStrictEqual(now, approved.expected_goal);
 }
 
-/** Readiness's level rule, on the node as stored (`observed_state`, the V1 `data`, a sampled prior, the event block). */
-export function riskHoldsALevel(node: Rec): boolean {
+/** Readiness's level rule, on the node as stored (`observed_state`, the V1 `data`, a sampled prior, a CURRENT event block). */
+export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
   if (finite(isRec(node.observed_state) ? node.observed_state.value : undefined)) return true;
   if (finite(isRec(node.data) ? node.data.value : undefined)) return true;
   const prior = isRec(node.prior) ? node.prior : undefined;
   if (prior !== undefined && prior.distribution === 'uniform' && finite(prior.range_min) && finite(prior.range_max)
     && prior.range_min !== prior.range_max) return true;
-  return node.event_risk !== undefined && node.event_risk !== null;
+  if (node.event_risk === undefined || node.event_risk === null) return false;
+  // Olumi's own range stated over a window that is no longer the goal's is stale, so no level (offered again over the current
+  // window). Any other block, valid or not, is held as it stands and is never overwritten here.
+  const block = EventRiskV1.safeParse(node.event_risk);
+  return !(block.success && block.data.occurrence.basis === 'olumi' && !riskOccurrenceIsCurrent(node, graph));
+}
+
+/**
+ * ⭐ AN OCCURRENCE IS A LEVEL ONLY OVER THE GOAL'S CURRENT WINDOW (Codex r2 on #3013: a write landed, the goal's period then
+ * moved from 3 to 6 months, and a cold reopen admitted the Run on a 3-month occurrence). Olumi's range (`basis: 'olumi'`) is
+ * bound to the window it was offered over: it counts only while that window is the goal's one current period
+ * (`riskOccurrenceWindowMonths`); otherwise it is stale, readiness withholds, and the card is offered again over the current
+ * window. A user's or a reference range keeps its own stated horizon (unchanged here).
+ */
+export function riskOccurrenceIsCurrent(node: Rec, graph: unknown): boolean {
+  const block = EventRiskV1.safeParse(node.event_risk);
+  if (!block.success) return false;
+  return block.data.occurrence.basis !== 'olumi' || block.data.horizon.months === riskOccurrenceWindowMonths(graph);
 }
 
 /**
@@ -111,7 +128,7 @@ export function riskOccurrenceSubject(graph: unknown, nodeId: string):
   if (node.kind !== 'risk' || typeof node.label !== 'string' || node.label.trim() === '' || /[\r\n]/.test(node.label)) {
     return { kind: 'ineligible', reason: 'not_a_risk' };
   }
-  if (riskHoldsALevel(node)) return { kind: 'ineligible', reason: 'holds_a_level' };
+  if (riskHoldsALevel(node, graph)) return { kind: 'ineligible', reason: 'holds_a_level' };
   if (graph.edges.some((e) => isRec(e) && e.to === nodeId)) return { kind: 'ineligible', reason: 'has_a_cause' };
   const window = riskOccurrenceWindowMonths(graph);
   const goalId = graph.nodes.find((n): n is Rec => isRec(n) && n.kind === 'goal')?.id;
@@ -208,4 +225,21 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
 export function riskOccurrencePostimageIsScoped(before: unknown, after: unknown, approved: ApprovedRiskOccurrence): boolean {
   const written = applyRiskOccurrenceEdit(before, approved);
   return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+}
+
+/** The card as its stored operation carries it (`agent-capabilities.ts` proposeRiskOccurrence), or `undefined` if malformed. */
+export function approvedRiskOccurrenceOf(op: { readonly path: string; readonly value?: unknown }): ApprovedRiskOccurrence | undefined {
+  const v = (isRec(op.value) ? op.value : {}) as Rec;
+  if (!isRec(v.event_risk) || !isRec(v.expected_node) || typeof v.goal_id !== 'string' || !isRec(v.expected_goal)) return undefined;
+  return { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node, goal_id: v.goal_id, expected_goal: v.expected_goal };
+}
+
+/**
+ * A held risk card still applies to `graph` exactly when its own writer would not refuse it there (the goal as bound, the
+ * node as shown, still eligible over the same window, or its own write already landed): the rule a held card's press and
+ * its lapse read (`heldCardStillApplies`, #3024).
+ */
+export function riskOccurrenceCardHolds(op: { readonly path: string; readonly value?: unknown }, graph: unknown): boolean {
+  const approved = approvedRiskOccurrenceOf(op);
+  return approved !== undefined && applyRiskOccurrenceEdit(graph, approved).kind !== 'refused';
 }

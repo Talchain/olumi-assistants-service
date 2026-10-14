@@ -10,7 +10,6 @@
 import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
-import { EventRiskV1 } from "../../schemas/event-risk.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import {
@@ -39,7 +38,7 @@ import {
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
-import { riskOccurrenceAskWords, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
+import { riskOccurrenceAskWords, riskOccurrenceIsCurrent, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -1336,8 +1335,9 @@ function goalRootsWithoutStatusQuoLevel(
     // ISL still centres the factor on 0.0.
     if (hasSampledPrior((node as { prior?: unknown }).prior)) continue;
     // event_risk.v1: an event risk's level is its OCCURRENCE, which ISL draws (0/1 per draw);
-    // it is never held at zero, so it needs no level today. Only a block the write doors accept counts.
-    if (EventRiskV1.safeParse(node.event_risk).success) continue;
+    // it is never held at zero, so it needs no level today. Only a block the write doors accept counts, and Olumi's range
+    // only over the goal's CURRENT window (`riskOccurrenceIsCurrent`): a stale one withholds and is asked again.
+    if (riskOccurrenceIsCurrent(node as unknown as Record<string, unknown>, graph)) continue;
     if (!reachesGoal(node.id)) continue;
     gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }

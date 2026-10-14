@@ -5,8 +5,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceGoalSubject, riskOccurrencePostimageIsScoped, riskOccurrenceSubject,
-  type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardHolds, riskOccurrenceGoalSubject, riskOccurrencePostimageIsScoped,
+  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+import { heldCardStillApplies, heldCardSubjectMoved } from '../proposal-object/still-applies.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -116,6 +117,35 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     expect(res).toMatchObject({ ok: false, applied: false, refusal: 'not_confirmed', readiness_after: { checked: false } });
     expect(res).not.toHaveProperty('follow_up');
     expect(JSON.stringify(res)).not.toContain('Recorded Olumi’s starting assumption');
+  });
+
+  it('⛔ Codex r2: Olumi’s occurrence is a level only over the goal’s CURRENT window — stale, readiness withholds and asks again', () => {
+    const written = (applyRiskOccurrenceEdit(G, approved()) as Rec).mutatedGraph as Rec;
+    expect(buildCanonicalAnalysisReadyFromGraph(written)).toMatchObject({ may_run: true });
+    // The goal's period moves from 3 to 6 months after the write: the 3-month range no longer counts.
+    const moved = structuredClone(written); goalOf(moved).goal_target_basis.period_months = 6;
+    expect(buildCanonicalAnalysisReadyFromGraph(moved)).toMatchObject({ may_run: false });
+    const asks = (((buildCanonicalAnalysisReadyFromGraph(moved) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.factor_id === RISK).map((i) => i.message);
+    expect(asks).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 6 months? The numerical analysis is withheld '
+      + 'until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+    expect(riskOccurrenceSubject(moved, RISK)).toMatchObject({ kind: 'eligible', window_months: 6 });
+    // CONTRAST: a user's range keeps its own stated horizon; it still counts.
+    const users = structuredClone(moved); riskOf(users).event_risk = { ...BLOCK, occurrence: { ...BLOCK.occurrence, basis: 'user' } };
+    expect(buildCanonicalAnalysisReadyFromGraph(users)).toMatchObject({ may_run: true });
+  });
+
+  it('#3024’s one rule for the risk card: holds as offered, after an unrelated edit and once landed; not after its window or node moved', () => {
+    const op = { op: SET_RISK_OCCURRENCE_OP, path: RISK, value: { event_risk: BLOCK, expected_node: riskOf(G), goal_id: 'productivity',
+      expected_goal: riskOccurrenceGoalSubject(G, 'productivity') } };
+    const card = { operations: [op] } as never;
+    const unrelated = structuredClone(G); (unrelated.edges as Rec[]).find((e) => e.from === 'leadership_coverage')!.strength = { mean: 0.1, std: 0.05 };
+    const landed = (applyRiskOccurrenceEdit(G, approved()) as Rec).mutatedGraph as Rec;
+    expect([G, unrelated, landed].map((g) => [riskOccurrenceCardHolds(op, g), heldCardStillApplies(card, g), heldCardSubjectMoved(card, g)]))
+      .toEqual(Array(3).fill([true, true, false]));
+    const window = structuredClone(G); goalOf(window).goal_target_basis.period_months = 6;
+    const renamed = structuredClone(G); riskOf(renamed).label = 'Code quality';
+    expect([window, renamed].map((g) => [riskOccurrenceCardHolds(op, g), heldCardStillApplies(card, g), heldCardSubjectMoved(card, g)]))
+      .toEqual(Array(2).fill([false, false, true]));
   });
 
   it('DL Q2: the chance rests on Olumi’s occurrence too — counted on the face and listed on the panel, by the risk’s id', () => {
