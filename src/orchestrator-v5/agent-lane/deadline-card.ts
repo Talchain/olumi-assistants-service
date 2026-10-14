@@ -87,55 +87,12 @@ const whole = (words: string, text: string): boolean => new RegExp(`(?:^|[^\\p{L
 type RecordLike = Record<string, unknown>;
 const record = (v: unknown): v is RecordLike => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Conservative goal attribution, separate from phrase occurrence: ownership, intent, subject and temporal scope. */
-function goalOwnsDeadline(goal: RecordLike, words: string, source: string): boolean {
-  const sentences = plainOf(source).split(/[.!?\n]+/);
-  // The goal's own unit names its subject ("riders") — byte-for-byte the earlier rule. A unit with no letters ("%": served
-  // b2ad8385, a share-of-riders goal) names none, so the goal's LABEL does, and only when the date's sentence carries TWO of
-  // the label's distinct content words (4-letter stems: riders+turning for "Riders served without being turned away"), so one
-  // shared word ("customers served", "the survey of riders") never attributes another quantity's date (buddy r2 P2).
-  const unit = plainOf(String(goal.goal_threshold_unit ?? ''));
-  const unitHasLetters = /\p{L}/u.test(unit);
-  const subject = unitHasLetters ? unit : plainOf(String(goal.label ?? ''));
-  const nouns = subject.match(/\p{L}+/gu)?.filter(w => !['at', 'month', 'months', 'per', 'the', 'a', 'level', 'surplus'].includes(w)) ?? [];
-  const FUNCTION = ['without', 'being', 'within', 'under', 'over', 'about', 'after', 'before', 'between', 'through', 'during', 'their',
-    'there', 'these', 'those', 'where', 'which', 'while', 'would', 'could', 'should'];
-  const stemsOf = (text: string): string[] => [...new Set((text.match(/\p{L}+/gu) ?? []).filter(w => w.length >= 5).map(w => w.slice(0, 4)))];
-  const labelStems = unitHasLetters ? [] : stemsOf(nouns.filter(w => !FUNCTION.includes(w)).join(' '));
-  const ownsSubject = (sentence: string): boolean => unitHasLetters ? nouns.some(noun => whole(noun, sentence))
-    : labelStems.length > 0 && labelStems.filter(stem => stemsOf(sentence).includes(stem)).length >= Math.min(2, labelStems.length);
-  return sentences.some((sentence) => {
-    if (!whole(words, sentence) || /\b(?:rival|competitor|example|e\.g|their|they|another goal|other goal)\b/.test(sentence)) return false;
-    if (/\b(?:not (?:a |the |our |my )?(?:deadline|target|goal)|duration|lasts?|as an? (?:training )?course)\b/.test(sentence)) return false;
-    if (/\b(?:goal|target)\b/.test(sentence) && !ownsSubject(sentence)) return false;
-    const before = sentence.slice(0, sentence.indexOf(plainOf(words)));
-    // A letterless-unit goal is a LEVEL stance (stay/keep/reach/grow …): "finish/complete/deliver" are task verbs, and a date whose own
-    // clause ("…, and finish our depot renovation in ten months") carries a verb but none of the label's words belongs to that clause.
-    const intent = unitHasLetters ? /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline|deliver|finish|complete)\b/
-      : /\b(?:stay|keep|reach|achieve|grow|reduce|increase|deadline)\b/;
-    if (!unitHasLetters) {
-      // The clause that owns the date (since the last "and" or ";", across its commas) may hold ONLY words of a level stance on this
-      // goal: the speaker, a want/need, a stance verb, a ceiling/target word, time words, the label's own words, and "without anyone
-      // …". ANY other word ("survey", "responses", "renovate", "depot", a number) means the clause has its own subject, so it owns its
-      // own date and is refused (closed = silent, never a wrong offer; the unit-with-letters path covers the common goals).
-      const ownClause = before.split(/;|\band\b/).pop() ?? '';
-      const ALLOWED = new Set(['we', 'i', 'us', 'our', 'my', 'want', 'wants', 'need', 'needs', 'must', 'should', 'will', 'would', 'to', 'that', 'this', 'it', 'them',
-        'stay', 'keep', 'reach', 'achieve', 'grow', 'reduce', 'increase', 'under', 'below', 'above', 'without', 'anyone', 'no', 'one', 'any', 'not',
-        'ceiling', 'cap', 'limit', 'target', 'level', 'threshold', 'maximum', 'minimum', 'at', 'most', 'least',
-        'over', 'the', 'next', 'within', 'in', 'for', 'by', 'end', 'of', 'during', 'about', 'around', 'roughly', 'approximately', 'another', 'coming',
-        'then', 'so', 'is', 'are', 'be', 'a', 'an', 'than', 'less', 'more', 'later', 'from', 'now', 'today']);
-      const words = ownClause.match(/\p{L}+/gu) ?? [];
-      const labelWords = new Set(nouns.map(w => w.slice(0, 4)));
-      if (/\d/.test(ownClause) || !words.every(w => ALLOWED.has(w) || labelWords.has(w.slice(0, 4)))) return false;
-    }
-    if (!/\b(?:we|i|us|our|my)\b/.test(before)
-      || !intent.test(before)
-      || !/\b(?:by|within|over|next|deadline|before|until|in)\b/.test(before)) return false;
-    // A bare owned deadline refers to the sole goal. Otherwise its subject must occur in THIS goal-intent sentence: a
-    // noun of the previous sentence never attributes a date to this goal (buddy r1 P1: "We have registered riders. We
-    // must reach revenue of £10,000 in ten months." is revenue's date). The d2 ceiling sentence names its riders itself.
-    return /\b(?:our|my) deadline\b/.test(before) || ownsSubject(sentence);
-  });
+/**
+ * The sentence of `source` that holds `words` (whole words), verbatim and trimmed: what the card says the date is read from.
+ * Sentences end at ".", "!", "?" or a line break; a figure's own full stop ("1.5") does not end one.
+ */
+function sentenceHolding(words: string, source: string): string | undefined {
+  return source.split(/(?<=[.!?])\s+|\n+/).map(t => t.trim()).find(t => t !== '' && whole(words, t));
 }
 export interface DeadlineIssueInput {
   readonly graph: unknown;
@@ -149,8 +106,20 @@ export interface DeadlineIssueInput {
   readonly pending: readonly PendingAction[];
   readonly priorOffer: boolean;
 }
-/** A proposal only: immutable R, one owned goal, no existing deadline/change, and the user's verbatim words. */
-export function deadlineCardToIssue(p: DeadlineIssueInput): { readonly goal_id: string; readonly words: string; readonly reference: string; readonly date: string } | undefined {
+/**
+ * A proposal only: immutable R, one goal, no existing deadline/change, and the user's verbatim words.
+ * ⭐ RULING A (DL 14 Oct, hiring-post3000 judge row 2): the goal's stated deadline words are written ONLY by construction,
+ * from the drafter's own words attested verbatim in the brief (`build-model.ts`, strict since #3000). The card trusts that
+ * attribution; no host word matcher re-decides it ("We have an urgent launch date in the next three months." was refused).
+ * The card quotes the sentence the words came from (`quote`), and is a question the user approves or declines.
+ */
+export function deadlineCardToIssue(p: DeadlineIssueInput): {
+  readonly goal_id: string; readonly words: string; readonly reference: string; readonly date: string;
+  /** The message the words were read from, plain (for #2997's one-phrase authorship rule). */
+  readonly source_plain: string;
+  /** Its sentence holding the words, verbatim. */
+  readonly quote: string;
+} | undefined {
   if (p.priorOffer || p.mutated || p.fastPath === 'approve' || p.proposalOffered || p.pending.length > 0 || p.reference === undefined
     || p.toolCalls.some(c => c.name.startsWith('propose_') || c.name === 'authorise_change') || !record(p.graph) || !Array.isArray(p.graph.nodes)) return undefined;
   const goals = p.graph.nodes.filter((n): n is RecordLike => record(n) && n.kind === 'goal');
@@ -159,8 +128,11 @@ export function deadlineCardToIssue(p: DeadlineIssueInput): { readonly goal_id: 
   if (typeof goal.id !== 'string' || goalDeadlineFromRecord(p.graph, goal.id) !== undefined) return undefined;
   const words = typeof goal.goal_deadline_as_stated === 'string' ? goal.goal_deadline_as_stated.trim() : '';
   if (words === '' || words.length > 80) return undefined;
-  const sources = [p.storedBrief, p.typedNow].filter((s): s is string => typeof s === 'string');
-  if (!sources.some(s => whole(words, s)) || !sources.some(s => goalOwnsDeadline(goal, words, s))) return undefined;
+  // The attested source first (construction attests against the stored brief), else the user's message now.
+  const source = [p.storedBrief, p.typedNow].find((s): s is string => typeof s === 'string' && whole(words, s));
+  const quote = source === undefined ? undefined : sentenceHolding(words, source);
+  if (source === undefined || quote === undefined) return undefined;
   const stated = readStatedDeadline(words, p.reference, { leadWordsOnly: true });
-  return stated === null ? undefined : { goal_id: goal.id, words, reference: p.reference, date: stated.date };
+  return stated === null ? undefined
+    : { goal_id: goal.id, words, reference: p.reference, date: stated.date, source_plain: plainOf(source), quote };
 }
