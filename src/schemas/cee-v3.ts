@@ -686,9 +686,10 @@ export const NodeV3 = z.object({
    * `openapi.yaml`; a consumer on a stale pin simply drops it.
    *
    * `operation: 'sum'` (R3-2, AIQ #72 5867700610): a limited spend tally that IS the sum of its
-   * levers (`admit-model.ts` `findSumTallies`), ONLY with `stated_in_brief: false` (a stated sum is
-   * malformed and dropped). Every C46 reader above reads `product` only (`readCarrier`), so a sum
-   * never withholds a leader.
+   * levers (`admit-model.ts` `findSumTallies`), always `stated_in_brief: false`; or (L2) a sum the
+   * drafter declared and admission checked whole (`checkDeclaredSums`), `stated_in_brief: true` only
+   * where CEE located the brief's own defining sentence. Every C46 reader above reads `product` only
+   * (`readCarrier`), so a sum never withholds a leader.
    */
   nonlinear_identity: z
     .union([
@@ -697,13 +698,13 @@ export const NodeV3 = z.object({
         factor_ids: z.array(z.string().min(1)).min(2),
         stated_in_brief: z.boolean(),
       }).strict(),
-      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`).
-      // ONLY as Olumi's reading — construction never mints a stated sum, so one is malformed and dropped. PLoT
-      // (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both operations.
+      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`), Olumi's
+      // reading. L2: a DECLARED sum checked whole (`checkDeclaredSums`) is the user's (`stated_in_brief: true`) only where
+      // the brief's own sentence defines it. PLoT (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both.
       z.object({
         operation: z.literal('sum'),
         factor_ids: z.array(z.string().min(1)).min(2),
-        stated_in_brief: z.literal(false),
+        stated_in_brief: z.boolean(),
       }).strict(),
       // S4 Q1: graph-level validation below restricts this arm to a goal's accumulation carrier.
       z.object({
