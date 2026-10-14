@@ -523,8 +523,8 @@ function executableWaitingProposalIds(scenarioId: string, userId: string | null,
     ...(graph !== undefined ? { scoped_precondition_holds: (p) => heldCardStillApplies(p, graph) } : {}),
     ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}),
   }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph)
-    // The rule's other half: a subject moved on an unmoved hash (a renamed goal) is not a decision point, unless its own write landed here.
-    && !(graph !== undefined && proposals.partialProgressOf(id)?.revision !== graphHash && heldCardSubjectMoved(proposals.get(id)!, graph)));
+    // The rule's other half: a subject moved on an unmoved hash (a renamed goal) is not a decision point.
+    && !(graph !== undefined && heldCardSubjectMoved(proposals.get(id)!, graph)));
 }
 
 /** The steady-state card is a Run-reply answer, not a held change: it never counts as an approval awaiting a yes. */
@@ -4298,11 +4298,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           isApplied: (id) => proposals.isApplied(id),
           declined: withdrawn, graph: readbackGraph, graphHash, scenarioId, requestId: String(req.id), nowMs: Date.now(),
           // A card whose own subject is unchanged survives a model move, by the rule its press reads (hiring witness 35a66525).
-          // A card whose OWN write landed (its partial progress at this very revision) is continued by its press, not retired.
-          stillApplies: (hold) => { const p = agentProposalOf(hold); return p !== undefined
-            && (proposals.partialProgressOf(p.proposal_id)?.revision === graphHash || heldCardStillApplies(p, readbackGraph)); },
-          subjectMoved: (hold) => { const p = agentProposalOf(hold); return p !== undefined
-            && proposals.partialProgressOf(p.proposal_id)?.revision !== graphHash && heldCardSubjectMoved(p, readbackGraph); } });
+          stillApplies: (hold) => { const p = agentProposalOf(hold); return p !== undefined && heldCardStillApplies(p, readbackGraph); },
+          subjectMoved: (hold) => { const p = agentProposalOf(hold); return p !== undefined && heldCardSubjectMoved(p, readbackGraph); } });
         liveHolds = reconciled.carried;
         for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));
         heldLapseLines = [...takeOwedHeldLapses(scenarioId), ...reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason))];

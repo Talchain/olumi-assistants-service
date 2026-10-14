@@ -35,13 +35,10 @@ export function identityProposalOfferable(proposal: StructuredProposal | undefin
 export const agentProposals = new ProposalStore();
 const proposals = agentProposals;
 
-/**
- * The other half of the press's rule (#3024): a card whose own subject moved while the analysis hash did not (a renamed goal)
- * is not offered, unless THIS proposal's own write landed at this revision (its retry continues it).
- */
-function subjectMovedHere(id: string, graphHash: string, graph: unknown, store: ProposalStore = proposals): boolean {
+/** The other half of the press's rule (#3024): a card whose own subject moved while the analysis hash did not (a renamed goal). */
+function subjectMovedHere(id: string, graph: unknown, store: ProposalStore = proposals): boolean {
   const p = store.get(id);
-  return graph !== undefined && p !== undefined && proposals.partialProgressOf(id)?.revision !== graphHash && heldCardSubjectMoved(p, graph);
+  return graph !== undefined && p !== undefined && heldCardSubjectMoved(p, graph);
 }
 
 /** The turn's authorise call, shared verbatim: current analysis-affecting graph hash and verified subject. */
@@ -52,7 +49,7 @@ export function executableProposalId(id: string, scenarioId: string, userId: str
     ...(graph !== undefined ? { scoped_precondition_holds: (p: StructuredProposal) => heldCardStillApplies(p, graph) } : {}),
     // Eligibility simulates the exact offered card; this read never consumes it.
     ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}) });
-  return decision.status === 'execute' && identityProposalOfferable(proposals.get(id), graph) && !subjectMovedHere(id, graphHash, graph) ? id : undefined;
+  return decision.status === 'execute' && identityProposalOfferable(proposals.get(id), graph) && !subjectMovedHere(id, graph) ? id : undefined;
 }
 
 /**
@@ -119,7 +116,7 @@ export async function readExecutableHeldProposalOffers(input: {
       // The press's own field-scoped rule (#3024): a card whose subject is unchanged is offered after an unrelated change.
       ...(input.graph !== undefined ? { scoped_precondition_holds: (p: StructuredProposal) => heldCardStillApplies(p, input.graph) } : {}) };
     if (membership.authorise(request).status !== 'execute' || !identityProposalOfferable(membership.get(id), input.graph)
-      || subjectMovedHere(id, input.graphHash, input.graph, membership)) return [];
+      || subjectMovedHere(id, input.graph, membership)) return [];
     // get and authorise only read Maps; neither changes order, capacity, or settlement.
     // A known warm refusal (including applied/partial/stale/integrity) vetoes durable authority.
     if (proposals.get(id) !== undefined && proposals.authorise(request).status !== 'execute') return [];
