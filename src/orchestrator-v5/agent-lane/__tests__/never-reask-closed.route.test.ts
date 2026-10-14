@@ -11,6 +11,7 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
  * CONTROLS: the first Run (nothing asked yet) still asks; another question in the history does not silence this one.
  */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
+import { asSent } from './helpers/as-sent.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -126,6 +127,24 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     expect(r.statusCode, r.body).toBe(200);
     return plain((r.json() as { assistant_text: string }).assistant_text);
   };
+
+  /**
+   * SAY-SHOWN (Codex #3018 r1): served d4's `say` asks, so the reply's composer makes its question the ask and its reason
+   * detail, and never-re-ask drops the question once asked: it is never shown as one line, so it is never promised.
+   */
+  it.each([false, true])('SAY-SHOWN: the d4 Run\'s `say` asks, so the AI is never told it is shown (asked before: %s)', async (asked) => {
+    history = asked ? [answerRow(1, D4.first_run_reply)] : [];
+    const text = await agentRun();
+    const run = modelBodies.flatMap((raw) => ((asSent(raw) as { input?: { type?: string; output?: string }[] }).input ?? []))
+      .filter((item) => item.type === 'function_call_output').map((item) => JSON.parse(String(item.output)) as Record<string, any>)
+      .find((out) => out.ran === true && out.goal_chance !== undefined);
+    expect(plain(run?.goal_chance.say ?? ''), 'PRECONDITION: the SENT Run carries the served d4 line, question and all')
+      .toBe(plain(`${REASON} ${QUESTION}`));
+    expect(run!.goal_chance).not.toHaveProperty('say_shown');
+    // Today's never-re-ask reply is unchanged: the reason is said; the question only until it was asked.
+    expect(text).toContain(plain(REASON));
+    expect(text.includes(QUESTION)).toBe(!asked);
+  });
 
   it('fixture control: the served first Run reply carries the reason AND the question', () => {
     expect(plain(D4.first_run_reply)).toContain(plain(REASON));
