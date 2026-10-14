@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief } from '../runtime/build-model.js';
+import { buildModelFromBrief, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import { assessConstructionSize, retryInstruction } from '../construction-size-gate.js';
 
 type Rec = Record<string, any>;
@@ -20,12 +20,28 @@ const budgetA = (optionLinks: number, room: number, own: number): string => (AIE
   .replace('{option_links}', String(optionLinks)).replace('{own - room}', String(own - room)).replace('{room}', String(room)).replace('{own}', String(own));
 const budgetB = (optionLinks: number): string => (AIE.b_replacement as string).replace('{option_links}', String(optionLinks));
 const sid = '5d2d2d2d-5d2d-4d2d-8d2d-5d2d2d2d2d2d';
+/**
+ * ⛔ T5 D2's drafts take "Feature launch" as the goal, which the served brief does not state ("Success means a conversion rate
+ * of over 15% and at least 20 new customers…"; T5 saved `feature_launch`). Construction never saves that draft as the goal
+ * (unattested-event-goal.test.ts, DL 14 Oct): on the served brief the one retry is asked to re-choose it, and the recorded
+ * retries, still the event, register nothing; the user is asked (the "served brief" rows below, each original row named).
+ * The size-retry rows also run, unchanged, as an ADDED contrast on the brief with its launch sentence stating the launch as a
+ * dated event, where "Feature launch" is a goal the brief states.
+ */
+const attestedLaunch = (brief: string): string => {
+  const variant = brief.replace('We plan to launch six months from today.', 'The feature launch deadline is six months from today.');
+  if (variant === brief) throw new Error('PRECONDITION: the attested-launch variant applies');
+  return variant;
+};
+/** The AIE's retry issue (packet 5b8c2f0e), whole: the reason the one retry is asked. */
+const REASON = UNATTESTED_GOAL_RETRY_ISSUE;
+const CONTRAST_BRIEF = attestedLaunch(FX.brief);
 
 /** The real build path: the drafter answers with `drafts` in turn; every request it was sent comes back, with the result. */
-async function construct(drafts: Rec[]): Promise<{ sent: Rec[]; result: Rec; registered: number }> {
+async function construct(drafts: Rec[], brief = CONTRAST_BRIEF): Promise<{ sent: Rec[]; result: Rec; registered: number }> {
   const sent: Rec[] = [];
   let registered = 0;
-  const result = await buildModelFromBrief(sid, FX.brief, (async (path: string) => {
+  const result = await buildModelFromBrief(sid, brief, (async (path: string) => {
     if (path.endsWith('/graph/register')) { registered += 1; return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'size-retry' } };
   }) as never, (async (req: Rec) => {
@@ -35,7 +51,7 @@ async function construct(drafts: Rec[]): Promise<{ sent: Rec[]; result: Rec; reg
   return { sent, result: result as Rec, registered };
 }
 
-describe('the served D2 r1 retry, through the real build path', () => {
+describe('the served D2 r1 retry, through the real build path (the brief stating the launch: an added contrast)', () => {
   it('reproduces the served totals, and now gives the drafter its own links budget: 30 − 18 = 12 for its 14', async () => {
     expect(FX.draft_call1.links, 'the first draft drew 14 links itself').toHaveLength(14);
     const { sent } = await construct([FX.draft_call1, FX.draft_call2]);
@@ -52,6 +68,20 @@ describe('the served D2 r1 retry, through the real build path', () => {
   it('the gate itself is unchanged: the served retry (still 32 links) is refused, and nothing registers', async () => {
     const { result, registered } = await construct([FX.draft_call1, FX.draft_call2]);
     expect(result).toMatchObject({ ok: false, refusal: 'model_too_large', edges: 32, limits: { maxEdges: 30 } });
+    expect(registered).toBe(0);
+  });
+});
+
+describe('the served brief: its drafts\' unattested "Feature launch" goal is asked about, never saved (DL 14 Oct)', () => {
+  it.each<[string, Rec[]]>([
+    ['reproduces the served totals, and now gives the drafter its own links budget: 30 − 18 = 12 for its 14', [FX.draft_call1, FX.draft_call2]],
+    ['the gate itself is unchanged: the served retry (still 32 links) is refused, and nothing registers', [FX.draft_call1, FX.draft_call2]],
+  ])('was "%s": the one retry carries the links budget AND the reason; the served retry is still the event, so nothing registers', async (_row, drafts) => {
+    const { sent, result, registered } = await construct(drafts, FX.brief);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.instructions as string).toContain(budgetA(18, 12, 14));
+    expect(sent[1]!.input as string).toContain(REASON);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
     expect(registered).toBe(0);
   });
 });
