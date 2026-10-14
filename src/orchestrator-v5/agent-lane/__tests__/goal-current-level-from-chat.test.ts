@@ -306,7 +306,8 @@ describe('CONTROLS — the brief path\'s operator and scale rules hold on this p
     } as unknown as CandidateModel,
     // This helper compares the OPERATOR and SCALE rules word for word, with no brief: the level is taken as written
     // apart from the target, so the grounding rule (goal-target-is-not-the-base.test.ts, R3 #72 5885498117) stays out.
-    {}, undefined, undefined, () => true);
+    // The level is the brief's (`goalLevelStated` true): the level path's brief check (DL 13:49Z 14 Oct) stays out too.
+    {}, undefined, () => true, () => true);
     return m.loss.find((l) => l.field_path === 'nodes[mrr].observed_state.baseline')?.reason;
   };
 
