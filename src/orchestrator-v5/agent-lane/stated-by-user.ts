@@ -348,7 +348,7 @@ export interface HeldGoalAttributes {
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
-  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
+  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown; readonly target_quote?: unknown } | null | undefined,
   brief: string,
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
@@ -373,9 +373,14 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // "support volume grew 15%" is not the cloud bill's "cut by 15%". Read as a chat goal target is (`scopeIn`): a figure
   // the nearest label word gives another quantity is not the goal's; one in a clause naming none ("cut it by 15%") is.
   const isChange = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs';
-  const wrote = (value: number): boolean => isChange
-    ? figureTheUserWroteFor(value, written.unit, brief, quantityScope(nodes, (node as { readonly label?: unknown }).label))
-    : figureTheUserWrote(value, written.unit, brief);
+  // ⭐ D3 (T5 strict comparator): OR the drafter's quote of the target's own sentence, verified literally (`targetTheQuoteStates`),
+  // so another node's words ("Customers lost to price rise") can no longer take the figure from the goal it states.
+  const label = (node as { readonly label?: unknown }).label;
+  const quoted = (value: number): boolean => targetTheQuoteStates(goal.target_quote, brief,
+    { figure: value, unit: written.unit, operator: goal.operator, label: typeof label === 'string' ? label : '' });
+  const wrote = (value: number): boolean => (isChange
+    ? figureTheUserWroteFor(value, written.unit, brief, quantityScope(nodes, label))
+    : figureTheUserWrote(value, written.unit, brief)) || quoted(value);
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
     && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
@@ -402,6 +407,27 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
     ...(months !== null ? { goal_horizon_months: months } : {}),
   };
   return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon }, horizon: attestation };
+}
+
+/** The drafter's comparator for each comparator the user can write (`comparatorTheUserWrote`), strictness included. */
+const OPERATOR_OF: Readonly<Record<StatedComparator, string>> = { at_least: '>=', at_most: '<=', above: '>', below: '<' };
+
+/**
+ * ⭐ D3 STRICT COMPARATOR (T5 D3 C r2 / A r2; the AI-quote contract, as T2A5): the drafter QUOTES the target's own sentence
+ * as `goal.target_quote`; the host verifies the literal only. The quote is verbatim in the brief (whole words); the target's
+ * figure is written inside it in the goal's unit; a comparator it states is the drafter's own, strictness included ("at
+ * least" is >=, "over" is >); and the goal's own label is named in it. Other nodes' labels are never read, so "Customers
+ * lost to price rise" cannot take "…revenue to rise by at least 15%" from the goal. No verb or word list.
+ */
+export function targetTheQuoteStates(quote: unknown, brief: string,
+  target: { readonly figure: number; readonly unit: unknown; readonly operator: unknown; readonly label: string }): boolean {
+  if (typeof quote !== 'string' || target.label.trim() === '') return false;
+  const said = quote.trim();
+  if (said === '' || said.length > 400 || quoteSpansIn(brief, said).length === 0) return false;
+  if (!figureTheUserWrote(target.figure, target.unit, said)) return false;
+  const comparator = comparatorTheUserWrote(said);
+  if (comparator !== null && OPERATOR_OF[comparator] !== target.operator) return false;
+  return factorTheUserNamed(target.label, said, { options: [], others: [] });
 }
 
 /** A figure's scope among a model's QUANTITIES (every node but options and the decision): `target`'s label, and the rest. */

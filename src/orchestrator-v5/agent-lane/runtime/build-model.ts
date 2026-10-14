@@ -185,6 +185,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
+      // ⭐ D3 (T5 strict comparator; the AI-quote contract). PROMPT HUNK: AIE sign-off required before ship
+      // (recovery/prompt/TARGET-QUOTE-FIELD-DRAFT.txt). Optional in the candidate contract (a recorded candidate validates
+      // unchanged), required in what is sent (`strictForTheDrafter`). The host verifies it literally (`targetTheQuoteStates`).
+      target_quote: { anyOf: [{ type: 'string', maxLength: 400 }, { type: 'null' }], description:
+        'The brief\u2019s own sentence that states the goal\u2019s target, copied character for character: it holds the target figure, any comparator ("at least", "over") and the goal metric\u2019s name. null when the brief states no target.' },
       // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the frame the TARGET is stated in. REQUIRED, so strict output
       // must say "level" rather than omit it; `admit-model.ts` writes a change only beside the user's stated level.
       frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
@@ -677,6 +682,8 @@ export function retrySchemaPinningGoal(
       ? { type: 'string', enum: [goal.deliverable] } : { type: 'null' },
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
+    // D3: the target's own sentence is part of the goal, so a compaction keeps it; absent (an older candidate) pins to null.
+    target_quote: typeof goal.target_quote === 'string' ? { type: 'string', enum: [goal.target_quote] } : { type: 'null' },
     // A pinned `null` must stay expressible: `{type:'number', enum:[null]}` is
     // unsatisfiable, so the compaction retry could never return the goal it was
     // pinned to and every unstated-target brief would lose its retry.
