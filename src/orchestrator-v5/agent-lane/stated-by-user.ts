@@ -1310,10 +1310,15 @@ export function statingSentenceOf(
   return sentencesOf(quote.trim()).find(sentence => linkEffectInOneSentence(withoutCorrectedFigureTail(sentence), effect, ends, scope) === null) ?? null;
 }
 
+/** After "a <head noun>": the phrase ends (punctuation, end, a verb or modal), so the article counts one of that noun. */
+const BARE_ONE_ENDS = /^(?:\s*$|\s*[,;:.!)\u2013\u2014]|\s+(?:would|will|could|can|might|may|should|alone|adds?|raises?|brings?|increases?|lifts?|boosts?|improves?|cuts?|reduces?|lowers?|costs?|means?|gives?|saves?|wins?|loses?)\b)/iu;
 /** Words that may stand between a distributive word and the source it counts ("each EXTRA conversation", "one MORE hire"). */
 const ONE_FILLER = /^(?:extra|more|additional|single|new|another)$/;
 /**
- * The token index of the word a distributive phrase counts one of ("each extra conversation" → conversation), or -1.
+ * The character offset of the word a distributive phrase counts one of ("each extra conversation" → conversation), or -1.
+ * A bare article counts one too, when it governs that head noun straight away ("hiring A Tech lead would raise
+ * productivity by about 8%": hiring served 14 Oct 16:39Z, refused as `not_the_users_statement`, so the user's own figure
+ * never reached the model). "A round of Tech lead interviews" counts rounds, not leads: the walk stops at "round".
  * ⛔ AIQ 5925663053: it must be what the source COUNTS — the change unit's head noun ("conversations"); a unit with no
  * noun counts nothing (CODEX 5925831728) — never any other label word: "Each investment firm brings in £1m" on "Warm conversations with investment firms"
  * is per FIRM, not per conversation. The walk crosses only fillers and the source's label words, never punctuation.
@@ -1332,8 +1337,12 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
   const isLabel = (w: string): boolean => [...label, ...unitWords].some((x) => sameWord(x, w));
   for (let i = 0; i < tokens.length; i += 1) {
     const w = tokens[i]!.w; const next = tokens[i + 1]?.w;
+    // A bare article counts one only where its own clause has no distributive word: "Every week a conversation adds …"
+    // counts weeks (R3 5925568501), so its "a conversation" is never one conversation.
+    const bare = (w === 'a' || w === 'an') && !(next !== undefined && /^(?:extra|single|additional)$/.test(next))
+      && !tokens.some((t) => /^(?:each|every|per)$/.test(t.w) && sameCoordinateClause(q, t.at, tokens[i]!.at));
     const from = /^(?:each|every|per)$/.test(w) ? i + 1 : w === 'one' && next === 'more' ? i + 2
-      : (w === 'a' || w === 'an') && next !== undefined && /^(?:extra|single|additional)$/.test(next) ? i + 2 : -1;
+      : (w === 'a' || w === 'an') && !bare ? i + 2 : bare ? i + 1 : -1;
     if (from < 0) continue;
     // AIQ 5925612672: the distributive word must GOVERN the source noun — at most ONE modifier between ("each extra
     // conversation"), plus the source's own label words; "per quarter from … conversations" and "one more round of
@@ -1341,7 +1350,10 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
     let fillers = 0;
     for (let j = from; j < tokens.length && (ONE_FILLER.test(tokens[j]!.w) || isLabel(tokens[j]!.w)); j += 1) {
       if (/[,;:()\u2013\u2014]/.test(q.slice(tokens[i]!.at, tokens[j]!.at))) break;
-      if (own.some((x) => sameWord(x, tokens[j]!.w))) return j;
+      // A bare article counts the head noun only where the phrase ENDS there: "a Tech lead would …" is one lead, "a Tech
+      // lead budget of £5" is a budget.
+      if (own.some((x) => sameWord(x, tokens[j]!.w))
+        && (!bare || BARE_ONE_ENDS.test(q.slice(tokens[j]!.at + tokens[j]!.w.length)))) return tokens[j]!.at;
       if (!isLabel(tokens[j]!.w) && (fillers += 1) > 1) break;
     }
   }
@@ -1672,6 +1684,19 @@ export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): St
   return found.length === 1 ? found[0] : undefined;
 }
 
+/**
+ * Whether two places in one sentence sit in the same coordinated clause. "Hiring a Tech lead would raise productivity by
+ * about 8%, and each additional developer by about 3%" sizes two links: the developer's link is the 3%, never the Tech
+ * lead's 8% (served hiring 14 Oct; the distributive path accepted any figure in the sentence). Split only where a new
+ * clause is coordinated (", and" / ", but" / "while" / "whereas"), so "Each extra conversation, which costs £20, brings
+ * £1,000" stays one clause.
+ */
+function sameCoordinateClause(q: string, a: number, b: number): boolean {
+  const cuts = [...q.matchAll(/,\s*(?:and|but)\s|\s(?:while|whereas)\s/giu)].map((m) => m.index ?? 0);
+  const clauseOf = (at: number): number => cuts.filter((c) => c < at).length;
+  return clauseOf(a) === clauseOf(b);
+}
+
 function linkEffectInOneSentence(
   q: string,
   effect: LinkEffectFigures,
@@ -1693,9 +1718,9 @@ function linkEffectInOneSentence(
   const ownSource = scope.source_unitless === true && effect.per_source_change_unit !== 'switch'
     ? labelHeadUnit(q, effect.per_source_change, ends.source, ends.target, true) : undefined;
   // The dental target writes 1 too: it is not the source's numeral, and cannot suppress "each appointment".
-  const oneAt = ownSource?.implicit === true ? ownSource.amount.start
-    : perFigures.length === 0 && Math.abs(effect.per_source_change) === 1
-      ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
+  const distributiveAt = ownSource?.implicit !== true && perFigures.length === 0 && Math.abs(effect.per_source_change) === 1
+    ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
+  const oneAt = ownSource?.implicit === true ? ownSource.amount.start : distributiveAt;
   /**
    * ⭐ A SWITCH'S EFFECT IS ITS TARGET FIGURE ALONE (Science 6008844683; construction's own reading of the same sentence,
    * `statedSwitchEffectQuoteMatches`). Turning something on is never written per a source figure: "The starter tier would
@@ -1716,7 +1741,8 @@ function linkEffectInOneSentence(
     && amountFigures.length === 1 && outsideRange.length === 1 && outsideRange[0] === amountFigures[0] && kindFits(amountFigures[0]!);
   const bothWritten = amountFigures.some(amount => writtenChange
     ? amount.index < levels!.from_index || amount.index >= levels!.end_index
-    : oneAt >= 0 || switchOne || perFigures.some(per => per.index !== amount.index));
+    : (oneAt >= 0 && (distributiveAt < 0 || sameCoordinateClause(q, distributiveAt, amount.index)))
+      || switchOne || perFigures.some(per => per.index !== amount.index));
   if (!bothWritten) return 'figures_not_in_statement';
   // The target is checked even when the source change is distributive or written as levels (Codex r2 HIGH).
   const notAChange = linkEffectFigureNotAChange(q, effect, ends, scope.target_units ?? []);
