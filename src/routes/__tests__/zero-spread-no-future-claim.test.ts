@@ -19,8 +19,8 @@ type Rec = Record<string, any>;
 const READ = (JSON.parse(readFileSync('tests/fixtures/zero-spread/served-capacity-post3010-read01-20261014.json', 'utf8')) as Rec).body as Rec;
 const KEEP = 'keep_current_staffing';
 const SERVED_LINE = 'Falls short of 100 tickets per week if today’s figures hold.';
-const LINE = 'Chance not shown: this model’s runs gave this option effectively no spread in its result for your goal, '
-  + 'so there is no range to give a chance from. You can review whether the figures this option rests on should be held that firmly.';
+const LINE = 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+  + 'You can review whether the model reflects the uncertainties that matter for this option.';
 const licenceRecord = (result: Rec): Rec => (result.enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_CHANCE_LICENSED)!;
 const cells = (result: Rec) => projectCanonicalAnalysisCells(result as never, READ.graph, READ.analysis_goal_certainty);
 const FUTURE = /falls short|meets\b|if today.s (figures|rates) hold/i;
@@ -71,8 +71,8 @@ describe('capacity post3010 row 3: a zero-spread cell says no future event', () 
     expect(licence?.withheld_reason_by_option?.[KEEP]).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     expect(JSON.stringify(licence)).not.toMatch(FUTURE);
     expect(ZERO_SPREAD_LINE).toBe(LINE);
-    // Codex r1: no certainty language, and no claim of equality the predicate's std arm does not prove.
-    expect(LINE).not.toMatch(/certain|same/i);
+    // AIE 281e8b3d: no claim of equality or zero variance the predicate's std arm does not prove.
+    expect(LINE).not.toMatch(/\bsame\b|every run|no (spread|uncertainty|variance)/i);
   });
 
   it('PRODUCER (the std arm, Codex r1’s reproduction): an option whose deciles differ inside the noise tolerance gets the same line, true for it too', () => {
