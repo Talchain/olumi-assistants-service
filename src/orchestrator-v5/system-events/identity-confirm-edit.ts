@@ -178,6 +178,25 @@ function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: rea
 }
 
 /**
+ * The today stock, monthly additions and rate of a part that accumulates over EXACTLY the goal's held horizon ("‘Pro
+ * subscribers at month 12’ = today's subscribers + new each month − churn, over 12 months"), in the order the sum-goal branch
+ * asks them, or `null`. A net-zero rate the model added itself is not asked (`goalStockAccumulationOf`'s rule).
+ */
+function horizonAccumulationInputsOf(graph: Rec & { nodes: unknown[] }, part: Rec): string[] | null {
+  const acc = isRec(part.nonlinear_identity) ? part.nonlinear_identity : undefined;
+  const ids = acc?.operation === 'accumulation' && Array.isArray(acc.factor_ids) && acc.factor_ids.length === 3
+    && acc.factor_ids.every((x) => typeof x === 'string') ? acc.factor_ids as string[] : undefined;
+  const goals = graph.nodes.filter((n): n is Rec => isRec(n) && n.kind === 'goal');
+  const months = goals.length === 1 && typeof goals[0]!.id === 'string' ? readGoalRecord(graph, goals[0]!.id)?.horizon?.months : undefined;
+  if (ids === undefined || months === undefined || acc?.horizon_months !== months) return null;
+  const [stockId, rateId, inflowId] = ids as [string, string, string];
+  const rate = graph.nodes.find((n): n is Rec => isRec(n) && n.id === rateId);
+  const zero = isRec(rate?.observed_state) ? rate.observed_state : undefined;
+  const netZero = rateId === `${String(part.id)}_net_zero_rate` && zero?.raw_value === 0 && zero.value === 0;
+  return [stockId, inflowId, ...(netZero ? [] : [rateId])];
+}
+
+/**
  * ⛔ NO YES OVER A PART WITH NO LEVEL (DL blocker, Paul's golden brief B1, scenario 828d87ac, 8 Oct): the card offered
  * "Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’" while ‘Pro paying subscribers’ (an outcome the drafter
  * left level-less) had no figure; the Yes recorded it as the user's, and both Runs refused `identity_operand_missing` (ISL
@@ -196,17 +215,24 @@ export interface IdentityPartWithoutLevel {
    */
   readonly held?: { readonly owner: 'yours_unverified'; readonly said: string };
 }
-export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): IdentityPartWithoutLevel[] {
+export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[], unwrapped = false): IdentityPartWithoutLevel[] {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes)) return [];
   const stock = goalStockAccumulationOf(persistedGraph);
   if (stock !== null && factorIds.length === 1 && factorIds[0] === stock.carrier.id) {
     return identityPartsWithoutLevel(persistedGraph, [String(stock.stock.id), String(stock.inflow.id),
-      ...(stock.netZero === null ? [String(stock.rate.id)] : [])]);
+      ...(stock.netZero === null ? [String(stock.rate.id)] : [])], true);
   }
   const out: IdentityPartWithoutLevel[] = [];
   for (const id of new Set(factorIds)) {
     const part = persistedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
     if (part === undefined) continue;
+    // ⭐ SCIENCE (Paul pricing, served 2a35ff31: "What is ‘Pro subscribers at month 12’ today?"): a part that is the stock AT
+    // the goal's month has no level today. Its missing figures are its accumulation's own inputs, as for a sum goal above.
+    const inputs = unwrapped ? null : horizonAccumulationInputsOf(persistedGraph, part);
+    if (inputs !== null) {
+      for (const p of identityPartsWithoutLevel(persistedGraph, inputs, true)) if (!out.some((o) => o.id === p.id)) out.push(p);
+      continue;
+    }
     const os = isRec(part.observed_state) ? part.observed_state : undefined;
     // ⛔ ONLY THE USER'S FIGURE IS A LEVEL HERE (DL correction, 8 Oct; Paul's 2 Oct brief §9 check 1: "With unknown
     // subscribers, do not invent that result"; Science §(p): an Olumi estimate needs a basis). B1 9f32a4b4's 250 is the
