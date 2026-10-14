@@ -232,8 +232,20 @@ describe('CONTRASTS', () => {
     expect((result.open_questions ?? []).join(' ')).not.toContain('the definition your brief gives');
   });
 
-  it.each(DENIALS)('accepted AI-misreading residual: false declaration from a denial is operative, quote visible: %s', async (quote) => {
+  // DENIALS[1] still writes "80" in a sentence naming the total: the origin reader (`briefWritesGoalLevel`) does not read
+  // negation, so its level stays admitted as before. A known residual of that reader, not of this check.
+  it.each(DENIALS.slice(0, 1))('a denial alone: the brief never writes the total\'s 80 today, so it is unknown and asked; no sum is held: %s', async (quote) => {
     const brief = FX.brief.replace(SENTENCE, quote);
+    const { graph, result } = await construct(declare(run5Shape(), { quote }), brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(result.not_represented).toContain('The current level of "Weekly support capacity" (80) is not a figure your brief states for it, so no chance '
+      + 'of reaching 100 is shown. Tell me the current level of "Weekly support capacity" and the chance of reaching it can be shown.');
+  });
+
+  // The total's level written for it (DL 13:49Z: the level path now checks the brief writes it), so the residual is tested on its own.
+  it.each(DENIALS)('accepted AI-misreading residual: false declaration from a denial is operative, quote visible: %s', async (quote) => {
+    const brief = FX.brief.replace(SENTENCE, `${quote} Weekly support capacity is 80 tickets per week today.`);
     const { graph, result: acceptedResult } = await construct(declare(run5Shape(), { quote }), brief);
     expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
     for (const from of [EXISTING, PART]) {
