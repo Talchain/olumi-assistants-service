@@ -204,6 +204,8 @@ export interface CandidateModel {
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
+      /** Internal: a setting the drafter called the user's that the verifier could not credit — UNKNOWN origin, never Olumi's. */
+      user_material_unverified?: true;
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -414,6 +416,8 @@ export interface ConstructedLevel {
   range?: InterventionV3T['range'];
   estimate?: true;
   basis?: string;
+  /** UNKNOWN origin, as `observed_state.user_material_unverified`: never the user's, never Olumi's (`settingProvenanceOf`). */
+  user_material_unverified?: true;
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -4335,6 +4339,7 @@ function admitOnce(
         (iv as { derived_total?: unknown }).derived_total === true);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
+      if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }

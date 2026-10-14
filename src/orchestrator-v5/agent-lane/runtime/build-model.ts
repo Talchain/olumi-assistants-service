@@ -938,10 +938,14 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
+        // ⛔ THE USER'S STATED SETTING IS NEVER OLUMI'S (capacity authorship row 7, DL 14 Oct). A setting the drafter called the
+        // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
+        // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
+        // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
         if (intervention.provenance === 'explicit' && unknownBaseline
           && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
-          interventions.push({ ...intervention, provenance: 'ai_proposed' });
+          interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
         } else {
           interventions.push(intervention);
         }
