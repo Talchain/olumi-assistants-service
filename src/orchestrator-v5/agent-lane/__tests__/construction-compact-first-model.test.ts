@@ -112,8 +112,7 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     };
     const s = structuredSequence(stated(candidate(20), 50), stated(candidate(3), 60));
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
-    expect(s.calls).toHaveLength(3);
+    expect(s.calls).toHaveLength(2);
     expect(out['refusal']).toBe('model_too_large');
   });
 
@@ -134,7 +133,7 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
     expect(out.ok).toBe(false);
     expect(out['refusal']).toBe('model_too_large');
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    // DL rulings 04:00Z/04:07Z 14 Oct: the retry here is ADOPTED (no smaller rejection) yet still over, so ONE more runs; never a third.
     expect(s.calls).toHaveLength(3);
     expect(registered(dp.paths)).toBe(0); // nothing written
   });
@@ -243,8 +242,7 @@ describe('\u26d4 a retry that LOSES user material is never adopted, even if smal
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
     // The retry WAS smaller on both dimensions, so a size-only check would have
     // taken it. It must not have been written.
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
-    expect(s.calls).toHaveLength(3);
+    expect(s.calls).toHaveLength(2);
     expect(out.ok).toBe(false);
     expect(out['refusal']).toBe('model_too_large');
     expect(registered(dp.paths)).toBe(0);

@@ -14,6 +14,11 @@ import { assessConstructionSize, retryInstruction } from '../construction-size-g
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-r1.json', 'utf8')) as Rec;
+/** The AIE's own text (packet 4056486b), branches (a) and (b), filled with the host's counts. */
+const AIE = JSON.parse(readFileSync('tests/fixtures/size-retry/aie-size-retry-text.json', 'utf8')) as Rec;
+const budgetA = (optionLinks: number, room: number, own: number): string => (AIE.a_replacement as string)
+  .replace('{option_links}', String(optionLinks)).replace('{own - room}', String(own - room)).replace('{room}', String(room)).replace('{own}', String(own));
+const budgetB = (optionLinks: number): string => (AIE.b_replacement as string).replace('{option_links}', String(optionLinks));
 const sid = '5d2d2d2d-5d2d-4d2d-8d2d-5d2d2d2d2d2d';
 
 /** The real build path: the drafter answers with `drafts` in turn; every request it was sent comes back, with the result. */
@@ -39,10 +44,8 @@ describe('the served D2 r1 retry, through the real build path', () => {
     const retry = sent[1]!.instructions as string;
     // The served state, byte for byte: the same draft yields the same totals the provider was sent.
     expect(retry).toContain(FX.served_retry_totals);
-    expect(retry).toContain('18 of those links come from the options themselves');
-    expect(retry).toContain('That leaves `links` room for 12; yours hold 14, so `links` must lose at least 2.');
-    // HOW: whole added nodes only; never a kept risk's or option's link, never a node a kept node needs to reach the goal.
-    expect(retry).toContain('Do it only by removing whole nodes you ADDED beyond the brief, each with all of its links. Never cut a link of a risk or option you keep, and never remove a node that a kept node needs to reach the goal.');
+    // The AIE's branch (a), whole and byte for byte, with T5 D2 r1's own counts: 18 options' links, room 12, holds 14.
+    expect(retry).toContain(budgetA(18, 12, 14));
     expect(sent[0]!.instructions as string, 'the first pass is unchanged by the retry text').not.toContain('of those links come from the options');
   });
 
@@ -73,8 +76,7 @@ describe('the links budget is said only when links are over, as a target, never 
     const own: [string, string][] = Array.from({ length: 29 }, (_, i) => [`f${i % 10}`, `f${(i + 1 + Math.floor(i / 10)) % 10}`]);
     const v = assessConstructionSize(graph(nodes, [['d', 'o'], ['o', 'f0'], ['o', 'f1'], ...own]));
     expect([v.edges, v.option_edges]).toEqual([32, 3]);
-    expect(retryInstruction(v)).toContain('3 of those links come from the options themselves');
-    expect(retryInstruction(v)).toContain('room for 27; yours hold 29, so `links` must lose at least 2.');
+    expect(retryInstruction(v)).toContain(budgetA(3, 27, 29));
   });
 
   it('when the options\' own links already reach the limit, the step is an added option or action, not `links`', () => {
@@ -82,6 +84,6 @@ describe('the links budget is said only when links are over, as a target, never 
     const actions: [string, string][] = Array.from({ length: 4 }, (_, i) => Array.from({ length: 7 }, (_, j) => [`o${i}`, `f${j}`] as [string, string])).flat();
     const v = assessConstructionSize(graph(nodes, [...Array.from({ length: 4 }, (_, i) => ['d', `o${i}`] as [string, string]), ...actions, ['f0', 'f7']]));
     expect([v.edges, v.option_edges]).toEqual([33, 32]);
-    expect(retryInstruction(v)).toContain('already come to 32, leaving no room for `links`: remove an option or an action you ADDED beyond the brief.');
+    expect(retryInstruction(v)).toContain(budgetB(32));
   });
 });

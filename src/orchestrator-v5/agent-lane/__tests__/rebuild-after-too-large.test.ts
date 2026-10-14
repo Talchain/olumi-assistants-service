@@ -87,7 +87,7 @@ describe('a first build refused as too large offers "Build it again"', () => {
     const b = res.json() as { assistant_text: string; suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
     // Vacuity guards: the real builder refused THIS turn as too large, after its one retry, and said so.
     expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'build_model_from_brief', ok: false, refusal: 'model_too_large' })]);
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    // DL rulings 04:00Z/04:07Z 14 Oct: the retry here is ADOPTED (no smaller rejection) yet still over, so ONE more runs; never a third.
     expect(construction, 'the first draft plus its two bounded retries').toBe(3);
     expect(b.assistant_text).toContain('ask me to build it again');
 

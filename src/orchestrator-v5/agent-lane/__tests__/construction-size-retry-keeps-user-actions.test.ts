@@ -154,9 +154,7 @@ const missingValues = (g: Graph) =>
 
 /** The unadoptable-retry outcome, stated in full: the oversized first draft stands, so the build is refused and NOTHING is registered. */
 function expectRefusedNotAdopted(out: Awaited<ReturnType<typeof construct>>) {
-  // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
-  expect(out.reqs, 'both bounded size retries were spent').toHaveLength(3);
-  expect(String(out.reqs[2]!.instructions), 'the third call is the second size retry').toContain('Your previous model was too large');
+  expect(out.reqs, 'the one bounded retry was spent').toHaveLength(2);
   expect(out.result.ok).toBe(false);
   expect(out.result.refusal).toBe('model_too_large');
   expect(out.result.retried).toBe(true);
@@ -334,16 +332,17 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     return d;
   };
 
-  it.each<[string, () => Draft, string]>([
-    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level'],
-    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value'],
-    ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis'],
-  ])('RED: with %s, the FIRST retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue) => {
+  it.each<[string, () => Draft, string, number]>([
+    // The calls: an echoed draft with a gap is ADOPTED yet still over, so one more retry runs (3); with a mechanism issue the
+    // echo is REJECTED (the issue is still open), and a rejection is never retried (2). DL rulings 04:00Z/04:07Z 14 Oct.
+    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level', 3],
+    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value', 3],
+    ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis', 2],
+  ])('RED: with %s, the FIRST retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue, calls) => {
     const first = draft();
     const { reqs, result } = await construct(first, first);
     expect(result.refusal ?? result.size_retried, 'PRECONDITION: the draft was oversized').toBeTruthy();
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
-    expect(reqs).toHaveLength(3);
+    expect(reqs).toHaveLength(calls);
     const retry = reqs[1]!;
     expect(retry.instructions).toContain(BUDGET);
     expect(retry.instructions).toMatch(COPY_RULE);
@@ -899,9 +898,7 @@ describe('(5) a link-oversized first draft: the size retry may drop Olumi\'s pla
 
   /** Kept first: the ONE retry was spent, the first draft's own counts are refused, and nothing is written. */
   function expectKeptFirstRefused(out: Awaited<ReturnType<typeof construct>>) {
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
-    expect(out.reqs, 'both bounded size retries were spent').toHaveLength(3);
-    expect(String(out.reqs[2]!.instructions), 'the third call is the second size retry').toContain('Your previous model was too large');
+    expect(out.reqs, 'the one bounded retry was spent').toHaveLength(2);
     expect(out.result.ok, JSON.stringify(out.result)).toBe(false);
     expect(out.result.refusal).toBe('model_too_large');
     expect(out.result.retried).toBe(true);

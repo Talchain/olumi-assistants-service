@@ -353,7 +353,7 @@ describe('⭐ a served draft keeps the drafter’s raw answer — one record, it
     constructionText = () => `${JSON.stringify(oversized(), null, 2)}\n`;
     const body = await firstBrief();
     expect(body._agent.tool_calls, 'control: refused after the retry').toMatchObject([{ name: 'build_model_from_brief', ok: false, refusal: 'model_too_large' }]);
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    // DL rulings 04:00Z/04:07Z 14 Oct: the retry here is ADOPTED (no smaller rejection) yet still over, so ONE more runs; never a third.
     expect(constructionSent, 'control: first + two size retries').toHaveLength(3);
     const recs = rawRows();
     expect(recs).toHaveLength(1);

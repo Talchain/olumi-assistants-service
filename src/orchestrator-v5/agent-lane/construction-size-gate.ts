@@ -279,17 +279,17 @@ export function assessConstructionSize(
  * ⭐ THE DRAFTER'S OWN LINKS BUDGET (T5 D2 r1, DL 14 Oct). The totals alone ("32 links, 2 over") left the drafter cutting
  * nothing: 18 of the 32 were its kept options' own links, which it cannot see in `links`, so its 14 `links` read as
  * within budget. Over on links only, it is told what `links` may hold: the limit minus the options' links. Still a target,
- * never a list. HOW it cuts matches the adoption rules (DL ruling (a), 14 Oct): whole added nodes only, since measured retries
- * that cut a kept risk's links or the only node on a kept node's goal path were rightly refused (`retainsRiskHypotheses`).
- * AIE_TEXT_PENDING (`recovery/prompt/SIZE-RETRY-DRAFT.txt`).
+ * never a list. HOW it cuts matches the adoption rules: whole optional added nodes only, since measured retries that cut a
+ * kept risk's links or the only node on a kept node's goal path were rightly refused (`retainsRiskHypotheses`). The AIE's
+ * text, branches (a) and (b), byte for byte (`codex/AIE-SIZE-RETRY-BUDGET-AND-PRESERVATION-20261014.json`, sha 4056486b).
  */
 function linksBudget(v: ConstructionSizeVerdict): string[] {
   if (v.over_by.edges === 0) return [];
   const own = v.edges - v.option_edges;
   const room = v.limits.maxEdges - v.option_edges;
   return room > 0
-    ? [`${v.option_edges} of those links come from the options themselves: one from the decision to each option and one for each factor an option acts on (for the option that keeps things as they are, each factor the other options act on). That leaves \`links\` room for ${room}; yours hold ${own}, so \`links\` must lose at least ${own - room}. Do it only by removing whole nodes you ADDED beyond the brief, each with all of its links. Never cut a link of a risk or option you keep, and never remove a node that a kept node needs to reach the goal.`]
-    : [`The options' own links (one from the decision to each option and one for each factor an option acts on) already come to ${v.option_edges}, leaving no room for \`links\`: remove an option or an action you ADDED beyond the brief.`];
+    ? [`${v.option_edges} of those links come from the options themselves: one from the decision to each option and one for each factor an option acts on (for the option that keeps things as they are, each factor the other options act on). That leaves \`links\` room for ${room}; yours hold ${own}, so \`links\` must lose at least ${own - room} entries. Remove only whole optional nodes you ADDED beyond the brief, each with all its links; do not remove a factor that a kept option acts on, cut a kept risk’s or option’s links, or break any kept node’s path to the goal. Check that the revised complete draft meets both limits without losing any stated material or required model meaning.`]
+    : [`The options’ own links, including the unchanged option’s links to the factors the others act on, already come to ${v.option_edges}, leaving no room for \`links\`. Remove only an optional option or action you ADDED beyond the brief, with its now-unneeded nodes and links; preserve every option and action the brief gives, every shared factor still needed by a kept option, and every kept risk’s links and path to the goal.`];
 }
 
 /**

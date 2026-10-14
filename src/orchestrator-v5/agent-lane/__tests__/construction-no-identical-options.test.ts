@@ -864,8 +864,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     (o as { changes?: string[] }).changes = [];
     (lossy as unknown as { links: { from: string; to: string }[] }).links = lossy.links.filter((l) => !(l.from === '£59 with AI release' && l.to === 'AI feature availability'));
     const { out, graph, reqs } = await construct(first(), lossy);
-    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
-    expect(reqs).toHaveLength(3);
+    expect(reqs).toHaveLength(2);
     expect([out.ok, out.refusal, out.retried]).toEqual([false, 'model_too_large', true]);
     expect(graph).toBeNull();
   });

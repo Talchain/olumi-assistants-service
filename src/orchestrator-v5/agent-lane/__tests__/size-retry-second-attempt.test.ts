@@ -2,7 +2,8 @@
  * ⭐ A SECOND BOUNDED SIZE RETRY (DL ruling 14 Oct; T5 D2 r1, `recovery/outbox/PROMPT.md`). With ONE retry, Paul's marketing
  * brief registered nothing 1 time in 2. Told its own links budget, the drafter came back within the limit 9/10. But a retry
  * adopted as smaller yet still over (rep 7: 31 links) or refused for cutting what a kept option needs (rep 8) ended the
- * build. While the model is STILL over the limit after the first retry, one more edits the current model under the same gates.
+ * build. When the first retry is ADOPTED and the model is still over the limit, one more edits that model under the same
+ * gates; a gate's rejection (rep 8) is never retried away (DL rulings 04:00Z/04:07Z).
  *
  * The corpus is not the author's: T5's served brief and first drafts, and five REAL provider retries sent the v3 text
  * (`tests/fixtures/size-retry/t5-d2-v3-retries.json`, `_source`). The rows run the real `buildModelFromBrief`.
@@ -45,14 +46,15 @@ describe('the served D2 r1 failures, through the 2-retry path', () => {
     expect(registered).toBe(1);
   });
 
-  it('rep 8 (refused: cut a factor a kept option acts on): the first draft is still over, so a second retry runs, and registers', async () => {
+  it('RED: rep 8 (refused by a gate: it cut a factor a kept option acts on) is NEVER retried away: refused as before', async () => {
     const { sent, result, registered, trace } = await construct([FIRST.draft_call1, R.retry_rep8, R.retry_rep6]);
-    expect(sent).toHaveLength(3);
-    expect(sent[2]!.instructions as string).toContain(`${SIZE}: 17 nodes and 32 links, 2 links over the limit.`);
-    expect(trace).toMatchObject({ retried: true, outcome: 'kept_first', second: 'adopted' });
-    expect(result).toMatchObject({ ok: true, within_compact_limits: true });
-    expect(registered).toBe(1);
+    expect(sent, 'no second retry after a rejection').toHaveLength(2);
+    expect(trace).toMatchObject({ retried: true, outcome: 'kept_first' });
+    expect(trace).not.toHaveProperty('second');
+    expect(result).toMatchObject({ ok: false, refusal: 'model_too_large', edges: 32 });
+    expect(registered).toBe(0);
   });
+
   it('NEVER SILENTLY: what BOTH retries shed is said against the first draft (rep 7 shed one factor, rep 6 then an outcome)', async () => {
     const { result } = await construct([FIRST.draft_call1, R.retry_rep7, R.retry_rep6]);
     expect(result).toMatchObject({ ok: true, size_retried: true });

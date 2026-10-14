@@ -1885,12 +1885,12 @@ export async function buildModelFromBrief(
       chain: chainsAsked.length,
     };
     trace = { retried: true, reasons, outcome: 'kept_first' };
-    // ⭐ A SECOND BOUNDED SIZE RETRY (DL ruling 14 Oct; T5 D2 r1, `recovery/outbox/PROMPT.md`). One retry left Paul's marketing
-    // brief with no model 1 time in 2: told its own links budget the drafter came back within the limit 9/10, but a retry
-    // adopted as smaller yet still over, or refused for cutting what a kept option or risk needs, ended the build. So while
-    // the model is STILL over the limit after the first retry, ONE more edits the current model (the adopted retry, else the
-    // first draft) under the same gates, the user's material still held to the first draft. Never a third, never off the
-    // size route; a model still over after both is refused as before.
+    // ⭐ A SECOND BOUNDED SIZE RETRY (DL rulings 04:00Z/04:07Z 14 Oct; T5 D2 r1, `recovery/outbox/PROMPT.md`). One retry left
+    // Paul's marketing brief with no model 1 time in 2: told its own links budget the drafter came back within the limit 9/10,
+    // but a retry adopted as smaller yet still over ended the build. So when the first retry is ADOPTED and the model is still
+    // over the limit, ONE more edits that model under the same gates, with the current counts and the same frozen source, the
+    // user's material still held to the first draft. A gate's rejection is never retried; never a third, never off the size
+    // route; a model still over after both is refused as before.
     let previous = firstCandidate;
     let askedNow = asked;
     // What a retry shed is said against the FIRST draft, across both attempts (⛔ NEVER SILENTLY, above).
@@ -1901,7 +1901,8 @@ export async function buildModelFromBrief(
     const outcomes: Array<'adopted' | 'kept_first' | 'retry_failed'> = [];
     const traceOf = (): ConstructionTrace => ({ retried: true, reasons, outcome: outcomes[0]!, ...(outcomes[1] === undefined ? {} : { second: outcomes[1] }) });
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      if (attempt === 2 && (!needsSizeRetry || size.within || size.user_material_exceeds_limit)) break;
+      // Only an ADOPTED (otherwise faithful) retry that is still over gets one more; a gate's rejection is never retried away.
+      if (attempt === 2 && (!needsSizeRetry || outcomes[0] !== 'adopted' || size.within || size.user_material_exceeds_limit)) break;
       outcomes[attempt - 1] = 'kept_first';
       trace = traceOf();
       try {
