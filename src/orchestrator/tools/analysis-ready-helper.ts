@@ -1238,7 +1238,7 @@ function relationshipAsk(option: unknown): string | undefined {
 function optionsTheRunSubmits(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload): ReadonlyArray<Record<string, unknown>> {
   // As the snapshot loader builds them (`build-turn-context.ts` mergeOptionInterventionObjects).
   const optionNodes = new Map<string, Record<string, unknown>>(graph.nodes
-    .filter((node) => node.kind === 'option').map((node) => [node.id, node as unknown as Record<string, unknown>]));
+    .filter((node) => node.kind === 'option').map((node): [string, Record<string, unknown>] => [node.id, { ...node }]));
   const options = (payload.options ?? []).map((option) => {
     const node = optionNodes.get(option.option_id);
     return { id: option.option_id, option_id: option.option_id, label: option.label,
