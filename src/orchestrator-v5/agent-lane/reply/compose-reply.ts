@@ -693,7 +693,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
   const horizonWithholdDetails = !canMark || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
     : cell.reasons.filter(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED' || reason.code === 'HORIZON_NOT_TESTED')
-      .map(reason => reason.message));
+      .flatMap(reason => typeof reason.message === 'string' && reason.message.trim() !== '' ? [reason.message] : []));
   /**
    * ⭐ Science §(ad), amended (Paul pricing, served 2a35ff31; AIE #94 6178106849 ACK + AMEND): the result cards already carry the
    * horizon marker (`canonical-analysis-view.ts`), so the reply never says it again. It leads, once, with the AIE's sentence
