@@ -255,7 +255,8 @@ describe('GEN #2 by entity: a drafter question is left out only when it is ABOUT
 
   it('a question ALSO about something else is asked: proposed bindings never remove a question\'s other parts (served D2: one question, three links)', async () => {
     const { questions } = await build(withConcerns([ASIDE_Q], { [ASIDE_Q]: [ASIDE_LINK, 'Monthly customer churn'] }));
-    expect(questions).toContain(ASIDE_Q);
+    // Asked, and its set-aside 60 is said to be set aside (`withSetAsideFiguresSaid`, DL 14 Oct): never stated as the model's.
+    expect(questions).toContain(`${ASIDE_Q} Olumi set that estimate aside, so the model does not use it yet: \u2018Price per paying customer per month\u2019 \u2192 \u2018Customer loss after price rise\u2019.`);
   });
 
   it('an entry whose concerns are not all labels binds nothing: the question is asked', async () => {
