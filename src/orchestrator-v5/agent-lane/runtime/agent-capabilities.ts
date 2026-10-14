@@ -3822,7 +3822,7 @@ export function createAgentCapabilities(
     // goal since the card was made (a renamed goal, a new target, period or reading) writes nothing. A card made before its
     // subject was recorded keeps the date gate above.
     if (deadlineSubjectHolds(op, approvedRead.raw) === false) {
-      return notApplied('model_changed_since_approval', 'The goal changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
+      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
     if (opts.commitOptionLevels === undefined) {
       return notApplied('deadline_writer_unavailable', 'This deadline could not be recorded here, so nothing was recorded.');
