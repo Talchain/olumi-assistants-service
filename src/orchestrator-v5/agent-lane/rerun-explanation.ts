@@ -372,9 +372,8 @@ export function rerunExplanationPlan(
         : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
-    'Olumi has already told the user, in its own words from the run record, what changed between the two Runs:',
-    `"${codeLine}"`,
-    'Do not repeat that line, and never say whether the inputs changed or stayed the same: that line is the record. Say what this Run shows.',
+    'Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.',
+    `Run record: "${codeLine}"`,
     priorWithheld
       ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
       : noMatched

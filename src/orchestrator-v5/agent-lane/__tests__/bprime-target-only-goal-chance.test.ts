@@ -79,11 +79,14 @@ describe('B′ — the target tail and the target-only licence', () => {
     expect(goalChanceWithheldForAgent(block)?.say).toBe(SINGULAR_TAIL);
   });
 
-  it('the licence lets the shares be said in the goal\'s own direction, always "in this model", never as a target chance or a recommendation', () => {
+  // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q3, rulings 1ad7f7b2…): both notes no longer license a share of runs or a leader as a
+  // Run-result finding (that inherited permission contradicted P13); a separately permitted share is comparative reasoning only.
+  it('both target-only notes: no share or leader in a Run result reply, never a ranking for the withheld chance, never a recommendation', () => {
     for (const note of [TARGET_ONLY_NOTE, TARGET_ONLY_OUTCOME_KEPT_NOTE]) {
-      expect(note).toMatch(/where lower is better, the option that came out lowest/);
-      expect(note).toMatch(/always said as ‘in this model’/);
-      expect(note).toMatch(/never\s+as a\s+chance of reaching the target and never as a recommendation/);
+      expect(note).not.toMatch(/where lower is better, the option that came out lowest/);
+      expect(note).toContain('In a Run result reply, do not report relative shares of model runs or name an option leader from them.');
+      expect(note).toContain('Never substitute a relative ranking for an unavailable goal chance.');
+      expect(note).toContain('it is neither a goal chance nor a recommendation.');
     }
   });
 

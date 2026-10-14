@@ -9,6 +9,7 @@ import {
   PREMORTEM_PRESS_ID, cardCallFor, fallbackReply, methodTurnForReadback, methodTurnFromSignals,
   planPickChipId, settleMethodTurn, type MethodReadback, type MethodTurn, type RunMethodTurn,
 } from '../method-turn.js';
+import { withApprovedMethodWords } from './helpers/approved-method-words.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[]; goal_constraints?: unknown };
 type Read = {
@@ -128,7 +129,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
   });
 
   it('B: entire grounded licensed-plan output is byte-equivalent to the base replay', () => {
-    assert.equal(JSON.stringify(turn(captured('B'))), JSON.stringify(base.B));
+    assert.equal(JSON.stringify(turn(captured('B'))), JSON.stringify(withApprovedMethodWords(base.B)));
   });
 
   it('C: whole decision turn and exact fallback are pinned with the grounding union intact', () => {
@@ -136,7 +137,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     const out = run(turn(c));
     const expected = JSON.parse(readFileSync(new URL('./fixtures/w9c/r2-controls.json', import.meta.url), 'utf8')).C;
     // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; every other whole-turn field stays pinned.
-    assert.equal(JSON.stringify(out), JSON.stringify(reclassifiedCTurn(expected.turn)));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(reclassifiedCTurn(expected.turn))));
     const fallback = settleMethodTurn(out, '');
     assert.equal(fallback.reply, expected.fallback);
     assert.equal(JSON.stringify(fallback), JSON.stringify(expected.settled));
@@ -160,7 +161,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     assert.equal(out?.kind, 'unavailable');
     assert.equal(out?.kind === 'unavailable' && out.reason, 'no_grounded_item');
     // Base A is the same complete decision refusal; pin the entire output, including its actions and copy.
-    assert.equal(JSON.stringify(out), JSON.stringify(base.A));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(base.A)));
   });
 
   it('explicit unlicensed A pick retains the base empty-path refusal', () => {

@@ -28,7 +28,9 @@ const OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, wri
 const PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
 // Re-pinned for S5 slice 4 (#2913): the only change is modelGapOf's deadline read (goalDeadlineOf(goal) →
 // goalDeadlineFromRecord(graph, goal.id)); no route directive byte changed.
-const WIDEN_TURN_SHA256 = '6bf5be56197c03c376ffd16d81c32fae8182d43c4a82e83fbe498d0219b7dce0';
+// Re-pinned for prompt P18 (AIE one-pass packet 94ad9c8f…): the only change is risksTurnFromSignals' first directive line
+// (the AIE's exact prefix, dynamic tag and suffix); staging's 6bf5be56… is reproduced by restoring that one line.
+const WIDEN_TURN_SHA256 = '06fe43a7a78d9979f79ab676d1b00934b8c7360e8147ee6e071d228d5d4f4e52';
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
 // Unit-only injection; the served builder supplies its own construction-aware admission closure.

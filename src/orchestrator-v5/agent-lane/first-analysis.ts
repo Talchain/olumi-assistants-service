@@ -348,6 +348,6 @@ export function describeFirstAnalysisForAgent(
     reason: outcome.reason,
     ...(outcome.reason === 'not_admissible' || outcome.reason === 'refused' ? { next_step: outcome.nextStep } : {}),
     claim_permissions: permissions,
-    note: 'No analysis ran on this turn. Olumi tells the user why beneath your reply; do not describe any result.',
+    note: "If analysis did not run, explain its actual recorded reason and a useful next action from the supplied facts. Keep reasoning useful before a Run; do not invent a missing value or promise that one answer will make analysis possible.",
   };
 }
