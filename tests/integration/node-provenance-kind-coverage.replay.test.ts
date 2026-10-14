@@ -751,6 +751,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // NODE_QUANTITY_FIELDS, even if a question happens to contain a number.
       "unresolved_targets",
       "user_questions",
+      // SYSTEM 1 the user's recorded statements, 14 Oct (DL 23:09Z; AIE 6180193788) — THE VALUE-BEARING DECISION: `user_statements`
+      // is NOT value-bearing and joins neither `carriesValue` nor `NODE_QUANTITY_FIELDS`. Each entry is the user's verified words
+      // (quote, source, speaker), the subject and field a door card recorded, and when; the figure or reading it sets lives on that
+      // field's own carrier, so it can never make a node look sized on its own.
+      "user_statements",
     ]);
   });
 });

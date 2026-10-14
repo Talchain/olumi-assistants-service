@@ -9,6 +9,8 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { userStatementsOn } from '../../statement-door/statements.js';
+import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, riskHoldsNowRecordedWords, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, riskStatedOccurrenceCardWords, riskStatedOccurrenceRecordedWords, SET_RISK_OCCURRENCE_OP,
@@ -1537,6 +1539,15 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
+      // ⭐ M3a (AIE 6180193788 §1): the user's recorded statements about the goal, verbatim, and the measure one of them defines,
+      // so THIS working input and a cold reopen hold the user's definition apart from Olumi's reading.
+      ...((): Record<string, unknown> => {
+        const node = (Array.isArray(g.raw.nodes) ? g.raw.nodes as unknown[] : []).find((x) => isPlainRecord(x) && x.id === n.id);
+        const said = userStatementsOn(node);
+        const measure = recordedMeasureOf(node);
+        return said.length === 0 ? {} : { user_statements: said.map((r) => ({ field: r.field, said: r.statements.map((x) => x.quote), speaker: 'user' })),
+          ...(measure === undefined ? {} : { measured_in: measure }) };
+      })(),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {

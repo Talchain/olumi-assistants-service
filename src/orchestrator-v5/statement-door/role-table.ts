@@ -11,6 +11,7 @@
 import type { StatementForm, UserStatement } from '../agent-lane/user-statements.js';
 import type { DoorSubject, StatementField } from './subject.js';
 import type { DoorWriteMember, FieldWriter } from './write.js';
+import { MEASURE_ROW } from './fields/measure.js';
 
 /** A field reader's reading of one statement: the form, the figure's ends (absent for a figure-free form) and a qualifier. */
 export interface DoorFigure {
@@ -18,6 +19,8 @@ export interface DoorFigure {
   readonly low?: number;
   readonly high?: number;
   readonly qualifier?: string;
+  /** A figure-free field's reading: the user's own words it rests on, inside the quote ("story points completed per sprint"). */
+  readonly words?: string;
 }
 
 export interface RoleRow {
@@ -30,7 +33,7 @@ export interface RoleRow {
    * reason it is not this field's reading (a different window, a negated event, a bound the carrier cannot hold…), which keeps
    * the user's words as said.
    */
-  readonly read: (quote: string, subject: DoorSubject, graph: unknown) => DoorFigure | { readonly refused: string };
+  readonly read: (quote: string, subject: DoorSubject, graph: unknown, words?: string) => DoorFigure | { readonly refused: string };
   /** The level door member the reading is written through (`write.ts`). With `field`, the row's key: unique in the table. */
   readonly carrier: DoorWriteMember;
   /** Whether this row reads statements about this subject (its kind and the graph's structure); never by elimination. */
@@ -38,19 +41,19 @@ export interface RoleRow {
   /** The adapter onto `carrier`: the verified reading → ONE write, or the reason the carrier cannot hold it. */
   readonly writer: FieldWriter;
   /** Olumi's reading of the statement, as the card says it ("your estimate of about 30% that ‘X’ happens …"). */
-  readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown) => string;
+  readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
   /** Every Olumi assumption the reading rests on, each said once (a step, a convention, a part the user did not give). */
-  readonly assumptions: (statements: readonly UserStatement[], subject: DoorSubject, graph: unknown) => readonly string[];
+  readonly assumptions: (statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string) => readonly string[];
   /** The receipt after a confirmed write and read-back ("Recorded your estimate: …"). */
-  readonly recordedWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown) => string;
+  readonly recordedWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
   /** At most this many statements make one reading (a lead's start and its settling-in: 2). */
   readonly maxStatements: number;
   /** The AIE comment id that signed this row's meaning and words. */
   readonly signed_by: string;
 }
 
-/** The table. Empty in the contract (PR-0); each migration adds its signed row(s), one per (field, carrier). */
-export const ROLE_TABLE: RoleRow[] = [];
+/** The table. Each migration adds its signed row(s), one per (field, carrier). */
+export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW];
 export const rowKey = (r: Pick<RoleRow, 'field' | 'carrier'>): string => `${r.field}:${r.carrier}`;
 
 /** The ONE row for this subject: its field, and the one row whose `applies` holds. None, or more than one, is no row. */
