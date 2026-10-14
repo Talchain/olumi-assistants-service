@@ -212,7 +212,7 @@ export function shareOptionEstimateWords(graph: unknown, optionId: string, opts:
   if (parts.extra === undefined) return team === '' ? '' : `using ${team}`;
   const extras = extrasOf(parts);
   const lead = (x: ExtraShare): string => x.leadLow === x.leadHigh ? months(x.leadLow) : `${months(x.leadLow)}–${months(x.leadHigh)}`;
-  const deliverable = String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
+  const deliverable = deliverableOf(share);
   const yours = hiringTimesLabel(activePartsOf(graph as Rec, share, optionId) ?? [], deliverable);
   const hires = yours !== '' ? yours : extras.length === 1
     ? `Olumi’s estimates of hiring time (${lead(extras[0]!)} months) and of the additional progress from the hires (${months(extras[0]!.monthlyShare * 100)}% of ${deliverable} per month)`
@@ -286,7 +286,7 @@ export function capacityRatioOutOfReach(graph: unknown, optionId: string): strin
   const { D, low } = parts.team, k = parts.ratio;
   const part = activePartsOf(graph as Rec, share, optionId)?.[0];
   const lead = part?.observed_state?.extra_share_by_date?.lead_low;
-  const deliverable = String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
+  const deliverable = deliverableOf(share);
   const best = Math.floor(Math.min(1, (k * D) / low) * 100);
   const oneDp = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 1 });
   const arithmetic = lead === 0
@@ -294,4 +294,9 @@ export function capacityRatioOutOfReach(graph: unknown, optionId: string): strin
     : '';
   return `No chance is shown for this option: on your own soonest estimate it can’t reach ${months(share.threshold_raw)}% of ${deliverable} `
     + `by ${sayDate(share.deadline)}. Even at ${months(low)} months, it gets about ${best}% done by then${arithmetic}.`;
+}
+
+/** The share goal's deliverable ("next feature launch" from "% of next feature launch"): one read of the goal's unit. */
+function deliverableOf(share: { readonly goal: Rec }): string {
+  return String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
 }
