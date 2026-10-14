@@ -105,8 +105,7 @@ const D2_SENTENCE = 'Our depot can service at most 1,900 riders without breaking
   + 'that ceiling, without turning anyone away, over the next ten months.';
 /**
  * AMENDED (ruling A, DL 14 Oct; was "…? Your words: “ten months”."): the route card quotes the sentence its words were read from,
- * and follows #2997's authorship rule. These briefs hold several date phrases ("a month", "month 3"), so which one is the deadline
- * is Olumi's interpretation to check.
+ * and is always Olumi's interpretation to check: that these are the goal's deadline is the drafter's reading, never the user's.
  */
 const ROUTE_CARD_D2 = `Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months” in “${D2_SENTENCE.slice(0, -1)}”. `
   + 'Olumi’s interpretation; check the date and reference before approving.';
@@ -585,8 +584,8 @@ describe('R7 attribution on the served share-of-riders goal', () => {
 
 /**
  * ⭐ RULING A (DL 14 Oct, hiring-post3000 judge row 2): the route card trusts the construction's attested `goal_deadline_as_stated`
- * (its only writer); `goalOwnsDeadline` is retired. Every negative it carried becomes a card OFFERED as a question that quotes
- * the sentence its words came from: the user approves or declines it, and nothing is saved until they do. Known residual (PR body):
+ * (its only writer); `goalOwnsDeadline` is retired. Every negative it carried becomes a card OFFERED as Olumi's interpretation,
+ * quoting the sentence its words came from: the user approves or declines it, and nothing is saved until they do. Known residual (PR body):
  * a date the drafter wrongly claims for the goal is offered too. The quote shows what it was read from.
  */
 describe('RULING A: the route card trusts the attested words; retired negatives are offered as a question, never saved', () => {
@@ -627,9 +626,10 @@ describe('RULING A: the route card trusts the attested words; retired negatives 
     expect(offer?.words).toBe('ten months');
     const out = await offer!.issue(w.ctx('Run'), { deadline_words: 'ten months', rationale: '' }) as Rec;
     expect(out).toMatchObject({ ok: true, mutated: false });
-    // One date phrase in the message: #2997's rule gives the user's own reading; the quote shows what it was read from.
-    expect(out.public_label).toBe(`Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months” in “${sentence.slice(0, -1)}”.`);
-    expect(w.proposals.get(String(out.proposal_id))?.provenance.authored_by).toBe('user_stated');
+    // The user's words, quoted with their sentence; that they are this goal's deadline is Olumi's interpretation (even one phrase).
+    expect(out.public_label).toBe(`Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months” in “${sentence.slice(0, -1)}”. `
+      + 'Olumi’s interpretation; check the date and reference before approving.');
+    expect(w.proposals.get(String(out.proposal_id))?.provenance.authored_by).toBe('model_proposed');
     expect(w.writes).toHaveLength(0);
     expect(w.read()).toEqual(before);
   });
@@ -645,7 +645,12 @@ describe('RULING A: the route card trusts the attested words; retired negatives 
     expect(calls, JSON.stringify(body._agent.tool_calls)).toHaveLength(1);
     const yes = body.suggested_actions.find((c: Rec) => c.id === approvalChipIdFor(calls[0].proposal_id));
     expect(yes).toMatchObject({ label: 'Yes',
-      detail: 'Is your deadline 14 January 2027 (3 months from 14 October 2026)? Your words: “three months” in “We have an urgent launch date in the next three months”.' });
+      detail: 'Is your deadline 14 January 2027 (3 months from 14 October 2026)? Your words: “three months” in “We have an urgent launch date in the next three months”. '
+        + 'Olumi’s interpretation; check the date and reference before approving.' });
+    const carrier = (w.rows[0] as Rec).pending_actions.find((p: Rec) => p.chip_id === yes.id);
+    expect(carrier.action.inline_patch.agent_proposal, JSON.stringify(carrier)).toMatchObject({ proposal_id: calls[0].proposal_id,
+      provenance: { authored_by: 'model_proposed' },
+      operations: [{ op: 'set_goal_deadline', path: 'productivity', value: { deadline: '2027-01-14', words: 'three months', reference: '2026-10-14' } }] });
     expect(body.suggested_actions).toContainEqual(DEADLINE_CHANGE_CHIP);
     expect(w.read(), 'offered, not saved').toEqual(before);
     // Yes saves the date the card showed.

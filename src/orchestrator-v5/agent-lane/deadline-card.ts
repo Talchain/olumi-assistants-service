@@ -111,13 +111,11 @@ export interface DeadlineIssueInput {
  * ⭐ RULING A (DL 14 Oct, hiring-post3000 judge row 2): the goal's stated deadline words are written ONLY by construction,
  * from the drafter's own words attested verbatim in the brief (`build-model.ts`, strict since #3000). The card trusts that
  * attribution; no host word matcher re-decides it ("We have an urgent launch date in the next three months." was refused).
- * The card quotes the sentence the words came from (`quote`), and is a question the user approves or declines.
+ * The card quotes the sentence the words came from (`quote`); it is Olumi's interpretation, a question the user approves or declines.
  */
 export function deadlineCardToIssue(p: DeadlineIssueInput): {
   readonly goal_id: string; readonly words: string; readonly reference: string; readonly date: string;
-  /** The message the words were read from, plain (for #2997's one-phrase authorship rule). */
-  readonly source_plain: string;
-  /** Its sentence holding the words, verbatim. */
+  /** The sentence the words were read from, verbatim. */
   readonly quote: string;
 } | undefined {
   if (p.priorOffer || p.mutated || p.fastPath === 'approve' || p.proposalOffered || p.pending.length > 0 || p.reference === undefined
@@ -134,5 +132,5 @@ export function deadlineCardToIssue(p: DeadlineIssueInput): {
   if (source === undefined || quote === undefined) return undefined;
   const stated = readStatedDeadline(words, p.reference, { leadWordsOnly: true });
   return stated === null ? undefined
-    : { goal_id: goal.id, words, reference: p.reference, date: stated.date, source_plain: plainOf(source), quote };
+    : { goal_id: goal.id, words, reference: p.reference, date: stated.date, quote };
 }

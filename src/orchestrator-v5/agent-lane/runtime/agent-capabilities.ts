@@ -10475,10 +10475,9 @@ export function createAgentCapabilities(
         return card === undefined ? undefined : { words: card.words,
           // A throw in the shared tail never takes the turn down: the same refusal the door already says.
           issue: async (subject, args) => {
-            // Ruling A: the words are the user's; "your deadline" is the user's reading only where #2997's rule gives it (the
-            // message holds ONE date phrase), else Olumi's interpretation to check. The card quotes the sentence it read.
-            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference, undefined, true,
-              datePhrasesIn(card.source_plain) <= 1, card.quote); } catch {
+            // Ruling A (DL 14 Oct): the words are the user's, quoted with their sentence; that they are THIS goal's deadline is the
+            // drafter's reading, so every route card is Olumi's interpretation to check (approval stays approval, never authorship).
+            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference, undefined, true, false, card.quote); } catch {
               return { ok: false, mutated: false, refusal: 'deadline_not_placed', detail: deadlineRefusalDetail.horizon_not_modelled };
             }
           } };
