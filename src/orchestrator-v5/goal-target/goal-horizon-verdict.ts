@@ -82,7 +82,7 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   const basis = goalTargetBasisOf(goal);
   if (basis === undefined || basis.open_question !== undefined || basis.period_months !== heldGoalHorizonMonths(goal)) return 'withhold';
   if (basis.effects_at_period_end) return 'basis_at_h';
-  // ⭐ DL ruling 14 Oct (option A; Paul: label, never withhold): a CHANGE target whose held month IS its own stated period, with
+  // ⭐ DL ruling 14 Oct (option A; AIE #94 6171728409: a chance only where the model supports it): a CHANGE target whose held month IS its own stated period, with
   // nothing in the model that works out timing (no accumulation carrier), is the same static reading as no held month: the
   // licence's conditional reading says Olumi's period-end assumption with the chance, or E's withhold says why not
   // (`periodEndConditionalOf`). Served hiring: the deadline card's "3 months from today" held month 3 beside the basis' 3, and
