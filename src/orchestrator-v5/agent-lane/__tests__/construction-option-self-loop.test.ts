@@ -38,6 +38,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { asProjectedMeanCapture, asServedBeforeOneForm, asServedBeforeProjectedMeans } from './fixtures/one-form-levels.js';
+import { asDecisionTitled, asQuestionTitled } from '../../__tests__/support/question-title.support.js';
 
 type Edge = { from: string; to: string; provenance?: { source?: string } };
 type Node = { id: string; kind: string; label: string; provenance?: string; interventions?: Record<string, { value: number; source: string }> };
@@ -288,7 +289,8 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     const { out, body } = await build(candidate);
     const comparisonBody = { ...body, nodes: beforeAiLevelTypes(body.nodes as Record<string, any>[], candidate, 'served') } as Graph;
     const withheld = new Set(loopWithheld(out));
-    const servedNodes = typedLevels(SERVED.draft_graph.nodes.map((n) => {
+    // #3045's decision title ("Question: …") postdates this capture: its one known decision-node delta, the title word only.
+    const servedNodes = typedLevels(SERVED.draft_graph.nodes.map(asQuestionTitled).map((n) => {
       if (n.id !== ADVERTISING || !withheld.has(SELF)) return n;
       const { [ADVERTISING]: _self, ...rest } = n.interventions!;
       return { ...n, interventions: rest };
@@ -392,7 +394,8 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     const readBack = asServedBeforeProjectedMeans(asServedBeforeOneForm(body, { ...body, nodes: (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => n) }));
     const untyped = withoutTypedLevels(beforeAiLevelTypes(readBack.nodes as Record<string, any>[], candidate, 'acyclic'));
     expect(untyped.length).toBe(readBack.nodes.length);
-    expect(createHash('sha256').update(canon({ ...readBack, nodes: untyped.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
+    // #3045's decision title postdates the digest as well: read back to "Decision: …", the title word only.
+    expect(createHash('sha256').update(canon({ ...readBack, nodes: untyped.map((n) => asDecisionTitled(withoutG1(n))) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 
   // Re-recorded (CEE #2355; AIQ 5909754019 (2), P0 PARTNER CR 5909944908): a drafted `explicit` self-link with no

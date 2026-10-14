@@ -91,8 +91,15 @@ it('4 W5: the witnessed pills, with the guidance press (Suggest options) leading
   assert.equal(selection?.slot1?.variant, 'W5');
   // Captured served order was [pre-mortem, Suggest options, strengthen]; cut 7 R3 FAIL 6/6 ruled the press leads.
   assert.deepEqual(offered.map(chip => chip.id), ['agent-next-widen', 'agent-next-pre-mortem', 'agent-next-strengthen']);
+  // #3045 (Paul's vocabulary, 14 Oct: "decision" is only the user's own act) re-words the pre-mortem pill: the captured served
+  // set with that ONE message as worded now, the captured words asserted first.
+  const served = nearTie.suggested_actions as typeof offered;
+  assert.equal(served.find(chip => chip.id === 'agent-next-pre-mortem')!.message,
+    'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?');
+  const servedNow = served.map(chip => chip.id === 'agent-next-pre-mortem'
+    ? { ...chip, message: 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?' } : chip);
   assert.deepEqual([...offered].sort((a, b) => a.id.localeCompare(b.id)),
-    [...(nearTie.suggested_actions as typeof offered)].sort((a, b) => a.id.localeCompare(b.id)));
+    [...servedNow].sort((a, b) => a.id.localeCompare(b.id)));
   assert.equal(offered.filter(chip => chip.id === 'agent-next-widen').length, 1);
 });
 it('5 every composed id survives durable filtering and same-Run reload; stale and waiting suppress', () => {

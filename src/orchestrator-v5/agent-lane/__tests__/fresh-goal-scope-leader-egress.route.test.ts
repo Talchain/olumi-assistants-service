@@ -494,6 +494,11 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(captured.guidance.slot1.copy.why).toBe("There is no 'carry on as now' option to compare with.");
     captured.guidance.slot1.copy.why = 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.';
     expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.'));
+    // #3045 (Paul's vocabulary, 14 Oct: "decision" is only the user's own act) re-words the pre-mortem pill: the same one-field
+    // treatment, the old words asserted first.
+    const preMortem = (captured.suggested_actions as { id: string; message: string }[]).find(a => a.id === 'agent-next-pre-mortem')!;
+    expect(preMortem.message).toBe('Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?');
+    preMortem.message = 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?';
     expect(withoutModelGap(bytes)).toBe(JSON.stringify(captured));
   });
   it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {

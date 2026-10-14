@@ -47,6 +47,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
+import { asQuestionTitled } from '../../__tests__/support/question-title.support.js';
 
 
 type Edge = { from: string; to: string; provenance?: { source?: string }; effect_direction?: string; strength?: { mean: number } };
@@ -205,8 +206,9 @@ const withCreditedType = (n: unknown): unknown => {
   return x !== null && typeof x === 'object' && x.kind === 'factor' && x.observed_state?.source === 'brief_extraction'
     && typeof x.observed_state.value === 'number' ? { ...x, observed_state: { ...x.observed_state, extractionType: 'explicit' } } : n;
 };
-const asServedNow = (n: unknown): unknown => withCreditedType(
-  n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
+// #3045's decision title ("Question: …") postdates the capture too: its one known decision-node delta, the title word only.
+const asServedNow = (n: unknown): unknown => asQuestionTitled(withCreditedType(
+  n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n));
 
 /** Sorted-key JSON, so the served bytes and ours compare by content, not key order. */
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
