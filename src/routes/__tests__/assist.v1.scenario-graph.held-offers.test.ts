@@ -604,6 +604,14 @@ describe('COLD RELOAD: a held deadline card on the opt-in graph read follows its
     expect(r.ids).not.toContain(r.id)
   })
 
+  it('ADVERSARIAL (equal value, different identity): its goal renamed and ANOTHER goal now carries its old label → not served', async () => {
+    const decoy = { ...GOAL_GRAPH, nodes: [...GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)),
+      { id: 'g2', label: 'Ship on time', kind: 'goal' }] }
+    expect(deadlineCardSubjectOf(decoy, 'g2'), 'the decoy holds the card’s exact recorded subject').toEqual(deadlineCardSubjectOf(GOAL_GRAPH, 'g1'))
+    const r = await fieldsOn(decoy)
+    expect(r.ids).not.toContain(r.id)
+  })
+
   it('NEGATIVE: an unrelated change AND its goal renamed → not served', async () => {
     const both = unrelated({ ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) })
     expect(computeAnalysisAffectingGraphHash(both)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
