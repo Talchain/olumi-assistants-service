@@ -1187,7 +1187,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     // AIQ 5887805333 (a): the committed row keeps the card's own words and that they were confirmed on the card — the
     // audit truth that the identity was not in the brief (the `edit_graph` receipt is strict and carries no words).
-    valueConfirmations = identityConfirm.choice === 'one_off' ? ['Recorded the one-off reading. Run the analysis again.'] : [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
+    valueConfirmations = identityConfirm.choice === 'one_off' ? ['Recorded the one-off reading.'] : [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
       identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
       identityConfirm.words.trim()}”`];
   }
