@@ -38,7 +38,7 @@ import {
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { midSentence } from '../agent-lane/guidance/render.js';
-import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -92,6 +92,11 @@ export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of y
 const SPREAD_NOTE_RETIRED = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** The scale authority's exact percent spellings (`unit-scale-class.ts`), never its prefix fallback. */
+const PERCENT_TOKENS: readonly string[] = UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [];
+/** Two recorded phrases are the same words: case, spacing and apostrophe form aside. */
+const sameWords = (a: unknown, b: string): boolean => typeof a === 'string'
+  && a.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
 const SHORTFALL_TEMPLATE = 'In its worst 1 in 20 runs of this model, ‘<label>’ falls short of your target by <figure> or more.';
 const TYPICAL_SHORTFALL_TEMPLATE = 'In this model, ‘<label>’ falls short of your target in almost every run, typically by about <figure>.';
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -609,12 +614,15 @@ export function goalChanceLicenceOf(
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   // ⭐ AIE #94 6160376175 (hiring row 3): on the bound percent CHANGE from today (a change quantity this Run scored as the paired
   // change from today), a shortfall is a share of today's level of the goal ("21% of today’s productivity"): never percentage
-  // points, never a share of the target. Any other "%" change says no shortfall (it would be ambiguous); other units keep their own.
-  const percentChange = changeFrame !== undefined && classifyUnitScaleClass(target.unit) === 'percent';
-  const goalWords = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label)
-    ? midSentence(goal.label.trim()) : undefined;
-  const ofToday = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today' && goalWords !== undefined
-    ? ` of today’s ${goalWords}` : undefined;
+  // points, never a share of the target. Codex #3008 r1: bound by the RECORD, never a text classifier. The target's unit is
+  // one of the scale authority's exact percent tokens (its prefix fallback admits "percentage points"), and the validated
+  // basis records its denominator as today's level of THIS goal and its effect unit as that unit of it, exactly. Any
+  // other percent-family change says no shortfall (it would be ambiguous); other units keep their own.
+  const percentChange = changeFrame !== undefined && classifyUnitScaleClass(target.unit) !== 'unknown';
+  const ofTodayBound = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today'
+    && goalLabel !== undefined && PERCENT_TOKENS.includes(target.unit.trim().toLowerCase())
+    && sameWords(basis.denominator, `today's ${goalLabel}`) && sameWords(basis.effect_unit, `${target.unit.trim()} of today's ${goalLabel}`);
+  const ofToday = ofTodayBound ? ` of today’s ${midSentence(goalLabel!)}` : undefined;
   const shortfall = percentChange && ofToday === undefined ? {}
     : shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope, ofToday ?? '');
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.

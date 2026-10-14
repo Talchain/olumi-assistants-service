@@ -124,6 +124,34 @@ describe('hiring row 3: the Run records its threshold on the licence it states, 
       + 'typically by about 5% of today’s productivity.');
   });
 
+  /** The served graph with the goal's recorded fields changed (Codex #3008 r1's two probes, through the real handler). */
+  const withGoalFields = (fields: Rec, basis: Rec = {}): Rec => {
+    const graph = structuredClone(FX.graph) as Rec;
+    const goal = (graph.nodes as Rec[]).find((n) => n.id === 'productivity')!;
+    Object.assign(goal, fields, { goal_target_basis: { ...goal.goal_target_basis, ...basis } });
+    return graph;
+  };
+
+  it('Codex #3008 r1 (unit): a change recorded in "percentage points" says no shortfall, never "21 percentage points of today’s …"', async () => {
+    const licence = licenceOf(await runServed(FX.brief, withGoalFields({ goal_threshold_unit: 'percentage points' })));
+    expect(licence?.pct_by_option, 'the chance itself is still licensed').toEqual(FX.served_licence.pct_by_option);
+    expect(licence).not.toHaveProperty('shortfall_note_by_option');
+    // Even with a basis that says the same unit of today's level, the unit itself is not a percent token.
+    const consistent = withGoalFields({ goal_threshold_unit: 'percentage points' }, { effect_unit: "percentage points of today's productivity" });
+    expect(licenceOf(await runServed(FX.brief, consistent))).not.toHaveProperty('shortfall_note_by_option');
+  });
+
+  it('Codex #3008 r1 (denominator): a % change of something other than today\'s level of the goal says no shortfall', async () => {
+    const graph = withGoalFields({}, { denominator: 'maximum rated productivity', effect_unit: '% of maximum rated productivity' });
+    const licence = licenceOf(await runServed(FX.brief, graph));
+    expect(licence?.pct_by_option, 'the chance itself is still licensed').toEqual(FX.served_licence.pct_by_option);
+    expect(licence).not.toHaveProperty('shortfall_note_by_option');
+    // One recorded field is enough to withhold: the effect unit alone, or the denominator alone.
+    for (const basis of [{ effect_unit: '% of maximum rated productivity' }, { denominator: 'maximum rated productivity' }]) {
+      expect(licenceOf(await runServed(FX.brief, withGoalFields({}, basis))), JSON.stringify(basis)).not.toHaveProperty('shortfall_note_by_option');
+    }
+  });
+
   it('CONTRAST: the same Run with no brief read has no conditional licence, so no figure and no shortfall line (fail-safe)', async () => {
     const result = await runServed(null);
     expect(licenceOf(result)).toBeUndefined();
