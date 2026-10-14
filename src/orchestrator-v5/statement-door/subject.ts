@@ -1,15 +1,16 @@
 /**
  * ⭐ SYSTEM 1: ONE STATEMENT DOOR (DL systems re-plan 14 Oct, design approved 22:49Z). Every user statement the model records is
  * about ONE subject: a graph identity (goal, factor, option, risk or link) plus ONE field from a closed set shared with SYSTEM 2's
- * construction map. Range, bound and likely end are FORMS of a statement (`StatementForm`), never fields. A subject is resolved
+ * construction map (agreed with PROMPT 14 Oct). Range, bound and likely end are FORMS of a statement (`StatementForm`; a likely end
+ * is a bound with its qualifier), never fields. An option's setting of a node is `level` on {option_id, node}. A subject is resolved
  * by graph identity only (ids); a label is looked up exactly once, by `resolveSubject`, and never guessed. Pure.
  */
-export const STATEMENT_FIELDS = ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation', 'setting'] as const;
+export const STATEMENT_FIELDS = ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation'] as const;
 export type StatementField = (typeof STATEMENT_FIELDS)[number];
 export const SUBJECT_KINDS = ['goal', 'factor', 'option', 'risk', 'link'] as const;
 export type SubjectKind = (typeof SUBJECT_KINDS)[number];
 
-/** The ONE subject a statement is about. `to_id` names a link's target; `option_id` the option that sets `id` (`setting`, `effect`). */
+/** The ONE subject a statement is about. `to_id` names a link's target; `option_id` the option that sets `id` (its `level` there, or its `effect`). */
 export interface DoorSubject {
   readonly kind: SubjectKind;
   readonly id: string;
