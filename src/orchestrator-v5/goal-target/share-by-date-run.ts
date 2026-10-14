@@ -292,6 +292,10 @@ export function capacityRatioOutOfReach(graph: unknown, optionId: string): strin
   try { exact = exactChance(parts, threshold); } catch { return null; }
   if (exact > 0) return null;
   const { D, low } = parts.team, k = parts.ratio;
+  // ⛔ PL (14 Oct, wrong-author class): "your own soonest estimate" only for the user's OWN verified hard lower bound.
+  // An Olumi endpoint (an assumed range, a lone-point convention) is never their minimum: no out-of-reach claim, and the
+  // engine's approximate result stands with its own label.
+  if (!humanHardLowerBound(graph, share.team_part_id, low)) return null;
   const part = activePartsOf(graph as Rec, share, optionId)?.[0];
   const lead = part?.observed_state?.extra_share_by_date?.lead_low;
   const deliverable = deliverableOf(share);
@@ -307,4 +311,17 @@ export function capacityRatioOutOfReach(graph: unknown, optionId: string): strin
 /** The share goal's deliverable ("next feature launch" from "% of next feature launch"): one read of the goal's unit. */
 function deliverableOf(share: { readonly goal: Rec }): string {
   return String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
+}
+
+/**
+ * The user's own HARD lower bound on the team's time, verified (S2 `statements` on the team part's stated time): spoken by
+ * the user, about months to finish, in months, a lower bound (or a range's lower end), unqualified, not negated, and equal
+ * to the part's soonest time. Nothing else is their minimum.
+ */
+function humanHardLowerBound(graph: unknown, teamId: string, low: number): boolean {
+  const g = graph as Rec | null;
+  const statements = g?.nodes?.find((n: Rec) => n?.id === teamId)?.observed_state?.stated_time?.statements;
+  return Array.isArray(statements) && statements.some((s: Rec) => s?.speaker === 'user' && s.subject?.quantity === 'months_to_finish'
+    && s.unit === 'months' && (s.form === 'lower_bound' || s.form === 'range') && s.low === low
+    && s.qualifier === undefined && s.negated !== true);
 }

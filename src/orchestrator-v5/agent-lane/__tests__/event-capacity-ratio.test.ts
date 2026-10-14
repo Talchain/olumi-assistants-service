@@ -11,7 +11,7 @@ import { buildModelFromBrief } from '../runtime/build-model.js';
 import { unresolvedEventOptionIds, withEventShareDate, withRatioCarrierSizes } from '../../goal-target/event-by-date-model.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { CAPACITY_RATIO_COMPARISON_WITHHELD, withoutCapacityRatioComparison, withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
-import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
+import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, capacityRatioOutOfReach, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
 import { normalChance } from '../../goal-target/event-by-date-share.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../../persisted-graph-projection.js';
@@ -38,10 +38,17 @@ async function construct(answer: Rec): Promise<Rec> {
 }
 const node = (g: Rec, id: string): Rec => g.nodes.find((n: Rec) => n.id === id);
 /** Paul's 7–8 months, saved through the real team-time write (which sizes the ratio link, L3). */
-async function saved(low = 7, high = 8): Promise<Rec> {
+/** Paul's own words for his team's time (capture 5b52ff13): "At least 7 months" (a hard lower end), then "8 months" for the likely upper end. */
+const PAUL_TEAM_STATEMENTS = [
+  { speaker: 'user', quote: 'At least 7 months', source: 'At least 7 months', subject: { quantity: 'months_to_finish' }, form: 'lower_bound',
+    low: 7, unit: 'months', reading: 'olumi' },
+  { speaker: 'user', quote: '8 months', source: '8 months', subject: { quantity: 'months_to_finish' }, form: 'upper_bound', high: 8,
+    unit: 'months', qualifier: 'likely', qualifier_in_quote: false, answering: 'the likely upper end', reading: 'olumi' },
+];
+async function saved(low = 7, high = 8, extra: Rec = { statements: PAUL_TEAM_STATEMENTS }): Promise<Rec> {
   const dated = withEventShareDate(await construct(draft()), '2027-04-14', '2026-10-14') as Rec;
   const result = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: low, high_months: high,
-    deadline: '2027-04-14', reference_date: '2026-10-14' } as never, computeAnalysisAffectingGraphHash(dated as never)!);
+    deadline: '2027-04-14', reference_date: '2026-10-14', ...extra } as never, computeAnalysisAffectingGraphHash(dated as never)!);
   if (result.kind !== 'mutated') throw new Error(JSON.stringify(result));
   return result.mutatedGraph as Rec;
 }
@@ -110,6 +117,18 @@ describe('L2: an event option with no Olumi pace acts through the brief\'s own c
     expect((reachable.inference_warnings as Rec[]).filter((w) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION
       && Array.isArray(w.option_ids) && w.option_ids.includes(LEGACY))).toEqual([]);
     expect(reachable.option_comparison.find((r: Rec) => r.option_id === LEGACY).probability_of_goal).toBe(0.004);
+  });
+
+  it('⛔ PL (wrong-author class): an OLUMI endpoint is never "your own soonest estimate" — Olumi\'s 7–9 from a bare "8" makes no out-of-reach claim', async () => {
+    const g = await saved(7, 9, { forecast_months: 8, forecast_words: '8 months', range_origin: 'olumi_estimate',
+      statements: [{ speaker: 'user', quote: '8 months', source: '8 months', subject: { quantity: 'months_to_finish' }, form: 'point',
+        low: 8, high: 8, unit: 'months', reading: 'olumi' }] });
+    expect(node(g, 'event_team').observed_state.stated_time).toMatchObject({ low: 7, high: 9, range_origin: 'olumi_estimate' });
+    // The same arithmetic as Paul's (6 × 17/15 ÷ 7 < 1), but the 7 is Olumi's: no "your own" claim; the engine's result stands.
+    expect(capacityRatioOutOfReach(g, LEGACY)).toBeNull();
+    const gated = withShareByDateChanceGate(envelope(), g, 'event_goal') as Rec;
+    expect(JSON.stringify(gated.inference_warnings)).not.toContain('your own soonest estimate');
+    expect(gated.option_comparison.find((r: Rec) => r.option_id === LEGACY).probability_of_goal).toBe(0.004);
   });
 
   it('⭐ NUMERICAL (local Normal-CDF match, AIE 6175233964; not the engine, not a shown figure): the sized link gives the Normal approximation of k × the team\'s contribution, for a fixed k', async () => {
