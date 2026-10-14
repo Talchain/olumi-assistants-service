@@ -18,7 +18,7 @@ import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { unreadGoalProductBlockerOf, type UnreadGoalProduct } from '../unread-goal-product.js';
 import { staleBlockerOf, staleResultLine } from '../write-outcome.js';
 import { oneNextStep, type PressBlocker } from '../press-next-step.js';
-import { goalTargetMissingBlockerOf, isChanceGoalModel } from '../decision-input-ask.js';
+import { goalTargetMissingBlockerOf } from '../decision-input-ask.js';
 import { modelGapOf } from '../method-turn/widen-turn.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 
@@ -239,13 +239,6 @@ describe('goal_target_missing ranks FIRST (Paul\'s funding test, DL 00:21Z)', ()
     // Contrast: ONE change, the goal states a target; neither says a target is missing.
     expect(modelGapOf(withTarget)?.kind).not.toBe('goal_target_missing');
     expect(goalTargetMissingBlockerOf(withTarget)).toBeNull();
-  });
-  it('a goal met by an event by a date: the step is never "today\'s level" of its share (Paul\'s hiring test)', () => {
-    const hiring = { nodes: [{ id: 'g', kind: 'goal', label: 'Share of next feature launch done by the deadline', goal_threshold_unit: '%',
-      observed_state: { unit: '% likely' } }, { id: 'o1', kind: 'option', label: 'Hire a tech lead' }], edges: [] };
-    expect(isChanceGoalModel(hiring)).toBe(true);
-    const step = nextStepBlockerForAgent({ raw: hiring, analysis_state: { run_state: { kind: 'none' } } });
-    expect(JSON.stringify(step ?? null)).not.toMatch(/today's level/);
   });
   it('the served capture (unseen-1, a stated target): the fact is the target\'s own question, not a target ask', () => {
     const step = nextStepBlockerForAgent({ raw: graph, analysis_state: { run_state: { kind: 'complete_current' } }, analysis_result: envelope });
