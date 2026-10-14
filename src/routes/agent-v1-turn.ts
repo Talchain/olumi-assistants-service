@@ -104,6 +104,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
+import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
@@ -871,7 +872,7 @@ export const STATED_FIGURE_INSTRUCTION =
 // AIE placed inside HOST_TOOL_CONTRACT's whole replaced entry, so it is sent ONCE there and no longer joined a second time.
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
-  [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
+  `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
 );
 /** The Agent's call that offers its proposing tools: the shared instructions, then the stated-figure rule. */
 const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
@@ -930,7 +931,7 @@ export const REBUILD_AFTER_TOO_LARGE_CHIP = {
  * permission, carry no figure and no dash (AIQ 5922131997).
  */
 export const NEXT_STEP_CHIPS = [
-  { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?' },
+  { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?' },
   // "this", not "the result": the analysis is a thinking tool, not an oracle (Paul, 10 Sep; the UI's noWinnerVocabulary
   // guard bans "the result" in tab copy, and the tab's own entry reads "What would change this?", DGAI #2479).
   { id: 'agent-next-what-would-change', label: 'What would change this?', message: 'What would most likely change this result?' },
@@ -5790,9 +5791,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       sentBody: wireBody as Record<string, unknown>,
       // The automatic first analysis is this turn's Run too; a later Run in the turn wins.
       toolResults: turnRunReceipts(fa, result.tool_results),
-      currentRun: finalRead.currentRun,
+      // The final read as it came: the Run it selected and the graph the reader checks, from one read.
+      read: finalRead,
       licence: leaderLicenceFromState(analysisState, analysisReady),
-      graph: readbackGraph ?? null,
       analysisReady,
     });
     if (runDelivery.kind === 'recorded' || runDelivery.reason !== 'no_run_this_turn') {

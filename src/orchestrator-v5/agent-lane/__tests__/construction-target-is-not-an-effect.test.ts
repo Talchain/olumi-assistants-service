@@ -67,14 +67,14 @@ describe('a target-sized Olumi estimate stays labelled and is challenged', () =>
   });
 
   it.each([
-    ['ROW 1', -9000, 100],
-    ['ROW 2', -90, 1],
-  ] as const)('%s: the target-sized Olumi estimate remains labelled and asks exactly for supporting evidence', async (_row, amount, per) => {
+    ['ROW 1', -9000, 100, '£9,000'],
+    ['ROW 2', -90, 1, '£90'],
+  ] as const)('%s: the target-sized Olumi estimate remains labelled and asks exactly for supporting evidence', async (_row, amount, per, money) => {
     const { graph, out } = await build(cut({ amount, per }));
     const edge = goalEdge(graph);
     expect(magnitudeOf(edge)).toBe('olumi_estimate');
     expect((edge.provenance as Rec).natural_effect).toEqual({ amount, amount_unit: 'GBP per month', per_source_change: per, per_source_change_unit: '%', strength_mean: -0.16, strength_mean_frame: 'edge_strength' });
-    expect(asked(out)).toEqual([`Olumi estimated that raising "GCP workload share" by ${per} ${per === 1 ? 'point' : 'points'} lowers "Monthly spend" by ${Math.abs(amount)} GBP per month; at the largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is not evidence for an effect size. What evidence supports this provisional estimate?`]);
+    expect(asked(out)).toEqual([`Olumi estimated that raising "GCP workload share" by ${per} ${per === 1 ? 'point' : 'points'} lowers "Monthly spend" by ${money} per month; at the largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is not evidence for an effect size. What evidence supports this provisional estimate?`]);
   });
 
   it('CONTROL (an estimate that is not the gap): "−£4,500 per 100%" is kept as Olumi\'s estimate, nothing asked', async () => {

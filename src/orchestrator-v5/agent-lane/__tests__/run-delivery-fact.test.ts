@@ -14,15 +14,15 @@ const COACH = { ...(maximalCoachingBlock as Record<string, unknown>), action_pro
 const RESULT_BLOCK = { type: 'analysis_result', summary: 'Comparison on the current model.' };
 const ranThisTurn = { ok: true, mutated: false, ran: true, run_identity: { scenario_id: 's', graph_hash_at_run: HASH, computed_at: AT } };
 
+const GRAPH = { nodes: [{ id: 'opt_a', kind: 'option', label: 'Raise prices' }] };
 const input = (over: Partial<RunDeliveryInput> = {}): RunDeliveryInput => ({
   sentBody: {
     blocks: [RESULT_BLOCK, CARD, COACH],
     analysis_ready: { status: 'ready', options: [{ option_id: 'opt_a', label: 'Raise prices', status: 'ready', interventions: { fac_price: 60 }, extra: 'not recorded' }] },
   },
   toolResults: [ranThisTurn],
-  currentRun: { runId: 'run_1', graphHashAtRun: HASH, computedAt: AT },
+  read: { currentRun: { runId: 'run_1', graphHashAtRun: HASH, computedAt: AT }, graph: GRAPH },
   licence: 'withheld',
-  graph: { nodes: [{ id: 'opt_a', kind: 'option', label: 'Raise prices' }] },
   analysisReady: undefined,
   ...over,
 });
@@ -44,9 +44,9 @@ describe('0.79 · runDeliveryFactFor', () => {
     ['no Run this turn', { toolResults: [] }, 'no_run_this_turn'],
     ['a Run that did not run (refused)', { toolResults: [{ ...ranThisTurn, ran: false }] }, 'no_run_this_turn'],
     ['a Run result with no identity', { toolResults: [{ ok: true, mutated: false, ran: true }] }, 'no_run_this_turn'],
-    ['no current Run on the readback', { currentRun: undefined }, 'run_not_current'],
-    ['an EARLIER Run current (same graph, another computed_at)', { currentRun: { runId: 'run_0', graphHashAtRun: HASH, computedAt: '2026-10-05T07:00:00.000Z' } }, 'not_this_turns_run'],
-    ['a current Run over another graph', { currentRun: { runId: 'run_0', graphHashAtRun: 'b'.repeat(16), computedAt: AT } }, 'not_this_turns_run'],
+    ['no current Run on the readback', { read: { graph: GRAPH } }, 'run_not_current'],
+    ['an EARLIER Run current (same graph, another computed_at)', { read: { currentRun: { runId: 'run_0', graphHashAtRun: HASH, computedAt: '2026-10-05T07:00:00.000Z' }, graph: GRAPH } }, 'not_this_turns_run'],
+    ['a current Run over another graph', { read: { currentRun: { runId: 'run_0', graphHashAtRun: 'b'.repeat(16), computedAt: AT }, graph: GRAPH } }, 'not_this_turns_run'],
     ['a block the contract refuses', { sentBody: { blocks: [{ ...CARD, block_id: 'not-a-uuid' }] } }, 'record_refused'],
     ['a leader claim under a withheld licence', { sentBody: { blocks: [{ ...COACH, action_prompt: 'Raise prices leads on the current model.' }] } }, 'outside_licence'],
   ])('%s → nothing recorded (%s)', (_name, over, reason) => {

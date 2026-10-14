@@ -1,6 +1,7 @@
 import { briefAttestsEventByDate, deliverableWrittenIn, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
@@ -52,7 +53,7 @@ import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldA
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, goalLevelOfStatedSum, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -429,6 +430,8 @@ export const AIE_APPROVED_DECLARED_SUM = {
 // date keeps its role (hiring raw 9d75b605 chose "Urgent launch"); the deadline is asked once, by the host
 // (`chanceGoalDeadlineAsk`); today's level of the same whole goal quantity, stated in other words, is its level (capacity).
 export const BUILD_INSTRUCTIONS = [
+  // ⭐ OLUMI'S PURPOSE (Paul's principle; DL 14 Oct): the drafter is sent alone, so it carries the core lines itself.
+  ...OLUMI_PURPOSE_CORE_LINES,
   'The goal carries the user’s governing aim and its stated target. A date is not automatically the goal: preserve whether it is a deadline for achieving the aim, a launch or start reference, or a measurement or learning window. Use event_by_date only when delivering the stated event is itself an aim; do not replace a quantity goal with an unrelated event or move its governing target into constraints to do so. Further mandatory targets of the same purpose may stay as target constraints: preserve their AND meaning, common reference and window, and all limits and conditions. If the governing meaning is unclear, retain the original words and ask; do not invent a target or a launch-completion percentage. For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. For an event-by-date model, the host supplies the deadline question; do not add that same question to unknowns. Ask only relevant remaining timing questions, such as how long the current team would take or when new capacity becomes effective, when those facts are genuinely missing. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
@@ -461,7 +464,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'to fundraising distraction"), in the goal\u2019s money unit with a plausible_max, and link it to the goal with effect_amount '
   + '-1, effect_per_source_change 1 and definitional true: money lost to it is money the goal does not get. What causes it '
   + 'still links into it as usual. This rule says nothing about a goal the user wants LESS of (a cost or a spend).',
-  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still decide which factors it ACTS ON \u2014 that is a structural claim \u2014 and then give each one a level. '
+  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the user\u2019s question becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still decide which factors it ACTS ON \u2014 that is a structural claim \u2014 and then give each one a level. '
   + 'EVERY FACTOR IT ACTS ON NEEDS A LEVEL: for every option except the one marked is_status_quo, put one `interventions` entry for EACH factor it acts on \u2014 the user\u2019s own number where the brief states one, otherwise your estimated resulting level (value_kind:"absolute", provenance ai_proposed) in that factor\u2019s own unit and plausible_max frame. A factor an option acts on with no level leaves the user a value question before anything can be calculated. Use `changes` ONLY for a factor where no defensible level exists, and name that missing level in `unknowns`. Every factor an option acts on also needs a baseline_value (a provisional estimate with baseline_known:false when the brief gives none). An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
   // options, factors, risks, outcomes and causal mechanisms that materially improve
@@ -485,8 +488,8 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ A FIGURE RULE NEVER REMOVES STRUCTURE (DL #75 5916217417): drafted models with NO risk rose from ≤8% (20–27 Sep)
   // to 81% (30 Sep). Measured on staging 68c9789c (MG, 0 retries): both MRR briefs drafted 0 risks, hiring 2, funding
   // 1. Every rule below that limits how a risk is LINKED or SIZED had been read as a reason to leave the risk out.
-  + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
-  + 'ALWAYS KEEP AT LEAST ONE RISK: the downside that could reverse the answer is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
+  + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could change what the analysis shows). '
+  + 'ALWAYS KEEP AT LEAST ONE RISK: the downside that could change what the analysis shows is part of what the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
   // K3 (R3 #75 5925627855, #85 5931851041; DL 380e54 5932372585: GO, generalised, never money-specific): a downside
   // the user NAMES is theirs to weigh, so it is never traded away for one Olumi thought of (Paul's "we'll run out of
   // money soon" was drawn 0/4 with A4b, 1/4 before).
@@ -540,7 +543,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'AND NEVER LINK AN OPTION STRAIGHT TO A RISK. An option changes a FACTOR, and it is the factor that raises or lowers the risk, so state it as `option -> factor` (through `changes`/`interventions`) and then `factor -> risk` with its own direction, and the risk on to what it threatens. A bare option -> risk link is the one shape that LOOKS connected and cannot be analysed at all: Olumi has to stop and ask how that option changes that risk before ANY of the model can run. Measured: ONE such link refuses the whole analysis, and a real first model carried four of them. If you cannot name the factor in between, do not draw the link: ask which factor carries it in `unknowns`.',
   'EACH LINK IS A CAUSAL HYPOTHESIS, AND ITS DIRECTION MUST BE STATED, NOT DEFAULTED. Take the direction from the brief where it says so; otherwise from the causal reasoning you could state in one line ("more delivery capacity raises velocity"; "a higher price raises churn"; "higher churn lowers recurring revenue"). '
   + 'Such a link is Olumi\'s hypothesis, not the user\'s claim: provenance "inferred" when it is read out of the brief, "ai_proposed" when it is your own reasoning, and "explicit" ONLY when the user stated that relationship. '
-  + 'WHICH option is better is the question the analysis answers \u2014 it is never a reason to mark a factor\'s link to the goal "unknown": more capacity raises velocity whichever option supplies it. '
+  + 'How the options compare is what the analysis explores \u2014 it is never a reason to mark a factor\'s link to the goal "unknown": more capacity raises velocity whichever option supplies it. '
   + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
@@ -2390,7 +2393,8 @@ export async function buildModelFromBrief(
     // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
     // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
     // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
-    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
+    // The same goal admission read: the total of the user's own sum is their level (`goalLevelOfStatedSum`).
+    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, goalLevelOfStatedSum(candidate, brief).goal, admitted.loss,
       (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
     if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
     // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of

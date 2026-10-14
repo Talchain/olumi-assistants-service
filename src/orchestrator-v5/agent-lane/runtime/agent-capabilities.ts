@@ -1193,8 +1193,10 @@ async function runComparisonFacts(scenarioId: string, requestId: string, g: Grap
 }
 
 /** What a Run's output tells the model to do with its comparison facts (Paul #94 6166259456). */
-export const RUN_COMPARISON_NOTE = 'This Run has a preceding Run of this model. In your reply, coach on this Run\u2019s new result: what it '
-  + 'means for the user\u2019s goal and decision, grounded in the model\u2019s own reasoning and the science behind the analysis. Then '
+// Principle review C (DL 14 Oct): the clause invited a verdict ("goal and decision") and had no science focus.
+export const RUN_COMPARISON_NOTE = 'This Run has a preceding Run of this model. In your reply, explain what this Run\u2019s new result '
+  + 'implies for the user\u2019s goal in the current model; never recommend or pick an option. Say what the result rests on most, what '
+  + 'is still uncertain or missing, and one thing worth checking or testing next, using only the supplied analysis. Then '
   + 'compare it with the preceding Run: what changed in the model between the two Runs (from rerun_record or run_delta) and how each '
   + 'option\u2019s result moved, using only the figures given here. Where these facts cannot support a quantity (a figure withheld, a '
   + 'change not recorded, or a movement no change is shown to cause), say so plainly instead of estimating. Never present the '
@@ -10803,9 +10805,9 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
           detail:
-            'The approved change is saved. An analysis runs only when the user asks for one, never as part ' +
-            'of an approval. Nothing was analysed: do not describe any result, and tell the user they can ' +
-            'run the analysis when they are ready.',
+            // #3038: a committed change is analysed automatically after the reply (when the model is ready).
+            'The approved change is saved. When the model is ready, Olumi analyses it automatically after your ' +
+            'reply; do not describe a result or ask the user to run one.',
         };
       }
       /**

@@ -7,6 +7,7 @@ import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { applyDisconfirm, doorFactorOf, existingLevers, sameLevers, riskGate, risksTurnFromSignals,
   widenGate, widenOptionsOf, widenTurnFromSignals, RISK_METHOD, type Graph, type RunWidenTurn } from '../method-turn/widen-turn.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
+import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { budgetFor } from '../model-budgets.js';
 import { doorLevelOf, estimateLevelPersists } from './agent-capabilities.js';
 import { readIsBaseline } from '../../../cee/baseline-identity.js';
@@ -51,7 +52,8 @@ export interface DraftDiagnosis {
   options: null | 'no_distinct_lever';
 }
 
-export const DRAFT_WIDENING_PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+// ⭐ OLUMI'S PURPOSE (DL 14 Oct): sent alone, so the core lines open it, INSIDE the constant (`isDraftWideningCall` reads its start).
+export const DRAFT_WIDENING_PREAMBLE = `${OLUMI_PURPOSE_CORE_LINES.join('\n')}\n` + "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
 /** Risks pass only (DL ruling (A), 8 Oct): every item says, BY ID, whether it only restates a limit the user set or a risk
  *  already in the model; such an item is dropped by type, never by its words (served B1: "Churn guardrail breach"). */
 export function draftWideningRisksLine(graph: unknown): string {

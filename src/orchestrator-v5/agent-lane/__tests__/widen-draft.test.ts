@@ -25,7 +25,14 @@ const BRIEF = 'We want to deliver 20 features in six months. I propose Hire a Te
 const SCENARIO = '99999999-9999-4999-8999-999999999999';
 const RATIONALE = 'RATIONALE MUST NEVER REACH ANY USER VISIBLE GRAPH FIELD';
 const OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, write instead how it would move the goal through a different mechanism; never use better, best, recommend, winner, or improve.';
-const PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+/** ⭐ OLUMI'S PURPOSE (DL 14 Oct): the draft-time widening is sent alone, so its preamble opens with the purpose core lines. */
+const PURPOSE_CORE = [
+  'You are a reasoning partner, not an answer or decision engine. The user and their team own every conclusion and choice.',
+  'Olumi proposes; the user authors. Keep what you added or estimated (factors, risks, links, values, options) visibly Olumi\'s, provisional and easy to accept, change or reject. Never justify a change only because it makes the model "more correct".',
+  'Say plainly what you used from the user, what you inferred, and what you left out.',
+  'If you cannot support a claim, say so, then coach: ask for the one input that matters most, or offer a well-founded activity (a pre-mortem, testing the assumption the result rests on). Never invent a number or certainty.',
+].join('\n');
+const PREAMBLE = `${PURPOSE_CORE}\n` + "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
 // Re-pinned for S5 slice 4 (#2913): the only change is modelGapOf's deadline read (goalDeadlineOf(goal) →
 // goalDeadlineFromRecord(graph, goal.id)); no route directive byte changed.
 // Re-pinned for prompt P18 (AIE one-pass packet 94ad9c8f…): the only change is risksTurnFromSignals' first directive line
@@ -34,7 +41,9 @@ const PREAMBLE = "This is Olumi's own check of a first draft; the user has not a
 // constant, directive or instruction line changed; staging's 06fe43a7… is reproduced by restoring that branch.
 // Widening restored (14 Oct, Paul #94 6166259456): re-pinned for `thinDraftOffer`'s guard beside a widened risk (3 lines); no
 // prompt constant, directive or instruction line changed; staging's a486c4de… is reproduced by removing those 3 lines.
-const WIDEN_TURN_SHA256 = 'b9a4520020a65674e7cc2b06b0aea43eaadb595347a8391e1ff232b43fd2a434';
+// Re-pinned for OLUMI'S PURPOSE (DL 14 Oct, principle review E contradiction 4): the only change is the two `rationale`
+// directive lines ("how each option would move the goal …" for "why each option might do better"); 2 lines, nothing else.
+const WIDEN_TURN_SHA256 = 'a25bf93db995469370161897b7d98e6db3ed563f2e4cbdfdd812388f69b4aff6';
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
 // Unit-only injection; the served builder supplies its own construction-aware admission closure.
@@ -311,7 +320,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(requests).toHaveLength(2);
     const risksRequest = requests.find(isRisks)!;
     const optionsRequest = requests.find(isOptions)!;
-    expect(risksRequest.instructions.split('\n')[1]).toBe(line);
+    expect(risksRequest.instructions.split('\n')[PREAMBLE.split('\n').length]).toBe(line);
     expect(line).toContain(`Limits the user already set: ${JSON.stringify([{ id: 'pro_monthly_churn', label: 'Pro monthly churn' }])}.`);
     expect(line).toContain(`Risks already in the model: ${JSON.stringify([{ id: 'price_rise_churn_backlash', label: 'Price-rise churn backlash' }])}.`);
     const riskItemSchema = (risksRequest.schema as Rec).properties.risk_suggestions.items;
@@ -319,7 +328,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(riskItemSchema.required).toContain('restates_id');
     expect(optionsRequest.instructions).not.toContain(line);
     expect(optionsRequest.instructions).not.toContain('restates_id');
-    expect(optionsRequest.instructions.split('\n')[1]).toBe(OPTIONS_PREAMBLE);
+    expect(optionsRequest.instructions.split('\n')[PREAMBLE.split('\n').length]).toBe(OPTIONS_PREAMBLE);
   });
 
   it('dv-rich: a sufficient draft makes zero calls and ships byte-identical with zero widening latency', async () => {
@@ -846,7 +855,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const requests = callStructured.mock.calls.map(([req]) => req);
     expect(widening.DRAFT_WIDENING_PREAMBLE).toBe(PREAMBLE);
     expect(requests).toHaveLength(2);
-    for (const req of requests) expect(req.instructions.split('\n')[0]).toBe(PREAMBLE);
+    for (const req of requests) expect(req.instructions.startsWith(`${PREAMBLE}\n`)).toBe(true);
     expect(requests.find(isRisks)!.instructions).toBe(`${PREAMBLE}\n${widening.draftWideningRisksLine(graphOf(input.admitted))}\n${(risksTurn as Rec).directive}`);
     expect(widening.DRAFT_WIDENING_OPTIONS_PREAMBLE).toBe(OPTIONS_PREAMBLE);
     expect(requests.find(isOptions)!.instructions).toBe(`${PREAMBLE}\n${OPTIONS_PREAMBLE}\n${(optionsTurn as Rec).directive}`);

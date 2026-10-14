@@ -660,8 +660,10 @@ export function decisionEntityFor(
   model: Pick<CandidateModel, 'goal' | 'decision_question'>,
   brief: string | undefined,
   otherLabels: readonly string[],
-): { readonly label: string; readonly provenance: 'explicit' | 'inferred' } {
-  const fallback = { label: `Decision: ${model.goal.metric}`, provenance: 'inferred' as const };
+): { readonly label: string; readonly provenance: 'explicit' | 'inferred'; readonly display?: string } {
+  // USER VOCABULARY (Paul, 14 Oct; DL item 4): the card says "Question: <metric>" (`display`), while `label` stays the id key
+  // "Decision: <metric>", so the node id (`decision_<metric>`) is unchanged.
+  const fallback = { label: `Decision: ${model.goal.metric}`, display: `Question: ${model.goal.metric}`, provenance: 'inferred' as const };
   const copied = model.decision_question;
   if (typeof copied !== 'string' || typeof brief !== 'string') return fallback;
   const span = collapseWhitespace(copied);
@@ -2957,6 +2959,37 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
 }
 
 /**
+ * ⭐ THE TOTAL OF THE USER'S OWN SUM IS THE USER'S LEVEL TODAY (DL 13:36Z 14 Oct; served capacity 13:28Z, CEE cbcefb47,
+ * drafter row 7b90af18). Since #2981's sum text, the drafter types a total's level today `inferred` when the brief DEFINES
+ * that total as a sum of quantities it states ("Total weekly support capacity is defined as the existing 80 tickets per week
+ * plus the additional specialist capacity": goal baseline 80 `inferred`). So the goal's level was withheld
+ * (`goalLevelIsEstimated`), its sum was then refused for want of a level on its total, and capacity lost the chance it had
+ * shown. The level is the user's when the user's own words fix it: ONE declared sum on the goal, bound to a sentence of the
+ * brief; every part a factor in the goal's unit with a known level today; every non-zero part's level the user's
+ * (`verifiedFactorLevel`), and at least one such part; and the parts adding up to the drafter's level. Then the goal's level
+ * is typed `explicit`, and every later check still applies (the brief writes the figure, the subject rule, its scale).
+ * Anything else is unchanged: a zero part adds nothing to the user's figures, and any non-zero estimate keeps it Olumi's.
+ */
+export function goalLevelOfStatedSum(model: CandidateModel, brief: string | undefined): CandidateModel {
+  const goal = model.goal;
+  const level = goal.baseline_value;
+  if (!goalLevelIsEstimated(goal) || goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return model;
+  const sums = (model.identities ?? []).filter((d) => d?.operation === 'sum' && d.outcome === goal.metric);
+  const quote = sums.length === 1 ? sums[0]!.evidence?.quote : undefined;
+  if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return model;
+  const unitOf = (u: unknown): string => String(u ?? '').trim().toLowerCase();
+  const matches = sums[0]!.factors.map((label) => model.factors.filter((f) => f.label === label));
+  if (matches.length < 2 || matches.some((m) => m.length !== 1)) return model;
+  const parts = matches.map((m) => m[0]!);
+  if (parts.some((f) => unitOf(f.unit) !== unitOf(goal.unit) || f.baseline_known !== true
+    || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))) return model;
+  const stated = parts.filter((f) => f.baseline_value !== 0);
+  if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return model;
+  const total = parts.reduce((sum, f) => sum + (f.baseline_value as number), 0);
+  return Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)) ? { ...model, goal: { ...goal, baseline_provenance: 'explicit' } } : model;
+}
+
+/**
  * A bare percent ("%", "percent", "per cent", "percentage"). A qualified percent ("% of appointments", "percentage
  * points") names a measure, never only a change's size.
  */
@@ -3646,7 +3679,8 @@ function admitOnce(
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
   const { model: draftedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
   // Authenticate before framing or writing levels: an estimate never competes with the user's current figure.
-  const model = { ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) };
+  // The total of the user's own sum is the user's level today (`goalLevelOfStatedSum`), read on the verified factors.
+  const model = goalLevelOfStatedSum({ ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) }, brief);
   const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
@@ -3839,7 +3873,8 @@ function admitOnce(
       || briefWritesFactorFigure(f, brief);
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
-  const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
+  /** `display`, when set, is what the node shows; `label` stays the key its id slugs from and links resolve by. */
+  const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,
       kind: 'goal',
@@ -4147,7 +4182,7 @@ function admitOnce(
   // whose label might slug to the same token.
   const decision = decisionEntityFor(model, brief, entities.map((e) => e.label));
   const DECISION_LABEL = decision.label;
-  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: decision.provenance });
+  entities.unshift({ label: DECISION_LABEL, ...(decision.display !== undefined ? { display: decision.display } : {}), kind: 'decision', provenance: decision.provenance });
 
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
@@ -4161,16 +4196,17 @@ function admitOnce(
     // A factor with NO baseline value gets no observed_state at all — an absent
     // value is the honest record; a zero would be a measurement. (An ESTIMATED
     // value is kept, stamped as Olumi's: `estimatedObservedState`.)
-    const label = shortLabel(e.label);
-    if (label !== e.label) {
+    const shown = e.display ?? e.label;
+    const label = shortLabel(shown);
+    if (label !== shown) {
       loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
         layer: 'cee',
         field_path: `nodes[${id}].label`,
-        before: e.label,
+        before: shown,
         after: label,
         reason:
-          `The label was ${e.label.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
+          `The label was ${shown.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
           'text is preserved on the node description and here.',
         severity: 'info',
       });
@@ -4179,7 +4215,7 @@ function admitOnce(
       id,
       kind: e.kind,
       label,
-      ...(label !== e.label ? { description: e.label } : {}),
+      ...(label !== shown ? { description: shown } : {}),
       provenance: isUnverifiedUserMaterial(e.node?.observed_state)
         ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
