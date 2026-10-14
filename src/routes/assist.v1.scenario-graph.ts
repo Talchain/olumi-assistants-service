@@ -26,6 +26,7 @@ import { log } from "../utils/telemetry.js";
 // helper; this route contributes the security ladder and the graph it read.
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 import { withEstimateGoalPointsAtEgress } from "../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js";
+import { runExplanationKeyForRecord } from "../orchestrator-v5/agent-lane/run-explanation.js";
 import { projectAnalysisAdmission } from './analysis-admission-projection.js';
 import { readExecutableHeldProposalOffers, type HeldProposalOfferRead } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -141,7 +142,7 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[]; run_narration?: { readonly run_key: string } | null } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
   scenarioId: string,
   requestId: string,
   authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
@@ -152,17 +153,33 @@ async function readConversationTurns(
     const answers = rows.filter(isAgentAnswerRow)
       .filter(r => typeof r.user_message === "string" || typeof r.assistant_message === "string").slice(0, CONVERSATION_TURNS_CAP);
     const current = (authority.analysisState as { run_state?: { kind?: unknown } } | null)?.run_state?.kind === "complete_current";
-    const turns: ConversationTurnRead[] = [...answers].reverse()
-      .map((r) => ({
-        turn_id: r.turn_id,
-        created_at: r.created_at,
-        user_message: typeof r.user_message === "string" ? r.user_message : null,
-        assistant_message: typeof r.assistant_message === "string"
-          ? withEstimateGoalPointsAtEgress({ assistant_text: r.assistant_message }, {
-            analysisResult: authority.analysisResult, graph: authority.graph, current,
-            userAuthoredTexts: answers.flatMap(answer => typeof answer.user_message === 'string' ? [answer.user_message] : []),
-          }).assistant_text : null,
-      }))
+    const userAuthoredTexts = answers.flatMap(answer => typeof answer.user_message === 'string' ? [answer.user_message] : []);
+    // ⛔ AN EARLIER ANSWER NEVER ACQUIRES A NEWER RUN'S WORDS (capacity witness, staging 351eeda0, 14 Oct: an answer that
+    // said "about 37%" reloaded as the second Run's "about 64%"). The stored text is the post-wire text the user saw, already
+    // gated for its own Run when it was written. It is re-gated against the CURRENT Run only when the narration stored WITH
+    // it names that Run (`run_narration`, migration 20261013230000); an older or unknown Run keeps its words byte for byte.
+    const currentRunKey = current ? runExplanationKeyForRecord(scenarioId, authority.analysisState, authority.analysisResult) : null;
+    const egress = { analysisResult: authority.analysisResult, graph: authority.graph, current, userAuthoredTexts };
+    // The ONE estimate point classifier on this read (one call site); `current` only where the text's own Run is current.
+    const atEgress = (text: string, ownRunIsCurrent: boolean): string => {
+      return withEstimateGoalPointsAtEgress({ assistant_text: text }, { ...egress, current: current && ownRunIsCurrent }).assistant_text;
+    };
+    const turns: ConversationTurnRead[] = (await Promise.all([...answers].reverse()
+      .map(async (r) => {
+        // Only a row the gate would change reads its own Run (one read each; none in the usual case). Every row still
+        // crosses the gate; for any other Run it is not current, and the gate returns the stored text unchanged.
+        const ownRunIsCurrent = typeof r.assistant_message === "string" && currentRunKey !== null
+          && typeof store.readCommittedTurn === "function"
+          && atEgress(r.assistant_message, true) !== r.assistant_message
+          && (await store.readCommittedTurn(scenarioId, r.turn_id).catch(() => null))?.run_narration?.run_key === currentRunKey;
+        return {
+          turn_id: r.turn_id,
+          created_at: r.created_at,
+          user_message: typeof r.user_message === "string" ? r.user_message : null,
+          assistant_message: typeof r.assistant_message === "string"
+            ? atEgress(r.assistant_message, ownRunIsCurrent) : null,
+        };
+      })))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
     const heldOffers = await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store });
