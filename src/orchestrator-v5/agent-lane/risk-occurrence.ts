@@ -53,16 +53,20 @@ export function riskHoldsALevel(node: Rec): boolean {
 }
 
 /**
- * The window Olumi's range is stated over: the goal's own period in months, from the ONE goal record's horizon, else the
- * validated target reading's period. One goal only; anything else is `undefined` (no window is ever guessed).
+ * The window Olumi's range is stated over: the goal's CURRENT recorded period in months (AIE packet 6e52e896
+ * `event_risk.horizon`): the ONE goal record's horizon and the validated target reading's period, wherever held. One goal
+ * only, and one period: two recorded periods that disagree are a conflict, never a window licence. Anything else is
+ * `undefined` (no window is ever guessed, scaled or chosen between).
  */
 export function riskOccurrenceWindowMonths(graph: unknown): number | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goals.length !== 1) return undefined;
-  const held = readGoalRecord(graph, goals[0]!.id as string)?.horizon?.months;
-  const months = finite(held) ? held : goalTargetBasisOf(goals[0])?.period_months;
-  return finite(months) && Number.isInteger(months) && months >= 1 && months <= 600 ? months : undefined;
+  const recorded = [readGoalRecord(graph, goals[0]!.id as string)?.horizon?.months, goalTargetBasisOf(goals[0])?.period_months]
+    .filter(finite);
+  if (recorded.length === 0 || recorded.some((m) => m !== recorded[0])) return undefined;
+  const months = recorded[0]!;
+  return Number.isInteger(months) && months >= 1 && months <= 600 ? months : undefined;
 }
 
 export type RiskOccurrenceIneligible = 'not_a_risk' | 'holds_a_level' | 'has_a_cause' | 'no_window' | 'unreadable';
@@ -102,15 +106,17 @@ const rangeWords = (block: EventRiskV1T): string => {
   return low === high ? `${low}%` : `${low}–${high}%`;
 };
 
-/** AIE_TEXT_PENDING: the card's sentence (`recovery/prompt/EVENT-RISK-CARD-DRAFT.txt`). */
-export const RISK_OCCURRENCE_CARD_TEMPLATE = 'Adopt Olumi’s starting assumption: the chance that ‘{label}’ happens at least once '
-  + 'within {window} is {range}. It stays Olumi’s estimate after you approve it, and the size of its effect is still Olumi’s placeholder.';
-/** AIE_TEXT_PENDING: the receipt, said only after the writer's confirmed commit and a matching read-back. */
-export const RISK_OCCURRENCE_RECORDED_TEMPLATE = 'Recorded Olumi’s starting assumption: the chance that ‘{label}’ happens at least once '
-  + 'within {window} is {range}. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
+/** AIE packet 6e52e896 `event_risk.card` (#94 6161383921), byte for byte. */
+export const RISK_OCCURRENCE_CARD_TEMPLATE = 'Adopt Olumi’s starting assumption: the chance that ‘{label}’ happens at least once within {window} is {range}. This is an estimate, not a measurement, and it stays Olumi’s after approval. The size of its effect remains Olumi’s placeholder; whether the effect relationship applies is a separate assumption.';
+/** AIE packet 6e52e896 `event_risk.receipt`, byte for byte: said only after the writer's committed write and a matching read-back. */
+export const RISK_OCCURRENCE_RECORDED_TEMPLATE = 'Recorded Olumi’s starting assumption: the chance that ‘{label}’ happens at least once within {window} is {range}. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
 
 const fill = (template: string, label: string, block: EventRiskV1T): string => template
   .replace('{label}', () => label.trim()).replace('{window}', () => windowWords(block.horizon.months)).replace('{range}', () => rangeWords(block));
+/** AIE packet 6e52e896 `event_risk.readiness_copy`: the question on the eligible event path (readiness, `levelGapAsk`). */
+export const RISK_OCCURRENCE_ASK_TEMPLATE = 'How likely is ‘{label}’ to happen at least once within {window}?';
+export const riskOccurrenceAskWords = (label: string, windowMonths: number): string => RISK_OCCURRENCE_ASK_TEMPLATE
+  .replace('{label}', () => label.trim()).replace('{window}', () => windowWords(windowMonths));
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
 

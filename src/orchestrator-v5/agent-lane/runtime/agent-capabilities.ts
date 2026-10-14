@@ -170,18 +170,14 @@ const notWrittenReason = (value: number, factor: string): string =>
   + `and ask for ${factor}\u2019s figure only if the user wants to set it. Never send 0 or any placeholder to mean "not set": leave level out.`;
 
 /** What the Agent is told to say about a named input that cannot hold a value. */
-/** AIE_TEXT_PENDING (`recovery/prompt/EVENT-RISK-CARD-DRAFT.txt`): a risk root that can take Olumi's range, named without one. */
-const RISK_OCCURRENCE_NEEDED_NOTE =
-  'These are risks with no likelihood yet. Olumi can propose one as a starting assumption: call propose_assumptions again with '
-  + 'that risk alone, user_stated false, a basis, and occurrence_range (the chance in percent, low and high, that it happens at '
-  + 'least once within within_months). Nothing was proposed for them in this call.';
-/** AIE_TEXT_PENDING: what the Agent is told beside the card. */
-const RISK_OCCURRENCE_PROPOSED_NOTE =
-  'Show the card exactly as public_label. This is Olumi\u2019s estimate of the chance the risk happens at least once within the '
-  + 'window, never the user\u2019s figure and never a measurement; it stays Olumi\u2019s after approval. The size of its effect is '
-  + 'still Olumi\u2019s placeholder. Only the button on the card applies it.';
-const RISK_OCCURRENCE_ALONE_DETAIL = 'Olumi\u2019s starting assumption for a risk is its own approval. Nothing was proposed: propose '
-  + 'the risk alone in one call, and any other values in another.';
+/** AIE packet 6e52e896 `event_risk.risk_occurrence_note`, byte for byte: a risk root that can take Olumi's range, named without one. */
+const RISK_OCCURRENCE_NEEDED_NOTE = 'These risks have no held occurrence likelihood. If the event and listed window are clear and supported, propose one through the available propose_assumptions tool with that risk alone, user_stated false, a grounded basis, and occurrence_range: the low and high chance, in percent, that it happens at least once within within_months. Nothing was proposed for these risks in this call. If event meaning or window is unresolved, preserve its source and clarify only that missing part.';
+/** AIE packet 6e52e896 `event_risk.card_note`, byte for byte: what the Agent is told beside the card. */
+const RISK_OCCURRENCE_PROPOSED_NOTE = 'Show the card exactly as public_label. It proposes Olumi’s estimated occurrence likelihood within the stated window, not a human figure or a measurement. It stays Olumi’s after approval. Occurrence, the effect relationship’s existence, and its effect size remain distinct; its effect size is still Olumi’s placeholder. Only the bound approval button applies the shown change; it does not Run the model.';
+/** AIE packet 6e52e896 `event_risk.mixed_refusal`, byte for byte. */
+const RISK_OCCURRENCE_ALONE_DETAIL = 'Olumi’s starting assumption for a risk needs its own approval. Nothing was proposed: propose the risk alone in one call, and any other values in another.';
+/** AIE packet 6e52e896 `event_risk.unknown_save`, byte for byte: the unknown outcome (no recorded / not-recorded inference). */
+const RISK_OCCURRENCE_UNKNOWN_SAVE = 'The save could not be confirmed. Check the current model before retrying.';
 
 const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
@@ -3867,7 +3863,7 @@ export function createAgentCapabilities(
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
     }
     const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
-      detail: 'Olumi\u2019s starting assumption was sent but could not be confirmed in the saved model. Say exactly that; never say it was recorded or not recorded.' };
+      detail: RISK_OCCURRENCE_UNKNOWN_SAVE };
     if (res.status === 'unconfirmed') return notConfirmed;
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);

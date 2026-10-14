@@ -36,18 +36,17 @@ type Rec = Record<string, any>;
 const SERVED = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-hiring-post3007-read01-20261014.json', 'utf8')) as Rec).body as Rec;
 const RISK = 'code_quality_deterioration';
 const LABEL = 'Code quality deterioration';
-const ASK = 'How likely or how large is "Code quality deterioration" today? The numerical analysis is withheld until this risk has a '
-  + 'supported value. You can also ask Olumi to propose a labelled starting assumption for review.';
+/** AIE packet 6e52e896 `event_risk.readiness_copy` (the eligible event path), then the ask's existing sentences. */
+const ASK = 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months? The numerical analysis is withheld until '
+  + 'this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.';
 const BASIS = 'Adding people under a three-month launch deadline often strains review time.';
 const ARGS = { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: BASIS, user_stated: false,
   occurrence_range: { low_percent: 20, high_percent: 40 } }] };
 const BLOCK = { version: 1, occurrence: { p_low: 0.2, p_high: 0.4, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: 3 } };
-/** AIE_TEXT_PENDING: the card and receipt, literal here so a change to either is a visible diff. */
-const CARD = 'Adopt Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is '
-  + '20–40%. It stays Olumi’s estimate after you approve it, and the size of its effect is still Olumi’s placeholder.\n'
-  + `Olumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${BASIS}”`;
-const RECEIPT = 'Recorded Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months '
-  + 'is 20–40%. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
+/** AIE packet 6e52e896 (#94 6161383921) `event_risk.card` / `.basis_line` / `.receipt`, filled by hand: literals, so any change is a visible diff. */
+const CARD = 'Adopt Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. This is an estimate, not a measurement, and it stays Olumi’s after approval. The size of its effect remains Olumi’s placeholder; whether the effect relationship applies is a separate assumption.'
+  + `\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${BASIS}”`;
+const RECEIPT = 'Recorded Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
 const ROUTE_MS = 60_000;
 const riskOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === RISK)!;
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
@@ -132,7 +131,7 @@ const offerCard = async (turn: Awaited<ReturnType<typeof route>>) => {
 };
 
 describe('Hiring path (a): Olumi’s starting assumption for the risk root, through the real route', () => {
-  it('precondition (served): the risk root has no level and no cause, and readiness withholds the whole Run with the ask', () => {
+  it('precondition (served graph): the risk root has no level and no cause; readiness withholds the whole Run and asks the event question (AIE)', () => {
     expect(riskOf(SERVED.graph)).toEqual({ id: RISK, ref: 'R1', kind: 'risk', label: LABEL, provenance: 'ai_inferred' });
     expect((SERVED.graph.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
     expect(buildCanonicalAnalysisReadyFromGraph(SERVED.graph)).toMatchObject({ may_run: false });
@@ -143,7 +142,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     const w = world(SERVED);
     const turn = await route(w);
     const { offer, pid, chip } = await offerCard(turn);
-    expect(chip, JSON.stringify(offer.suggested_actions)).toMatchObject({ label: 'Use as a starting assumption', detail: CARD });
+    expect(chip, JSON.stringify(offer.suggested_actions)).toMatchObject({ label: 'Use as a starting assumption', message: 'Yes, use that.', detail: CARD });
     expect((offer.suggested_actions as Rec[]).filter(c => String(c.id).startsWith('agent-approve'))).toHaveLength(1);
     expect(JSON.parse(toolOutputs.at(-1)!)).toMatchObject({ ok: true, public_label: CARD,
       risk_assumption: { risk: LABEL, chance_low_percent: 20, chance_high_percent: 40, within_months: 3, olumis_estimate: true } });
@@ -160,6 +159,11 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((w.graph().edges as Rec[]).filter((e) => e.from === RISK).map((e) => e.provenance)).toEqual([
       { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true }]);
     expect(JSON.stringify(w.writes)).toContain(JSON.stringify(RECEIPT).slice(1, -1));
+    // A duplicate press writes nothing twice: the model and the count of graph writes are unchanged.
+    const graphWrites = w.writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
+    await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect(w.graph()).toEqual(expected);
+    expect(w.writes.filter((x) => x.graph !== undefined && x.graph !== null)).toHaveLength(graphWrites);
 
     // The Run: readiness admits it, no level is owed, and the Run's sent graph carries the risk with Olumi's range.
     expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: true });
@@ -176,11 +180,12 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(JSON.stringify(readiness.needs_from_user ?? [])).not.toContain(LABEL);
   }, ROUTE_MS);
 
-  it('CONTRAST: a typed yes is not the press (card-only): nothing is written and the Run stays withheld', async () => {
+  // Words typed that EXACTLY equal the one waiting card's button ARE that press (R2 T1, `agent-v1-turn.ts`); any other yes is not.
+  it('CONTRAST: a typed yes that is not the card’s own words is not the press (card-only): nothing is written', async () => {
     const w = world(SERVED);
     const turn = await route(w);
     const { offer, pid } = await offerCard(turn);
-    const typed = await turn({ message: 'Yes, use that.', source: 'composer', agent_session_id: offer._agent.session_id },
+    const typed = await turn({ message: 'Yes, go ahead.', source: 'composer', agent_session_id: offer._agent.session_id },
       [call('authorise_change', { proposal_id: pid }), say('Done.')]);
     expect((typed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'))
       .toEqual([expect.objectContaining({ ok: false, mutated: false })]);

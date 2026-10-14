@@ -39,6 +39,7 @@ import {
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
+import { riskOccurrenceAskWords, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -1372,7 +1373,12 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   const eventTeam = draftedTeamPartOf(rawGraph)?.team;
   const eventAsk = eventTeam !== undefined && eventTeam.id === gap.id ? eventModelAsk(rawGraph) : null;
   if (eventAsk) return eventAsk;
-  if (gap.kind === 'risk') return `How likely or how large is "${gap.label}" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
+  // AIE packet 6e52e896 `event_risk.readiness_copy`: where the event path is ACTUALLY available (a risk root with no level and
+  // one current goal period, `riskOccurrenceSubject`, the card's own eligibility), the question is its occurrence within that
+  // window, never a level "today". Every other risk keeps its ask, byte for byte.
+  const eventPath = gap.kind === 'risk' ? riskOccurrenceSubject(rawGraph, gap.id) : undefined;
+  const question = eventPath?.kind === 'eligible' ? riskOccurrenceAskWords(gap.label, eventPath.window_months) : `How likely or how large is "${gap.label}" today?`;
+  if (gap.kind === 'risk') return `${question} The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
   return statusQuoLevelAsk(gap.label);
 };
 

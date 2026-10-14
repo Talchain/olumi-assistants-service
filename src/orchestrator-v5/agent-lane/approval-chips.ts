@@ -46,6 +46,9 @@ const meetsReading = (stated: unknown, reading: string): boolean => stated === r
 /** AIE_TEXT_PENDING: the button on the card answering the goal's open question (`goal-target/held-change-target.ts`). */
 export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' } as const;
 
+/** AIE packet 6e52e896 `event_risk.Q3`: the button on the card of Olumi's range for a risk root (`risk-occurrence.ts`). */
+const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message: 'Yes, use that.' } as const;
+
 /** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
 const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
 
@@ -226,8 +229,10 @@ export function approvalChipsFor(
       || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
       || held.public_label !== stored!.public_label) return [];
     const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
+    const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
-      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : approve.message, detail: stored!.public_label }, AMEND_CHIP];
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message : approve.message,
+      detail: stored!.public_label }, AMEND_CHIP];
   }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
@@ -650,8 +655,8 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const ops = proposal.operations;
   // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
   if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
-  // AIE_TEXT_PENDING: Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
-  if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return 'Use as a starting assumption';
+  // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
+  if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrencePostimageIsScoped, riskOccurrenceSubject,
   type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { goalChanceEstimateCensus, olumiEstimateWords } from '../goal-chance-estimate-attribution.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 type Rec = Record<string, any>;
 const G = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-hiring-post3007-read01-20261014.json', 'utf8')) as Rec).body.graph as Rec;
@@ -63,5 +64,22 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     // CONTRAST: the user's own stated range on the same risk is not Olumi's estimate.
     const users = structuredClone(written); riskOf(users).event_risk.occurrence.basis = 'user';
     expect(goalChanceEstimateCensus(users, OPTIONS, 'productivity').counts).toEqual(before.counts);
+  });
+
+  it('AIE window: the goal’s CURRENT recorded period; two recorded periods that disagree are no window licence', () => {
+    const agree = structuredClone(G); goalOf(agree).goal_horizon_months = 3;
+    expect(riskOccurrenceSubject(agree, RISK)).toMatchObject({ kind: 'eligible', window_months: 3 });
+    const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
+    expect(riskOccurrenceSubject(conflict, RISK)).toEqual({ kind: 'ineligible', reason: 'no_window' });
+  });
+
+  it('AIE readiness copy: the eligible event path asks the occurrence within the window; an ineligible risk keeps its ask', () => {
+    const ask = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
+      .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message);
+    expect(ask(G)).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 3 months? The numerical analysis is '
+      + 'withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+    const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
+    expect(ask(conflict)).toEqual(['How likely or how large is "Code quality deterioration" today? The numerical analysis is withheld until this '
+      + 'risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
   });
 });
