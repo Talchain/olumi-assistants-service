@@ -245,9 +245,10 @@ export function capacityRatioWords(part: Rec | undefined): string {
   const withUnit = (value: unknown, unit: unknown): string =>
     `${months(Number(value))}${typeof unit === 'string' && unit !== '' ? (unit.startsWith('%') ? unit : ` ${unit}`) : ''}`;
   const identity = `${q(basis.capacity)} = ${basis.factors.map((f: Rec) => q(f.label)).join(' × ')}`;
-  const derived = basis.factors.filter((f: Rec) => f.derived !== null && typeof f.derived === 'object').map((f: Rec) => f.derived.split_with !== undefined
+  const derived = basis.factors.flatMap((f: Rec) => f.derived !== null && typeof f.derived === 'object' ? [f.derived.split_with !== undefined
     ? `${q(f.label)} at ${withUnit(f.today, f.unit)} today, worked out on Olumi’s assumption that the time is split only between it and ${q(f.derived.split_with)}`
-    : `${q(f.label)} at ${withUnit(f.today, f.unit)} today, worked out by Olumi from ${q(f.derived.from)}`);
+    : `${q(f.label)} at ${withUnit(f.today, f.unit)} today, worked out by Olumi from ${q(f.derived.from)}`]
+    : f.estimated === true ? [`${q(f.label)} at ${withUnit(f.today, f.unit)} today, Olumi’s estimate`] : []);
   const reading = `${basis.identity_stated === true ? `your brief’s ${identity}` : `Olumi’s reading that ${identity}`}`
     + (derived.length === 0 ? '' : ` (with ${derived.join('; ')})`);
   const olumis = (Array.isArray(basis.settings) ? basis.settings : []).filter((x: Rec) => x.olumis === true)
