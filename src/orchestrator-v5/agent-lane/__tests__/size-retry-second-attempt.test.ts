@@ -87,6 +87,29 @@ describe('the gates still hold on the second retry, and there is never a third',
     expect(registered).toBe(0);
   });
 
+  // Codex FAIL 3011 r1 (`codex/CHECK-3011-b61aaf1a-codex.md`): the second retry is held to the FIRST retry's gates. Rep 7's
+  // own model, edited the two ways Codex found registering, must be refused exactly as the first retry would refuse them.
+  it.each<[string, (d: Rec) => void]>([
+    ['cuts a kept option\'s link into the kept risk (Agency campaign effort → Unknown conversion lift)', (d) => {
+      const before = (d.links as Rec[]).length;
+      d.links = (d.links as Rec[]).filter((l) => !(l.from === 'Agency campaign effort' && l.to === 'Unknown conversion lift'));
+      expect((d.links as Rec[]).length, 'PRECONDITION: rep 7 drew that link').toBe(before - 1);
+    }],
+    ['reverses the kept risk\'s link to the goal path (Unknown conversion lift → Conversion rate)', (d) => {
+      const l = (d.links as Rec[]).find((x) => x.from === 'Unknown conversion lift' && x.to === 'Conversion rate')!;
+      expect(l.direction, 'PRECONDITION: rep 7 drew it negative').toBe('negative');
+      l.direction = 'positive';
+    }],
+  ])('RED: a second retry that %s is refused, as the first would be; nothing registers', async (_case, edit) => {
+    const second = structuredClone(R.retry_rep7) as Rec;
+    edit(second);
+    const { sent, result, registered, trace } = await construct([FIRST.draft_call1, R.retry_rep7, second]);
+    expect(sent).toHaveLength(3);
+    expect(trace).toMatchObject({ outcome: 'adopted', second: 'kept_first' });
+    expect(result).toMatchObject({ ok: false, refusal: 'model_too_large', edges: 31 });
+    expect(registered).toBe(0);
+  });
+
   it('CONTRAST: a first retry within the limit (rep 6) ends it: no second retry, no `second` on the trace', async () => {
     const { sent, result, trace } = await construct([FIRST.draft_call1, R.retry_rep6, R.retry_rep9]);
     expect(sent).toHaveLength(2);

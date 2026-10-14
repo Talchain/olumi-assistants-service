@@ -1898,6 +1898,10 @@ export async function buildModelFromBrief(
     // The user's limits and levels are read against the FIRST draft and ITS gaps (paired with `firstCandidate`): after an
     // adoption `preparation` is the carried one, and a second attempt read against it re-authored the user's limited quantity.
     const firstPreparation = preparation;
+    // ⛔ EVERY retry passes the FIRST retry's gates (Codex FAIL 3011 r1): the risk check is keyed on what the first attempt was
+    // asked and judged against the first draft's risks. Keyed on `askedNow`, an adopted retry that cleared its repair issue left
+    // the second attempt unchecked, and it registered a kept risk's cut link (and a reversed one) the first would refuse.
+    const firstGateCandidate = candidate;
     const outcomes: Array<'adopted' | 'kept_first' | 'retry_failed'> = [];
     const traceOf = (): ConstructionTrace => ({ retried: true, reasons, outcome: outcomes[0]!, ...(outcomes[1] === undefined ? {} : { second: outcomes[1] }) });
     for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -1992,7 +1996,7 @@ export async function buildModelFromBrief(
             // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
             (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
             // The collapsed quantity is the one risk the chain issue asks the retry to replace.
-            (askedNow.length === 0 || retainsRiskHypotheses({ ...candidate, risks: candidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
+            (asked.length === 0 || retainsRiskHypotheses({ ...firstGateCandidate, risks: firstGateCandidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
             // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
             (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
           ) {
