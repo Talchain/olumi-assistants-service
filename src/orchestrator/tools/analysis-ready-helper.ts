@@ -41,6 +41,10 @@ import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analys
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
+// The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
+import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
+import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
+import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -1227,9 +1231,29 @@ function relationshipAsk(option: unknown): string | undefined {
  * only cause it was is a root the engine samples. Where the guard would refuse
  * instead (the goal, a compared option or a lever's target is excluded) it
  * withholds nothing, and neither does this reader.
+ * The options are the ones the Run SUBMITS, through the Run's own chain: the user's exclusions, the analysable gate,
+ * then Olumi's filter (an unadopted suggestion leaves when two of the user's options remain). An option the Run drops
+ * cannot make the guard refuse (#2999 check: one targeting an excluded node had kept its unvalued child out of the ask).
  */
-function leftOutOfRun(graph: GraphV3T, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
-  const options = (payload.options ?? []) as ReadonlyArray<{ option_id?: unknown; interventions?: unknown }>;
+function optionsTheRunSubmits(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload): ReadonlyArray<Record<string, unknown>> {
+  // As the snapshot loader builds them (`build-turn-context.ts` mergeOptionInterventionObjects).
+  const optionNodes = new Map<string, Record<string, unknown>>(graph.nodes
+    .filter((node) => node.kind === 'option').map((node) => [node.id, node as unknown as Record<string, unknown>]));
+  const options = (payload.options ?? []).map((option) => {
+    const node = optionNodes.get(option.option_id);
+    return { id: option.option_id, option_id: option.option_id, label: option.label,
+      interventions: node ? mergeInterventionSourceObjects(node) : {},
+      ...((option as { is_baseline?: boolean }).is_baseline !== undefined
+        ? { is_baseline: (option as { is_baseline?: boolean }).is_baseline } : {}) };
+  });
+  const user = userExcludedOptions({ options, graph: rawGraph });
+  const gate = gateAnalysableOptions({ options: user.options, graph, rawPersistedGraph: rawGraph, scaleNetEnabled: true });
+  return filterOlumiProposedOptions({ submitted: gate.options as ReadonlyArray<Record<string, unknown>>, graph: rawGraph,
+    unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options;
+}
+
+function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
+  const options = optionsTheRunSubmits(graph, rawGraph, payload) as ReadonlyArray<{ option_id?: unknown; interventions?: unknown }>;
   const refusing = new Set<string>([
     goalId,
     ...options.flatMap((option) => (typeof option.option_id === 'string' ? [option.option_id] : [])),
@@ -1257,7 +1281,7 @@ function goalRootsWithoutStatusQuoLevel(
     return kind === 'option' || kind === 'decision' || kind === 'constraint';
   };
   const goalId = payload.goal_node_id;
-  const notSent = leftOutOfRun(graph, payload, goalId);
+  const notSent = leftOutOfRun(graph, rawGraph, payload, goalId);
   const parents = new Map<string, number>();
   const children = new Map<string, string[]>();
   for (const edge of graph.edges) {
