@@ -4137,7 +4137,9 @@ export function createAgentCapabilities(
   };
 
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true): Promise<ToolResult> => {
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true,
+    /** The sentence the words were read from, quoted on the card (the route's card, ruling A). */
+    readFrom?: string): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4198,6 +4200,7 @@ export function createAgentCapabilities(
       const rationale = typeof args.rationale === 'string' ? args.rationale : '';
       const sourceDetail = rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
+      const quoted = readFrom === undefined || readFrom.trim() === stated.words.trim() ? '' : ` in “${readFrom.trim().replace(/[.!?]+$/, '')}”`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4208,7 +4211,7 @@ export function createAgentCapabilities(
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
+        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”${quoted}.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
       });
       proposals.put(proposal);
       return {
@@ -10472,7 +10475,9 @@ export function createAgentCapabilities(
         return card === undefined ? undefined : { words: card.words,
           // A throw in the shared tail never takes the turn down: the same refusal the door already says.
           issue: async (subject, args) => {
-            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference); } catch {
+            // Ruling A (DL 14 Oct): the words are the user's, quoted with their sentence; that they are THIS goal's deadline is the
+            // drafter's reading, so every route card is Olumi's interpretation to check (approval stays approval, never authorship).
+            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference, undefined, true, false, card.quote); } catch {
               return { ok: false, mutated: false, refusal: 'deadline_not_placed', detail: deadlineRefusalDetail.horizon_not_modelled };
             }
           } };
