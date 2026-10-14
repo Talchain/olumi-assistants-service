@@ -287,7 +287,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
 const UNSIZED = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-7f5659fd-unsized-options-graph-20261014.json', import.meta.url), 'utf8')) as {
   graph_text: string; graph_sha256: string };
 const STRUCTURAL = /no factor connections|cannot reach the goal|Connect it to at least one factor/;
-const issuesOf = (g: unknown): Rec[] => resolveRunAdmission(g).assessment.issues as Rec[];
+const issuesOf = (g: unknown): Rec[] => resolveRunAdmission(g).assessment.issues as unknown as Rec[];
 
 describe('an unsized deadline-forecast option is asked for its effect, never called unconnected (served 7f5659fd turn 06)', () => {
   it('PRECONDITION: the served graph after team time, byte-pinned; no option is sized and every option links only to the sketch', () => {

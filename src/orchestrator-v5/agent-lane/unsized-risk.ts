@@ -5,8 +5,8 @@
  *
  * A positively identified, still-provisional OLUMI risk suggestion that nobody has sized is kept in the saved model, visibly, and
  * left out of the Run's calculation: never sampled, never read as zero, never said as "doesn't happen" (AIE: deleting a root proves
- * no chance conditional on its absence). The host says once what the calculation leaves out, in the AIE's exact words, and offers
- * the existing occurrence ask as coaching only where its window exists (no horizon is invented).
+ * no chance conditional on its absence). The host says once what the calculation leaves out, in the AIE's exact words. The Run
+ * runs on everything supported; sizing the risk (the existing occurrence card) is coaching in addition, never the completion.
  *
  * In the set: a RISK with a unique id that
  *  · is OLUMI'S, by positive evidence only (`authorshipOf({ nodeTag })` is `ai`, i.e. the drafter's own `ai_inferred` label, or
@@ -20,7 +20,7 @@
  */
 import { authorshipOf, nodeIntroductionOf } from '../../cee/provenance/provenance-of.js';
 import { limitNodeIds } from '../../graph/retained-limit.js';
-import { riskHoldsALevel, riskOccurrenceAskWords, riskOccurrenceSubject } from './risk-occurrence.js';
+import { riskHoldsALevel } from './risk-occurrence.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -77,18 +77,15 @@ export function withoutUnsizedOlumiRisks<T>(graph: T, identityGraph: unknown = g
 
 /**
  * The host's ONE line for an unsized Olumi risk, in the AIE's exact words (6177505214): "These chances cover…" beside a shown
- * chance, "This calculation covers…" where none is shown. The coaching step is the existing occurrence ask, offered only where its
- * window exists (one current goal period, `riskOccurrenceSubject`); otherwise the line promises nothing and invents no horizon.
+ * chance, "This calculation covers…" where none is shown. A statement, never a question: a host line carrying the occurrence ask
+ * displaced the Run reply's answer shape (B1 route row), so the ask stays with the existing occurrence card and readiness copy.
  */
 export function unsizedOlumiRiskLine(graph: unknown, riskId: string, besideChance: boolean): string | null {
   const node = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === riskId) : undefined;
   const label = typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : null;
   if (label === null || /[\r\n]/.test(label)) return null;
-  const omission = `${besideChance ? 'These chances cover' : 'This calculation covers'} the modelled effects only. ‘${label}’ is Olumi’s `
+  return `${besideChance ? 'These chances cover' : 'This calculation covers'} the modelled effects only. ‘${label}’ is Olumi’s `
     + 'unsized risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.';
-  const subject = riskOccurrenceSubject(graph, riskId);
-  return subject.kind !== 'eligible' ? omission
-    : `${omission} To include it: is ‘${label}’ already true now? If not: ${riskOccurrenceAskWords(label, subject.window_months)}`;
 }
 
 /** The AIE's label-free form, where a label would not reach the user whole: the count, never a guess. */

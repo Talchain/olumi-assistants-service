@@ -61,7 +61,7 @@ async function sentGraph(g: Json): Promise<Json | null> {
 
 const OMISSION = 'This calculation covers the modelled effects only. ‘Specialist availability risk’ is Olumi’s unsized risk suggestion and is '
   + 'not included in this calculation; its likelihood and impact remain unresolved.';
-const asksFor = (g: Json): Json[] => (resolveRunAdmission(g).assessment.issues as Json[]).filter((i) => i.factor_id === RISK);
+const asksFor = (g: Json): Json[] => (resolveRunAdmission(g).assessment.issues as unknown as Json[]).filter((i) => i.factor_id === RISK);
 
 describe('an unsized Olumi risk never holds the Run; it is left out and said once (capacity, UI joined witness 358132d8)', () => {
   it('PRECONDITION: the served capacity model, byte-pinned; the risk is Olumi’s (ai_inferred), with no figure, feeding capacity', () => {

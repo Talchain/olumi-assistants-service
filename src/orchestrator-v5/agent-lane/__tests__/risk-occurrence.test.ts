@@ -289,11 +289,10 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
 
   it('RED→GREEN: their words → ONE card quoting them → the press → the risk holds now as THEIRS (occurrence 1, basis user); its gap closes', async () => {
     const w = world();
-    // Before (AMENDED, DL 15 Oct 23:19Z): Olumi's unsized risk is left out of the Run, so readiness does not ask; the host's line
-    // offers the held-state reading first, then the AIE occurrence ask, as coaching.
+    // Before (AMENDED, DL 15 Oct 23:19Z): Olumi's unsized risk is left out of the Run, so readiness does not ask, and the host
+    // says what the calculation leaves out; the user's own words below still size it through this card.
     expect(asks(w.graph())).toEqual([]);
-    expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toContain('To include it: is ‘Code quality deterioration’ already true now? If not: '
-      + 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months?');
+    expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toContain('‘Code quality deterioration’ is Olumi’s unsized risk suggestion');
     const card = await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
     expect(card).toMatchObject({ ok: true, risk_holds_now: { risk: 'Code quality deterioration', quote: SAID, within_months: 3 } });
     expect(card.public_label).toBe(`From your message: ‘${SAID}’ Do you want to record that ‘Code quality deterioration’ is already true now? `

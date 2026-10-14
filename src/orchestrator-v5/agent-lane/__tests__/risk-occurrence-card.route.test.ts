@@ -38,8 +38,6 @@ const SERVED = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-h
 const RISK = 'code_quality_deterioration';
 const LABEL = 'Code quality deterioration';
 /** AIE packet 6e52e896 `event_risk.readiness_copy` (the eligible event path), then the ask's existing sentences. */
-const ASK = 'Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers until '
-  + 'this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.';
 const BASIS = 'Adding people under a three-month launch deadline often strains review time.';
 const ARGS = { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: BASIS, user_stated: false,
   occurrence_range: { low_percent: 20, high_percent: 40 } }] };
@@ -158,15 +156,14 @@ const offerCard = async (turn: Awaited<ReturnType<typeof route>>) => {
 describe('Hiring path (a): Olumi’s starting assumption for the risk root, through the real route', () => {
   // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214; was: readiness withholds the whole Run and asks the event question). The
   // risk is Olumi's own suggestion (`ai_inferred`) and unsized, so it no longer holds the Run: it is left out of the calculation
-  // and the host's line says so in the AIE's words, with the same event question as coaching. The card below still sizes it.
+  // and the host's line says so in the AIE's words. The card below still sizes it (coaching in addition, never the completion).
   it('precondition (served graph): the risk root has no level and no cause; it is left out of the Run, and its event question is coaching (AIE)', () => {
     expect(riskOf(SERVED.graph)).toEqual({ id: RISK, ref: 'R1', kind: 'risk', label: LABEL, provenance: 'ai_inferred' });
     expect((SERVED.graph.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
     expect(buildCanonicalAnalysisReadyFromGraph(SERVED.graph)).toMatchObject({ may_run: true });
     expect(levelAsks(SERVED.graph)).toEqual([]);
     expect(unsizedOlumiRiskLine(SERVED.graph, RISK, false)).toBe(`This calculation covers the modelled effects only. ‘${LABEL}’ is Olumi’s unsized `
-      + `risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved. To include it: is ‘${LABEL}’ `
-      + `already true now? If not: How likely is ‘${LABEL}’ to happen at least once within 3 months?`);
+      + 'risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.');
   });
 
   it('GREEN: propose → ONE card → the press → saved as Olumi’s → the Run is admitted → a cold reopen keeps it', async () => {
@@ -362,7 +359,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_assumptions')).toMatchObject({ ok: false });
     expect((offer.suggested_actions ?? []).filter((c: Rec) => String(c.id).startsWith('agent-approve'))).toEqual([]);
     expect(w.graph()).toEqual(unperiod.graph);
-    // AMENDED (DL 15 Oct 23:19Z): left out, not asked; with no goal period its line offers no occurrence ask (no horizon invented).
+    // AMENDED (DL 15 Oct 23:19Z): left out, not asked; its line is the AIE's omission sentence.
     expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK)).toEqual([]);
     expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toBe(`This calculation covers the modelled effects only. ‘${LABEL}’ is Olumi’s unsized `
       + 'risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.');
