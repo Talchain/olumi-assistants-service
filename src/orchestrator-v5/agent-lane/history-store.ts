@@ -375,7 +375,7 @@ export const DURABLE_SEED_TURNS = 20;
 /** The raw rows a reseed reads so that {@link DURABLE_SEED_TURNS} answer rows survive the drop (claim + sub-turns). */
 export const DURABLE_SEED_ROWS_READ = 100;
 
-export type DurableRow = { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null };
+export type DurableRow = { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null; created_at?: string | null };
 
 /** The Agent's own answer rows with words, oldest first (`readRecent` returns newest first). */
 function durableAnswerRows<T extends DurableRow>(turns: readonly T[]): T[] {

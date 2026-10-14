@@ -1782,8 +1782,22 @@ const CHIP_HASH_SEP = '#chip:';
  * PLAIN hash of them: no `#chip:` suffix and no operation in the digest, the same rule as `typedByUser`. The reseed holds
  * proven rows as typed words (`HistoryStore.seed`); every other row stays source-unknown.
  */
-export function typedRowProof(scenarioId: string, userId: string | null): (row: { request_hash?: string | null; user_message?: string | null }) => boolean {
-  return (row) => typeof row.user_message === 'string' && row.request_hash === agentTurnRequestHash(scenarioId, userId, row.user_message);
+export function typedRowProof(scenarioId: string, userId: string | null):
+  (row: { request_hash?: string | null; user_message?: string | null; created_at?: string | null }) => boolean {
+  return (row) => typeof row.user_message === 'string' && writtenSinceTypedOriginCutoff(row.created_at)
+    && row.request_hash === agentTurnRequestHash(scenarioId, userId, row.user_message);
+}
+/**
+ * ⛔ THE CUTOFF (DL, 14 Oct): before DGAI c3a20ea9 (#2792 + #2793 + #2794) the UI sent some of Olumi's own text without a
+ * chip (GuidanceStrip discuss and exercise, confirm, OptionsComparison, OptionPreview, DraftNotes, FactorNode, …), so an
+ * older row's plain hash does not prove its words were typed. Only rows written once that UI was served are proven:
+ * staging's version.json showed c3a20ea9 at 21:03Z (built 20:24:48Z), so the cutoff is that observation, never earlier.
+ * An older row, or one with no readable time, stays source-unknown.
+ */
+export const TYPED_ORIGIN_PROOF_FROM = '2026-10-14T21:03:00Z';
+function writtenSinceTypedOriginCutoff(createdAt: string | null | undefined): boolean {
+  const at = typeof createdAt === 'string' ? Date.parse(createdAt) : Number.NaN;
+  return Number.isFinite(at) && at >= Date.parse(TYPED_ORIGIN_PROOF_FROM);
 }
 /** A durable typed discriminator lets the UI's chipless retry recognise SCI-DEEP without reversing the digest. */
 export const STRUCTURAL_CHALLENGE_HASH_TAG = 'sci-deep:';

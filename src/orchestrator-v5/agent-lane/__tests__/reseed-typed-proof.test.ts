@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { HistoryStore, historyFromDurableTurns, type DurableRow } from '../history-store.js';
-import { agentTurnRequestHash, typedRowProof } from '../../../routes/agent-v1-turn.js';
+import { agentTurnRequestHash, TYPED_ORIGIN_PROOF_FROM, typedRowProof } from '../../../routes/agent-v1-turn.js';
 import { verifyStatements } from '../user-statements.js';
 
 const SCENARIO = '42d10ecf-34c5-4c0a-ba6b-e2186b47c2c8';
@@ -29,7 +29,11 @@ const SERVED: DurableRow[] = [
   { request_hash: 'agent_turn:9ee3205a9573bf7e7ac01b26c17b7d7f44c4598004ca5fb46397e328dc367be6', user_message: 'Yes, record those.', assistant_message: 'a' }, // the card press
   { request_hash: 'agent_turn:9065583b7c4c0baa91f2178039a67ba0057c5bfa331855d924f0750d6075340e', user_message: MEANING, assistant_message: 'a' },
 ];
-const ROWS = [...SERVED].reverse();
+/** The same rows written after the UI cutoff (`TYPED_ORIGIN_PROOF_FROM`): the hashes are content-bound, so only the time moves. */
+const at = (i: number, base: string): string => new Date(Date.parse(base) + i * 60_000).toISOString();
+const ROWS = SERVED.map((r, i) => ({ ...r, created_at: at(i, '2026-10-14T21:10:00Z') })).reverse();
+/** As served: 16:38–16:43Z, before the UI sent every piece of Olumi's text as a chip. */
+const ROWS_AS_SERVED = SERVED.map((r, i) => ({ ...r, created_at: at(i, '2026-10-14T16:38:00Z') })).reverse();
 /** The route's own proof, as its reseed passes it (`agent-v1-turn.ts` `typedRowProof`). */
 const proofFor = (subject: string | null) => typedRowProof(SCENARIO, subject);
 
@@ -72,9 +76,31 @@ describe('a redeploy keeps what the user typed, from the row\'s own request hash
 
   it('NEGATIVE: a chip press of plain-looking words is never typed (its hash carries #chip:)', () => {
     const chip = `${agentTurnRequestHash(SCENARIO, null, OTHERS)}#chip:0123456789abcdef0123456789abcdef`;
-    const rows = [{ request_hash: chip, user_message: OTHERS, assistant_message: 'a' }];
+    const rows = [{ request_hash: chip, user_message: OTHERS, assistant_message: 'a', created_at: '2026-10-14T21:10:00Z' }];
     const h = new HistoryStore();
     h.seed('sess', historyFromDurableTurns(rows), [], rows, proofFor(null));
     expect(h.typedWords('sess')).toEqual([]);
+  });
+
+  it('⛔ CUTOFF: rows written before the UI sent all of Olumi\'s text as chips (DGAI c3a20ea9) are never proven typed', () => {
+    const h = new HistoryStore();
+    h.seed('sess', historyFromDurableTurns(ROWS_AS_SERVED), [], ROWS_AS_SERVED, proofFor(null));
+    expect(h.typedWords('sess')).toEqual([]);
+    // The boundary itself: one millisecond before is unknown, the instant itself is proven.
+    const row = (created_at: string | null) => ({ request_hash: agentTurnRequestHash(SCENARIO, null, OTHERS), user_message: OTHERS, created_at });
+    expect(proofFor(null)(row(new Date(Date.parse(TYPED_ORIGIN_PROOF_FROM) - 1).toISOString()))).toBe(false);
+    expect(proofFor(null)(row(TYPED_ORIGIN_PROOF_FROM))).toBe(true);
+    expect(proofFor(null)(row(null))).toBe(false);
+  });
+
+  it('⛔ EXACT-MATCH TWIN: typed words equal to the one card\'s button ARE the press, never typed; a near-match is typed', () => {
+    const press = 'Yes, record those.';
+    const pressed = { request_hash: agentTurnRequestHash(SCENARIO, null, press, 'approve:prop_0123456789abcdef'), user_message: press, created_at: '2026-10-14T21:20:00Z' };
+    const near = 'Yes, record those, please.';
+    const typed = { request_hash: agentTurnRequestHash(SCENARIO, null, near), user_message: near, created_at: '2026-10-14T21:21:00Z' };
+    const rows = [typed, pressed];
+    const h = new HistoryStore();
+    h.seed('sess', historyFromDurableTurns(rows), [], rows, proofFor(null));
+    expect(h.typedWords('sess')).toEqual([near]);
   });
 });

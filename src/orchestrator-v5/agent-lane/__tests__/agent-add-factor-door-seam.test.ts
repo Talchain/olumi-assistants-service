@@ -73,7 +73,8 @@ const store = {
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
         handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
-        created_at: new Date(Date.UTC(2026, 8, 27, 0, 0, tick)).toISOString() });
+        // After the typed-origin cutoff (`TYPED_ORIGIN_PROOF_FROM`, the UI that sends all of Olumi's text as chips).
+        created_at: new Date(Date.UTC(2026, 9, 15, 0, 0, tick)).toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) {
         graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
