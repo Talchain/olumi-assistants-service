@@ -10,6 +10,7 @@ import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edi
 import { proposeProductIdentity } from './identity-proposal.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { sentenceAround } from './unplaced-goal-level.js';
+import { alreadyTrueQuoteOf, riskOccurrenceSubject } from './risk-occurrence.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -61,4 +62,30 @@ export function heldFigureAskToConfirm(p: {
   // The LAST Run decides, as `identityAskLineOwed` reads it: a later Run without the ask clears it.
   const last = p.toolCalls.flatMap((c, i) => (c.name === 'run_analysis' ? [p.toolResults[i]] : [])).at(-1);
   return isRec(last) && typeof last.identity_ask_say === 'string' && last.identity_ask_say.trim() !== '' ? last.identity_ask_say : undefined;
+}
+
+/**
+ * ⭐ S2 HOLDS NOW, FROM THE BRIEF, ONE PRESS (DL 14 Oct, marketing de659cfd: "I'm not that experienced with marketing" was asked
+ * "How likely is ‘Limited marketing experience’ to happen…?" every turn). The drafter read that the brief says the risk ALREADY
+ * holds, and admission kept its whole sentence (`already_true_quote`). The route issues S2-B's holds-now card for the FIRST such
+ * risk the event path can record (`riskOccurrenceSubject` eligible), quoting that sentence; the card's door re-verifies it as the
+ * user's words, and only the press records it. Never when the turn proposed or approved anything or a card is waiting.
+ */
+export function briefHoldsNowArgs(graph: unknown): { readonly assumptions: readonly Rec[] } | undefined {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return undefined;
+  for (const node of graph.nodes.filter(isRec)) {
+    const quote = alreadyTrueQuoteOf(node);
+    if (quote === undefined || typeof node.id !== 'string' || typeof node.label !== 'string') continue;
+    if (riskOccurrenceSubject(graph, node.id).kind !== 'eligible') continue;
+    return { assumptions: [{ factor_label: node.label, value: 0, unit: '', basis: '', user_stated: true, holds_now: { quote } }] };
+  }
+  return undefined;
+}
+
+export function briefHoldsNowToIssue(p: {
+  readonly toolCalls: readonly { readonly name: string }[];
+  readonly proposalOffered: boolean;
+  readonly heldWaiting: boolean;
+}): boolean {
+  return !p.proposalOffered && !p.heldWaiting && !p.toolCalls.some((c) => c.name === 'authorise_change' || c.name.startsWith('propose_'));
 }

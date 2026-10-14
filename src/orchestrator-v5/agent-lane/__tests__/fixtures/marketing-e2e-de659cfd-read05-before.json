@@ -1,0 +1,1258 @@
+{
+ "_provenance": {
+  "source": "recovery/live/runs/2026-10-14T202102Z-marketing-e2e-de659cfd-ffb2b138/marketing/reads/05-04-before.json",
+  "served": {
+   "cee": "de659cfdcc28b3934009b9a88e207437e5eb40c2"
+  },
+  "label": "04-before",
+  "at": "2026-10-14T20:25:15.680Z"
+ },
+ "body": {
+  "scenario_id": "be168e19-568a-45c6-b71a-1d40d7892e76",
+  "brief_text": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+  "graph": {
+   "edges": [
+    {
+     "to": "hire_marketing_manager",
+     "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "ai_tool_plus_advertising",
+     "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "continue_as_now",
+     "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_marketing_time",
+     "from": "hire_marketing_manager",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "annual_marketing_spend",
+     "from": "hire_marketing_manager",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "marketing_manager_hired",
+     "from": "hire_marketing_manager",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "advertising_spend",
+     "from": "ai_tool_plus_advertising",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_marketing_time",
+     "from": "ai_tool_plus_advertising",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "annual_marketing_spend",
+     "from": "ai_tool_plus_advertising",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "ai_campaign_tool_in_use",
+     "from": "ai_tool_plus_advertising",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "marketing_manager_hired",
+     "from": "continue_as_now",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "ai_campaign_tool_in_use",
+     "from": "continue_as_now",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "campaign_planning_quality",
+     "from": "marketing_manager_hired",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "campaign_planning_quality",
+     "from": "ai_campaign_tool_in_use",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "campaign_planning_quality",
+     "from": "founder_marketing_time",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "conversion_rate",
+     "from": "campaign_planning_quality",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "conversion_rate",
+     "from": "limited_marketing_experience",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "qualified_launch_traffic",
+     "from": "advertising_spend",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "new_customers",
+     "from": "qualified_launch_traffic",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "new_customers",
+     "from": "conversion_rate",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "annual_marketing_spend",
+     "from": "marketing_manager_hired",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "annual_marketing_spend",
+     "from": "ai_campaign_tool_in_use",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "annual_marketing_spend",
+     "from": "advertising_spend",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    }
+   ],
+   "nodes": [
+    {
+     "id": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+     "ref": "D1",
+     "kind": "decision",
+     "label": "Should I hire a marketing manager, or use an AI tool to plan the campaign for…",
+     "provenance": "from_brief",
+     "description": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?"
+    },
+    {
+     "id": "new_customers",
+     "ref": "G2",
+     "kind": "goal",
+     "label": "New customers",
+     "provenance": "from_brief",
+     "goal_direction": ">=",
+     "goal_threshold": 0.8,
+     "goal_target_basis": {
+      "source": "olumi_reading",
+      "reference": "launch",
+      "target_raw": 20,
+      "effect_unit": "customers",
+      "period_kind": "over_period",
+      "target_frame": "level",
+      "also_required": [
+       "conversion rate of over 15%"
+      ],
+      "period_months": 3,
+      "quantity_frame": "level",
+      "effects_at_period_end": false
+     },
+     "goal_threshold_cap": 25,
+     "goal_threshold_raw": 20,
+     "goal_threshold_unit": "customers",
+     "goal_threshold_frame": "level",
+     "goal_threshold_cap_provenance": "target_derived_headroom"
+    },
+    {
+     "id": "hire_marketing_manager",
+     "ref": "O2",
+     "kind": "option",
+     "label": "Hire marketing manager",
+     "provenance": "from_brief",
+     "interventions": {
+      "marketing_manager_hired": {
+       "unit": "managers",
+       "value": 0.1,
+       "source": "cee_hypothesis",
+       "raw_value": 1,
+       "target_match": {
+        "node_id": "marketing_manager_hired",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "ai_tool_plus_advertising",
+     "ref": "O4",
+     "kind": "option",
+     "label": "AI tool plus advertising",
+     "provenance": "from_brief",
+     "interventions": {
+      "ai_campaign_tool_in_use": {
+       "value": 1,
+       "source": "cee_hypothesis",
+       "target_match": {
+        "node_id": "ai_campaign_tool_in_use",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "continue_as_now",
+     "ref": "O5",
+     "kind": "option",
+     "label": "Continue as now",
+     "provenance": "ai_inferred",
+     "is_baseline": true
+    },
+    {
+     "id": "marketing_manager_hired",
+     "ref": "F6",
+     "kind": "factor",
+     "label": "Marketing manager hired",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "scale_frame": 10
+    },
+    {
+     "id": "ai_campaign_tool_in_use",
+     "ref": "F7",
+     "kind": "factor",
+     "label": "AI campaign tool in use",
+     "category": "controllable",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "advertising_spend",
+     "ref": "F3",
+     "kind": "factor",
+     "label": "Advertising spend",
+     "category": "controllable",
+     "provenance": "from_brief",
+     "scale_frame": 200000
+    },
+    {
+     "id": "founder_marketing_time",
+     "ref": "F8",
+     "kind": "factor",
+     "label": "Founder marketing time",
+     "category": "controllable",
+     "provenance": "from_brief",
+     "scale_frame": 100
+    },
+    {
+     "id": "campaign_planning_quality",
+     "ref": "F9",
+     "kind": "factor",
+     "label": "Campaign planning quality",
+     "category": "observable",
+     "provenance": "ai_inferred",
+     "scale_frame": 100
+    },
+    {
+     "id": "annual_marketing_spend",
+     "ref": "F10",
+     "kind": "factor",
+     "label": "Annual marketing spend",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "scale_frame": 200000
+    },
+    {
+     "id": "limited_marketing_experience",
+     "ref": "R4",
+     "kind": "risk",
+     "label": "Limited marketing experience",
+     "provenance": "from_brief"
+    },
+    {
+     "id": "qualified_launch_traffic",
+     "ref": "OC2",
+     "kind": "outcome",
+     "label": "Qualified launch traffic",
+     "provenance": "ai_inferred",
+     "scale_frame": 100000
+    },
+    {
+     "id": "conversion_rate",
+     "ref": "F11",
+     "kind": "factor",
+     "label": "Conversion rate",
+     "category": "observable",
+     "provenance": "from_brief",
+     "scale_frame": 100
+    },
+    {
+     "id": "annual_campaign_spending",
+     "ref": "F4",
+     "kind": "factor",
+     "label": "Annual campaign spending",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "scale_frame": 200000
+    },
+    {
+     "id": "founder_time_on_campaign",
+     "ref": "F5",
+     "kind": "factor",
+     "label": "Founder time on campaign",
+     "category": "controllable",
+     "provenance": "from_brief",
+     "scale_frame": 100
+    }
+   ],
+   "ref_high_water": {
+    "D": 1,
+    "F": 11,
+    "G": 2,
+    "O": 5,
+    "R": 4,
+    "OC": 2
+   },
+   "goal_constraints": [
+    {
+     "role": "goal_target",
+     "unit": "customers",
+     "label": "New customers",
+     "value": 20,
+     "node_id": "new_customers",
+     "operator": ">=",
+     "provenance": "inferred",
+     "value_frame": "level",
+     "constraint_id": "agent-lane:new_customers:>="
+    },
+    {
+     "role": "goal_target",
+     "unit": "%",
+     "label": "Conversion rate",
+     "value": 15,
+     "node_id": "conversion_rate",
+     "operator": ">=",
+     "provenance": "inferred",
+     "value_frame": "level",
+     "constraint_id": "agent-lane:conversion_rate:>=",
+     "operator_as_stated": ">"
+    },
+    {
+     "unit": "GBP/year",
+     "label": "Annual marketing spend",
+     "value": 100000,
+     "node_id": "annual_marketing_spend",
+     "operator": "<=",
+     "provenance": "explicit",
+     "value_frame": "level",
+     "constraint_id": "agent-lane:annual_marketing_spend:<="
+    },
+    {
+     "unit": "%",
+     "label": "Founder marketing time",
+     "value": 25,
+     "node_id": "founder_marketing_time",
+     "operator": "<=",
+     "provenance": "explicit",
+     "value_frame": "level",
+     "constraint_id": "agent-lane:founder_marketing_time:<="
+    },
+    {
+     "unit": "£/year",
+     "label": "Annual campaign spending",
+     "value": 100000,
+     "node_id": "annual_campaign_spending",
+     "operator": "<=",
+     "provenance": "explicit",
+     "value_frame": "level",
+     "constraint_id": "agent-lane:annual_campaign_spending:<=",
+     "retained_unresolved_limit": {
+      "role": "original",
+      "state": "unscored",
+      "reason": "retained_limit_equivalence_unresolved",
+      "question": "Do these describe the same limit?",
+      "previous_constraint_id": "agent-lane:annual_campaign_spending:<=",
+      "proposed_constraint_ids": [
+       "agent-lane:annual_marketing_spend:<="
+      ]
+     }
+    },
+    {
+     "unit": "% of time",
+     "label": "Founder time on campaign",
+     "value": 25,
+     "node_id": "founder_time_on_campaign",
+     "operator": "<=",
+     "provenance": "explicit",
+     "value_frame": "level",
+     "constraint_id": "agent-lane:founder_time_on_campaign:<=",
+     "retained_unresolved_limit": {
+      "role": "original",
+      "state": "unscored",
+      "reason": "retained_limit_quantity_unresolved",
+      "question": "What forecast and basis should be used to evaluate this retained limit?",
+      "previous_constraint_id": "agent-lane:founder_time_on_campaign:<=",
+      "proposed_constraint_ids": []
+     }
+    }
+   ]
+  },
+  "analysis_result": null,
+  "analysis_state": {
+   "run_state": {
+    "kind": "never_run"
+   },
+   "readiness": {
+    "status": "needs_user_input",
+    "blockers": [
+     {
+      "repairability": "human_input_required",
+      "option_id": "hire_marketing_manager",
+      "option_label": "Hire marketing manager",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Founder marketing time\" needs a numeric value for option \"Hire marketing manager\""
+     },
+     {
+      "repairability": "human_input_required",
+      "option_id": "hire_marketing_manager",
+      "option_label": "Hire marketing manager",
+      "factor_id": "annual_marketing_spend",
+      "factor_label": "Annual marketing spend",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Annual marketing spend\" needs a numeric value for option \"Hire marketing manager\""
+     },
+     {
+      "repairability": "human_input_required",
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "advertising_spend",
+      "factor_label": "Advertising spend",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Advertising spend\" needs a numeric value for option \"AI tool plus advertising\""
+     },
+     {
+      "repairability": "human_input_required",
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Founder marketing time\" needs a numeric value for option \"AI tool plus advertising\""
+     },
+     {
+      "repairability": "human_input_required",
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "annual_marketing_spend",
+      "factor_label": "Annual marketing spend",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Annual marketing spend\" needs a numeric value for option \"AI tool plus advertising\""
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Marketing manager hired\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "marketing_manager_hired",
+      "factor_label": "Marketing manager hired"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"AI campaign tool in use\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "ai_campaign_tool_in_use",
+      "factor_label": "AI campaign tool in use"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Advertising spend\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "advertising_spend",
+      "factor_label": "Advertising spend"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder marketing time\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "Is ‘Limited marketing experience’ already true now? If so, say so. If not: How likely is ‘Limited marketing experience’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.",
+      "repairability": "human_input_required",
+      "factor_id": "limited_marketing_experience",
+      "factor_label": "Limited marketing experience"
+     }
+    ]
+   },
+   "leader_claim": {
+    "permitted": false,
+    "withheld_reason": "analysis_no_result"
+   },
+   "robustness": {},
+   "usable_for_prose": false,
+   "usable_for_chips": false,
+   "usable_for_followup": false,
+   "requires_rerun": false,
+   "blocked_unusable": false,
+   "contradictions": []
+  },
+  "current_read": {
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "hire_marketing_manager",
+      "label": "Hire marketing manager",
+      "status": "needs_encoding",
+      "interventions": {
+       "marketing_manager_hired": 0.1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "marketing_manager_hired": {
+        "display_value": "1 managers",
+        "normalised_value": 0.1,
+        "raw_value": 1,
+        "unit": "managers"
+       }
+      },
+      "raw_interventions": {
+       "marketing_manager_hired": 1
+      },
+      "status_reason": "Awaiting effect values for \"Founder marketing time\" and \"Annual marketing spend\""
+     },
+     {
+      "option_id": "ai_tool_plus_advertising",
+      "label": "AI tool plus advertising",
+      "status": "needs_encoding",
+      "interventions": {
+       "ai_campaign_tool_in_use": 1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "ai_campaign_tool_in_use": {
+        "display_value": "1",
+        "normalised_value": 1
+       }
+      },
+      "status_reason": "Awaiting effect values for \"Advertising spend\", \"Founder marketing time\" and \"Annual marketing spend\""
+     },
+     {
+      "option_id": "continue_as_now",
+      "label": "Continue as now",
+      "status": "ready",
+      "interventions": {},
+      "is_baseline": true,
+      "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+     }
+    ],
+    "goal_node_id": "new_customers",
+    "status": "needs_user_input",
+    "blockers": [
+     {
+      "option_id": "hire_marketing_manager",
+      "option_label": "Hire marketing manager",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Founder marketing time\" needs a numeric value for option \"Hire marketing manager\"",
+      "suggested_action": "add_value"
+     },
+     {
+      "option_id": "hire_marketing_manager",
+      "option_label": "Hire marketing manager",
+      "factor_id": "annual_marketing_spend",
+      "factor_label": "Annual marketing spend",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Annual marketing spend\" needs a numeric value for option \"Hire marketing manager\"",
+      "suggested_action": "add_value"
+     },
+     {
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "advertising_spend",
+      "factor_label": "Advertising spend",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Advertising spend\" needs a numeric value for option \"AI tool plus advertising\"",
+      "suggested_action": "add_value"
+     },
+     {
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Founder marketing time\" needs a numeric value for option \"AI tool plus advertising\"",
+      "suggested_action": "add_value"
+     },
+     {
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "annual_marketing_spend",
+      "factor_label": "Annual marketing spend",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Annual marketing spend\" needs a numeric value for option \"AI tool plus advertising\"",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "marketing_manager_hired",
+      "factor_label": "Marketing manager hired",
+      "blocker_type": "missing_value",
+      "message": "What is \"Marketing manager hired\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "ai_campaign_tool_in_use",
+      "factor_label": "AI campaign tool in use",
+      "blocker_type": "missing_value",
+      "message": "What is \"AI campaign tool in use\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "advertising_spend",
+      "factor_label": "Advertising spend",
+      "blocker_type": "missing_value",
+      "message": "What is \"Advertising spend\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "blocker_type": "missing_value",
+      "message": "What is \"Founder marketing time\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "limited_marketing_experience",
+      "factor_label": "Limited marketing experience",
+      "blocker_type": "missing_value",
+      "message": "Is ‘Limited marketing experience’ already true now? If so, say so. If not: How likely is ‘Limited marketing experience’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.",
+      "suggested_action": "add_value"
+     }
+    ],
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 20,
+    "goal_threshold_unit": "customers",
+    "goal_threshold_cap": 25,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "readiness_issues": [
+     {
+      "issue_id": "semantic_1",
+      "repairability": "human_input_required",
+      "option_id": "hire_marketing_manager",
+      "option_label": "Hire marketing manager",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Founder marketing time\" needs a numeric value for option \"Hire marketing manager\"",
+      "provenance": "unattributed",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "semantic_2",
+      "repairability": "human_input_required",
+      "option_id": "hire_marketing_manager",
+      "option_label": "Hire marketing manager",
+      "factor_id": "annual_marketing_spend",
+      "factor_label": "Annual marketing spend",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Annual marketing spend\" needs a numeric value for option \"Hire marketing manager\"",
+      "provenance": "unattributed",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "semantic_3",
+      "repairability": "human_input_required",
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "advertising_spend",
+      "factor_label": "Advertising spend",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Advertising spend\" needs a numeric value for option \"AI tool plus advertising\"",
+      "provenance": "unattributed",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "semantic_4",
+      "repairability": "human_input_required",
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Founder marketing time\" needs a numeric value for option \"AI tool plus advertising\"",
+      "provenance": "unattributed",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "semantic_5",
+      "repairability": "human_input_required",
+      "option_id": "ai_tool_plus_advertising",
+      "option_label": "AI tool plus advertising",
+      "factor_id": "annual_marketing_spend",
+      "factor_label": "Annual marketing spend",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Annual marketing spend\" needs a numeric value for option \"AI tool plus advertising\"",
+      "provenance": "unattributed",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "level_1",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Marketing manager hired\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "marketing_manager_hired",
+      "factor_label": "Marketing manager hired",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_2",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"AI campaign tool in use\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "ai_campaign_tool_in_use",
+      "factor_label": "AI campaign tool in use",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_3",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Advertising spend\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "advertising_spend",
+      "factor_label": "Advertising spend",
+      "provenance": "unattributed",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_4",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder marketing time\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_marketing_time",
+      "factor_label": "Founder marketing time",
+      "provenance": "unattributed",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_5",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "Is ‘Limited marketing experience’ already true now? If so, say so. If not: How likely is ‘Limited marketing experience’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.",
+      "repairability": "human_input_required",
+      "factor_id": "limited_marketing_experience",
+      "factor_label": "Limited marketing experience",
+      "provenance": "unattributed",
+      "obligation": "required"
+     }
+    ],
+    "repair_proposal": {
+     "proposal_version": "readiness_repair_v1",
+     "complete": true,
+     "issue_ids": [
+      "semantic_1",
+      "semantic_2",
+      "semantic_3",
+      "semantic_4",
+      "semantic_5",
+      "level_1",
+      "level_2",
+      "level_3",
+      "level_4",
+      "level_5"
+     ],
+     "changes": [],
+     "unresolved_inputs": [
+      {
+       "issue_id": "semantic_1",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Founder marketing time\" needs a numeric value for option \"Hire marketing manager\"",
+       "option_id": "hire_marketing_manager",
+       "factor_id": "founder_marketing_time",
+       "obligation": "offered",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "semantic_2",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Annual marketing spend\" needs a numeric value for option \"Hire marketing manager\"",
+       "option_id": "hire_marketing_manager",
+       "factor_id": "annual_marketing_spend",
+       "obligation": "offered",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "semantic_3",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Advertising spend\" needs a numeric value for option \"AI tool plus advertising\"",
+       "option_id": "ai_tool_plus_advertising",
+       "factor_id": "advertising_spend",
+       "obligation": "offered",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "semantic_4",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Founder marketing time\" needs a numeric value for option \"AI tool plus advertising\"",
+       "option_id": "ai_tool_plus_advertising",
+       "factor_id": "founder_marketing_time",
+       "obligation": "offered",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "semantic_5",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Annual marketing spend\" needs a numeric value for option \"AI tool plus advertising\"",
+       "option_id": "ai_tool_plus_advertising",
+       "factor_id": "annual_marketing_spend",
+       "obligation": "offered",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "level_1",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Marketing manager hired\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "marketing_manager_hired",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      },
+      {
+       "issue_id": "level_2",
+       "kind": "option_effect_value",
+       "prompt": "What is \"AI campaign tool in use\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "ai_campaign_tool_in_use",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      },
+      {
+       "issue_id": "level_3",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Advertising spend\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "advertising_spend",
+       "obligation": "required",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "level_4",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Founder marketing time\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "founder_marketing_time",
+       "obligation": "required",
+       "provenance": "unattributed"
+      },
+      {
+       "issue_id": "level_5",
+       "kind": "option_effect_value",
+       "prompt": "Is ‘Limited marketing experience’ already true now? If so, say so. If not: How likely is ‘Limited marketing experience’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.",
+       "factor_id": "limited_marketing_experience",
+       "obligation": "required",
+       "provenance": "unattributed"
+      }
+     ]
+    },
+    "may_run": false,
+    "analysis_admission": {
+     "structurally_analysable": false,
+     "missing_important_inputs": [
+      {
+       "issue_id": "semantic_1",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "hire_marketing_manager",
+       "option_label": "Hire marketing manager",
+       "factor_id": "founder_marketing_time",
+       "factor_label": "Founder marketing time",
+       "why_it_matters": "Factor \"Founder marketing time\" needs a numeric value for option \"Hire marketing manager\"",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "semantic_2",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "hire_marketing_manager",
+       "option_label": "Hire marketing manager",
+       "factor_id": "annual_marketing_spend",
+       "factor_label": "Annual marketing spend",
+       "why_it_matters": "Factor \"Annual marketing spend\" needs a numeric value for option \"Hire marketing manager\"",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "semantic_3",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "ai_tool_plus_advertising",
+       "option_label": "AI tool plus advertising",
+       "factor_id": "advertising_spend",
+       "factor_label": "Advertising spend",
+       "why_it_matters": "Factor \"Advertising spend\" needs a numeric value for option \"AI tool plus advertising\"",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "semantic_4",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "ai_tool_plus_advertising",
+       "option_label": "AI tool plus advertising",
+       "factor_id": "founder_marketing_time",
+       "factor_label": "Founder marketing time",
+       "why_it_matters": "Factor \"Founder marketing time\" needs a numeric value for option \"AI tool plus advertising\"",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "semantic_5",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "ai_tool_plus_advertising",
+       "option_label": "AI tool plus advertising",
+       "factor_id": "annual_marketing_spend",
+       "factor_label": "Annual marketing spend",
+       "why_it_matters": "Factor \"Annual marketing spend\" needs a numeric value for option \"AI tool plus advertising\"",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_1",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "marketing_manager_hired",
+       "factor_label": "Marketing manager hired",
+       "why_it_matters": "What is \"Marketing manager hired\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_2",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "ai_campaign_tool_in_use",
+       "factor_label": "AI campaign tool in use",
+       "why_it_matters": "What is \"AI campaign tool in use\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_3",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "advertising_spend",
+       "factor_label": "Advertising spend",
+       "why_it_matters": "What is \"Advertising spend\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_4",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "founder_marketing_time",
+       "factor_label": "Founder marketing time",
+       "why_it_matters": "What is \"Founder marketing time\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_5",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "limited_marketing_experience",
+       "factor_label": "Limited marketing experience",
+       "why_it_matters": "Is ‘Limited marketing experience’ already true now? If so, say so. If not: How likely is ‘Limited marketing experience’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      }
+     ],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "none",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "Review all 10 readiness issues together before analysis."
+      },
+      {
+       "field": "missing_important_inputs",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "5 inputs are still needed from you."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "This model cannot be analysed yet."
+      }
+     ],
+     "graph_hash": "caaa18a117e55aba73237415434a548e8a33150ccd1e9e4be447df75a8f0e947",
+     "semantic_signals": {
+      "confidence_parameters_total": 23,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 13,
+      "confidence_parameters_unattributed": 10,
+      "material_parameters_total": 8,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 2,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "marketing_manager_hired",
+       "ai_campaign_tool_in_use",
+       "campaign_planning_quality",
+       "conversion_rate"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "current_graph_hash": "caaa18a117e55aba"
+   },
+   "run_state": {
+    "kind": "never_run"
+   },
+   "computed_against_hash": null,
+   "current_analysis_hash": "caaa18a117e55aba",
+   "figures": []
+  }
+ }
+}
