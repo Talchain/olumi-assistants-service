@@ -61,9 +61,8 @@ describe('get_canonical_state: every link says who sized it (served 799d1a5d)', 
 });
 
 describe('propose_link_strengths says when it replaces an estimate (served 799d1a5d)', () => {
-  // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
   const propose = (keys: readonly string[]) => createAgentCapabilities(d, new ProposalStore()).proposeLinkStrengths!(ctx, {
-    links: keys.map((k) => { const [from, to] = k.split('->'); return { user_stated: false, basis: 'Olumi’s own estimate from the model', from_label: label(from!), to_label: label(to!), strength: 'very strong' }; }),
+    links: keys.map((k) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength: 'very strong' }; }),
     rationale: 'fix them all',
   }) as Promise<{ ok: boolean; links?: { was: { sizing?: string } }[]; note?: string; refusal?: string; detail?: string }>;
 
@@ -95,9 +94,8 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
     ? { ...e, provenance: { ...e.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-01T09:25:00.000Z' } } } : e)) });
   const composed = async (asked: readonly (readonly [string, InfluenceBand])[], graph: unknown = F.graph) => {
     const dg: InternalDispatch = async (path) => (path.endsWith('/graph') ? { status: 200, json: { graph, graph_hash: F.graph_hash } } : { status: 500, json: {} });
-    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
     const args = {
-      links: asked.map(([k, strength]) => { const [from, to] = k.split('->'); return { user_stated: false, basis: 'Olumi’s own estimate from the model', from_label: label(from!), to_label: label(to!), strength }; }),
+      links: asked.map(([k, strength]) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength }; }),
       rationale: 'fix them all', whole_request: true,
     };
     const result = await createAgentCapabilities(dg, new ProposalStore()).proposeLinkStrengths!(ctx, args);
@@ -194,10 +192,10 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
         grounded_links: [{ from: FROM, to: TO }] } : {}) };
     const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const, rationale: userText,
       ...(named ? { from_words: words } : {}) };
-    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
     const args = singular ? link : { links: [link], whole_request: true };
     const result = singular ? await caps.proposeLinkStrength!(context, link)
-      : await caps.proposeLinkStrengths!(context, { links: [{ user_stated: typeof link.from_words === 'string', ...(typeof link.from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...link }], rationale: userText });
+      // ⛔ INPUT CHANGE (#3002): the named band carries the AI's own claim `user_stated`, as a prompt-following AI gives it.
+      : await caps.proposeLinkStrengths!(context, { links: [{ user_stated: named, ...link }], rationale: userText });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     const proposal = store.get(String(result.proposal_id))!;
     // Same-band approval stays a review at 0.5 on a sized link, and for Olumi's band on a drawn link (the adoption writer

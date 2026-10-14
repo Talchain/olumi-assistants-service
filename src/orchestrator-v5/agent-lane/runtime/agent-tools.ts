@@ -462,9 +462,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
           strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
           from_words: { type: 'string', description: 'For a positively verified user-authored band only: copy the complete latest applicable statement about this directed link verbatim from a verified user message, retaining speaker/source, qualification and negation. A report, question, dispute, or evidence-strength word is not the user\u2019s own link estimate. Otherwise omit human-credit words and preserve the original source separately; omission alone grants neither AI authorship nor a new estimate.' },
-          // AIE_TEXT_PENDING (DL r2 design approved 14 Oct; the AIE writes the exact words): the three tiers' one AI claim.
-          user_stated: { type: 'boolean', description: 'true only when from_words quotes the user\u2019s own complete statement of this link\u2019s band. false for everything else: Olumi\u2019s own new estimate (then give no from_words, and give basis), and a band that someone else stated or that the user cites or reports ("Alice says…", "the evidence says…"), or that comes from a question or a dispute.' },
-          basis: { type: 'string', description: 'Only with user_stated false: Olumi\u2019s own grounds for this estimate, in one sentence (what in the model or the evidence supports this band). Without it the band is not recorded as Olumi\u2019s estimate.' },
+          // AIE_TEXT_PENDING (DL split of #3002, 14 Oct; the AIE writes the exact words): the AI's one claim of the user's words.
+          user_stated: { type: 'boolean', description: 'true only when from_words quotes the user\u2019s own complete statement of this link\u2019s band. false for everything else: Olumi\u2019s own new estimate (then give no from_words), and a band that someone else stated or that the user cites or reports ("Alice says…", "the evidence says…"), or that comes from a question or a dispute.' },
         }, ['from_label', 'to_label', 'strength', 'user_stated']),
       },
       rationale: { type: 'string', description: 'What the user asked for, in their words.' },
@@ -923,9 +922,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
-    // #3002 r2: the AI's own claim (`user_stated`, required in the tool schema; absent reads UNKNOWN) and Olumi's own basis.
+    // #3002: the AI's own claim (`user_stated`, required in the tool schema). The host's own cards send none.
     links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string;
-      user_stated?: boolean; basis?: string }[];
+      user_stated?: boolean }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */

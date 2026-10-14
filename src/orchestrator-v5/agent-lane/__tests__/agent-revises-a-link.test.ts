@@ -350,8 +350,7 @@ describe('a link strength is said as its band word, never as Olumi\'s internal n
   it('RED (the set Olumi sizes): the card, the result and the note carry no number and no scale', async () => {
     const w = world(graphWith(0.5));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
-    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
-    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ user_stated: false, basis: 'Olumi’s own estimate from the model', from_label: 'Pro plan price', to_label: 'MRR', strength: 'moderate' }], rationale: 'x' });
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Pro plan price', to_label: 'MRR', strength: 'moderate' }], rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(String(p.public_label)).toContain('"Pro plan price" → "MRR" as moderate, Olumi’s estimate');
     expect(String(p.public_label)).not.toMatch(/\d|0–1|scale/);

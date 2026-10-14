@@ -2199,6 +2199,13 @@ function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews:
 
 /** D1 (AIE AMEND, 12 Oct), verbatim: the pending offer's words for Olumi's first estimate of a link nobody had sized. */
 export const D1_PENDING_FIRST_ESTIMATE = 'an estimate from Olumi that has not yet been applied';
+/**
+ * #3002 (DL split, Codex CHECK-3002-783a55b8 item 3): the HOST names, on the card itself, each link left out because the
+ * source of its band is not verified, by the model's own labels for its ids, so the user never relies on the Agent saying
+ * it. AIE_TEXT_PENDING (the AIE writes the exact words).
+ */
+export const leftOutUnknownOriginCard = (pairs: readonly string[]): string => pairs.length === 0 ? ''
+  : `. Not included, because the source of ${pairs.length === 1 ? 'its band' : 'their bands'} is not verified (nothing changes for ${pairs.length === 1 ? 'it' : 'them'}): ${pairs.join('; ')}`;
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -5009,25 +5016,24 @@ export function createAgentCapabilities(
           ...(typed.trim() !== '' ? { thisMessage: typed } : {}), ...(ctx.unverified_user_text !== undefined ? { unverified: ctx.unverified_user_text } : {}) },
           g.nodes, from.id, to.id, bound);
         /**
-         * ⭐ THE THREE TIERS (DL on Codex CHECK-3002-a3b352af): the Agent says whose band it is (`user_stated`), the host
-         * verifies, and an unverified claim is never anyone's.
+         * ⭐ WHOSE BAND (DL split of #3002 after Codex CHECK-3002-783a55b8): the Agent says when it quotes the user
+         * (`user_stated`), and the host verifies.
          *  · USER: `user_stated` true AND the quote verifies (`linkBandSource`).
-         *  · OLUMI: `user_stated` false, NO quote, Olumi's OWN `basis` (DL amendment, PL #94 05:12Z), and the conversation does
-         *    not read this band for this link: Olumi's own new estimate, explicitly declared (`statementOrigin`'s own-estimate rule).
-         *  · UNKNOWN: anything else. That includes an absent claim, `user_stated` false without a basis, a quote that does not
-         *    verify (truncated history too), a quote the Agent says is not the user's ("Alice supplied these…"), and a copied
-         *    band. The AI's non-user claim is never overridden, and a known source stays the link's: nothing is written.
+         *  · UNKNOWN: a quote, or the Agent's claim of the user's words, that does not verify (truncated history too), or a
+         *    quote the Agent says is not the user's: never relabelled Olumi's. And a band the conversation reads for this
+         *    link without a verified quote (copied).
+         *  · OLUMI: otherwise, no quote and no claim of the user's words: Olumi's own estimate, staging's rule unchanged.
+         *    ⛔ PRE-EXISTING RESIDUAL (staging): a band the Agent attributes to someone else WITHOUT a quote ("Alice
+         *    supplied…") is still Olumi's here. The structured origin field (olumi / third_party) is the next PR.
          */
-        const claimed = l.user_stated;
         const quoted = typeof l.from_words === 'string' && l.from_words.trim() !== '';
-        const ownBasis = typeof l.basis === 'string' && l.basis.trim() !== '';
-        const origin = claimed === true && source.verified ? 'human'
-          : claimed === false && !quoted && ownBasis ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
-            : 'unknown';
-        // An UNKNOWN band is left out and said, never written; the links whose origin IS known are still offered (Paul's
+        const origin = l.user_stated === true && source.verified ? 'human'
+          : quoted || l.user_stated === true ? 'unknown'
+            : statementOrigin(false, source.copied, ctx.user_text_complete !== false, true);
+        // An UNKNOWN band is left out and named, never written; the links whose origin IS known are still offered (Paul's
         // served set: his named links are his, "all other listed effects to moderate" names no link, so those stay unknown).
         // A band the user's OWN strength already sits in changes nothing whoever names it: it goes on to "already" below.
-        if (origin === 'unknown' && !(keepsUsers && linkSizing(edge) === 'user')) { unknownOrigin.push(name); continue; }
+        if (origin === 'unknown' && !(keepsUsers && linkSizing(edge) === 'user')) { unknownOrigin.push(pair); continue; }
         const stated = origin === 'human' ? [band] : null;
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
@@ -5134,7 +5140,8 @@ export function createAgentCapabilities(
             // from Olumi that has not yet been applied"; the typed `whose` stays the contract, and no receipt after a confirmed
             // write says it (the approval's words are the narrator's own).
             : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x) === 'Olumi\u2019s first estimate for a link nobody had sized'
-              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; '),
+              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; ')
+          + leftOutUnknownOriginCard(unknownOrigin),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;

@@ -218,16 +218,47 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   });
   it.each([false, true])('credit never carries to a different link earlier=$earlier', async earlier => {
     const words = 'Monthly churn has a strong effect on Paying subscribers.';
-    // ⛔ EXPECTATION CHANGED (r2, the three tiers): the quote of the OTHER link does not verify, so it is UNKNOWN, never Olumi's
-    // (the check's own expectation was model_proposed). Without a quote and with the AI's explicit Olumi claim, it is Olumi's.
+    // ⛔ EXPECTATION CHANGED (r2): the quote of the OTHER link does not verify, so it is UNKNOWN, never Olumi's (the check's own
+    // expectation was model_proposed). Without a quote, and not read in the conversation, it is Olumi's (staging's rule).
     const p = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', from_words:words, user_stated: true}]);
     expect(p.door.refusal).toBe('origin_unknown');
     expect(p.door.operations).toHaveLength(0);
     doors.length = 0;
-    const o = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', user_stated: false, basis: 'Olumi\u2019s own estimate from the model'}]);
+    const o = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', user_stated: false}]);
     expect(o.door.operations).toHaveLength(1);
     expect(o.door.operations[0].path).toBe('monthly_new_paying_subscribers::paying_subscribers');
     expect(o.door.operations[0].value.author).toBe('model_proposed');
+  });
+  it('#3002 mixed set: the HOST names the left-out link on the approval card, by its model labels; only the known tiers are written', async () => {
+    const words = 'Monthly churn has a strong effect on Paying subscribers.';
+    const unknownBefore = JSON.stringify(edgeNow('monthly_new_paying_subscribers', 'paying_subscribers'));
+    const p = await runProbe('mixed', words, false, [{ ...churnLink('strong'), user_stated: true, from_words: words },
+      { from_label: 'Monthly new paying subscribers', to_label: 'Paying subscribers', strength: 'strong', user_stated: true, from_words: words },
+      { from_label: 'Pro plan price', to_label: 'Monthly new paying subscribers', strength: 'weak', user_stated: false }]);
+    expect(p.door.operations.map((o) => [o.path, o.value.author])).toEqual([['monthly_churn::paying_subscribers', 'user_stated'],
+      ['pro_plan_price::monthly_new_paying_subscribers', 'model_proposed']]);
+    // The card the user approves (the chip's detail, the stored proposal's own label) says it, never the Agent's prose.
+    expect(p.chips).toHaveLength(1);
+    expect(String(p.chips[0].detail)).toContain('Not included, because the source of its band is not verified (nothing changes for it): '
+      + '"Monthly new paying subscribers" \u2192 "Paying subscribers"');
+    expect(String(p.door.public_label)).toBe(String(p.chips[0].detail));
+    expect(JSON.stringify(edgeNow('monthly_new_paying_subscribers', 'paying_subscribers')), 'the unknown link is untouched').toBe(unknownBefore);
+    expect(edgeNow(...CHURN).provenance.source).toBe('user_specified');
+    expect(edgeNow('pro_plan_price', 'monthly_new_paying_subscribers').provenance.magnitude).toBe('olumi_estimate');
+  });
+  it('CONTROL: a set with nothing left out names nothing on its card', async () => {
+    const words = 'Monthly churn has a strong effect on Paying subscribers.';
+    const p = await runProbe('mixed-control', words, false, [{ ...churnLink('strong'), user_stated: true, from_words: words }]);
+    expect(String(p.chips[0].detail)).not.toContain('Not included');
+  });
+  // ⛔ PRE-EXISTING RESIDUAL (staging's rule, DL ruling 14 Oct; the structured origin field olumi / third_party is the next PR):
+  // a band the AI attributes to someone else ONLY in its own arguments (Codex's r2 probe: a per-link `basis`, a field neither
+  // staging nor this head reads), with no quote, is still Olumi's estimate here, exactly as on staging (the same row passes on
+  // staging; PR body). It flips when that field lands.
+  it.each(['Alice supplied this weak estimate.', 'The Smith report estimates a weak effect for this link.'])('RESIDUAL (pre-existing on staging): an unquoted band cited to a third party in the AI\u2019s own arguments is Olumi\u2019s: %s', async cited => {
+    const p = await runProbe('cited-residual', 'Please suggest link strengths.', false, [{ ...churnLink('weak'), user_stated: false, basis: cited }]);
+    expect(p.door.operations.map((o) => o.value.author)).toEqual(['model_proposed']);
+    expectSaved('model_proposed', 0.1);
   });
   it.each([false, true])('positive own quote earlier=$earlier', async earlier => {
     const words = 'Monthly churn has a strong effect on Paying subscribers.';

@@ -46,8 +46,7 @@ const SIX: { from: string; to: string; kept: boolean }[] = [
 const edgeOf = (g: Graph, l: { from: string; to: string }): Edge => g.edges.find((e) => key(e) === key(l))!;
 /** The served links at these SIX positions, as the Agent offered them (all six by default). */
 const argsFor = (at: readonly number[] = SIX.map((_, i) => i)) => ({ rationale: 'served mixed set', links: at.map((i) => SIX[i]!)
-  // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
-  .map((l) => ({ user_stated: false, basis: 'Olumi’s own estimate from the model', from_label: label(l.from), to_label: label(l.to),
+  .map((l) => ({ from_label: label(l.from), to_label: label(l.to),
     strength: l.kept ? edgeBandFromMagnitude(Math.abs(edgeOf(FX.before.graph, l).strength.mean)) : 'moderate' })) });
 
 /**

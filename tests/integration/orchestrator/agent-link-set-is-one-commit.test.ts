@@ -132,12 +132,12 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-agent'); },
     });
-    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following
-    // AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
+    // ⛔ INPUT CHANGE (#3002): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true
+    // when it quotes the user; false when it does not.
     const realPropose = caps.proposeLinkStrengths!.bind(caps);
     caps.proposeLinkStrengths = (c, a) => realPropose(c, { ...a, links: Array.isArray(a.links)
       ? a.links.map((l) => typeof (l as { from_words?: unknown }).from_words === 'string' ? { user_stated: true, ...l }
-        : { user_stated: false, basis: 'Olumi\u2019s own estimate from the model', ...l }) : a.links } as never);
+        : { user_stated: false, ...l }) : a.links } as never);
     return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText, ...interaction } };
   };
 
@@ -523,7 +523,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { caps, ctx } = agent(words);
     const p = await caps.proposeLinkStrengths!(ctx, { links: ['capacityQuality', 'capacityOverhead'].map((k) => ({ from_label: L[k as Key][0], to_label: L[k as Key][1], strength: 'strong' })) as never, rationale: words });
     // ⛔ EXPECTATION CHANGED (#3002 r2): the copied link is left out and said (UNKNOWN), never relabelled; old whole-set refusal →
-    // new: the other link, with the AI's explicit Olumi claim and basis, is still offered as Olumi's.
+    // new: the other link, unquoted and not read in the conversation, is still offered as Olumi's.
     expect((p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin).toEqual([pairName('capacityQuality')]);
     expect(JSON.stringify((p as { links?: unknown }).links ?? [])).not.toContain(L.capacityQuality[1]);
     expect(linkSizing(edge('capacityQuality'))).not.toBe('user');
@@ -809,6 +809,28 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       && linkSizing(e) !== 'placeholder');
     expect(sized.map((e) => `${e.from}->${e.to}`).sort()).toEqual(HIRING.served_ops.map((o) => `${o.from_id}->${o.to_id}`).sort());
     for (const e of sized) expect(e.strength.mean, `${e.from}->${e.to}`).not.toBe(was.find((w) => w.from === e.from && w.to === e.to)!.strength.mean);
+  });
+
+  it('⭐ #3002 CONTROL (served hiring, staging 34a5cdf6, 14 Oct turn 04): the AI\u2019s six unquoted bands are still Olumi\u2019s card, and approving saves each as olumi_estimate', async () => {
+    const H = JSON.parse(readFileSync(new URL('../../fixtures/t2a5/served-hiring-post3008-turn04.json', import.meta.url), 'utf8')) as {
+      user_messages: string[]; served_chip_detail: string; links: { from_label: string; to_label: string; strength: string }[];
+      graph: { nodes: { id: string; label: string }[]; edges: Edge[] } };
+    persisted = structuredClone(H.graph);
+    const idOf = (label: string): string => H.graph.nodes.find((n) => n.label === label)!.id;
+    const said = H.user_messages.at(-1)!;
+    const { caps, ctx } = agent(said, undefined, { user_text: H.user_messages.join('\n'), verified_user_messages: H.user_messages });
+    const p = await caps.proposeLinkStrengths!(ctx, { rationale: said, links: H.links as never });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    // The card the user approved on staging, byte-equal: nothing left out, every band Olumi's first estimate.
+    expect(String(p.public_label)).toBe(H.served_chip_detail);
+    expect(p).not.toHaveProperty('left_out_unknown_origin');
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(rows.size, 'one approval, one commit').toBe(1);
+    for (const l of H.links) {
+      const e = edgeOf(idOf(l.from_label), idOf(l.to_label));
+      expect(e.provenance, `${l.from_label} -> ${l.to_label}`).toMatchObject({ magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', band: l.strength } });
+      expect(linkSizing(e), `${l.from_label} -> ${l.to_label}`).toBe('olumi_accepted');
+    }
   });
 
   it('NEGATIVE (D1): where the approval cannot size a placeholder, Olumi\'s band stays a review: a link the user drew, and a default already AT the midpoint', async () => {

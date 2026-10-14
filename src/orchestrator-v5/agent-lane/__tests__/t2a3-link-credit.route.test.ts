@@ -95,9 +95,9 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
       const answered = thisTurn.some((i) => i.type === 'function_call_output');
       if (!answered && proposeOn !== null && lastUserText(body) === proposeOn.message) {
         return reply([{ type: 'function_call', name: 'propose_link_strengths', call_id: 'fixture_link_set',
-          // ⛔ INPUT CHANGE (#3002 r2): each link carries the AI's claim `user_stated`: true when it quotes the user; false with Olumi's own basis when not.
+          // ⛔ INPUT CHANGE (#3002): each link carries the AI's claim `user_stated`: true when it quotes the user; false when not.
           arguments: JSON.stringify({ links: proposeOn.links.map((l) => typeof (l as { from_words?: unknown }).from_words === 'string'
-            ? { user_stated: true, ...l } : { user_stated: false, basis: 'Olumi\u2019s own estimate from the model', ...l }),
+            ? { user_stated: true, ...l } : { user_stated: false, ...l }),
             rationale: 'The user asked for these link strengths.' }) }]);
       }
       return reply([{ type: 'message', content: [{ type: 'output_text', text: 'Noted.' }] }]);
