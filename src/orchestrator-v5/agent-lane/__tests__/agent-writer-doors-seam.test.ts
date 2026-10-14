@@ -310,7 +310,7 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     expect(g.nodes.find((x) => x.id === 'goal_x')!['provenance'], 'the goal it threatens').toBeUndefined();
     expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
     expect(t2.assistant_text, t2.assistant_text).toContain('Added "Competitive response" as a risk, affecting "Revenue" and driven by "Price"');
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/placeholder strength, not an estimate/);
+    expect(t2.assistant_text, t2.assistant_text).toContain('how strongly is not known yet: the strength is Olumi\u2019s guess, not an estimate.');
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
