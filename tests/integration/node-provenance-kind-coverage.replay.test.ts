@@ -608,6 +608,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // whole point of `'retained_excluded'`. Treating it as value-bearing would
       // make an excluded node look valueless and reintroduce, one layer down,
       // the exact false claim the field exists to prevent.
+      // S2 holds now from the brief, 14 Oct (#3134, DL Fix A) — THE VALUE-BEARING DECISION: `already_true_quote` is NOT
+      // value-bearing and joins neither `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is the verbatim brief sentence saying a
+      // RISK is already the case now (admission keeps it only as a whole brief sentence); it asserts no magnitude. The risk
+      // stays without a level until the user's press records the holds-now block (`event_risk`, which IS value-bearing), so
+      // treating the quote as a value would make a risk nobody has confirmed look sized.
+      "already_true_quote",
       "analysis_participation",
       "category",
       // Science PR-4, 14 Oct (AIE same-cohort law) — THE VALUE-BEARING DECISION: `cohort_forecast` IS value-bearing in
