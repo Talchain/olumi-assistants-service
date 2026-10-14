@@ -613,7 +613,7 @@ export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: str
     if (link === null || labelOf(link.from_id) === null || labelOf(link.to_id) === null) return null;
     // Science 393023 LICENCE ruling 3: a placeholder has no band, so no card proposes its default prior as an estimate.
     if (link.band === undefined) return null;
-    return { tool: 'propose_link_strengths', args: linkStrengthsCardArgs(link, rationale) };
+    return { tool: 'propose_link_strengths', args: linkStrengthsCardArgs(link, rationale, graph) };
   }
   if (target.kind === 'factor') {
     const node = nodes.find((n) => n.id === target.id);

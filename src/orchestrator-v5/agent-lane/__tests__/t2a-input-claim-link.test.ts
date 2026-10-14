@@ -56,10 +56,10 @@ function harness(mean: number) {
 // T2A5: no unverified text by default (an unverified statement of the band makes its origin unknown, AIE 6157593360).
 const contextOf = (verified: string, interaction: Partial<AgentToolContext>) => ({ scenario_id: scenario, authenticated_user_id: null,
   request_id: 't2a', user_text: verified, user_turn_text: 'Please prepare the link.', ...interaction });
-// ⛔ INPUT CHANGE (#3002 r2, the three tiers): every stub link now carries the AI's own claim `user_stated`, as a prompt-following
-// AI gives it: true when it quotes the user (`from_words`); false with Olumi's own basis when it does not. A row may still set it.
+// ⛔ INPUT CHANGE (#3002, known-origin transport): every stub link declares its `origin`, as a prompt-following AI gives it: user
+// when it quotes the user (`from_words`); olumi, with Olumi's own basis, when it does not. A row may still set it.
 const linkOf = (from: string, overrides: Record<string, unknown>) => ({ links: [{ from_label: from, to_label: 'MRR', strength: 'weak',
-  user_stated: typeof overrides.from_words === 'string', ...(typeof overrides.from_words === 'string' ? {} : { basis: 'Olumi\u2019s own estimate from the model' }),
+  origin: typeof overrides.from_words === 'string' ? 'user' : 'olumi', ...(typeof overrides.from_words === 'string' ? {} : { basis: 'Olumi\u2019s own estimate from the model' }),
   ...overrides }],
   rationale: 'Prepare the requested link strength.' }) as never;
 /** The door's answer alone, nothing approved: for the T2A5 refusals (origin unknown, nothing prepared). */
@@ -91,14 +91,14 @@ describe('T2-A retained input_claim on the exact link through proposal, approval
     expect(result.edge.provenance.source).toBe('user_specified');
     expect(result.edge.strength.mean).toBe(0.1);
   });
-  it.each([{}, { user_stated: false, basis: 'Model estimate' }])('(a) the same earlier words, NOT quoted: origin unknown, nothing prepared: %j', async overrides => {
+  it.each([{}, { origin: 'olumi', basis: 'Model estimate' }])('(a) the same earlier words, NOT quoted: origin unknown, nothing prepared: %j', async overrides => {
     const { result, writes } = await offer('Price', overrides);
     expect(result).toMatchObject({ ok: false, refusal: 'origin_unknown' });
     expect(writes).toHaveLength(0);
   });
   // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers on Codex CHECK-3002-a3b352af): a quote the host cannot verify is UNKNOWN,
-  // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs user_stated:false and NO quote.
-  it.each([{}, { user_stated: false, basis: 'Model estimate' }, { from_words: history }])('(b) a different existing link stays Olumi’s, or unknown when quoted: %j', async overrides => {
+  // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs origin olumi, its basis and NO quote.
+  it.each([{}, { origin: 'olumi', basis: 'Model estimate' }, { from_words: history }])('(b) a different existing link stays Olumi’s, or unknown when quoted: %j', async overrides => {
     if ('from_words' in overrides) return expectUnknown('Quality', overrides);
     const result = await journey('Quality', overrides);
     expect((result.op.value as { author: string }).author).toBe('model_proposed');
@@ -152,13 +152,13 @@ describe('T2A2 current interaction supplies the exact link, never an end from hi
   // this message or an earlier one; the user's own words NOT quoted are never relabelled Olumi's: origin unknown, nothing prepared.
   // Price without a quote, old (T2A3) model_proposed → new origin unknown; the AI's quote "Price is strong" credits it.
   it.each([['Price', undefined], ['Quality', undefined], ['Price', 'Price is strong'], ['Quality', 'Price is strong']] as const)('review A with earlier history B credits only A, and only with the AI\u2019s quote: %s, from_words %s', async (from, quote) => {
-    if (from === 'Price' && quote === undefined) return expectUnknown(from, { strength: 'strong', user_stated: false, basis: 'Model estimate' },
+    if (from === 'Price' && quote === undefined) return expectUnknown(from, { strength: 'strong', origin: 'olumi', basis: 'Model estimate' },
       'Quality has a weak effect on MRR. Price is strong.', { ...priceReview, user_turn_text: 'Price is strong.' }, 0.3);
-    // ⛔ INPUT CHANGE (#3002 r2): the quoting AI says the quote is the user's (user_stated true); the AI's explicit false is
+    // ⛔ INPUT CHANGE (#3002): the quoting AI declares the quote the user's (origin user); the AI's declared origin is
     // never overridden. Quality quoting "Price is strong" does not verify: old model_proposed → new origin unknown.
-    if (from === 'Quality' && quote !== undefined) return expectUnknown(from, { strength: 'strong', user_stated: true, from_words: quote },
+    if (from === 'Quality' && quote !== undefined) return expectUnknown(from, { strength: 'strong', origin: 'user', from_words: quote },
       'Quality has a weak effect on MRR. Price is strong.', { ...priceReview, user_turn_text: 'Price is strong.' }, 0.3);
-    const result = await journey(from, { strength: 'strong', ...(quote === undefined ? { user_stated: false, basis: 'Model estimate' } : { user_stated: true, from_words: quote }) },
+    const result = await journey(from, { strength: 'strong', ...(quote === undefined ? { origin: 'olumi', basis: 'Model estimate' } : { origin: 'user', from_words: quote }) },
       'Quality has a weak effect on MRR. Price is strong.',
       { ...priceReview, user_turn_text: 'Price is strong.' }, 0.3);
     const theirs = from === 'Price' && quote !== undefined;
@@ -203,7 +203,7 @@ const bothReview = {
 };
 describe('T2A3 (#2993 check): a bound link still needs the user’s words to name an end of it', () => {
   // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers on Codex CHECK-3002-a3b352af): a quote the host cannot verify is UNKNOWN,
-  // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs user_stated:false and NO quote.
+  // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs origin olumi, its basis and NO quote.
   it.each([{}, { from_words: 'Quality is strong.' }])('blocking 1: Price → MRR selected, "Quality is strong." stays Olumi’s, or unknown when quoted: %j', async overrides => {
     if ('from_words' in overrides) return expectUnknown('Price', { strength: 'strong', ...overrides }, 'Quality is strong.', { ...priceReview, user_turn_text: 'Quality is strong.' }, 0.3);
     const result = await journey('Price', { strength: 'strong', ...overrides }, 'Quality is strong.',
@@ -238,7 +238,7 @@ describe('T2A3 (#2993 check): reporting or disputing Olumi’s claim is not the 
     'You suggested Price has a weak effect on MRR; I disagree.',
     'According to Olumi, Price has a weak effect on MRR.',
   ])('blocking 2: "%s" then a later estimate stays Olumi’s, flagged or not', async earlier => {
-    for (const overrides of [{}, { user_stated: false, basis: 'Model estimate' }]) {
+    for (const overrides of [{}, { origin: 'olumi', basis: 'Model estimate' }]) {
       const result = await journey('Price', overrides, `${earlier}\n${later}`, { user_turn_text: later });
       expect(author(result), JSON.stringify(overrides)).toBe('model_proposed');
       expect(result.edge.provenance.source).toBe('cee_hypothesis');
@@ -449,24 +449,54 @@ describe('T2A3 ruling: the AI quoting the user\u2019s whole message credits none
     ['Price has a weak effect on MRR. Quality has a weak effect on MRR. I disagree with all these estimates.', 'weak', {}],
   ] as const)('"%s" proposing %s, quoted whole → never the user\u2019s: unknown, nothing prepared', async (words, strength, interaction) => {
     // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers on Codex CHECK-3002-a3b352af): a quote the host cannot verify is UNKNOWN,
-    // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs user_stated:false and NO quote.
+    // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs origin olumi, its basis and NO quote.
     await expectUnknown('Price', { strength, from_words: words }, words, { ...interaction, user_turn_text: words }, strength === 'strong' ? 0.3 : 0.55);
   });
 });
 
 // ⭐ T2A5 (AIE 6157593360): the host's mechanical checks on the AI's quote, one row each (a quote that fails is never Olumi's).
 describe('T2A5: the AI quotes the user\u2019s complete statement, the host verifies it', () => {
-  // ⭐ #3002 r2 (DL three tiers, PL #94 05:12Z): Olumi's estimate is an EXPLICIT claim with Olumi's own basis; anything less is
-  // unknown. And a quote that does not verify is never Olumi's, even with truncated history (Codex CHECK-3002 item 3).
-  it('user_stated false WITHOUT a basis is not Olumi\u2019s authorship: unknown, nothing prepared', async () => {
-    await expectUnknown('Quality', { user_stated: false, basis: undefined }, 'Please suggest a strength.', { user_turn_text: 'Please suggest a strength.' });
-  });
-  it('CONTROL: user_stated false WITH Olumi\u2019s own basis is Olumi\u2019s estimate', async () => {
-    const result = await journey('Quality', { user_stated: false, basis: 'Quality shifts MRR only through churn in this model.' }, 'Please suggest a strength.', { user_turn_text: 'Please suggest a strength.' });
+  // ⭐ #3002 KNOWN-ORIGIN TRANSPORT (DL 14 Oct, after Codex CHECK-3002-783a55b8): the AI DECLARES whose band it is; the host
+  // verifies. Olumi's estimate is only a declared olumi band with its own basis and no quote; a user band needs a verified quote
+  // AND complete history; anything else stays UNKNOWN and is never written.
+  it('CONTROL: origin olumi WITH Olumi\u2019s own basis, no quote, not read in the conversation, is Olumi\u2019s estimate', async () => {
+    const result = await journey('Quality', { origin: 'olumi', basis: 'Quality shifts MRR only through churn in this model.' }, 'Please suggest a strength.', { user_turn_text: 'Please suggest a strength.' });
     expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.magnitude).toBe('olumi_estimate');
+  });
+  it.each([
+    ['origin olumi WITHOUT a basis', { origin: 'olumi', basis: undefined }],
+    ['no origin: a false user flag plus basis text (the r2 shape) is no declaration', { origin: undefined, user_stated: false, basis: 'Quality shifts MRR only through churn in this model.' }],
+    ['origin user WITHOUT a quote', { origin: 'user', basis: undefined }],
+  ] as const)('%s: unknown, nothing prepared', async (_, overrides) => {
+    await expectUnknown('Quality', overrides, 'Please suggest a strength.', { user_turn_text: 'Please suggest a strength.' });
+  });
+  it('under-declaration: a verified quote declared olumi is never relabelled Olumi\u2019s: unknown, nothing prepared', async () => {
+    const words = 'Price has a weak effect on MRR.';
+    await expectUnknown('Price', { origin: 'olumi', basis: 'Model estimate', from_words: words }, words, { user_turn_text: words });
+  });
+  it('origin third_party: never written, never Olumi\u2019s, left out and named with the source it cites', async () => {
+    const words = 'Alice thinks Price has a weak effect on MRR.';
+    const { result, writes } = await offer('Price', { origin: 'third_party', source: 'Alice', basis: undefined }, words, { user_turn_text: words });
+    expect(result).toMatchObject({ ok: false, refusal: 'origin_unknown', left_out_third_party: ['"Price" \u2192 "MRR", cited to "Alice"'] });
+    expect(writes).toHaveLength(0);
+  });
+  // ⛔ DL 14 Oct: reseeded chip text is stored as a user message, so a match there does not prove the user's words. Restored
+  // rows reach the door only as UNVERIFIED text (`authorshipWords`), so a quote matching them alone is not a receipt.
+  it('a quote matching ONLY restored (reseeded) text, never a typed message: unknown, nothing prepared', async () => {
+    const restored = 'Price has a weak effect on MRR.';
+    await expectUnknown('Price', { origin: 'user', from_words: restored }, 'Please record the links.',
+      { user_turn_text: 'Please record the links.', unverified_user_text: restored, user_text_complete: false });
+  });
+  it('CONTROL: the same quote in a message the user TYPED is theirs, even with restored rows beside it (route turns are never "complete")', async () => {
+    const words = 'Price has a weak effect on MRR.';
+    const result = await journey('Price', { origin: 'user', from_words: words }, words,
+      { user_turn_text: words, unverified_user_text: 'Some restored earlier row.', user_text_complete: false });
+    expect(author(result)).toBe('user_stated');
+    expect(result.edge.provenance.source).toBe('user_specified');
   });
   it('truncated history + a quote of an earlier estimate the host cannot see: unknown, never "Olumi\u2019s estimate"', async () => {
-    await expectUnknown('Price', { user_stated: true, from_words: 'Price has a weak effect on MRR.' }, 'Please record the links.',
+    await expectUnknown('Price', { origin: 'user', from_words: 'Price has a weak effect on MRR.' }, 'Please record the links.',
       { user_turn_text: 'Please record the links.', user_text_complete: false });
   });
   it('a FRAGMENT of the user\u2019s own sentence is not a receipt: origin unknown, nothing prepared', async () => {
@@ -474,7 +504,7 @@ describe('T2A5: the AI quotes the user\u2019s complete statement, the host verif
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR' }, words, { user_turn_text: words });
   });
   // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers on Codex CHECK-3002-a3b352af): a quote the host cannot verify is UNKNOWN,
-  // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs user_stated:false and NO quote.
+  // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs origin olumi, its basis and NO quote.
   it('words the user never wrote are not a receipt: unknown, nothing prepared', async () => {
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR.' }, 'Please size the links.', { user_turn_text: 'Please size the links.' });
   });
@@ -491,7 +521,7 @@ describe('T2A5: the AI quotes the user\u2019s complete statement, the host verif
     'None of these are my estimates. Price has a weak effect on MRR.',
   ])('its whole message must agree: the framed or disowned sentence quoted alone is not the user\u2019s: unknown (%s)', async words => {
     // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers on Codex CHECK-3002-a3b352af): a quote the host cannot verify is UNKNOWN,
-    // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs user_stated:false and NO quote.
+    // never Olumi's (old model_proposed → new origin unknown, nothing prepared). Olumi's needs origin olumi, its basis and NO quote.
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR.' }, words, { user_turn_text: words });
   });
   // Buddy review (Codex, read-only, fd148466): a colon keeps its speaker; a later denial supersedes; copying is read widely.

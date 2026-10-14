@@ -16,6 +16,7 @@ import { selectStrengthenPlaceholder, type StrengthenPlaceholderTarget } from '.
 import { renderCopy } from './guidance/render.js';
 import type { GuidanceSignals as LeafSignals } from './guidance/types.js';
 import { linkSizeAsk } from './link-size-ask.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 /** The product's own "Strengthen the model" next step (`NEXT_STEP_CHIPS`, agent-v1-turn.ts). */
 export const STRENGTHEN_PRESS_CHIP_ID = 'agent-next-strengthen';
@@ -25,7 +26,7 @@ export const STRENGTHEN_CARD_RATIONALE = 'This link has no size yet; ask how muc
 /** A sized link supplies a proposed band. An unsized target supplies only its labels for a size ask. */
 export interface LinkStrengthsCardArgs {
   readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength?: StrengthenPlaceholderTarget['band'];
-    readonly user_stated?: false; readonly basis?: string }];
+    readonly origin?: 'olumi'; readonly basis?: string }];
   readonly rationale: string;
 }
 
@@ -36,12 +37,20 @@ export interface LinkStrengthsCardArgs {
  * link keeps its existing proposal behaviour, including same-band preservation (#2473).
  */
 export function linkStrengthsCardArgs(
-  link: Pick<StrengthenPlaceholderTarget, 'from_label' | 'to_label' | 'band'>,
+  link: Pick<StrengthenPlaceholderTarget, 'from_id' | 'to_id' | 'from_label' | 'to_label' | 'band'>,
   rationale: string,
+  graph: unknown,
 ): LinkStrengthsCardArgs {
-  // #3002 r2 (the three tiers): the host's own card is Olumi's explicit estimate, grounded on the band the model holds.
+  /**
+   * ⭐ #3002 known-origin transport: the host's own card DECLARES its band Olumi's new estimate, with its basis, ONLY for a link
+   * whose stored strength is not the user's (Codex CHECK-3002-783a55b8 item 4). A user-sized link keeps the user's origin: the
+   * card declares nothing, so the door answers "already, as the user set it" and writes nothing.
+   */
+  const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  const stored = Array.isArray(edges) ? edges.find((e) => rec(e)?.from === link.from_id && rec(e)?.to === link.to_id) : undefined;
+  const olumis = link.band !== undefined && linkSizing(stored) !== 'user';
   return { links: [{ from_label: link.from_label, to_label: link.to_label,
-    ...(link.band === undefined ? {} : { strength: link.band, user_stated: false, basis: rationale }) }], rationale };
+    ...(link.band === undefined ? {} : { strength: link.band }), ...(olumis ? { origin: 'olumi' as const, basis: rationale } : {}) }], rationale };
 }
 
 export interface StrengthenCard {
@@ -91,7 +100,7 @@ export function strengthenCardFor(state: StrengthenPressState): StrengthenCard |
     return {
       target,
       text: `${copy.title}\n\n${question}`,
-      args: linkStrengthsCardArgs(target, STRENGTHEN_CARD_RATIONALE),
+      args: linkStrengthsCardArgs(target, STRENGTHEN_CARD_RATIONALE, state.graph),
       ...(target.band === undefined ? { ask_only: true as const } : {}),
     };
   } catch {

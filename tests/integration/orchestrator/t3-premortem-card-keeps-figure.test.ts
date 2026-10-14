@@ -127,11 +127,11 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     const card = mt.cardCallFor(item, persisted);
     expect(card?.tool).toBe('propose_link_strengths');
     if (card?.tool !== 'propose_link_strengths') return;
+    // #3002: Olumi's own sized link, so the host's card declares the band Olumi's, with the card's basis.
+    expect(card.args.links[0]).toMatchObject({ origin: 'olumi', basis: expect.any(String) });
     const before = JSON.parse(JSON.stringify(edgeOf(FROM, TO))) as Edge;
     const { caps, ctx } = agent('Run a pre-mortem on ‘AI Reporting Module Sprint’.');
-    // ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
-    const withClaim = { ...card.args, links: card.args.links.map((l) => ({ user_stated: typeof (l as { from_words?: unknown }).from_words === 'string', ...(typeof (l as { from_words?: unknown }).from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l })) };
-    const p = await caps.proposeLinkStrengths!(ctx, withClaim as never);
+    const p = await caps.proposeLinkStrengths!(ctx, card.args as never);
     expect(p.ok, JSON.stringify(p)).toBe(true);
     expect(String(p.public_label)).toContain(`"${card.args.links[0].from_label}" → "${card.args.links[0].to_label}" as ${CANVAS_BAND_WORD.strong}`);
     expect(String(p.public_label)).toContain('Olumi’s estimate');
@@ -140,5 +140,28 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     const after = edgeOf(FROM, TO);
     expect(after.strength, 'μ 0.6 and σ 0.3 held exactly').toEqual(before.strength);
     expect(after.strength.mean).toBe(0.6);
+  });
+
+  it('⭐ #3002 (Codex CHECK-3002-783a55b8 item 4): the SAME card on a link whose strength the USER set keeps it the user\u2019s: no Olumi declaration, nothing written', async () => {
+    // The user's own figure at the same μ 0.6 (the canvas writes `user_specified`).
+    const own = edgeOf(FROM, TO);
+    own.provenance = { source: 'user_specified' };
+    const turn = mt.planMethodTurn({ chipId: mt.planPickChipId('ai_reporting_module_sprint'), signalInputs: {
+      offeredSpecific: [], graph: D1.body.draft_graph, analysisState: D1.body.analysis_state, analysisResult: D1.body.analysis_result,
+      optionParticipation: D1.body.option_participation, leaderLicensed: false } });
+    if (turn?.kind !== 'run') throw new Error('expected a run');
+    const card = mt.cardCallFor(turn.context.supplied_items.find((i) => i.id === `${FROM}->${TO}`)!, persisted);
+    if (card?.tool !== 'propose_link_strengths') throw new Error('expected a link card');
+    // The producer declares no origin for it: its arguments carry no claim of anyone's.
+    expect(card.args.links[0]).not.toHaveProperty('origin');
+    expect(card.args.links[0]).not.toHaveProperty('basis');
+    const before = JSON.stringify(edgeOf(FROM, TO));
+    const { caps, ctx } = agent('Run a pre-mortem on ‘AI Reporting Module Sprint’.');
+    const p = await caps.proposeLinkStrengths!(ctx, card.args as never);
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'nothing_to_change' });
+    expect(p).not.toHaveProperty('proposal_id');
+    expect((p as { already?: string[] }).already).toEqual([`"${card.args.links[0].from_label}" \u2192 "${card.args.links[0].to_label}" is already ${CANVAS_BAND_WORD.strong}, as the user set it`]);
+    expect(JSON.stringify(edgeOf(FROM, TO)), 'the user\u2019s figure and its origin are untouched').toBe(before);
+    expect(rows.size, 'nothing committed').toBe(0);
   });
 });

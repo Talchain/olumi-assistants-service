@@ -1,10 +1,11 @@
 /**
  * ⭐ #3002 r2: THE INDEPENDENT CHECK'S OWN PROBES, adopted unchanged as rows (Codex CHECK-3002-a3b352af, 14 Oct: 19 failed /
- * 13 passed on a3b352af). The DL's three tiers (#94): USER only with the AI's user_stated claim AND a verified whole quote;
- * OLUMI only an explicit new estimate (user_stated false, no quote, no copy); UNKNOWN everything else.
+ * 13 passed on a3b352af), and the r2 check's (CHECK-3002-783a55b8). KNOWN-ORIGIN TRANSPORT (DL 14 Oct): the AI DECLARES each
+ * band's `origin`. USER only when declared user with a verified whole quote and complete history; OLUMI only a declared olumi
+ * band with its own basis, no quote, no copy; UNKNOWN everything else, never written, named on the card.
  *
  * The real path, end to end: DGAI's `selected_elements` → `/agent/v1/turn` → the stubbed model calls `propose_link_strengths`
- * (its links carry NO user_stated, so no claim is made) → the real door → the card or the refusal → the press → the
+ * (its links declare NO origin unless a row says so) → the real door → the card or the refusal → the press → the
  * production writer → the stored graph read back. Served bytes: the W3 cold read (`520aab46`, CEE `f074916`). 0 LLM calls.
  */
 import { randomUUID } from 'node:crypto';
@@ -66,7 +67,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 // Observe the real link-set door's input and the operations it prepares; the capability itself runs unchanged.
-const doors: { ctx: Json; operations: Json[]; public_label: unknown; refusal: unknown }[] = [];
+const doors: { ctx: Json; operations: Json[]; public_label: unknown; refusal: unknown; left_out_third_party?: unknown }[] = [];
 vi.mock('../runtime/agent-capabilities.js', async (original) => {
   const actual = await original<typeof import('../runtime/agent-capabilities.js')>();
   return { ...actual, createAgentCapabilities: (...input: Parameters<typeof actual.createAgentCapabilities>) => {
@@ -75,7 +76,7 @@ vi.mock('../runtime/agent-capabilities.js', async (original) => {
     return { ...capabilities, proposeLinkStrengths: async (...args: Parameters<typeof proposeLinkStrengths>) => {
       const result = await proposeLinkStrengths(...args);
       const proposal = input[1].get(String(result.proposal_id));
-      doors.push({ ctx: args[0] as Json, operations: [...(proposal?.operations ?? [])] as Json[], public_label: result.public_label, refusal: result.refusal });
+      doors.push({ ctx: args[0] as Json, operations: [...(proposal?.operations ?? [])] as Json[], public_label: result.public_label, refusal: result.refusal, left_out_third_party: result.left_out_third_party });
       return result;
     } };
   } };
@@ -218,21 +219,75 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   });
   it.each([false, true])('credit never carries to a different link earlier=$earlier', async earlier => {
     const words = 'Monthly churn has a strong effect on Paying subscribers.';
-    // ⛔ EXPECTATION CHANGED (r2, the three tiers): the quote of the OTHER link does not verify, so it is UNKNOWN, never Olumi's
-    // (the check's own expectation was model_proposed). Without a quote and with the AI's explicit Olumi claim, it is Olumi's.
-    const p = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', from_words:words, user_stated: true}]);
+    // ⛔ EXPECTATION CHANGED (r2): the quote of the OTHER link does not verify, so it is UNKNOWN, never Olumi's (the check's own
+    // expectation was model_proposed). Declared Olumi's, with its basis and no quote, it is Olumi's.
+    const p = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', from_words:words, origin: 'user'}]);
     expect(p.door.refusal).toBe('origin_unknown');
     expect(p.door.operations).toHaveLength(0);
     doors.length = 0;
-    const o = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', user_stated: false, basis: 'Olumi\u2019s own estimate from the model'}]);
+    const o = await runProbe('other-link', words, earlier, [{from_label:'Monthly new paying subscribers', to_label:'Paying subscribers', strength:'strong', origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model'}]);
     expect(o.door.operations).toHaveLength(1);
     expect(o.door.operations[0].path).toBe('monthly_new_paying_subscribers::paying_subscribers');
     expect(o.door.operations[0].value.author).toBe('model_proposed');
   });
+  it('#3002 mixed set: the HOST names the left-out link on the approval card, by its model labels; only the known tiers are written', async () => {
+    const words = 'Monthly churn has a strong effect on Paying subscribers.';
+    const unknownBefore = structuredClone(edgeNow('monthly_new_paying_subscribers', 'paying_subscribers'));
+    const p = await runProbe('mixed', words, false, [{ ...churnLink('strong'), origin: 'user', from_words: words },
+      { from_label: 'Monthly new paying subscribers', to_label: 'Paying subscribers', strength: 'strong', origin: 'user', from_words: words },
+      { from_label: 'Pro plan price', to_label: 'Monthly new paying subscribers', strength: 'weak', origin: 'olumi',
+        basis: 'Olumi proposes weak because the model includes retention effects moderating the price response.' }]);
+    expect(p.door.operations.map((o) => [o.path, o.value.author])).toEqual([['monthly_churn::paying_subscribers', 'user_stated'],
+      ['pro_plan_price::monthly_new_paying_subscribers', 'model_proposed']]);
+    // The card the user approves (the chip's detail, the stored proposal's own label) says it, never the Agent's prose.
+    expect(p.chips).toHaveLength(1);
+    expect(String(p.chips[0].detail)).toContain('Not included, because the source of its band is not verified (nothing changes for it): '
+      + '"Monthly new paying subscribers" \u2192 "Paying subscribers"');
+    expect(String(p.door.public_label)).toBe(String(p.chips[0].detail));
+    expect(edgeNow('monthly_new_paying_subscribers', 'paying_subscribers'), 'the unknown link is untouched').toEqual(unknownBefore);
+    expect(edgeNow(...CHURN).provenance.source).toBe('user_specified');
+    expect(edgeNow('pro_plan_price', 'monthly_new_paying_subscribers').provenance.magnitude).toBe('olumi_estimate');
+  });
+  it('CONTROL: a set with nothing left out names nothing on its card', async () => {
+    const words = 'Monthly churn has a strong effect on Paying subscribers.';
+    const p = await runProbe('mixed-control', words, false, [{ ...churnLink('strong'), origin: 'user', from_words: words }]);
+    expect(String(p.chips[0].detail)).not.toContain('Not included');
+  });
+  // ⭐ Codex r2's cited-source probes, both shapes: declared third_party with its source, and the r2 shape (no origin, a false user
+  // flag plus basis text citing the source). Never Olumi's, never written; the declared source is named on the result.
+  it.each(['Alice', 'the Smith report'])('third party declared (%s): never Olumi\u2019s, nothing written, named with its source', async cited => {
+    const p = await runProbe('cited-third-party', 'Please suggest link strengths.', false, [{ ...churnLink('weak'), origin: 'third_party', source: cited }]);
+    expect(p.door.refusal).toBe('origin_unknown');
+    expect(p.door.operations).toHaveLength(0);
+    expect(p.changed, 'nothing written').toBe(false);
+    expect(p.chips, 'no card').toHaveLength(0);
+    expect(p.door.left_out_third_party).toEqual([`"Monthly churn" \u2192 "Paying subscribers", cited to "${cited}"`]);
+  });
+  it.each(['Alice supplied this weak estimate.', 'The Smith report estimates a weak effect for this link.'])('the r2 shape (no origin; user_stated false + basis "%s") is no declaration: unknown, nothing written', async basis => {
+    const p = await runProbe('cited-basis', 'Please suggest link strengths.', false, [{ ...churnLink('weak'), user_stated: false, basis }]);
+    expect(p.door.refusal).toBe('origin_unknown');
+    expect(p.changed).toBe(false);
+  });
+  // ⭐ #3002 (DL 14 Oct): reseeded chip text is stored as a user message, so a fresh session's restored words prove nothing. The
+  // route hands restored rows to the door only as UNVERIFIED text (`history-store.ts` `authorshipWords`), never as typed words.
+  it('a fresh session reseeded from the durable rows: a quote of the restored earlier words is not the user\u2019s: unknown, nothing written', async () => {
+    const words = 'Monthly churn has a strong effect on Paying subscribers.';
+    await send({ agent_session_id: `typed-${randomUUID()}`, message: words });
+    const before = JSON.stringify(edgeNow(...CHURN));
+    proposeOn = { message: LATER, links: [{ ...churnLink('strong'), origin: 'user', from_words: words }] };
+    const body = await send({ agent_session_id: `reseeded-${randomUUID()}`, message: LATER });
+    proposeOn = null;
+    expect(doors).toHaveLength(1);
+    expect(String(doors[0]!.ctx.unverified_user_text), 'the earlier words reach the door as restored, unknown-source text').toContain(words);
+    expect(doors[0]!.ctx.verified_user_messages, 'never as typed words').not.toContain(words);
+    expect(doors[0]!.refusal).toBe('origin_unknown');
+    expect((body.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'))).toHaveLength(0);
+    expect(JSON.stringify(edgeNow(...CHURN)), 'nothing written').toBe(before);
+  });
   it.each([false, true])('positive own quote earlier=$earlier', async earlier => {
     const words = 'Monthly churn has a strong effect on Paying subscribers.';
-    // ⛔ INPUT CHANGE (r2): the AI claims the user's own band (user_stated true) beside its verified quote.
-    const p = await runProbe('own-control', words, earlier, [{...churnLink('strong'), from_words:words, user_stated: true}]);
+    // ⛔ INPUT CHANGE (#3002): the AI declares the user's own band (origin user) beside its verified quote.
+    const p = await runProbe('own-control', words, earlier, [{...churnLink('strong'), from_words:words, origin: 'user'}]);
     expect(p.door.operations[0].path).toBe(CHURN.join('::'));
     expect(p.door.operations[0].value.author).toBe('user_stated');
     expectSaved('user_stated', 0.55);

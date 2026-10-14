@@ -462,10 +462,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
           strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
           from_words: { type: 'string', description: 'For a positively verified user-authored band only: copy the complete latest applicable statement about this directed link verbatim from a verified user message, retaining speaker/source, qualification and negation. A report, question, dispute, or evidence-strength word is not the user\u2019s own link estimate. Otherwise omit human-credit words and preserve the original source separately; omission alone grants neither AI authorship nor a new estimate.' },
-          // AIE_TEXT_PENDING (DL r2 design approved 14 Oct; the AIE writes the exact words): the three tiers' one AI claim.
-          user_stated: { type: 'boolean', description: 'true only when from_words quotes the user\u2019s own complete statement of this link\u2019s band. false for everything else: Olumi\u2019s own new estimate (then give no from_words, and give basis), and a band that someone else stated or that the user cites or reports ("Alice says…", "the evidence says…"), or that comes from a question or a dispute.' },
-          basis: { type: 'string', description: 'Only with user_stated false: Olumi\u2019s own grounds for this estimate, in one sentence (what in the model or the evidence supports this band). Without it the band is not recorded as Olumi\u2019s estimate.' },
-        }, ['from_label', 'to_label', 'strength', 'user_stated']),
+          // #3002 known-origin transport: the AIE's exact text (packet 491cee5a, #94 6162480601). The host verifies each declared
+          // origin and never writes an unverified one; unknown is the existing outcome.
+          origin: { type: 'string', enum: ['user', 'third_party', 'olumi'], description: 'Declare the source of this specific estimate, independently of approval. \u2018user\u2019 means a positively verified retained human statement supplies this estimate for this subject, quantity, units, reference and period; provide its complete bound quotation. A user-role message, approval, copied statement or incomplete/reseeded history is not proof. \u2018third_party\u2019 means the estimate comes from an identified person, report or other source; retain that source, its complete claim and verification state. \u2018olumi\u2019 means a genuinely new estimate Olumi is making now, with its own grounded basis for this same quantity and context. A false user flag, nonempty basis, paraphrase or copied figure does not make an estimate Olumi\u2019s. Preserve known stored human, AI or third-party origin; if origin cannot be verified, keep it unknown rather than inventing one.' },
+          // AIE_TEXT_PENDING (#3002): the two companion fields the origin text names (its source; Olumi's own basis).
+          source: { type: 'string', description: 'Only with origin third_party: who or what stated this band, in the user\u2019s words (e.g. "Alice", "the Smith report").' },
+          basis: { type: 'string', description: 'Only with origin olumi: Olumi\u2019s own grounds for this new estimate, in one sentence (what in the model or the evidence supports this band).' },
+        }, ['from_label', 'to_label', 'strength', 'origin']),
       },
       rationale: { type: 'string', description: 'What the user asked for, in their words.' },
       whole_request: WHOLE_REQUEST,
@@ -923,9 +926,10 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
-    // #3002 r2: the AI's own claim (`user_stated`, required in the tool schema; absent reads UNKNOWN) and Olumi's own basis.
+    // #3002 known-origin transport: whose band the AI declares (`origin`, required in the tool schema), with its quote, cited
+    // source or Olumi's own basis. An absent or unknown origin is never written.
     links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string;
-      user_stated?: boolean; basis?: string }[];
+      origin?: 'user' | 'third_party' | 'olumi'; source?: string; basis?: string }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */

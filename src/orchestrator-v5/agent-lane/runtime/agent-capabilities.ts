@@ -2199,6 +2199,18 @@ function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews:
 
 /** D1 (AIE AMEND, 12 Oct), verbatim: the pending offer's words for Olumi's first estimate of a link nobody had sized. */
 export const D1_PENDING_FIRST_ESTIMATE = 'an estimate from Olumi that has not yet been applied';
+/**
+ * #3002 (DL split, Codex CHECK-3002-783a55b8 item 3): the HOST names, on the card itself, each link left out because the
+ * source of its band is not verified, by the model's own labels for its ids, so the user never relies on the Agent saying
+ * it. AIE_TEXT_PENDING (the AIE writes the exact words).
+ */
+/** The words every left-out sentence on a link-set card starts with; the receipt repeats those sentences after approval. */
+const LEFT_OUT_CARD_LEAD = 'Not included, because ';
+export const leftOutUnknownOriginCard = (pairs: readonly string[]): string => pairs.length === 0 ? ''
+  : `. ${LEFT_OUT_CARD_LEAD}the source of ${pairs.length === 1 ? 'its band' : 'their bands'} is not verified (nothing changes for ${pairs.length === 1 ? 'it' : 'them'}): ${pairs.join('; ')}`;
+/** #3002: the same, for each link whose band the Agent declared a third party's, with the source it cites. AIE_TEXT_PENDING. */
+export const leftOutThirdPartyCard = (pairs: readonly string[]): string => pairs.length === 0 ? ''
+  : `. ${LEFT_OUT_CARD_LEAD}${pairs.length === 1 ? 'its band is' : 'their bands are'} someone else\u2019s, not the user\u2019s or Olumi\u2019s (nothing changes for ${pairs.length === 1 ? 'it' : 'them'}): ${pairs.join('; ')}`;
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -3993,15 +4005,18 @@ export function createAgentCapabilities(
       + ' Give a figure, or ask Olumi to estimate it.';
     const accepts = (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
       + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : '');
+    // #3002: the links the card left out, said again in the card's own stored words (the host's, by id → label; a restored
+    // proposal carries the same card), so the receipt never reads as if the whole set was recorded.
+    const omitted = parent.public_label.split(LEFT_OUT_CARD_LEAD).slice(1).map((x) => ` ${LEFT_OUT_CARD_LEAD}${x.trim().replace(/\.$/, '')}.`).join('');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
       follow_up: counted
         ? `Recorded ${mixedLinkSetHeading(sent.length - changedUnsized - reviewedUnsized.length, changedUnsized, reviewedUnsized.length)}.`
-          + `${listed.length > 0 ? ` ${listed.join('; ')}.` : ''}${accepts}${countedTail}`
+          + `${listed.length > 0 ? ` ${listed.join('; ')}.` : ''}${accepts}${omitted}${countedTail}`
         : `Recorded ${placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
-        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}`,
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.${accepts}${omitted}`,
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -4905,8 +4920,10 @@ export function createAgentCapabilities(
       const shown: Shown[] = [];
       const already: string[] = [];
       const definitional: string[] = [];
-      /** Links whose band's origin stays UNKNOWN (the three tiers): left out and said, the rest of the set still offered. */
+      /** Links whose band's origin stays UNKNOWN: left out and named on the card, the rest of the set still offered. */
       const unknownOrigin: string[] = [];
+      /** Links whose band the Agent declared a third party's: never written, left out and named with the source it cites. */
+      const thirdParty: string[] = [];
       // ⭐ F1: links left out because they hold the user's own figure, each in the refusal's own words.
       const heldFigures: string[] = [];
       const seen = new Set<string>();
@@ -5009,25 +5026,30 @@ export function createAgentCapabilities(
           ...(typed.trim() !== '' ? { thisMessage: typed } : {}), ...(ctx.unverified_user_text !== undefined ? { unverified: ctx.unverified_user_text } : {}) },
           g.nodes, from.id, to.id, bound);
         /**
-         * ⭐ THE THREE TIERS (DL on Codex CHECK-3002-a3b352af): the Agent says whose band it is (`user_stated`), the host
-         * verifies, and an unverified claim is never anyone's.
-         *  · USER: `user_stated` true AND the quote verifies (`linkBandSource`).
-         *  · OLUMI: `user_stated` false, NO quote, Olumi's OWN `basis` (DL amendment, PL #94 05:12Z), and the conversation does
-         *    not read this band for this link: Olumi's own new estimate, explicitly declared (`statementOrigin`'s own-estimate rule).
-         *  · UNKNOWN: anything else. That includes an absent claim, `user_stated` false without a basis, a quote that does not
-         *    verify (truncated history too), a quote the Agent says is not the user's ("Alice supplied these…"), and a copied
-         *    band. The AI's non-user claim is never overridden, and a known source stays the link's: nothing is written.
+         * ⭐ KNOWN-ORIGIN TRANSPORT (#3002, DL 14 Oct after Codex CHECK-3002-783a55b8): the Agent DECLARES whose band it is
+         * (`origin`), the host verifies it mechanically, and only a verified origin is written.
+         *  · USER: `origin` user and a quote that verifies (`linkBandSource`) in a message the user TYPED in this process. Restored
+         *    and reseeded rows (chip text is stored as a user message) are never verified (`authorshipWords`), so a match there is
+         *    not a receipt. `user_text_complete` is not read here: it is false on every route turn from the first.
+         *  · OLUMI: `origin` olumi, NO quote, Olumi's own `basis`, and the conversation does not read this band for this link.
+         *  · Anything else stays UNKNOWN and is never written: a third party's band (`origin` third_party, named with the
+         *    `source` it cites), an absent origin, and a quote or a claim that does not verify. The card names each link left out.
          */
-        const claimed = l.user_stated;
-        const quoted = typeof l.from_words === 'string' && l.from_words.trim() !== '';
-        const ownBasis = typeof l.basis === 'string' && l.basis.trim() !== '';
-        const origin = claimed === true && source.verified ? 'human'
-          : claimed === false && !quoted && ownBasis ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
+        const nonBlank = (x: unknown): x is string => typeof x === 'string' && x.trim() !== '';
+        const declared = l.origin;
+        const origin = declared === 'user'
+          ? (nonBlank(l.from_words) && source.verified ? 'human' : 'unknown')
+          : declared === 'olumi' && !nonBlank(l.from_words) && nonBlank(l.basis)
+            ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
             : 'unknown';
-        // An UNKNOWN band is left out and said, never written; the links whose origin IS known are still offered (Paul's
+        // An UNKNOWN band is left out and named, never written; the links whose origin IS known are still offered (Paul's
         // served set: his named links are his, "all other listed effects to moderate" names no link, so those stay unknown).
         // A band the user's OWN strength already sits in changes nothing whoever names it: it goes on to "already" below.
-        if (origin === 'unknown' && !(keepsUsers && linkSizing(edge) === 'user')) { unknownOrigin.push(name); continue; }
+        if (origin === 'unknown' && !(keepsUsers && linkSizing(edge) === 'user')) {
+          if (declared === 'third_party') thirdParty.push(`${pair}${nonBlank(l.source) ? `, cited to "${l.source.replace(/\s+/g, ' ').trim().slice(0, 80)}"` : ''}`);
+          else unknownOrigin.push(pair);
+          continue;
+        }
         const stated = origin === 'human' ? [band] : null;
         if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
@@ -5070,9 +5092,10 @@ export function createAgentCapabilities(
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, wasEdge: edge,
           sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
-      const unknownLeftOut = unknownOrigin.length > 0 ? { left_out_unknown_origin: unknownOrigin } : {};
-      if (ops.length === 0 && unknownOrigin.length > 0 && heldFigures.length === 0 && definitional.length === 0) {
-        return { ok: false, mutated: false, refusal: 'origin_unknown', link: unknownOrigin[0], ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
+      const unknownLeftOut = { ...(unknownOrigin.length > 0 ? { left_out_unknown_origin: unknownOrigin } : {}),
+        ...(thirdParty.length > 0 ? { left_out_third_party: thirdParty } : {}) };
+      if (ops.length === 0 && unknownOrigin.length + thirdParty.length > 0 && heldFigures.length === 0 && definitional.length === 0) {
+        return { ok: false, mutated: false, refusal: 'origin_unknown', link: unknownOrigin[0] ?? thirdParty[0], ...unknownLeftOut, ...(already.length > 0 ? { already } : {}),
           detail: `${UNKNOWN_ORIGIN_DETAIL} Nothing was prepared for any of the links.` };
       }
       if (ops.length === 0) {
@@ -5134,7 +5157,8 @@ export function createAgentCapabilities(
             // from Olumi that has not yet been applied"; the typed `whose` stays the contract, and no receipt after a confirmed
             // write says it (the approval's words are the narrator's own).
             : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x) === 'Olumi\u2019s first estimate for a link nobody had sized'
-              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; '),
+              ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; ')
+          + leftOutUnknownOriginCard(unknownOrigin) + leftOutThirdPartyCard(thirdParty),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
@@ -5157,6 +5181,7 @@ export function createAgentCapabilities(
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
           // AIE_TEXT_PENDING (#3002 r2): the left-out unknown links, said.
           + (unknownOrigin.length > 0 ? 'Some links were left out because the source of their band is not verified (`left_out_unknown_origin`): their origin stays unknown and nothing was prepared for them. Ask the user for that source, and never call those bands Olumi\u2019s estimate or the user\u2019s. ' : '')
+          + (thirdParty.length > 0 ? 'Some links were left out because their band is someone else\u2019s (`left_out_third_party`): say whose, that it was not recorded, and ask whether the user holds that view themselves. Never call those bands Olumi\u2019s estimate or the user\u2019s. ' : '')
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0

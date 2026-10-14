@@ -79,8 +79,8 @@ const BANDS = [
   { from_label: 'Pro plan price', to_label: 'Pro MRR', strength: 'very strong' as const },
   { from_label: 'Pro paying subscribers', to_label: 'Pro MRR', strength: 'very strong' as const },
   { from_label: 'Pro MRR', to_label: 'MRR', strength: 'very strong' as const },
-// ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
-].map((l) => ({ user_stated: typeof (l as { from_words?: unknown }).from_words === 'string', ...(typeof (l as { from_words?: unknown }).from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l }));
+// ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it: user when it quotes the user; olumi, with Olumi's own basis, when it does not.
+].map((l) => ({ origin: typeof (l as { from_words?: unknown }).from_words === 'string' ? 'user' as const : 'olumi' as const, ...(typeof (l as { from_words?: unknown }).from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l }));
 
 
 const RUN_AT = '2026-09-28T17:00:00.000Z';

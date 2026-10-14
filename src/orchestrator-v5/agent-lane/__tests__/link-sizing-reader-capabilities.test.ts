@@ -20,8 +20,8 @@ const priceRevenue = (projected = true): Edge => ({ from: 'price', to: 'revenue'
   exists_probability: 1, effect_direction: 'positive',
   provenance: { source: 'user_specified', ...(projected ? { mean_projected: true } : {}) } });
 const labels = { from_label: 'Price', to_label: 'Revenue' };
-// ⛔ INPUT CHANGE (#3002 r2, the three tiers): each stub link carries the AI's own claim user_stated, as a prompt-following AI gives it: true when it quotes the user; false with Olumi's own basis when it does not.
-const proposalArgs = (strength: 'strong' | 'weak', fromWords?: string) => ({ links: [{ user_stated: fromWords !== undefined, ...(fromWords === undefined ? { basis: 'Olumi’s own estimate from the model' } : {}), ...labels, strength,
+// ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it: user when it quotes the user; olumi, with Olumi's own basis, when it does not.
+const proposalArgs = (strength: 'strong' | 'weak', fromWords?: string) => ({ links: [{ origin: fromWords !== undefined ? 'user' as const : 'olumi' as const, ...(fromWords === undefined ? { basis: 'Olumi’s own estimate from the model' } : {}), ...labels, strength,
   ...(fromWords === undefined ? {} : { from_words: fromWords }) }], rationale: 'identity-bound R7 reader row' });
 
 function world(initial = priceRevenue(), setProvenance?: Record<string, unknown>) {
