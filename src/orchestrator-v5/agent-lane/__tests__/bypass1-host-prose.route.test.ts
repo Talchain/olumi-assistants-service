@@ -285,6 +285,27 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
   });
 
+  it('ADVERSARIAL (Codex r1 probe, served 5b6e5eb7 turn 01): an EARLIER Run of the same graph is not this turn\'s Run; the line stays', async () => {
+    const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
+    view.run = { ...view.run, run_id: 'earlier-run', computed_at: '2026-10-13T06:54:24.046Z' };
+    expect(view.run.graph_hash_at_run).toBe(CAPACITY_3017.analysis_result.computed_against_hash);
+    served = { ...CAPACITY_3017, canonical_analysis_view: view };
+    const run = await runPress();
+    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+  });
+
+  it('ADVERSARIAL (Codex r1 probe, capacity Run 2): a card face WITHOUT the shortfall sentence leaves the whole line said', async () => {
+    const shortfall = 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.';
+    const view = structuredClone(CAPACITY.canonical_analysis_view) as Json;
+    const cell = (view.options as { cell: Json }[]).find((o) => o.cell.kind === 'figure')!.cell;
+    expect(cell.face).toContain(shortfall);
+    cell.face = (cell.face as string).replace(` ${shortfall}`, '');
+    served = { ...CAPACITY, canonical_analysis_view: view };
+    const run = await runPress();
+    expect(count(run.assistant_text as string, shortfall)).toBe(1);
+    expect(count(run.assistant_text as string, cell.face as string)).toBe(1);
+  });
+
   it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
     const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
     view.staleness = { ...view.staleness, stale: true };

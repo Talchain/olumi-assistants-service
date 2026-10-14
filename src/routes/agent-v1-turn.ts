@@ -83,6 +83,7 @@ import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-cur
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analysis-interpretation-identity.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
@@ -5184,23 +5185,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // not said again here; what it rests on still is (DL ruling on #3027), and the AI's answer explains it. No such card
       // (an Explain, a view that cannot ship, another or a stale Run): the line stays, the truthful fallback. By the Run's
       // identity and the cell's own face, never by words.
-      // ⛔ The card's own binding, never an equal value (DL lesson 08:08Z): DGAI binds it to this turn's view only by a
-      // non-empty run id and the result's own graph hash equal to that Run's (`mapV5Blocks`, `matchesCanonicalRun` 'card').
+      // ⛔ Bound by IDENTITY, never an equal value (DL lesson 08:08Z; Codex r1 on #3027). The card is this turn's Run only
+      // when the shipped view names a Run (a non-empty run id, which DGAI's card binding needs: `mapV5Blocks`,
+      // `matchesCanonicalRun` 'card') whose run-fact identity (`compareAnalysisRunFactIdentity`: scenario, graph hash,
+      // `computed_at`) is the Run THIS turn executed, from that Run's own output: the Run press or the Agent's
+      // `run_analysis` (`run_identity`), else the first pass (its own block and stamp, as goal certainty binds it). That
+      // output carries no run id; an earlier Run of the same graph has another `computed_at`. And current, not stale.
+      const thisTurnRun = ((): unknown => {
+        for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
+          if (result.tool_calls[i]!.name !== 'run_analysis') continue;
+          const out = result.tool_results[i] as { ran?: unknown; run_identity?: unknown } | undefined;
+          if (out?.ran === true) return out.run_identity;
+        }
+        if (fa?.ran !== true) return undefined;
+        const executed = fa.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as { computed_against_hash?: unknown } | undefined;
+        return { scenario_id: scenarioId, graph_hash_at_run: executed?.computed_against_hash,
+          computed_at: (fa.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
+      })();
       const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
-        ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown };
+        ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
           staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] }
         : undefined;
-      const resultHash = (analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash;
       const cardBound = cardView !== undefined && cardView.staleness?.stale === false
         && typeof cardView.run?.run_id === 'string' && cardView.run.run_id !== ''
-        && typeof resultHash === 'string' && resultHash !== '' && cardView.run.graph_hash_at_run === resultHash;
+        && compareAnalysisRunFactIdentity(thisTurnRun, { scenario_id: scenarioId, graph_hash_at_run: cardView.run.graph_hash_at_run,
+          computed_at: cardView.run.computed_at }).status === 'match'
+        && (analysisResult as { computed_against_hash?: unknown }).computed_against_hash === cardView.run.graph_hash_at_run;
       const cardFaces = new Map(cardBound
         ? cardView.options.flatMap(({ option_id, cell }) => (cell.kind === 'figure' || cell.kind === 'range')
           && typeof cell.face === 'string' ? [[option_id, cell.face] as const] : []) : []);
-      const onCard = new Set(screenLines.filter((l) => {
-        const face = cardFaces.get(l.option_id);
-        return face !== undefined && (l.chance === face || l.chance.startsWith(`${face} `));
-      }).map((l) => l.option_id));
+      // Only a line the card displays IN FULL goes (Codex r1 on #3027): a face without the line's shortfall sentence
+      // leaves the whole line said, so nothing the card does not show disappears.
+      const onCard = new Set(screenLines.filter((l) => cardFaces.get(l.option_id) === l.chance).map((l) => l.option_id));
       const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
         goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
           .filter((note) => cardDetail === null || !cardDetail.has(note)), { onCard });
