@@ -57,7 +57,7 @@ function chipsFor(store: ProposalStore, turn: { name: string; result: ToolResult
 
 const BUILT: ToolResult = { ok: true, mutated: true, model_version: { version_number: 1 } };
 const OLD_LINE = 'The model was saved as version 1.';
-const NEW_LINE = 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.';
+const NEW_LINE = 'Figures you did not give me are Olumi\u2019s estimates; when you approve one, it stays marked as Olumi\u2019s estimate, approved by you.';
 
 /* ── 1. TRUTH: the build's approval line ── */
 describe('the build line says what approval changes', () => {
