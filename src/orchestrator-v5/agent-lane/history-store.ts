@@ -375,7 +375,7 @@ export const DURABLE_SEED_TURNS = 20;
 /** The raw rows a reseed reads so that {@link DURABLE_SEED_TURNS} answer rows survive the drop (claim + sub-turns). */
 export const DURABLE_SEED_ROWS_READ = 100;
 
-type DurableRow = { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null };
+export type DurableRow = { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null };
 
 /** The Agent's own answer rows with words, oldest first (`readRecent` returns newest first). */
 function durableAnswerRows<T extends DurableRow>(turns: readonly T[]): T[] {
@@ -534,9 +534,24 @@ export class HistoryStore {
    * past the seed's newest 20 go back in first, so the window drops them too (the 2,400-character bound still applies).
    * The first is the opening, kept whole, only when the read reached the start (`briefFromDurableTurns`). `rows` are the
    * rows the seed read (no new read).
+   *
+   * ⭐ RESTART CONTINUITY (DL 17:18Z, 14 Oct; marketing lost a typed figure's origin across a redeploy): `typedProof` is the
+   * route's proof that a row's words were TYPED, from the row's own durable request hash (`agentTurnRequestHash`: a chip
+   * press appends `#chip:`, an approval binds its operation inside the digest, so only a chipless, operation-free message
+   * hashes plain). Proven rows are typed words again, oldest first, exactly as `recordTyped` would have held them; every
+   * other row stays source-unknown. Without a proof, nothing changes.
    */
-  seed(sessionId: string, durable: readonly unknown[], held: readonly unknown[], rows: readonly DurableRow[] = []): void {
+  seed(sessionId: string, durable: readonly unknown[], held: readonly unknown[], rows: readonly DurableRow[] = [],
+    typedProof?: (row: DurableRow) => boolean): void {
     this.incompleteAuthorship.add(sessionId);
+    if (typedProof !== undefined) {
+      const proven = durableAnswerRows(rows).flatMap((t) => (t.user_message?.trim() && typedProof(t) ? [t.user_message] : []));
+      if (proven.length > 0) {
+        const held = this.typed.get(sessionId) ?? [];
+        this.typed.delete(sessionId);
+        this.typed.set(sessionId, [...proven, ...held].slice(-MAX_TYPED_WORDS));
+      }
+    }
     const found = briefFromDurableTurns(rows);
     if (found !== undefined && found.trim() !== '') this.openingAhead.add(sessionId); else this.openingAhead.delete(sessionId);
     const answers = durableAnswerRows(rows);
