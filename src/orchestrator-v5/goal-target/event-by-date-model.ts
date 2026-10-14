@@ -463,13 +463,36 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
       natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
         strength_mean: 1, strength_mean_frame: 'edge_strength' } } }];
   const switches: string[] = [];
+  // An option with no Olumi pace that changes the brief's own capacity chain acts through it (Paul c1494f4d).
+  const ratios = eventCapacityRatios(candidate);
   candidate.options.forEach((o, i) => {
     const id = `event_option_${i + 1}`, capacity = o.added_capacity;
     nodes.push({ id, kind: 'option', label: o.label, provenance: o.provenance === 'explicit' ? 'from_brief' : 'ai_inferred',
       ...(o.is_status_quo === true ? { is_baseline: true } : {}), interventions: {} });
     edges.push({ from: 'event_decision', to: id, exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive' });
     if (o.is_status_quo === true) return;
-    if (!capacity) { unresolved.push(id); return; }
+    if (!capacity) {
+      const r = ratios.get(i);
+      if (r === undefined) { unresolved.push(id); return; }
+      // ⛔ PL: a ratio below 1 (the option would SHRINK the team's capacity) is never a negative size or a silent clip.
+      if (r.ratio < 1) {
+        unresolved.push(id);
+        loss.push({ field_path: `nodes[${id}].capacity_ratio`, before: r, after: null, severity: 'warn',
+          reason: `"${o.label}" would lower ${r.capacity} (to ${Math.round(r.ratio * 100)}% of today), and this deadline forecast doesn't yet model an option that slows the team down.` });
+        return;
+      }
+      const sw = `event_capacity_${i + 1}`;
+      switches.push(sw);
+      // The ratio carrier: its link's size comes from the team's own share once that is held (`withEventShareDate` /
+      // the team-time writer); until then the link stays explicitly defaulted, never an estimate of extra share.
+      nodes.push({ id: sw, kind: 'factor', category: 'controllable', label: `${o.label} changes ${r.capacity}`, provenance: 'ai_inferred',
+        observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: { capacity_ratio: r.ratio,
+          ratio_basis: { capacity: r.capacity, factors: r.factors }, lead_low: 0, lead_high: 0, unit: `${unit} per month` } } });
+      edges.push({ from: sw, to: 'event_goal', exists_probability: 1, effect_direction: 'positive',
+        strength: { mean: 0.5, std: 0.125 }, defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
+      nodes.find(n => n.id === id)!.interventions[sw] = { value: 1 };
+      return;
+    }
     const { monthly_share_pct, lead_months_low, lead_months_high } = capacity;
     if (!validEventCapacity(capacity)) {
       unresolved.push(id);
@@ -527,6 +550,8 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
   for (const edge of out.edges.filter((e: Rec) => e.to === goal.id && e.from !== team.id)) {
     const node = out.nodes.find((n: Rec) => n.id === edge.from), c = node?.observed_state?.extra_share_by_date;
     if (!c) continue;
+    // A capacity-ratio carrier is sized from the team's own share (L3), never from a pace; until then it stays defaulted.
+    if (typeof c.capacity_ratio === 'number') { Object.assign(c, { deadline, reference_date: c.reference_date ?? reference }); continue; }
     Object.assign(c, { deadline, reference_date: c.reference_date ?? reference });
     const m = extraShareLinkMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high,
       hirePaceIsOlumisOwn(node));
