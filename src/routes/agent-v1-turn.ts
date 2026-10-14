@@ -1777,6 +1777,14 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
  * `source: 'retry'`). `sameAgentTurnRequest` lets exactly that retry replay the recorded press (Codex pre-review P1).
  */
 const CHIP_HASH_SEP = '#chip:';
+/**
+ * Restart continuity (DL 17:18Z, 14 Oct): a durable answer row's words were TYPED when its stored hash is this subject's
+ * PLAIN hash of them: no `#chip:` suffix and no operation in the digest, the same rule as `typedByUser`. The reseed holds
+ * proven rows as typed words (`HistoryStore.seed`); every other row stays source-unknown.
+ */
+export function typedRowProof(scenarioId: string, userId: string | null): (row: { request_hash?: string | null; user_message?: string | null }) => boolean {
+  return (row) => typeof row.user_message === 'string' && row.request_hash === agentTurnRequestHash(scenarioId, userId, row.user_message);
+}
 /** A durable typed discriminator lets the UI's chipless retry recognise SCI-DEEP without reversing the digest. */
 export const STRUCTURAL_CHALLENGE_HASH_TAG = 'sci-deep:';
 export function chipOperationOf(body: Record<string, unknown>): string | undefined {
@@ -3091,7 +3099,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const durable = historyFromDurableTurns(durableSeedRows);
         if (durable.length > 0) {
           // Seeding reuses already-saved rows and held history; it is not an effect of this turn.
-          histories.seed(sessionId, durable, held, durableSeedRows);
+          // Restart continuity: a row whose stored hash is this subject's PLAIN hash of its own words was typed (no chip, no
+          // operation); `HistoryStore.seed` holds those words as typed again. Any other row stays source-unknown.
+          histories.seed(sessionId, durable, held, durableSeedRows, typedRowProof(scenarioId, userId));
         }
         earlierWordsKnown = true;
       } catch (err) {
