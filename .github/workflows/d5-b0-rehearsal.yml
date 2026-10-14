@@ -1,0 +1,56 @@
+name: d5-b0-rehearsal
+
+# D5-B rehearsal (row B0 of recovery/D5-DECISION-PROPOSAL.md §3.8).
+# Applies D5-B-MIGRATION.sql / D5-B-ROLLBACK.sql to a DISPOSABLE Postgres service container loaded with the
+# recorded live delegates. It has no secrets and no network path to Supabase; run-b0.sh refuses any PGHOST
+# other than localhost. Branch-only: this workflow is not on staging or main.
+on:
+  push:
+    branches: [d5/b0-rehearsal]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d5-b0-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15.8   # live Supabase reports PostgreSQL 15.8
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: b0-disposable
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: b0-disposable
+      B0_OUT: ${{ github.workspace }}/d5-b0-out
+    steps:
+      - uses: actions/checkout@v4
+      - name: psql client
+        run: |
+          command -v psql || { sudo apt-get update -q && sudo apt-get install -y -q postgresql-client; }
+          psql --version
+      - name: Rehearse D5-B (B0)
+        run: bash scripts/d5-b0/run-b0.sh
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d5-b0-results
+          path: d5-b0-out/

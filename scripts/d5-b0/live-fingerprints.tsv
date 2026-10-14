@@ -1,0 +1,18 @@
+# kind	schema	name	live md5(pg_get_functiondef) or '-'	live ACL text ('-' = not compared)   (read 14 Oct 2026 08:44–08:47Z, SELECT only)
+func	public	append_agent_answer_if_latest	fca6a21cbcd07a2e2f0ec3994ac46485	{postgres=X/postgres,service_role=X/postgres}
+func	public	append_agent_answer_if_latest_narrated	a3c05897876e1bf6361e4f1d314e28b6	{postgres=X/postgres,service_role=X/postgres}
+func	public	append_agent_answer_narrated	51ea0b3668de63fc8f5c83b9ad00ce8c	{postgres=X/postgres,service_role=X/postgres}
+func	public	append_agent_answer_with_offers	d65f9bba4c291c9eef86e1eefafa7194	{postgres=X/postgres,service_role=X/postgres}
+func	public	append_agent_answer_with_guidance	fbc87d7d8c9d39b343537206b4af09a9	{postgres=X/postgres,service_role=X/postgres}
+func	public	append_turn_atomic_v2	3f26919033ac076a8888762d179a4f78	{postgres=X/postgres,service_role=X/postgres}
+func	public	scenarios_bump_revision	3e7ea8689e7b1b46809159eabc7d3f64	{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+func	public	update_updated_at	bc63a00721d3247270efd34cf8aa8531	{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+func	public	claim_guest_scenario	d7f95c0a4b441c3457fb3bc526cd9b62	{postgres=X/postgres,service_role=X/postgres}
+func	public	create_model_version_cas_v1	2efc01760b26f67fd8a92ca193b11f68	{postgres=X/postgres,service_role=X/postgres}
+func	public	append_scenario_event	11729bdf39a7d15d1dbcfee2f8c9af88	{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+func	auth	uid	ea3b41bf29e2ad573067939329aa088e	-
+table	public	scenarios	-	{postgres=arwdDxt/postgres,authenticated=ardDxt/postgres,service_role=arwdDxt/postgres}
+table	public	v5_conversation_turns	-	{postgres=arwdDxt/postgres,anon=arwdxt/postgres,authenticated=arwdxt/postgres,service_role=arwdDxt/postgres}
+table	public	v5_handler_facts	-	{postgres=arwdDxt/postgres,anon=arwdxt/postgres,authenticated=arwdxt/postgres,service_role=arwdDxt/postgres}
+table	public	scenario_members	-	{postgres=arwdDxt/postgres,service_role=arwdDxt/postgres}
+table	public	model_versions	-	{postgres=arwdDxt/postgres,service_role=arwdDxt/postgres,authenticated=r/postgres}
