@@ -705,7 +705,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
     && new Set(horizonWithholdDetails).size === 1
     && (input.chanceCells ?? []).some(cell => cell.kind === 'withheld' && cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
   const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined
-    : horizonWhyLeads ? horizonLead : markerForDisclosure(chanceDisclosure);
+    : horizonWhyLeads && horizonLead !== null ? horizonLead : markerForDisclosure(chanceDisclosure);
   // The why's opening restates the lead's reason ("Your goal is for month 12, and this model only has today's numbers."): dropped.
   const horizonDetailBeyondLead = !horizonWhyLeads ? horizonWithholdDetails
     : horizonWithholdDetails.slice(0, 1).map(why => sentencesOf(why).slice(1).join(' ').trim()).filter(rest => rest !== '');
