@@ -5122,13 +5122,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
       || (fastPath === 'explain' && narrationStatus !== 'stale');
     // ⭐ SAY-SHOWN: the latest Run told the AI its `say` is shown (`say_shown`), so the host shows it: once, an AI copy counting
-    // as that once. Only an unknown current state still wins (DL 14 Oct): the withheld reason may itself be stale.
-    goalChanceOwed = stateFacts.current_state_unknown === true ? null
-      : goalChanceSayPromisedThisTurn(result.tool_results)
-        ? goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { graph: readbackGraph })
-        : !hostProse && !chanceFaceTurn ? null
-          : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
-            identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
+    // as that once, and no other owner silences it. Only an unknown current state still wins (DL 14 Oct): the withheld reason
+    // may itself be stale.
+    const sayPromised = goalChanceSayPromisedThisTurn(result.tool_results);
+    goalChanceOwed = stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn) ? null
+      : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), {
+        ...(sayPromised ? {} : { gateReasonOwed: gateOwnsGoalChance,
+          identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null }),
+        graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
       const goalLines = [goalChanceOwed];
       askEachOnce(goalLines, await repliesToCheckAsks(goalLines, historyReader, scenarioId, undefined));
