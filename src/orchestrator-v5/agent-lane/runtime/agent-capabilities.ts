@@ -9,7 +9,7 @@ import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
-import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -253,6 +253,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
+import { deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
@@ -3563,6 +3564,10 @@ export function createAgentCapabilities(
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
+  /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
+  const withdrawnProposals = new Set<string>();
+  /** How many times this turn's draft (by its cache key) was re-issued after a withdrawal: each re-issue's id is fresh. */
+  const reissuedDrafts = new Map<string, number>();
 
   /**
    * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
@@ -3603,6 +3608,7 @@ export function createAgentCapabilities(
       return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
     }
     Object.assign(candidate, limits.replacement);
+    // The drafter's targets are its reading of the user's goal: `limitsKeptBy` stores them `inferred`, never `explicit`.
     const held = targetsHeldBy(candidate);
     if (held.length === 0) {
       return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
@@ -3654,15 +3660,40 @@ export function createAgentCapabilities(
       pending = prepareRevisedDraft(ctx, g, goal);
       revisedDrafts.set(key, pending);
     }
-    const draft = await pending;
+    let draft = await pending;
     if ('refused' in draft) {
       return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', [{
         words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
-    // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
-    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
-      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    /**
+     * ⭐ A WITHDRAWN CARD IS RE-ISSUED FRESH, NEVER RETURNED DEAD (served marketing turn 02 on 00a51f7d; Codex
+     * CHECK-3020-45e7c1e3 item 1; DL r2): the turn's one draft is reused, so a target call after `withdraw_proposal` returned
+     * the withdrawn id as offered, and the reply described a card the user never saw. Refusing it (r1) left NO card after
+     * propose → withdraw → propose → withdraw → propose. So the next call issues the SAME prepared card under a FRESH id, bound
+     * to the current revision; the withdrawn id stays consumed by its own `withdraw_proposal` call, so ONE live card ends the
+     * turn. Only a recorded withdrawal re-issues: a card merely gone from the store (evicted) is offered again under its id.
+     */
+    if (withdrawnProposals.has(draft.proposal.proposal_id)) {
+      const { proposal_id: _withdrawn, ...content } = draft.proposal;
+      const reissues = (reissuedDrafts.get(key) ?? 0) + 1;
+      reissuedDrafts.set(key, reissues);
+      draft = { proposal: createProposal({ ...content, base_graph_identity_hash: g.graph_hash,
+        provenance: { ...content.provenance, basis: `${content.provenance.basis ?? ''} Offered again after a withdrawal this turn (${reissues}).` } }),
+        held: draft.held };
+      revisedDrafts.set(key, Promise.resolve(draft));
+    }
+    if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
+    /**
+     * Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is never "held". Held only
+     * by the exact label. A card target that carries this figure, comparator and unit under another label is UNKNOWN, never
+     * "not in the draft" (served marketing turn 02 on 00a51f7d: "new customers" read NOT on ‘New customers in first 3 months’,
+     * so the AI withdrew the card and nothing reached Paul). NOT held only when no card target carries the figure at all.
+     */
+    const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
+      && unitsConflict(target.unit, t.unit) === null);
+    const holds: boolean | 'unknown' = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)) ? true
+      : sameFigure.length > 0 ? 'unknown' : false;
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,
@@ -3672,7 +3703,11 @@ export function createAgentCapabilities(
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
         + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
-        + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+        // The AIE's exact texts (packet 281e8b3d, #94 6162120876): the 'unknown' note, and the residual for a figure no card
+        // target carries (no value/comparator/unit miss is proof the target is absent from the complete model).
+        + (holds === true ? '' : holds === 'unknown'
+          ? ' The requested target could not be verified against the card\u2019s complete meaning. Do not say it is included or excluded. If this reply actually offers the current card, explain the uncertainty and ask the user to check the goal, target, reference, period and conditions before approving.'
+          : ` The host did not find a matching target entry for ${targetFigure(target.value, target.unit)} in this card. Do not claim that the requested target is absent from the complete model unless its full meaning was checked. Explain the limitation and what the current card actually contains.`),
     };
   };
 
@@ -3856,6 +3891,16 @@ export function createAgentCapabilities(
     if (heldNow !== v.expected_deadline && heldNow !== v.deadline) {
       return notApplied('model_changed_since_approval', 'The goal\u2019s deadline changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
+    // The card's recorded subject (its goal's complete projection) is the press's and the lapse's rule too: any change to the
+    // goal since the card was made (a renamed goal, a new target, period or reading) writes nothing. A card made before its
+    // subject was recorded keeps the date gate above.
+    // A retry is continued only from THIS proposal's own landed write (Codex r1 on #3024): its partial progress, or its own
+    // deadline commit in the scenario's ledger (durable across a restart). An equal date set by anyone else is not that.
+    const ownWriteLanded = proposals.partialProgressOf(parent.proposal_id) !== undefined || (opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(`${parent.proposal_id}#deadline`)), () => false));
+    if (!ownWriteLanded && deadlineSubjectHolds(op, approvedRead.raw) === false) {
+      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
+    }
     if (opts.commitOptionLevels === undefined) {
       return notApplied('deadline_writer_unavailable', 'This deadline could not be recorded here, so nothing was recorded.');
     }
@@ -3869,6 +3914,9 @@ export function createAgentCapabilities(
       goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
         reference_date: (op.value as { reference?: string }).reference,
         stated_months: (op.value as { stated_months?: number }).stated_months },
+      // The store-reading writer reads the same rule on the base it writes (Codex r1 on #3024).
+      ...((op.value as { expected_goal?: unknown }).expected_goal !== undefined
+        ? { deadline_card: { expected_goal: (op.value as { expected_goal?: unknown }).expected_goal, own_write_landed: ownWriteLanded } } : {}),
     });
     // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
     if ((res.status === 'committed' || res.status === 'unconfirmed') ) {
@@ -4277,6 +4325,9 @@ export function createAgentCapabilities(
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_goal_deadline', path: goal.id,
           value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words,
+            // The card's SUBJECT (DL 14 Oct): the goal's complete projection as it stands now. One rule reads it at press, at
+            // lapse and at the writer (`still-applies.ts`), so an unrelated change never lapses the card and any goal change does.
+            ...(deadlineCardSubjectOf(g.raw, goal.id) !== undefined ? { expected_goal: deadlineCardSubjectOf(g.raw, goal.id) } : {}),
             ...(reference !== undefined ? { reference } : {}),
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
@@ -6823,6 +6874,7 @@ export function createAgentCapabilities(
         const p = proposals.get(id);
         if (p === undefined || p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return notFound;
         proposals.discard(id);
+        withdrawnProposals.add(id);
       }
       return {
         ok: true, mutated: false, proposal_id: id, withdrawn: true,
@@ -6871,9 +6923,9 @@ export function createAgentCapabilities(
         typed_approval_of: ctx.typed_approval_of,
         // EBD: a team-time card is stale only when what it read changed (hiring times landing never stale it).
         // E5: likewise a hiring-times card, while its own parts, carriers and deadline stand (the team time landing never stales it).
-        scoped_precondition_holds: (p) => teamTimeReadHolds(p, before.raw)
-          || (p.operations.length === 1 && p.operations[0]!.op === SET_HIRING_TIMES
-            && hiringTimesStillApply(p.operations[0]!.value as ApprovedHiringTimes, before.raw)),
+        // A deadline card, while its goal holds the date it was made against (hiring witness 35a66525: link strengths moved the
+        // model). The same rule decides its lapse (`heldCardStillApplies`, `lifecycle.ts`).
+        scoped_precondition_holds: (p) => heldCardStillApplies(p, before.raw),
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so

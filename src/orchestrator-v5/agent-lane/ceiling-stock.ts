@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { classifyValueSource, valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
-import { readGoalRecord } from '../goal-target/goal-record.js';
+import { GOAL_RECORD_PRECEDENCE, readGoalRecord, type GoalRecord } from '../goal-target/goal-record.js';
 import { timeClassOf } from '../goal-target/time-class.js';
 import { readCount, readUnitParts, statedTailParts, words } from './same-unit.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
@@ -72,14 +72,25 @@ function netAddition(before: string): boolean {
 export { isConfirmedCeilingStockCarrier, confirmedCeilingStockOf } from './ceiling-stock-carrier.js';
 
 /** The existing amount authority binds the value; this separate recogniser reads CURRENT/LIMIT/net roles. */
+/**
+ * ⛔ #3020 r3 (DL split after Codex CHECK-3020-dc005c2a): ONCE A REVISED-DRAFT REPLACEMENT HAS SET THE GOAL'S CURRENT TARGET,
+ * NO CARD. The replacement keeps that target's comparator on the goal and removes its user source (`goalTargetStampsInferred`,
+ * `draft-replacement.ts`): a node-held comparator with no source. Staging refused here through that source, so the older
+ * brief's ceiling never overwrites the target the user approved (Codex's reproducer: ≤1,600 riders replaced by the brief's
+ * 1,900, stored as the user's). It can only withhold. Binding the card to the current revision is parked.
+ */
+function targetSetByRevisedDraft(record: GoalRecord | null | undefined): boolean {
+  return record?.target?.comparator_source === GOAL_RECORD_PRECEDENCE.comparator[0] && record.target.source === undefined;
+}
+
 export function recogniseCeilingStock(graph: unknown, brief: string | null | undefined): CeilingStockPending | null {
   if (!rec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || typeof brief !== 'string') return null;
   // THE TIME CLASS (`time-class.ts`): a brief that states a timing shape this fixed month-H reading cannot hold ("starting in
   // month 3", a lift that begins later) offers no card. This can only withhold; it never recognises more than before.
   if (!timeClassOf(brief).supported) return null;
   const nodes: Rec[] = graph.nodes.filter(rec), goals = nodes.filter(n => n.kind === 'goal');
-  const goal = goals[0], h = goal && readGoalRecord(graph, goal.id)?.horizon?.months;
-  if (goals.length !== 1 || goal.nonlinear_identity != null || goal.goal_stock_reading === 'one_off'
+  const goal = goals[0], record = goal && readGoalRecord(graph, goal.id), h = record?.horizon?.months;
+  if (goals.length !== 1 || goal.nonlinear_identity != null || goal.goal_stock_reading === 'one_off' || targetSetByRevisedDraft(record)
     || h === undefined || h < 1 || h > 120 || goal.observed_state != null
     || ['user_stated', 'user_ratified'].includes(classifyValueSource(goal.threshold_source))
     || graph.goal_constraints?.some((r: Rec) => r.node_id === goal.id && r.provenance === 'explicit')) return null;

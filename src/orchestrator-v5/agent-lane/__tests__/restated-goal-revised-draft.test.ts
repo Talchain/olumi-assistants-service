@@ -378,11 +378,13 @@ describe('M1 captured marketing limit spellings through revised-draft offer and 
     const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(applied).toMatchObject({ ok: true, mutated: true, applied: true });
     expect(s.commits).toHaveLength(1);
+    // ⛔ EXPECTATION CHANGED (#3020 r2, DL (a); old `explicit` → new `inferred` on the two TARGETS only): approving the revised
+    // draft's reading of the goal is not authorship. The limits keep their own origin.
     const expectedRows: Rec[] = [
       { constraint_id: 'agent-lane:conversion_rate:>=', node_id: 'conversion_rate', operator: '>=', operator_as_stated: '>',
-        value: 15, label: 'conversion rate', unit: '%', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+        value: 15, label: 'conversion rate', unit: '%', provenance: 'inferred', value_frame: 'level', role: 'goal_target' },
       { constraint_id: 'agent-lane:new_customers_in_first_3_months:>=', node_id: 'new_customers_in_first_3_months', operator: '>=',
-        value: 20, label: 'New customers in first 3 months', unit: 'customers', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+        value: 20, label: 'New customers in first 3 months', unit: 'customers', provenance: 'inferred', value_frame: 'level', role: 'goal_target' },
       { constraint_id: 'agent-lane:annual_campaign_spend:<=', node_id: 'annual_campaign_spend', operator: '<=',
         value: 100000, label: 'Annual campaign spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
       { constraint_id: 'agent-lane:founder_marketing_time:<=', node_id: 'founder_marketing_time', operator: '<=',
@@ -594,11 +596,13 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     s.said(FX.l20.turn_id);
     expect(await caps.authoriseChange(pressed(r.proposal_id as string), { proposal_id: r.proposal_id } as never))
       .toMatchObject({ ok: true, mutated: true, applied: true });
+    // ⛔ EXPECTATION CHANGED (#3020 r2, DL (a)): the revised draft's two targets are stored `inferred` (old `explicit`); the limit
+    // and the carried founder-time row keep their own origin (the carried row asserted above byte-equal to the original).
     await expectStoredRunAndReopen(s, [
       { constraint_id: 'agent-lane:new_customers:>=', node_id: 'new_customers', operator: '>=', value: 20,
-        label: 'New customers', unit: 'customers', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+        label: 'New customers', unit: 'customers', provenance: 'inferred', value_frame: 'level', role: 'goal_target' },
       { constraint_id: 'agent-lane:conversion_rate:>=', node_id: 'conversion_rate', operator: '>=', operator_as_stated: '>',
-        value: 15, label: 'Conversion rate', unit: '%', provenance: 'explicit', value_frame: 'level', role: 'goal_target' },
+        value: 15, label: 'Conversion rate', unit: '%', provenance: 'inferred', value_frame: 'level', role: 'goal_target' },
       { constraint_id: 'agent-lane:annual_marketing_spend:<=', node_id: 'annual_marketing_spend', operator: '<=',
         value: 100000, label: 'Annual marketing spend', unit: 'GBP/year', provenance: 'explicit', value_frame: 'level' },
       original,
@@ -769,12 +773,17 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     await expectStoredRunAndReopen(s, rows);
   });
 
-  it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is not "held"', async () => {
+  // ⛔ CHANGED EXPECTATION (old → new, DL 14 Oct 01:4xZ: unverifiable is unknown, never "not included"): false + "NOT in the
+  // revised draft" → 'unknown' + "check the targets on the card". The card DOES carry "> 15%" (on Conversion rate), so the host
+  // cannot tell whether it is this call's target; it is still never "held".
+  it('RED (measures): a target call names its quantity; the same figure on ANOTHER quantity is never "held" — unknown', async () => {
     const s = server();
     // "customers" is in L20; 15% is a figure L20 states. The candidate holds "> 15%" only on Conversion rate.
     const r = await offerOn(s, candidate, { constraint_type: 'at_least', value: 15, unit: '%', measures: 'customers', rationale: L20 });
-    expect(r).toMatchObject({ ok: true, revised_draft: { holds_this_target: false } });
-    expect(String(r.note)).toMatch(/This target \(15%\) is NOT in the revised draft/);
+    expect(r).toMatchObject({ ok: true, revised_draft: { holds_this_target: 'unknown' } });
+    // The AIE's exact 'unknown' note (packet 281e8b3d).
+    expect(String(r.note)).toMatch(/The requested target could not be verified against the card\u2019s complete meaning\. Do not say it is included or excluded\./);
+    expect(String(r.note)).not.toMatch(/NOT in the revised draft/);
   });
 
   it('RED (whole graph): a postimage that is not the acknowledged registration is unconfirmed, and no replacement receipt is issued', async () => {

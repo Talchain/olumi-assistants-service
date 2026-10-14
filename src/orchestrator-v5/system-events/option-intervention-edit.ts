@@ -96,6 +96,7 @@ import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } fr
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady, type HorizonBasisWrite } from '../goal-target/goal-steady-write.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import { deadlineGoalStillBound } from '../agent-lane/proposal-object/still-applies.js';
 import { applyGoalReadingEdit, goalReadingPostimageIsScoped, type ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
 import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -865,7 +866,7 @@ export type OptionInterventionBatchExecutionInput =
     /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
-    readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly goalHorizon?: ApprovedGoalHorizon & { readonly expected_goal?: unknown; readonly own_write_landed?: boolean };
     /** ⭐ G: the user's answer to the goal's open question, `goal_target_basis.open_question` removed only: ONE append, alone. */
     readonly goalReading?: ApprovedGoalReading;
     readonly goalSteady?: ApprovedGoalSteady;
@@ -1196,6 +1197,13 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    // ⭐ The card's bound goal, read by the store-reading writer on the base it writes (Codex r1 on #3024: a goal renamed between
+    // the approval read and this read, the hash unchanged, was written). The same rule as the press and the lapse
+    // (`deadlineGoalStillBound`); only THIS proposal's own landed write continues past it, to the writer's verified no-op.
+    if (goalHorizon.expected_goal !== undefined && goalHorizon.own_write_landed !== true
+      && !deadlineGoalStillBound(before, goalHorizon.goal_id, goalHorizon.expected_deadline, goalHorizon.expected_goal)) {
+      return { kind: 'refused', reason: 'goal_horizon_goal_changed' };
+    }
     const written = applyGoalHorizonEdit(before, goalHorizon);
     if (written.kind === 'refused') return { kind: 'refused', reason: `deadline_${written.reason}` };
     // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).

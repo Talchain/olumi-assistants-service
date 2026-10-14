@@ -338,23 +338,24 @@ export interface StatusQuoLevel {
  * Amendment 1: the status quo row's own line, for the Run's recorded same-draw reference (`status_quo_by_assumption`) only.
  * Never a Monte Carlo figure, an interval or a chance, and never a forecast: a held reference value is named as recorded,
  * never compared with the target as a future event.
- * ⭐ AIE #94 6160089127 (`recovery/codex/AIE-STATUS-QUO-REFERENCE-AND-NEXT-STEP-RULING-20261014.json`; capacity judge row 3):
- * the two exact lines, byte for byte. The LEVEL line only where the caller holds the same Run's level and target in one
+ * ⭐ AIE #94 6163023819 (`recovery/codex/AIE-D4-FUTURE-VALUE-CALENDAR-AND-STATUS-QUO-RULINGS-20261014.json`, sha256
+ * fc17c200…, `status_quo`; capacity judge post3017 row 3), replacing #94 6160089127's lines: the two exact lines, byte for
+ * byte. A limitation of this Run's held-reference convention, never a universal inability, a certain future outcome or a
+ * promise that a figure unlocks a chance. The LEVEL line only where the caller holds the same Run's level and target in one
  * unit; every other case the generic line.
  */
 export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string {
   const bound = level === undefined ? undefined : COMPARATOR_WORDS[level.comparator];
+  const opening = `This Run cannot give a chance for carrying on as now: it uses ‘${label}’ as its unchanged reference, by assumption. `;
+  const review = `Review the evidence for how ‘${label}’ could change over this Run’s goal period without an intervention`
+    + `, including any forecast or uncertainty already retained in the model.`;
   if (level === undefined || bound === undefined || !Number.isFinite(level.today) || !Number.isFinite(level.target)
     || level.unit.trim() === '') {
-    return `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference, by assumption. `
-      + `Its own chance of meeting the recorded target is not shown. `
-      + `You can review what could make ‘${label}’ change if you carried on as now.`;
+    return `${opening}${review}`;
   }
   const say = (v: number): string => sayFigureAsWritten(v, level.unit);
-  return `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference. `
-    + `The model's held reference value is ${say(level.today)}; the target for this Run is ${bound} ${say(level.target)}. `
-    + `This option's own chance of meeting that target is not shown. `
-    + `You can review what could make ‘${label}’ change if you carried on as now.`;
+  return `${opening}The model’s held reference value is ${say(level.today)}; `
+    + `the target for this Run is ${bound} ${say(level.target)}. ${review}`;
 }
 
 /**

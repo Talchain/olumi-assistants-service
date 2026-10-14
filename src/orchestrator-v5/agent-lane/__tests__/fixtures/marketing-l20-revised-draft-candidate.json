@@ -1,6 +1,6 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "6a1fdbe9-bee4-423b-8f01-4e483070afcd",
+ "operation_id": "a5b2d99b-6a76-47db-aae3-45a5b2fffaa1",
  "candidate": {
   "nodes": [
    {
@@ -39,7 +39,6 @@
      "effects_at_period_end": true,
      "source": "olumi_reading"
     },
-    "threshold_source": "brief_extraction",
     "goal_direction": ">=",
     "goal_deadline_as_stated": "3 months"
    },
@@ -361,7 +360,7 @@
     "value": 20,
     "label": "New customers",
     "unit": "customers",
-    "provenance": "explicit",
+    "provenance": "inferred",
     "value_frame": "level",
     "role": "goal_target"
    },
@@ -373,7 +372,7 @@
     "value": 15,
     "label": "Conversion rate",
     "unit": "%",
-    "provenance": "explicit",
+    "provenance": "inferred",
     "value_frame": "level",
     "role": "goal_target"
    },
