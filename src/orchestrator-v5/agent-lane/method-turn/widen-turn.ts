@@ -238,7 +238,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: 
       + 'the factor’s own units and within its range, so the options can be compared once the user approves. An option whose '
       + 'levels you cannot estimate is not suggested. Never present a level as the user’s figure, and put no figure in an '
       + 'option’s name.',
-    'Put why each option might do better in `rationale`, in one or two plain sentences.',
+    'Put how each option would move the goal through a different mechanism in `rationale`, in one or two plain sentences.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
   ].join('\n');
   const doorFactors = g.nodes.filter((n) => n.kind === 'factor').map((n) => ({
@@ -652,7 +652,7 @@ function questionDirective(q: QuestionedLink, existing: readonly string[], facto
     'EVERY factor the option changes needs a level: your own estimate (estimate: true, with a basis the user can check), in '
       + 'the factor’s own units and within its range. An option whose levels you cannot estimate is not suggested. Never '
       + 'present a level as the user’s figure, and put no figure in the option’s name.',
-    'Put why it might do better, whichever way that link turns out, in `rationale`, in one or two plain sentences.',
+    'Put how it would move the goal without relying on that link, whichever way that link turns out, in `rationale`, in one or two plain sentences.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
   ].join('\n');
 }

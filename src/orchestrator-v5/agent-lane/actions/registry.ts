@@ -101,7 +101,7 @@ export const ACTION_REGISTRY: Readonly<Record<ActionId, ActionEntry>> = {
   pre_mortem: {
     label: 'Pre-mortem', icon: 'ClipboardList', group: 'method',
     press: { kind: 'fixed', id: 'agent-next-pre-mortem' },
-    user_line: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?',
+    user_line: 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?',
     authorities: { eligibility: 'RC', science: 'DSK', quantities: null }, contract: 'typed_method', run_dependent: false,
   },
   more_options: {

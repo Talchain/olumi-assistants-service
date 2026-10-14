@@ -189,7 +189,7 @@ function drafts(f: ActionFacts): Draft[] {
     const date = f.deadline === null ? null : sayDate(f.deadline);
     // Contract v1.1 item 4: the user line names the horizon the model holds, never a default year.
     const userLine = date === null ? undefined
-      : `Run a pre-mortem with me: imagine it is ${date} and this decision went badly. What most plausibly went wrong?`;
+      : `Run a pre-mortem with me: imagine it is ${date}, we went ahead, and it went badly. What most plausibly went wrong?`;
     out.push(draft(f, 'pre_mortem',
       !f.goalPresent ? { enabled: false, disabled_reason: DISABLED.needs_goal }
         : f.ownOptionCount < 1 ? { enabled: false, disabled_reason: DISABLED.needs_option }

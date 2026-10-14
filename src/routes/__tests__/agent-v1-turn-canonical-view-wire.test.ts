@@ -257,7 +257,9 @@ describe('canonical view on the same-page turn wire', () => {
       "analysis_ready": "6cde1496b47a0b7f7a21b9f8e77aee70dbeae02a56ff9d8a6f1a7486b0420d93",
       "draft_graph": "bad2923f6f0eabdecd4e44aa6905fbeb35343415facedcf40c953c7cb507fcd5",
       "_answer_shape": "42480035ce86ad4003eeace38ef517ee7ef4c930be0f5ca48c64e702f4b75b51",
-      "action_bar": "0c1c0d9b61498c90fd27fed8d4d24d0e5851ef0747f3ecdaeedece34ee467603",
+      // USER VOCABULARY (#3042) and OLUMI'S PURPOSE (#3045): the bar's two user lines only ("Review this model: …",
+      // "imagine we went ahead and it went badly"); reversing exactly those on the SENT bar reproduces 0c1c0d9b….
+      "action_bar": "e6a14d69e70dc856590e3de1b207abb7bd2de23687b428315b87013e8f011112",
       "_provider_calls": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "_agent": "f54bda8731e3b9dab638e5a87fd362d85a695c5ccfafeda819e89f9a24c793de",
       "_diagnostic_trace": "d3559521297dafbcd23d2db68f21626e77e51129d92ccca32707cc0819295ec2"

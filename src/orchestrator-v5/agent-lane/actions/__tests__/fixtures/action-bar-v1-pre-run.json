@@ -58,7 +58,7 @@
       "icon": "ClipboardList",
       "group": "method",
       "press_id": "agent-next-pre-mortem",
-      "user_line": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
+      "user_line": "Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?",
       "enabled": true,
       "why_now": "Imagine this went badly and find the most likely causes.",
       "offer_key": "2daa6b030f955ad9"

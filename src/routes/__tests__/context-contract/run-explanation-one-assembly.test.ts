@@ -198,7 +198,10 @@ describe('Explain scoped assembly safety', () => {
       // USER VOCABULARY (Paul, 14 Oct; CLAUDE.md §3): the coach template's VOCABULARY section and three phrases only:
       // 38,008 → 38,583 bytes (+575). Captured from the SENT body against staging 687c0d50's; reversing exactly those edits
       // on the SENT body reproduces staging's body byte for byte.
-      .toBe('0755d3985c9ebebba18736a26bce337008864c705d13531f3b46e8f74f5abb20');
+      // OLUMI'S PURPOSE (DL 14 Oct; Paul via the DL): the purpose block first in the host's part (+1,721) and the template's
+      // leader sentence (+201): 38,583 → 40,505 bytes. Captured from the SENT body against staging d529a94e's (which
+      // reproduces 0755d398…); removing exactly the block and reversing that sentence gives staging's body byte for byte.
+      .toBe('1f004bc69ce902ed38cbd13a600473862744335491d224758d06363b95b75490');
   },60000);
 });
 
