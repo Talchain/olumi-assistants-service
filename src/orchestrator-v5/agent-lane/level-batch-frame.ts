@@ -117,9 +117,10 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
       if (sameEngineQuantity(quantity, nextResolved.value) && !refreshPair && !initialEncoding) continue;
       if (cap === undefined || !Number.isFinite(quantity) || quantity < 0 || quantity > cap) return { kind: 'refused', reason: 'level_frame_mismatch' };
       // Only the carrier the resolver reads is re-encoded and checked; a shadowed
-      // carrier never reaches the engine, so it keeps its bytes (buddy r2).
+      // carrier never reaches the engine, so it keeps its bytes (buddy r2). With no
+      // readable winner (e.g. raw-only), every carrier is re-encoded so the level stays readable.
       const winning = mergeInterventionSourceObjects(option)[factorId];
-      for (const { carrier, key: cellKey } of cells.filter(c => c.carrier[c.key] === winning)) {
+      for (const { carrier, key: cellKey } of (winning === undefined ? cells : cells.filter(c => c.carrier[c.key] === winning))) {
         const cell = carrier[cellKey];
         const next = { ...(typeof cell === 'object' && cell !== null ? cell : {}), value: quantity / cap, raw_value: quantity, cap };
         if (typeof cell === 'object' && cell !== null && Object.hasOwn(cell, 'raw_value')) {

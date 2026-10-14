@@ -198,7 +198,7 @@ async function press(id: string, message: string, parameters?: Record<string, un
 }
 async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propose_identity']): Promise<void> {
   const callsBeforeApproval = modelCalls;
-  await assertIdentityYes(card, press, id => agentProposals.get(id), () => graphWrites, () => source.graph, tools);
+  await assertIdentityYes(card, press, id => agentProposals.get(id), () => graphWrites, () => source.graph, tools, ['authorise_change', 'run_analysis']);
   const freshFacts = actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
     analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY });
   expect(offersOf(actionBarOf(freshFacts)).filter(o => o.action_id === 'confirm_reading')).toEqual([]);

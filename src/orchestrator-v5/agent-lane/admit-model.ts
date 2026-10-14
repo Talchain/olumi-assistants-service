@@ -82,7 +82,9 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
+import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -275,6 +277,12 @@ export interface CandidateIdentity {
   readonly operation: string;
   readonly factors: readonly string[];
   readonly provenance: string;
+  /**
+   * L2: for a `sum` the brief DEFINES, the drafter's quote of the defining sentence. Optional: the sent schema has no such
+   * key yet (`AIE_TEXT_PENDING_DECLARED_SUM`, `runtime/build-model.ts`), so absent means none was quoted. Read only by
+   * `checkDeclaredSums`, which locates it in the brief itself; the drafter's quote alone is never authority.
+   */
+  readonly evidence?: { readonly quote: string } | null;
 }
 
 /**
@@ -326,14 +334,15 @@ export interface NonlinearIdentityCarrier {
 }
 
 /**
- * The persisted `sum` carrier on a limited spend tally (`findSumTallies`; same NodeV3 field). Always Olumi's reading:
- * no brief states it, so `stated_in_brief` is `false`. The product machinery (`readCarrier`, the sign test, F-LIMIT N1)
+ * The persisted `sum` carrier (same NodeV3 field): on a limited spend tally (`findSumTallies`), always Olumi's reading
+ * (`stated_in_brief: false`); or a sum the drafter DECLARED and admission checked whole (`checkDeclaredSums`, L2), the
+ * user's only where the brief's own sentence defines it. The product machinery (`readCarrier`, the sign test, F-LIMIT N1)
  * reads `product` only, so a sum is never judged as a product.
  */
 export interface SumIdentityCarrier {
   readonly operation: 'sum';
   readonly factor_ids: readonly string[];
-  readonly stated_in_brief: false;
+  readonly stated_in_brief: boolean;
 }
 
 /** A declaration that held structurally and bears on the goal — what the carrier persists. */
@@ -1228,6 +1237,13 @@ export function sumIdentitySentence(tally: string, operands: readonly string[]):
   return `Olumi reads "${tally}" as ${plusList(operands)}: Olumi's reading, not your figure; tell me if it includes other costs.`;
 }
 
+/** L2's one sentence for a carried DECLARED `sum`: the brief's definition said as fact, or Olumi's reading said as such. */
+export function declaredSumSentence(total: string, parts: readonly string[], statedInBrief: boolean): string {
+  return statedInBrief
+    ? `"${total}" is worked out as ${plusList(parts)}, the definition your brief gives.`
+    : `Olumi reads "${total}" as ${plusList(parts)}: Olumi's reading, not your figure; tell me if it includes anything else.`;
+}
+
 /**
  * ⭐ R3-2 — THE SUM SAID WHERE THE USER ALWAYS SEES IT (`open_questions`, as `productIdentityOpenQuestions`), once per
  * minted tally. Nothing when none was minted, so every other model's questions are unchanged.
@@ -1363,6 +1379,134 @@ const quotedList = (items: readonly string[]): string => {
   return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
 };
 
+/** A declared `sum` that held whole (`checkDeclaredSums`), with its bound source and authorship. */
+export interface AcceptedDeclaredSum {
+  readonly outcome_id: string;
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+  /** Located brief sentence bound to the declared quantities. */
+  readonly quote?: string;
+}
+
+/** ISL's reconciliation tolerance for a stated level (`IDENTITY_RECONCILIATION_TOLERANCE`, robustness_analyzer_v2.py). */
+const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
+
+/**
+ * ⭐ L2 — A SUM THE DRAFTER DECLARES, CHECKED WHOLE, ONCE (DL brief L2, 12 Oct; AIE #94 6134029017 Q1).
+ *
+ * The capacity brief DEFINES "Total weekly support capacity … as the existing 80 tickets per week plus the additional
+ * specialist capacity". Run 5 sent that definition as two uncertain causal links (exists 0.8, ±0.5), so the shown chance
+ * understated it and the reply called the user's definition Olumi's assumption. A declared `sum` is carried on its total
+ * (`nonlinear_identity`, R3-2's carrier; ISL then works the total out from its parts and never reads those links'
+ * strengths) only when the WHOLE declared set holds against the admitted graph:
+ *  · the total and every part are distinct quantities in the model, each named once (a duplicate or unbound label
+ *    refuses), with at least two parts;
+ *  · every part reaches the total by ONE link that holds by definition (`holdsByDefinition`: ±1 per 1 in one unit at both
+ *    ends, its size still that definition) at +1, since ISL adds every operand at +1 (`_identity_term`); and no other
+ *    definitional link enters the total (a required part missing from the declaration refuses);
+ *  · the total and every part have a scale and a level today, and today's levels add up within ISL's own reconciliation
+ *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
+ *    constant is only ever a part with its own level: the candidate has no other place for one.
+ * DL L3b ruling: an explicit declaration with located, bound brief evidence retains original user authorship.
+ * This trusts the drafter's relation reading: a falsely declared denial can pass (accepted AI-misreading residual).
+ * No declaration means no declared sum. A quote CEE cannot locate or bind is rejected as before. Any failure writes
+ * nothing: the links stay as drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
+ */
+function checkDeclaredSums(
+  allDeclared: readonly CandidateIdentity[],
+  resolve: (label: string) => string | undefined,
+  nodes: readonly AdmittedNode[],
+  edges: readonly { from: string; to: string; strength?: { mean: number }; effect_direction?: string; provenance?: AdmittedEdge['provenance'] }[],
+  frameOf: (id: string) => number | undefined,
+  brief: string | undefined,
+): { accepted: AcceptedDeclaredSum[]; loss: RepairEntry[] } {
+  const accepted: AcceptedDeclaredSum[] = [];
+  const loss: RepairEntry[] = [];
+  const declared = allDeclared.filter((d) => d?.operation === 'sum');
+  if (declared.length === 0) return { accepted, loss };
+  const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
+  const unitOf = nodeUnitOf(nodes);
+  const QUANTITY = new Set<CandidateNodeKind>(['goal', 'outcome', 'factor']);
+  const INPUT = new Set<CandidateNodeKind>(['outcome', 'factor']);
+  /** Today's level in the node's own units: its stated figure, else its normalised level on its frame. */
+  const todayRaw = (id: string): number | undefined => {
+    const os = nodeOf.get(id)?.observed_state;
+    if (os === undefined) return undefined;
+    if (typeof os.raw_value === 'number' && Number.isFinite(os.raw_value)) return os.raw_value;
+    const level = typeof os.baseline === 'number' ? os.baseline : os.value;
+    const frame = frameOf(id);
+    return typeof level === 'number' && Number.isFinite(level) && frame !== undefined ? level * frame : undefined;
+  };
+  for (const d of declared) {
+    const factors = Array.isArray(d.factors) ? d.factors : [];
+    const totalId = resolve(d.outcome);
+    const reject = (why: string): void => {
+      loss.push({
+        field_path: `nodes[${totalId ?? slugId(String(d.outcome))}].nonlinear_identity_rejected`,
+        before: { outcome: d.outcome, operation: d.operation, factors: [...factors] },
+        after: null,
+        reason: `Olumi read "${d.outcome}" as ${quotedList(factors)} added together, but ${why}, so that was not used and nothing about it is assumed.`,
+        severity: 'warn',
+      } as RepairEntry);
+    };
+    if (totalId === undefined) { reject(`"${d.outcome}" is not in the model`); continue; }
+    if (!QUANTITY.has(nodeOf.get(totalId)!.kind)) { reject(`"${d.outcome}" is not a quantity in the model`); continue; }
+    const partIds: string[] = [];
+    let why: string | null = null;
+    for (const f of factors) {
+      const id = resolve(f);
+      if (id === undefined) { why = `"${f}" is not in the model`; break; }
+      if (!INPUT.has(nodeOf.get(id)!.kind)) { why = `"${f}" is not a quantity in the model`; break; }
+      if (id === totalId) { why = `"${f}" cannot be added into itself`; break; }
+      if (partIds.includes(id)) { why = `"${f}" is named twice`; break; }
+      partIds.push(id);
+    }
+    if (why === null && partIds.length < 2) why = 'a sum needs at least two different quantities';
+    if (why !== null) { reject(why); continue; }
+    const totalLabel = nodeOf.get(totalId)!.label;
+    const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
+    const definitional = edges.filter((e) => e.to === totalId && holdsByDefinition(e as Record<string, unknown>, unitOf));
+    const plusOne = (id: string): boolean => {
+      const links = edges.filter((e) => e.from === id && e.to === totalId);
+      const ne = links[0]?.provenance?.natural_effect;
+      return links.length === 1 && definitional.includes(links[0]!) && ne !== undefined && ne.amount / ne.per_source_change > 0
+        && links[0]!.effect_direction !== 'negative' && (links[0]!.strength?.mean ?? 0) > 0;
+    };
+    const notDefined = partIds.find((id) => !plusOne(id));
+    if (notDefined !== undefined) { reject(`"${labelOf(notDefined)}" is not linked into "${totalLabel}" one for one in the same unit`); continue; }
+    const missing = definitional.find((e) => !partIds.includes(e.from) && INPUT.has(nodeOf.get(e.from)?.kind as CandidateNodeKind));
+    if (missing !== undefined) { reject(`"${labelOf(missing.from)}" is also part of "${totalLabel}" by definition and is not among them`); continue; }
+    const unframed = [totalId, ...partIds].find((id) => { const f = frameOf(id); return f === undefined || !(f > 0) || !Number.isFinite(f); });
+    if (unframed !== undefined) { reject(`"${labelOf(unframed)}" has no scale to add it up on`); continue; }
+    const unlevelled = [totalId, ...partIds].find((id) => todayRaw(id) === undefined);
+    if (unlevelled !== undefined) { reject(`"${labelOf(unlevelled)}" has no figure today`); continue; }
+    const total = todayRaw(totalId)!;
+    const parts = partIds.map((id) => todayRaw(id)!);
+    const sum = parts.reduce((a, b) => a + b, 0);
+    const scale = Math.max(Math.abs(total), parts.reduce((a, b) => a + Math.abs(b), 0));
+    if (scale > 0 && Math.abs(total - sum) / scale > ISL_IDENTITY_RECONCILIATION_TOLERANCE) {
+      reject(`today "${totalLabel}" is ${sayFigure(total, '')} while those parts add up to ${sayFigure(sum, '')}`);
+      continue;
+    }
+    // Bind the drafter's declaration to its source; relation polarity remains the drafter's responsibility (DL L3b).
+    const quoted = d.evidence?.quote;
+    if (quoted === undefined || quoted === null) {
+      accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false });
+      continue;
+    }
+    const sentence = locatedBriefSentence(brief, quoted);
+    const figures = sentence === null ? [] : findStatedAmounts(sentence).map((a) => a.magnitude);
+    const names = (id: string): boolean => sentence !== null && (labelHoldsQuantity(sentence, labelOf(id))
+      || (id !== totalId && figures.includes(Math.abs(todayRaw(id)!))));
+    if (sentence === null || ![totalId, ...partIds].every(names)) {
+      reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
+      continue;
+    }
+    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: d.provenance === 'explicit', quote: sentence });
+  }
+  return { accepted, loss };
+}
+
 /**
  * ⛔ C46 STAGE 1 — CHECK A DECLARED PRODUCT, THEN ASK WHETHER ITS SIGN IS PROVABLE.
  *
@@ -1432,8 +1576,8 @@ function markProductIdentities(
   const analyses: ProductIdentityAnalysis[] = [];
   const unlevelled: string[] = [];
   // ⭐ CEE #4: an `accumulation` is admitted by its own writer (`accumulation-identity.ts`, which needs the held deadline),
-  // never refused here as "not a relationship Olumi can check".
-  const declared = allDeclared.filter((d) => d?.operation !== 'accumulation');
+  // never refused here as "not a relationship Olumi can check". L2: nor is a `sum`, checked whole by `checkDeclaredSums`.
+  const declared = allDeclared.filter((d) => d?.operation !== 'accumulation' && d?.operation !== 'sum');
   if (declared.length === 0) return { marks, loss, accepted, analyses, unlevelled };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
@@ -5432,6 +5576,26 @@ function admitOnce(
       carriers.set(a.outcome_id, { operation: 'product', factor_ids: [...a.factor_ids], stated_in_brief: a.stated_in_brief });
     }
   }
+  // ⭐ L2: a SUM the drafter declared, checked whole against the FINAL structure (`checkDeclaredSums`) and carried on its
+  // total with the bound declaration's authorship. A declared product wins its node; a declared sum
+  // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
+  const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
+    finalEdges, (id) => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); }, brief);
+  loss.push(...declaredSums.loss);
+  const declaredCarried: AcceptedDeclaredSum[] = [];
+  for (const s of declaredSums.accepted) {
+    if (carriers.has(s.outcome_id)) continue;
+    carriers.set(s.outcome_id, { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: s.stated_in_brief });
+    declaredCarried.push(s);
+    loss.push({
+      field_path: `nodes[${s.outcome_id}].sum_identity`,
+      before: null,
+      after: { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: s.stated_in_brief },
+      reason: declaredSumSentence(labelById.get(s.outcome_id) ?? s.outcome_id, s.factor_ids.map((id) => labelById.get(id) ?? id), s.stated_in_brief)
+        + (s.quote !== undefined ? ` Brief quote: “${s.quote}”` : ''),
+      severity: 'info',
+    } as RepairEntry);
+  }
   // ⭐ R3-2: a limited spend tally fed only by its same-unit levers is held as their SUM (`findSumTallies`), on the FINAL
   // structure, as Olumi's reading — said once in `open_questions` (`sumIdentityOpenQuestions`). A declared product wins.
   const sums = findSumTallies(levers.nodes, finalEdges, constraintResult.constraints).filter((t) => !carriers.has(t.node_id));
@@ -5451,6 +5615,8 @@ function admitOnce(
   // domain judgement is NOT applied: it assumes Olumi's spread (σ = β/2), and whether the parts can overrun the total is
   // exactly what the limit on the total checks. Even a Run that does not evaluate the identity then adds the parts up
   // exactly, and the limit is scored on the parts (`placeholder-parts.ts`). No frame on either end → left as it was.
+  /** Per total, the parts whose links are now its DEFINITION (minted by R3-2 or declared, L2). */
+  const definedParts = new Map<string, ReadonlySet<string>>();
   if (sums.length > 0) {
     const partsOf = new Map(sums.map((t) => [t.node_id, new Set(t.factor_ids)] as const));
     finalEdges = finalEdges.map((e) => {
@@ -5472,9 +5638,31 @@ function admitOnce(
       return { ...edge, strength: { mean: beta, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
         provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, natural_effect, definitional: true as const } };
     });
+    for (const [total, parts] of partsOf) definedParts.set(total, parts);
+  }
+  // ⭐ L2: a carried DECLARED sum's parts are its definition too, at existence 1 and the spread floor, as R3-2's. The size is
+  // the one admission already checked (`holdsByDefinition`: ±1 per 1 in one unit, β on the two frames), kept as it is so
+  // the frame fits after admission move it like any other link. Bound explicit declarations retain user authorship
+  // and their `source_quote`. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
+  if (declaredCarried.length > 0) {
+    const declaredOf = new Map(declaredCarried.map((s) => [s.outcome_id, s] as const));
+    finalEdges = finalEdges.map((e) => {
+      const declared = declaredOf.get(e.to);
+      if (declared === undefined || !declared.factor_ids.includes(e.from)) return e;
+      const { defaulted: _projection, ...edge } = e;
+      const { reasoning: _guess, basis: _guessBasis, source: _drafted, source_quote: _drafterQuote, olumi_fit_candidate: _fit,
+        mean_projected: _projected, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
+      return { ...edge, strength: { mean: e.strength.mean, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
+        provenance: { ...provenance, source: declared.stated_in_brief ? 'brief_extraction' : 'cee_hypothesis',
+          magnitude: declared.stated_in_brief ? 'user_stated' as const : 'olumi_estimate' as const, definitional: true as const,
+          ...(declared.quote !== undefined ? { source_quote: declared.quote } : {}) } };
+    });
+    for (const s of declaredCarried) definedParts.set(s.outcome_id, new Set(s.factor_ids));
+  }
+  if (definedParts.size > 0) {
     // The sizer asked about each part's size BEFORE it became a definition ("Nobody has said, so Olumi uses a placeholder
     // …"); that question is no longer true and is never shown (CODEX 5930239704, MG sweep C1). Only the rewritten edges.
-    const defined = new Set(finalEdges.filter((e) => e.provenance?.definitional === true && partsOf.get(e.to)?.has(e.from) === true)
+    const defined = new Set(finalEdges.filter((e) => e.provenance?.definitional === true && definedParts.get(e.to)?.has(e.from) === true)
       .map((e) => `edges[${e.from}::${e.to}]`));
     for (let i = loss.length - 1; i >= 0; i--) {
       const at = /^(edges\[.*\])\.(?:magnitude_question|set_aside_estimate|magnitude_unconvertible)$/.exec(loss[i]!.field_path);
