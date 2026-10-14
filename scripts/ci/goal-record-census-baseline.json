@@ -1,5 +1,5 @@
 {
-  "source_sha": "567a8b0c1a7a1ea7be9993ac794f79b4df5a4124",
+  "source_sha": "23c155150668984c7dc047bf82fd3014d921b333",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -647,7 +647,6 @@
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 3,
       "src/orchestrator-v5/agent-lane/current-level-answer.ts": 2,
       "src/orchestrator-v5/agent-lane/current-level-ask-carry.ts": 1,
-      "src/orchestrator-v5/agent-lane/deadline-card.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-certainty.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 17,
@@ -843,7 +842,7 @@
     "goal_threshold_cap_provenance": 37,
     "goal_threshold_frame": 142,
     "goal_threshold_raw": 247,
-    "goal_threshold_unit": 224,
+    "goal_threshold_unit": 223,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 43,
     "readHeldGoalComparator": 20,
@@ -856,7 +855,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2488,
+  "total_references": 2487,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
