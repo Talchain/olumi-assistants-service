@@ -923,7 +923,7 @@ export function blockerIssue(
       ...common,
       code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
       category: 'option_mapping',
-      message: `No option changes "${factorLabel ?? factorId}"; it remains part of the current model.`,
+      message: `No option changes "${factorLabel ?? factorId}", so every option is compared with it at its current level. Tell me if one of the options should change it.`,
     };
   }
   // A carrier with no usable `blocker_type` at all is malformed, not
@@ -1380,8 +1380,8 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   const question = eventPath?.kind === 'eligible' ? riskOccurrenceAskWords(gap.label, eventPath.window_months) : `How likely or how large is "${gap.label}" today?`;
   // The offer to propose is said only where the card can exist (PL 05:53Z): with no single saved goal period there is no
   // window, so no card, and the ask never promises one.
-  if (gap.kind === 'risk') return `${question} The numerical analysis is withheld until this risk has a supported value.`
-    + (eventPath?.kind === 'eligible' ? ' You can also ask Olumi to propose a labelled starting assumption for review.' : '');
+  if (gap.kind === 'risk') return `${question} Olumi can’t run the numbers until this risk has a figure.`
+    + (eventPath?.kind === 'eligible' ? ' Or ask Olumi to suggest a starting estimate for you to review.' : '');
   return statusQuoLevelAsk(gap.label);
 };
 

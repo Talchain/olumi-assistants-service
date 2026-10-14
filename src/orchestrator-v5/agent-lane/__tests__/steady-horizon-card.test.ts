@@ -192,7 +192,7 @@ describe('steady horizon: one held card through the existing approved batch door
     const reply = await turn({ message: 'Run analysis', source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: tid });
     const card = cardOf(reply);
     expect(card.id).toMatch(/^agent-approve-proposal:/);
-    expect(card.detail).toBe(`Does ‘${goalOf(jsonbGraph()).label}’ stay about the same over 9 months unless you act? If yes, Olumi records that as your judgement and the chance is worked out for month 9; then run the analysis again.`);
+    expect(card.detail).toBe(`Does ‘${goalOf(jsonbGraph()).label}’ stay about the same over 9 months unless you act? If yes, Olumi records that as your judgement and the chance is worked out for month 9, and the analysis runs again.`);
     expect(card).not.toHaveProperty('preselected');
     expect(JSON.stringify(jsonbGraph())).toBe(before);
     expect(executableProposalId(card.id.split(':')[1]!, SCENARIO, null, computeAnalysisAffectingGraphHash(jsonbGraph() as never) ?? undefined, jsonbGraph())).toBeDefined();

@@ -148,7 +148,7 @@ describe('blockerIssue — the producer authored the sentence, so the producer k
 
     expect(issue?.code).toBe('UNREACHABLE_CONTROLLABLE_FACTOR');
     expect(issue?.message).toBe(
-      'No option changes "Support Response Time"; it remains part of the current model.',
+      'No option changes "Support Response Time", so every option is compared with it at its current level. Tell me if one of the options should change it.',
     );
   });
 

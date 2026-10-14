@@ -23,9 +23,20 @@ const FX = JSON.parse(readFileSync('tests/fixtures/status-quo-row/served-capacit
 const GOAL = 'weekly_support_capacity';
 const SQ = 'keep_current_staffing';
 const OLD = 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.';
-/** The AIE's two lines (packet fc17c200), placeholders filled with this Run's own recorded values. */
-const AIE = JSON.parse(readFileSync('tests/fixtures/status-quo-row/aie-status-quo-lines-fc17c200.json', 'utf8')) as {
+/** The AIE's packet fc17c200 lines, as they were (the meaning these lines keep). */
+const AIE_PACKET = JSON.parse(readFileSync('tests/fixtures/status-quo-row/aie-status-quo-lines-fc17c200.json', 'utf8')) as {
   exact_LEVEL_line: string; exact_generic_line: string };
+/**
+ * The row's two lines in plain words (Paul's principle review C.md #3028, 14 Oct; AIE re-sign pending): the packet's meaning and
+ * rules kept (the held reference and the target as recorded values, no future-event comparison, no promise of an unlock).
+ */
+const AIE = {
+  exact_LEVEL_line: 'This Run can’t give a chance for carrying on as now, because it treats ‘<goal>’ as unchanged from today’s <reference> '
+    + '(your target is <comparator> <target>). Worth checking: how ‘<goal>’ could change over the goal period if nothing is done, '
+    + 'including any forecast or range already in the model.',
+  exact_generic_line: 'This Run can’t give a chance for carrying on as now, because it treats ‘<goal>’ as unchanged from today. Worth checking: '
+    + 'how ‘<goal>’ could change over the goal period if nothing is done, including any forecast or range already in the model.',
+};
 const levelLine = (goal: string, reference: string, comparator: string, target: string): string => AIE.exact_LEVEL_line
   .split('<goal>').join(goal).replace('<reference>', reference).replace('<comparator>', comparator).replace('<target>', target);
 const NEW = levelLine('Weekly support capacity', '80 tickets per week', 'at least', '100 tickets per week');
@@ -74,10 +85,10 @@ describe('the status quo row: the held reference value and the target as recorde
 
   it('the LEVEL line says the held comparator as recorded, never "meets"; anything unreadable gets the generic line', () => {
     const say = (today: number, comparator: string) => statusQuoRowWords('Cost', { today, comparator, target: 100, unit: '£' });
-    expect(say(100, '>=')).toContain('The model’s held reference value is £100; the target for this Run is at least £100.');
-    expect(say(100, '>')).toContain('the target for this Run is above £100.');
-    expect(say(90, '<=')).toContain('The model’s held reference value is £90; the target for this Run is at most £100.');
-    expect(say(100, '<')).toContain('the target for this Run is below £100.');
+    expect(say(100, '>=')).toContain('as unchanged from today’s £100 (your target is at least £100).');
+    expect(say(100, '>')).toContain('(your target is above £100).');
+    expect(say(90, '<=')).toContain('as unchanged from today’s £90 (your target is at most £100).');
+    expect(say(100, '<')).toContain('(your target is below £100).');
     for (const c of ['>=', '>', '<=', '<']) expect(say(100, c)).not.toMatch(NEVER);
     expect(statusQuoRowWords('Cost')).toBe(generic('Cost'));
     expect(statusQuoRowWords('Cost', { today: 1, comparator: '==', target: 1, unit: '£' })).toBe(generic('Cost'));
@@ -85,12 +96,12 @@ describe('the status quo row: the held reference value and the target as recorde
     expect(statusQuoRowWords('Cost', { today: 1, comparator: '>=', target: 1, unit: ' ' })).toBe(generic('Cost'));
   });
 
-  it('IDENTITY: both lines are the AIE\'s packet text, byte for byte, with only the placeholders filled', () => {
+  it('IDENTITY: both lines are the plain-words text, byte for byte, with only the placeholders filled', () => {
     expect(statusQuoRowWords('Cost', { today: 90, comparator: '<=', target: 100, unit: '£' }))
       .toBe(levelLine('Cost', '£90', 'at most', '£100'));
     expect(statusQuoRowWords('Cost')).toBe(AIE.exact_generic_line.split('<goal>').join('Cost'));
-    // Contrast: the fixture is the packet's own text (its opening and its review sentence), not a copy of the producer.
-    expect(AIE.exact_generic_line.startsWith('This Run cannot give a chance for carrying on as now: it uses ‘<goal>’')).toBe(true);
-    expect(AIE.exact_LEVEL_line.endsWith(AIE.exact_generic_line.slice(AIE.exact_generic_line.indexOf(' Review the evidence')))).toBe(true);
+    // Contrast: the producer no longer says the packet's own wording (replaced by the plain words, same meaning).
+    expect(statusQuoRowWords('Cost')).not.toBe(AIE_PACKET.exact_generic_line.split('<goal>').join('Cost'));
+    expect(AIE.exact_LEVEL_line.endsWith(AIE.exact_generic_line.slice(AIE.exact_generic_line.indexOf(' Worth checking')))).toBe(true);
   });
 });

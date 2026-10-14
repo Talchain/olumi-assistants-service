@@ -317,7 +317,7 @@ describe('T4e K1: first Run never computes an unknown sampled root as zero', () 
     expect(calls).toBe(0);
     const { assessCanonicalAnalysisReadiness } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
     expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
-      ? 'How likely or how large is "Delivery disruption" today? The numerical analysis is withheld until this risk has a supported value.'
+      ? 'How likely or how large is "Delivery disruption" today? Olumi can’t run the numbers until this risk has a figure.'
       : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
   });
 });

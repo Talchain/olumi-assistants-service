@@ -629,7 +629,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
     // Audit MAG-2 (served 201724Z steps 06–07): the new factor's link is the flat default, so its size is a placeholder,
     // never "Olumi's estimate".
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Revenue"; how strongly is not known yet: Olumi used a placeholder strength, not an estimate\./);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Revenue"; how strongly is not known yet: the strength is Olumi’s guess, not an estimate\./);
     expect(t2.assistant_text).not.toMatch(/how strongly is Olumi's estimate/);
   }, 120_000);
 
@@ -790,7 +790,9 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const pressed = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     expect(pressed._agent.tool_calls.find((call) => call.name === 'authorise_change'))
       .toMatchObject({ ok: true, mutated: true });
-    expect(pressed.assistant_text).toContain('Any earlier result is now out of date; run analysis to include this option.');
+    // Plain words (#3038, Paul's principle review): the receipt no longer tells the user to run what runs automatically.
+    expect(pressed.assistant_text).toContain('Its Olumi origin and each level\'s recorded source remain unchanged.');
+    expect(pressed.assistant_text).not.toContain('run analysis to include this option');
     expect(pressed.assistant_text).not.toMatch(/the earlier analysis|run it again/i);
     expect(approveChipOf(pressed), 'the applied proposal is no longer offered').toBeUndefined();
     const after = graphNow();

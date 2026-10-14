@@ -27,7 +27,7 @@ const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
 const WITHHELD_FINDING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
-const riskAsk = (label: string): string => `How likely or how large is "${label}" today? The numerical analysis is withheld until this risk has a supported value.`;
+const riskAsk = (label: string): string => `How likely or how large is "${label}" today? Olumi can’t run the numbers until this risk has a figure.`;
 const SENTENCE = riskAsk('Demand shortfall');
 const MISSING_ROOT_UNNAMED_ONE = missingRootUnnamedLine(1);
 

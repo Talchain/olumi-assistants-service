@@ -37,15 +37,15 @@ const SERVED = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-h
 const RISK = 'code_quality_deterioration';
 const LABEL = 'Code quality deterioration';
 /** AIE packet 6e52e896 `event_risk.readiness_copy` (the eligible event path), then the ask's existing sentences. */
-const ASK = 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months? The numerical analysis is withheld until '
-  + 'this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.';
+const ASK = 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers until '
+  + 'this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.';
 const BASIS = 'Adding people under a three-month launch deadline often strains review time.';
 const ARGS = { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: BASIS, user_stated: false,
   occurrence_range: { low_percent: 20, high_percent: 40 } }] };
 const BLOCK = { version: 1, occurrence: { p_low: 0.2, p_high: 0.4, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: 3 } };
 /** AIE packet 6e52e896 (#94 6161383921) `event_risk.card` / `.basis_line` / `.receipt`, filled by hand: literals, so any change is a visible diff. */
-const CARD = 'Adopt Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. This is an estimate, not a measurement, and it stays Olumi’s after approval. The size of its effect remains Olumi’s placeholder; whether the effect relationship applies is a separate assumption.'
-  + `\nOlumi's proposed basis for this estimate (any claimed earlier statement remains unverified unless shown with its verified source): “${BASIS}”`;
+const CARD = 'Adopt Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. This is an estimate, not a measurement, and it stays Olumi’s after approval. How strongly it affects the model, and whether it does at all, are separate Olumi guesses you can change.'
+  + `\nWhy Olumi suggests this (not checked against a source unless one is shown): “${BASIS}”`;
 const RECEIPT = 'Recorded Olumi’s starting assumption: the chance that ‘Code quality deterioration’ happens at least once within 3 months is 20–40%. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
 const ROUTE_MS = 60_000;
 /** The lapse a held card is said with (`heldLapseSentence`, 'model_changed'). */
@@ -337,7 +337,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     // Codex r2: the cold reopen admits no Run on the 3-month range under the 6-month goal; it asks the occurrence over 6 months.
     expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: false });
     expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
-      'How likely is ‘Code quality deterioration’ to happen at least once within 6 months? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+      'How likely is ‘Code quality deterioration’ to happen at least once within 6 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     sentBodies.length = 0;
     await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() });
     expect(sentReadiness()).toMatchObject({ checked: true, may_run: false });
@@ -355,7 +355,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((offer.suggested_actions ?? []).filter((c: Rec) => String(c.id).startsWith('agent-approve'))).toEqual([]);
     expect(w.graph()).toEqual(unperiod.graph);
     expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
-      'How likely or how large is "Code quality deterioration" today? The numerical analysis is withheld until this risk has a supported value.']);
+      'How likely or how large is "Code quality deterioration" today? Olumi can’t run the numbers until this risk has a figure.']);
   }, ROUTE_MS);
 
   it('PL 05:53Z: adoption alone never licenses the Run — another unresolved root still withholds it after the press', async () => {

@@ -243,7 +243,7 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     expect(p.chips).toHaveLength(1);
     // ⛔ EXPECTATION CHANGED (AIE packet 2b19ae59): the AIE's exact singular sentence replaces the host's draft.
     expect(String(p.chips[0].detail)).toContain('Left out of this change set: '
-      + '"Monthly new paying subscribers" \u2192 "Paying subscribers"' + ', because the proposed band\'s source is unverified. Its current relationship and source are kept.');
+      + '"Monthly new paying subscribers" \u2192 "Paying subscribers"' + ', because Olumi could not confirm who gave the proposed strength. Its current relationship and source are kept.');
     expect(String(p.door.public_label)).toBe(String(p.chips[0].detail));
     expect(edgeNow('monthly_new_paying_subscribers', 'paying_subscribers'), 'the unknown link is untouched').toEqual(unknownBefore);
     expect(edgeNow(...CHURN).provenance.source).toBe('user_specified');

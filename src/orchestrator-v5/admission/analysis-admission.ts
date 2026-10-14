@@ -1359,7 +1359,7 @@ export function analysisAdmissionFrom(
         demanded > 0
           ? `${demanded === 1 ? 'One input is' : `${demanded} inputs are`} still needed from you.`
           : required !== '' ? required
-            : 'Olumi filled in the gaps here itself; you can review them, and nothing is required of you.',
+            : 'Olumi filled these gaps itself with provisional assumptions; check them, because the comparison rests on them.',
     });
   }
 

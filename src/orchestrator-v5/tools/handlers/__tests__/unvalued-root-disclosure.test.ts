@@ -72,7 +72,7 @@ const unvaluedRoots = (g: unknown) => assessCanonicalAnalysisReadiness(g).analys
 describe('every sampled unvalued root kind on the goal path has a typed gap', () => {
   it('R1: a RISK root withholds and names the risk in its next step', () => {
     const g = withRoot('risk');
-    const message = 'How likely or how large is "Lack of AI experience" today? The numerical analysis is withheld until this risk has a supported value.';
+    const message = 'How likely or how large is "Lack of AI experience" today? Olumi can’t run the numbers until this risk has a figure.';
     expect(rootIssues(g).map(i => [i.code, i.factor_id, i.message])).toEqual([['MISSING_FACTOR_LEVEL', 'root_gap', message]]);
     expect(buildCanonicalAnalysisReadyFromGraph(g)?.blockers?.map(b =>
       typeof b === 'object' && b !== null && 'message' in b ? b.message : undefined)).toEqual([
@@ -233,7 +233,7 @@ describe('T4e K1: non-factor roots withhold and offer a next step', () => {
       'Factor "Developers" is currently 4 people. What should option "Carry On" set it to?',
       'Factor "Tech leads" is currently 1 people. What should option "Carry On" set it to?',
       ...RISK_LABELS.map(label =>
-      `How likely or how large is "${label}" today? The numerical analysis is withheld until this risk has a supported value.`)]);
+      `How likely or how large is "${label}" today? Olumi can’t run the numbers until this risk has a figure.`)]);
     expect(g).toEqual(before);
   });
 

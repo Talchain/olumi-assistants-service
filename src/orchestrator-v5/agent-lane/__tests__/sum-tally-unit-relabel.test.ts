@@ -161,7 +161,7 @@ describe('howStronglyWords: who sized a link, with a definition as its own class
     ['RED: a definition alone', [def], 'how strongly is fixed by definition: one for one.'],
     ['control: an estimate alone', [est], 'how strongly is Olumi\'s estimate.'],
     ['control: the user\'s own', [yours], 'how strongly is as you stated it.'],
-    ['control: a placeholder', [ph], 'how strongly is not known yet: Olumi used a placeholder strength, not an estimate.'],
+    ['control: a placeholder', [ph], 'how strongly is not known yet: the strength is Olumi’s guess, not an estimate.'],
     ['RED: definition + estimate', [def, est], 'how strongly is partly fixed by definition and partly Olumi\'s estimate, not a measurement.'],
     ['RED: the user\'s + a definition (nothing guessed)', [yours, def], 'how strongly is partly as you stated it and partly fixed by definition.'],
     ['control: estimate + placeholder (unchanged words)', [est, ph], 'how strongly is partly Olumi\'s estimate and partly a placeholder, not a measurement.'],

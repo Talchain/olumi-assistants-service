@@ -487,7 +487,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     // ⭐ #3002 (DL; Codex CHECK-3002-783a55b8 item 3): the HOST names the four left-out links on the card AND in the receipt, by the
     // model's own labels for their ids, never relying on the Agent saying it.
     // ⛔ EXPECTATION CHANGED (AIE packet 2b19ae59): the AIE's exact plural sentence replaces the host's draft.
-    const omitted = `Left out of this change set: ${MODERATE.map(pairName).join('; ')}, because the proposed bands' sources are unverified. Their current relationships and sources are kept.`;
+    const omitted = `Left out of this change set: ${MODERATE.map(pairName).join('; ')}, because Olumi could not confirm who gave the proposed strengths. Their current relationships and sources are kept.`;
     expect(String(p.public_label)).toContain(omitted);
     expect(String(out.follow_up)).toContain(omitted);
     for (const k of MODERATE) {

@@ -26,11 +26,9 @@ const SERVED_LINE = (FX.served_licence.withheld_reason_by_option as Record<strin
  * status-quo row's LEVEL line. This goal holds today's 80 and a target of at least 100 in one unit, spelt as each served graph
  * holds it. These rows are about the Run's frame; the words are pinned in `status-quo-row-words.test.ts`.
  */
-const byAssumptionIn = (unit: string): string => `This Run cannot give a chance for carrying on as now: it uses ‘Weekly support capacity’ as its `
-  + `unchanged reference, by assumption. The model’s held reference value is 80 ${unit}; the target for this `
-  + `Run is at least 100 ${unit}. Review the evidence for how ‘Weekly support capacity’ could change over `
-  + `this Run’s goal period without an intervention, including any forecast or uncertainty already retained `
-  + `in the model.`;
+const byAssumptionIn = (unit: string): string => `This Run can’t give a chance for carrying on as now, because it treats ‘Weekly support capacity’ `
+  + `as unchanged from today’s 80 ${unit} (your target is at least 100 ${unit}). Worth checking: how ‘Weekly support capacity’ could change `
+  + `over the goal period if nothing is done, including any forecast or range already in the model.`;
 const BY_ASSUMPTION = byAssumptionIn('tickets per week');
 /** The run-4 served graph (`FLOAT`) spells the same unit "tickets / week". */
 const FLOAT_BY_ASSUMPTION = byAssumptionIn('tickets / week');

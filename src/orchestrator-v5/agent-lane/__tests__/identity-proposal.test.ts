@@ -37,7 +37,7 @@ describe('the card on the served graphs', () => {
       outcome_id: 'mrr',
       operation: 'product',
       factor_ids: ['pro_plan_price', 'paying_subscribers'],
-      words: `Is “${node(served(0), 'mrr').label}” your “${node(served(0), 'pro_plan_price').label}” × “${node(served(0), 'paying_subscribers').label}”? £49 × 1,500 = £73,500, close to your £75,000. If yes, Olumi will calculate “${node(served(0), 'mrr').label}” that way, and you can run the analysis again.`,
+      words: `Is “${node(served(0), 'mrr').label}” your “${node(served(0), 'pro_plan_price').label}” × “${node(served(0), 'paying_subscribers').label}”? £49 × 1,500 = £73,500, close to your £75,000. If yes, Olumi will calculate “${node(served(0), 'mrr').label}” that way and run the analysis again.`,
     });
   });
   it('RED: runs 3 and 4 get the card too, the rate first whatever the edge order', () => {
@@ -140,7 +140,7 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
       operation: 'product',
       factor_ids: ['pro_plan_price', 'paying_subscribers'],
       // AIQ 5892754930 (3): the Yes makes MRR the carrier PLUS its other parent, so the card names it and whose figure it is.
-      words: `Is “${label('pro_plan_mrr')}” your “${label('pro_plan_price')}” × “${label('paying_subscribers')}”? £49 × 1,500 = £73,500; with “${label('other_plan_mrr')}” (your figure, £1,500) that gives your £75,000 “${label('mrr')}”. If yes, Olumi will calculate “${label('pro_plan_mrr')}” that way, and you can run the analysis again.`,
+      words: `Is “${label('pro_plan_mrr')}” your “${label('pro_plan_price')}” × “${label('paying_subscribers')}”? £49 × 1,500 = £73,500; with “${label('other_plan_mrr')}” (your figure, £1,500) that gives your £75,000 “${label('mrr')}”. If yes, Olumi will calculate “${label('pro_plan_mrr')}” that way and run the analysis again.`,
     });
     expect(proposeProductIdentity(g)!.words.length).toBeLessThanOrEqual(CARD_WORDS_MAX);
   });

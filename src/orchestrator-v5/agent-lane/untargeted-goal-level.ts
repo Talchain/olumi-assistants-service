@@ -47,6 +47,6 @@ export function untargetedGoalLevelAsk(
   const said = quote !== null ? `says “${quote}”` : `puts it at ${sayFigureWithoutRounding(level, unit ?? '')} today`;
   return {
     value: level, unit, quote,
-    question: `Your brief ${said}. This draft does not yet hold that current level as a model input.`,
+    question: `Your brief ${said}. The model doesn’t use this figure yet: with no target stated, there is nothing to measure it against.`,
   };
 }

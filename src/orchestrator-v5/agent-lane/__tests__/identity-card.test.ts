@@ -75,7 +75,7 @@ function world(start: Json, scriptedRefusal?: string) {
 
 describe('PRECONDITIONS — the served bytes and R3\'s card', () => {
   it('run 0 has a card; run 1 (Olumi\'s inferred product) has the SAME card (fork (iii)); once confirmed, none', () => {
-    expect(proposeProductIdentity(served(0))?.words).toMatch(/^Is “.+” your “.+” × “.+”\? £49 × 1,500 = £73,500, close to your £75,000\. If yes, .+and you can run the analysis again\.$/);
+    expect(proposeProductIdentity(served(0))?.words).toMatch(/^Is “.+” your “.+” × “.+”\? £49 × 1,500 = £73,500, close to your £75,000\. If yes, .+ and run the analysis again\.$/);
     expect(proposeProductIdentity(served(1))?.words).toBe(proposeProductIdentity(served(0))?.words);
     expect(proposeProductIdentity(confirmed(1))).toBeNull();
   });
@@ -206,7 +206,9 @@ describe('"Yes" on the card: one write through the real door, then nothing runs'
     expect(sent.identity_confirm?.reading_token).toBe(identityConfirmReadingToken({ outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'paying_subscribers'], words: r.card.words }));
     expect(w.s.graph.nodes.find((n: Json) => n.id === 'mrr').nonlinear_identity)
       .toEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'paying_subscribers'], stated_in_brief: true });
-    expect(String(out.follow_up)).toMatch(/run the analysis again/);
+    // Plain words (#3038): the receipt no longer tells the user to run what runs automatically after an approval.
+    expect(String(out.follow_up)).toMatch(/^Recorded, as you confirmed: "MRR" is calculated as /);
+    expect(String(out.follow_up)).not.toMatch(/run the analysis again/);
   });
 
   it('a second press of the same card writes nothing more (one commit)', async () => {

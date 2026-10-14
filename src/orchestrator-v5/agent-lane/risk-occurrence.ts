@@ -162,7 +162,7 @@ const rangeWords = (block: EventRiskV1T): string => {
 };
 
 /** AIE packet 6e52e896 `event_risk.card` (#94 6161383921), byte for byte. */
-export const RISK_OCCURRENCE_CARD_TEMPLATE = 'Adopt Olumi’s starting assumption: the chance that ‘{label}’ happens at least once within {window} is {range}. This is an estimate, not a measurement, and it stays Olumi’s after approval. The size of its effect remains Olumi’s placeholder; whether the effect relationship applies is a separate assumption.';
+export const RISK_OCCURRENCE_CARD_TEMPLATE = 'Adopt Olumi’s starting assumption: the chance that ‘{label}’ happens at least once within {window} is {range}. This is an estimate, not a measurement, and it stays Olumi’s after approval. How strongly it affects the model, and whether it does at all, are separate Olumi guesses you can change.';
 /** AIE packet 6e52e896 `event_risk.receipt`, byte for byte: said only after the writer's committed write and a matching read-back. */
 export const RISK_OCCURRENCE_RECORDED_TEMPLATE = 'Recorded Olumi’s starting assumption: the chance that ‘{label}’ happens at least once within {window} is {range}. It stays marked as Olumi’s estimate: your approval applied it, it did not make it your judgement.';
 

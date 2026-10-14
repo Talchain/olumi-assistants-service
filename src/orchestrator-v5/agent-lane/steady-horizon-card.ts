@@ -50,7 +50,7 @@ export function steadyHorizonCard(input: {
   // the path (B1 before its Yes).
   if (graph.nodes.some((n) => n !== null && typeof n === 'object'
     && (n as { nonlinear_identity?: { operation?: unknown } }).nonlinear_identity?.operation === 'accumulation')) return null;
-  const detail = `Does ‘${goal.label}’ stay about the same over ${months} months unless you act? If yes, Olumi records that as your judgement and the chance is worked out for month ${months}; then run the analysis again.`;
+  const detail = `Does ‘${goal.label}’ stay about the same over ${months} months unless you act? If yes, Olumi records that as your judgement and the chance is worked out for month ${months}, and the analysis runs again.`;
   const proposal = createProposal({ scenario_id: input.scenarioId, user_id: input.userId,
     base_graph_identity_hash: input.graphHash,
     operations: [{ op: 'attest_goal_steady', path: goal.id, value: { months } }],

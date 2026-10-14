@@ -28,7 +28,7 @@ const ONLY: Record<Who, string> = {
   yours: 'how strongly is as you stated it.',
   definition: 'how strongly is fixed by definition: one for one.',
   estimate: 'how strongly is Olumi\'s estimate.',
-  placeholder: 'how strongly is not known yet: Olumi used a placeholder strength, not an estimate.',
+  placeholder: 'how strongly is not known yet: the strength is Olumi’s guess, not an estimate.',
   unmarked: 'who set its strength is not recorded.',
 };
 const PART: Record<Who, string> = {
