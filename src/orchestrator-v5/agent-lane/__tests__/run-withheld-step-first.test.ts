@@ -42,6 +42,10 @@ describe('a Run withheld for a missing figure: that figure is the ONE next step 
   it('CONTRAST: once readiness admits the Run, the later-stage step it had returns', () => {
     const body = copy();
     body.current_read.analysis_ready = { ...body.current_read.analysis_ready, status: 'ready', blockers: [] };
-    expect(nextStepBlockerForAgent(read(body))).toEqual({ kind: 'missing_input', ask: 'What\'s today\'s level of conversion rate?' });
+    // The later stage's own step, exactly: since #3086 (SCIENCE, AIE MA1) a target measured from launch asks whether its two
+    // counts share a cohort, never today's level ("What's today's level of conversion rate?" was that step before it).
+    expect(nextStepBlockerForAgent(read(body))).toEqual({ kind: 'missing_input',
+      ask: 'Do your ‘New customers in first 3 months’ come from the same people your ‘conversion rate’ is measured on?',
+      also_unbuilt: 'the chance of meeting a target measured from launch' });
   });
 });
