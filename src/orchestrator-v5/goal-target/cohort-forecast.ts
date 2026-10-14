@@ -26,6 +26,12 @@ export interface CohortForecast {
   readonly author: 'user' | 'olumi';
 }
 
+/**
+ * The ONE rule for a target row read as the cohort's rate: its stored unit is exactly '%' (a percentage of the people
+ * reached). "% of revenue", "percentage points" or a per-period rate is never this rate, so the display classifier is not used.
+ */
+export const isCohortRateRow = (row: unknown): boolean => isRec(row) && typeof row.unit === 'string' && row.unit.trim() === '%';
+
 /** The option node's stored forecast, or `undefined` (absent or malformed: a malformed record is absence). */
 export function readCohortForecast(node: unknown): CohortForecast | undefined {
   if (!isRec(node) || node.kind !== 'option') return undefined;
@@ -56,7 +62,7 @@ export function cohortTargetsOf(targetRows: readonly unknown[], f: CohortForecas
   const count = rows.find((r) => r.node_id === f.same_cohort.count_target_node_id);
   if (!bound(rate) || !bound(count) || rate === count) return undefined;
   // The rate is a percentage of the cohort; the count is whole people. Nothing else is read as either.
-  if (typeof rate.unit !== 'string' || rate.unit.trim() !== '%' || rate.value < 0 || rate.value > 100) return undefined;
+  if (!isCohortRateRow(rate) || rate.value < 0 || rate.value > 100) return undefined;
   if (!Number.isInteger(count.value) || count.value < 0) return undefined;
   return [{ row: rate, quantity: 'rate', threshold: rate.value / 100 }, { row: count, quantity: 'count', threshold: count.value }];
 }

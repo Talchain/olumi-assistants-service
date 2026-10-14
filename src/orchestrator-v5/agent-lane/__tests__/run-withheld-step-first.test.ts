@@ -43,9 +43,10 @@ describe('a Run withheld for a missing figure: that figure is the ONE next step 
     const body = copy();
     body.current_read.analysis_ready = { ...body.current_read.analysis_ready, status: 'ready', blockers: [] };
     // The later stage's own step, exactly: since #3086 (SCIENCE, AIE MA1) a target measured from launch asks whether its two
-    // counts share a cohort, never today's level ("What's today's level of conversion rate?" was that step before it).
+    // counts share a cohort, never today's level ("What's today's level of conversion rate?" was that step before it). Since
+    // PR-4b (#3115) two such targets are built from the cohort forecasts these answers give, so the chance is no longer called
+    // unbuilt; a single launch-window target still is (`launch-window-coaching.test.ts`).
     expect(nextStepBlockerForAgent(read(body))).toEqual({ kind: 'missing_input',
-      ask: 'Do your ‘New customers in first 3 months’ come from the same people your ‘conversion rate’ is measured on?',
-      also_unbuilt: 'the chance of meeting a target measured from launch' });
+      ask: 'Do your ‘New customers in first 3 months’ come from the same people your ‘conversion rate’ is measured on?' });
   });
 });

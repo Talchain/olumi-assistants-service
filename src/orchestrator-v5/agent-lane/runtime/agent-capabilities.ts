@@ -300,7 +300,7 @@ import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS,
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import { applyCohortForecastEdit, approvedCohortForecastOf, cohortForecastCardWords, cohortForecastRecordedWords, cohortQuartileQuestion, cohortWindowOf,
   percentRangesIn, peopleFiguresIn, sameQuestion, SET_COHORT_FORECAST_OP, storedTargetRowsOf, UNDERLYING_RATE_MEANING, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
-import { cohortTargetsOf, type CohortForecast } from '../../goal-target/cohort-forecast.js';
+import { cohortTargetsOf, isCohortRateRow, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -6017,7 +6017,7 @@ export function createAgentCapabilities(
       const option = named[0]!;
       const optionId = String(option.id);
       const targets = storedTargetRowsOf(g.raw);
-      const rate = targets.filter((t) => typeof t.unit === 'string' && t.unit.trim() === '%');
+      const rate = targets.filter(isCohortRateRow);
       const count = targets.filter((t) => !rate.includes(t));
       if (targets.length !== 2 || rate.length !== 1 || count.length !== 1) {
         return { ok: false, mutated: false, refusal: 'targets_not_cohort',
