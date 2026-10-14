@@ -64,17 +64,24 @@ const DATED = (() => { const b = structuredClone(SERVED) as Rec; Object.assign(g
 const levelAsks = (g: Rec): Rec[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.code === 'MISSING_FACTOR_LEVEL');
 
 /** The served read in a stateful store: the read route, the level door's append (graph, facts) and its read-back. */
-function world(body: Rec, opts: { raceAfterWrite?: (g: Rec) => void } = {}) {
+function world(body: Rec, opts: { raceAfterWrite?: (g: Rec) => void; beforeDoorRead?: (g: Rec) => void } = {}) {
   const sid = String(body.scenario_id);
-  let raced = false;
+  let raced = false, doorRaced = false;
   let bytes = JSON.stringify(body.graph);
   const graph = (): Rec => JSON.parse(bytes);
   const rows: SessionTurnWithContent[] = [];
   const writes: Rec[] = [];
   const latest = () => rows.find(r => !r.turn_id.endsWith(':claim'));
   const ledger: CommittedTurnLedger = { write_turn_ids: [], user_message_turn_ids: [], first_user_message: String(body.brief_text), complete: true } as never;
+  // Another writer that lands after the press's own read and before the level door reads the store (the buddy's r3 probe).
+  const doorRead = () => {
+    if (opts.beforeDoorRead !== undefined && !doorRaced && new Error().stack?.includes('executeOptionInterventionBatch')) {
+      doorRaced = true; const g = graph(); opts.beforeDoorRead(g); bytes = JSON.stringify(g);
+    }
+  };
   const store = createMockSessionStore({
-    loadGraph: async () => graph(), loadGraphAndBriefText: async () => ({ graph: graph(), briefText: String(body.brief_text) }),
+    loadGraph: async () => { doorRead(); return graph(); },
+    loadGraphAndBriefText: async () => { doorRead(); return { graph: graph(), briefText: String(body.brief_text) }; },
     ensureScenarioExists: async () => ({ user_id: null }),
     readCommittedTurn: async (_sid, id) => { const r = rows.find(x => x.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used, pending_actions: (r as Rec).pending_actions ?? [] } : null; },
@@ -298,6 +305,19 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(String(pressed.assistant_text)).toMatch(LAPSE);
     expect((pressed.suggested_actions ?? []).some((c: Rec) => c.id === chip!.id)).toBe(false);
     expect(onLatestRow(w, chip!.id)).toBe(false);
+  }, ROUTE_MS);
+
+  it('⛔ buddy r3 (equal value, different identity): ANOTHER writer lands the EQUAL block between the press’s read and the door’s → the press is refused: no receipt, no write of its own', async () => {
+    const w = world({ ...structuredClone(SERVED), scenario_id: randomUUID() }, { beforeDoorRead: (g) => { riskOf(g).event_risk = structuredClone(BLOCK); } });
+    const turn = await route(w);
+    const { offer, chip } = await offerCard(turn);
+    const writesBefore = w.writes.filter((x) => x.graph).length;
+    const pressed = await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect(riskOf(w.graph()).event_risk, 'the equal block is the other writer’s').toEqual(BLOCK);
+    const authorised = (pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change');
+    expect(authorised, JSON.stringify(authorised)).toEqual([expect.objectContaining({ ok: false, mutated: false })]);
+    expect(w.writes.filter((x) => x.graph), 'no graph write of its own').toHaveLength(writesBefore);
+    expect(JSON.stringify([pressed.assistant_text, w.writes])).not.toContain(JSON.stringify(RECEIPT).slice(1, -1));
   }, ROUTE_MS);
 
   it('⛔ Codex r1 RACED READ-BACK: the goal moves from 3 to 6 months as the write lands → not confirmed: no receipt, no may_run', async () => {
