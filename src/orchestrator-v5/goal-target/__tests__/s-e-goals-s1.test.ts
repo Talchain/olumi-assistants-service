@@ -19,6 +19,7 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
+import { deadlineCardSubjectOf } from '../../agent-lane/proposal-object/still-applies.js';
 import { approvalChipsFor, DEADLINE_CHANGE_CHIP } from '../../agent-lane/approval-chips.js';
 import { placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { decisionInputLines, isDecisionInputAsk } from '../../agent-lane/decision-input-ask.js';
@@ -249,7 +250,7 @@ const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.id === GOAL_ID);
 describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the SAME turn, and the Yes writes it', () => {
   it('RED on df15c8c1 (no door): propose → card "Is your deadline 7 April 2027 (6 months from 7 October 2026)?" [Yes] [Change date] → REAL door → stored → read-back', async () => {
     const w = world(stored());
-    const hashBefore = computeAnalysisAffectingGraphHash(w.graph() as never);
+    const hashBefore = computeAnalysisAffectingGraphHash(w.graph() as never), atOffer = w.graph();
     const r = await w.caps.proposeGoalDeadline!(ctxSaying(PAUL_0913), { deadline_words: 'a deadline in 6 months', rationale: PAUL_0913 }) as Rec;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”. Basis supplied for this interpretation: ' + PAUL_0913);
@@ -266,6 +267,8 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
       follow_up: 'Your deadline for "meet our next feature-launch deadline" is now 7 April 2027.' }));
     expect(w.commits).toHaveLength(1);
     expect(w.commits[0]!.goal_horizon).toEqual({ goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07', stated_months: 6 });
+    // #3024: the writer also reads the card's bound goal (as offered), with no own write landed yet.
+    expect(w.commits[0]!.deadline_card).toEqual({ expected_goal: deadlineCardSubjectOf(atOffer, GOAL_ID), own_write_landed: false });
     const after = w.graph();
     expect(goalOf(after).goal_horizon).toEqual({ deadline: '2027-04-07' });
     // No structural pair: H and the date are held, but the analysis hash stays unchanged.

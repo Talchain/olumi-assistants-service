@@ -519,8 +519,12 @@ function executableWaitingProposalIds(scenarioId: string, userId: string | null,
   if (graphHash === undefined) return [];
   return proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id).filter((id) => proposals.authorise({
     proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
+    // The press's own field-scoped rule (#3024): a waiting card whose subject is unchanged still makes this a decision point.
+    ...(graph !== undefined ? { scoped_precondition_holds: (p) => heldCardStillApplies(p, graph) } : {}),
     ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}),
-  }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph));
+  }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph)
+    // The rule's other half: a subject moved on an unmoved hash (a renamed goal) is not a decision point.
+    && !(graph !== undefined && heldCardSubjectMoved(proposals.get(id)!, graph)));
 }
 
 /** The steady-state card is a Run-reply answer, not a held change: it never counts as an approval awaiting a yes. */
