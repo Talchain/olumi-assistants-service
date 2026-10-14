@@ -3849,8 +3849,11 @@ export function createAgentCapabilities(
       || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
+    // A retry continues only from THIS proposal's own landed write (its partial progress, or its own commit in the ledger).
+    const ownWriteLanded = proposals.partialProgressOf(pid) !== undefined || (opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(pid)), () => false));
     const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
-      goal_id: v.goal_id, expected_goal: v.expected_goal };
+      goal_id: v.goal_id, expected_goal: v.expected_goal, own_write_landed: ownWriteLanded };
     // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
     // that moved since the card was made writes nothing, whatever the analysis hash says (Codex r1 on #3013).
     if (!riskOccurrenceGoalHolds(approved, before.raw)) {

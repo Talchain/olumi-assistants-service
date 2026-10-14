@@ -44,7 +44,10 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     riskOf(expected).event_risk = BLOCK;
     expect((out as Rec).mutatedGraph).toEqual(expected);
     expect(riskOccurrencePostimageIsScoped(G, expected, approved())).toBe(true);
-    expect(applyRiskOccurrenceEdit(expected, approved())).toEqual({ kind: 'unchanged' });
+    // A retry after THIS proposal's own write landed is a verified no-op…
+    expect(applyRiskOccurrenceEdit(expected, { ...approved(), own_write_landed: true })).toEqual({ kind: 'unchanged' });
+    // …ADVERSARIAL (DL 08:08Z): the equal block found WITHOUT that identity is a node changed since the card, never its write.
+    expect(applyRiskOccurrenceEdit(expected, approved())).toEqual({ kind: 'refused', reason: 'risk_changed' });
   });
 
   it('refuses: the node moved since the card, a cause link, a level, no single goal period, or a block that is not Olumi’s', () => {
@@ -134,18 +137,46 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     expect(buildCanonicalAnalysisReadyFromGraph(users)).toMatchObject({ may_run: true });
   });
 
-  it('#3024’s one rule for the risk card: holds as offered, after an unrelated edit and once landed; not after its window or node moved', () => {
+  it('#3024’s one rule for the risk card: holds as offered and after an unrelated edit; not when an equal block is already there, nor after its window or node moved', () => {
     const op = { op: SET_RISK_OCCURRENCE_OP, path: RISK, value: { event_risk: BLOCK, expected_node: riskOf(G), goal_id: 'productivity',
       expected_goal: riskOccurrenceGoalSubject(G, 'productivity') } };
     const card = { operations: [op] } as never;
     const unrelated = structuredClone(G); (unrelated.edges as Rec[]).find((e) => e.from === 'leadership_coverage')!.strength = { mean: 0.1, std: 0.05 };
     const landed = (applyRiskOccurrenceEdit(G, approved()) as Rec).mutatedGraph as Rec;
-    expect([G, unrelated, landed].map((g) => [riskOccurrenceCardHolds(op, g), heldCardStillApplies(card, g), heldCardSubjectMoved(card, g)]))
-      .toEqual(Array(3).fill([true, true, false]));
+    expect([G, unrelated].map((g) => [riskOccurrenceCardHolds(op, g), heldCardStillApplies(card, g), heldCardSubjectMoved(card, g)]))
+      .toEqual(Array(2).fill([true, true, false]));
     const window = structuredClone(G); goalOf(window).goal_target_basis.period_months = 6;
     const renamed = structuredClone(G); riskOf(renamed).label = 'Code quality';
-    expect([window, renamed].map((g) => [riskOccurrenceCardHolds(op, g), heldCardStillApplies(card, g), heldCardSubjectMoved(card, g)]))
-      .toEqual(Array(2).fill([false, false, true]));
+    // An equal block already on the node is not this card's write (identity, not value): the card no longer applies.
+    expect([landed, window, renamed].map((g) => [riskOccurrenceCardHolds(op, g), heldCardStillApplies(card, g), heldCardSubjectMoved(card, g)]))
+      .toEqual(Array(3).fill([false, false, true]));
+  });
+
+  it('OWN WRITE: the first save lands unconfirmed → the same card pressed again continues from ITS OWN write and confirms; 1 write in all', async () => {
+    let g = structuredClone(G);
+    let writes = 0, firstCall = true;
+    const ctx = { scenario_id: 'dc4e09b6-3727-4b14-a3af-dceef435b7d9', authenticated_user_id: null, request_id: 'r', turn_id: 't', user_text: 'Please propose an assumption.' };
+    const caps = createAgentCapabilities(async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(g), graph_hash: computeAnalysisAffectingGraphHash(g as never) } };
+      if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+      throw new Error(path);
+    }, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: async (input) => {
+      const r = applyRiskOccurrenceEdit(g, input.risk_occurrence!);
+      if (r.kind === 'refused') return { status: 'refused', reason: `risk_occurrence_${r.reason}` } as never;
+      if (r.kind === 'mutated') { g = r.mutatedGraph as Rec; writes += 1; }
+      const result = firstCall ? { status: 'unconfirmed' } : { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(g as never), already_applied: r.kind === 'unchanged',
+        committed_levels: [], links_resized: [], receipt: null };
+      firstCall = false;
+      return result as never;
+    } });
+    const p = await caps.proposeAssumptions(ctx as never, { assumptions: [{ factor_label: riskOf(g).label, value: 30, unit: '%', basis: 'An estimate for the launch window.',
+      user_stated: false, occurrence_range: { low_percent: 20, high_percent: 40 } }] } as never);
+    const yes = { ...ctx, user_text: 'Yes, use that.', typed_approval_of: String(p.proposal_id), typed_approval_words: 'Yes, use that.' } as never;
+    expect(await caps.authoriseChange(yes, { proposal_id: String(p.proposal_id) })).toMatchObject({ ok: false, mutated: true, refusal: 'not_confirmed' });
+    expect(riskOf(g).event_risk).toEqual(BLOCK);
+    const again = await caps.authoriseChange(yes, { proposal_id: String(p.proposal_id) });
+    expect(again).toMatchObject({ ok: true, applied: true });
+    expect(writes).toBe(1);
   });
 
   it('DL Q2: the chance rests on Olumi’s occurrence too — counted on the face and listed on the panel, by the risk’s id', () => {

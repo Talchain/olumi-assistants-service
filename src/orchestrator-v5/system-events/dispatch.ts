@@ -3557,7 +3557,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
       ...(input.goal_reading !== undefined ? { goal_reading: input.goal_reading } : {}),
-      ...(input.risk_occurrence !== undefined ? { risk_occurrence: input.risk_occurrence } : {}),
+      ...(input.risk_occurrence !== undefined ? { risk_occurrence: (({ own_write_landed: _own, ...card }) => card)(input.risk_occurrence) } : {}),
       ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
@@ -3599,7 +3599,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.goal_reading.expected_goal !== undefined ? { expected_goal: input.goal_reading.expected_goal } : {}) } } : {}),
     ...(input.risk_occurrence !== undefined ? { riskOccurrence: { risk_id: input.risk_occurrence.risk_id,
       event_risk: input.risk_occurrence.event_risk, expected_node: input.risk_occurrence.expected_node,
-      goal_id: input.risk_occurrence.goal_id, expected_goal: input.risk_occurrence.expected_goal } } : {}),
+      goal_id: input.risk_occurrence.goal_id, expected_goal: input.risk_occurrence.expected_goal,
+      own_write_landed: input.risk_occurrence.own_write_landed === true } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,

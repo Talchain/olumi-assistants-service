@@ -44,6 +44,11 @@ export interface ApprovedRiskOccurrence {
   /** The one goal whose window the range is stated over, and that goal exactly as it stood ({@link riskOccurrenceGoalSubject}). */
   readonly goal_id: string;
   readonly expected_goal: Readonly<Rec>;
+  /**
+   * THIS proposal's own write already landed (its partial progress, or its own commit in the ledger): only then is a node that
+   * holds exactly the card's block a verified no-op. An equal block is never identity on its own (DL 08:08Z; Codex r1 on #3024).
+   */
+  readonly own_write_landed?: boolean;
 }
 
 /**
@@ -190,8 +195,9 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   if (!riskOccurrenceGoalHolds(approved, persistedGraph)) return { kind: 'refused', reason: 'goal_changed' };
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.risk_id);
   if (matches.length !== 1) return { kind: 'refused', reason: 'risk_not_found' };
-  // ⭐ IDEMPOTENT: a retry after a write that landed finds exactly the card's node with this block, nothing else moved on it.
-  if (isDeepStrictEqual(matches[0], { ...approved.expected_node, event_risk: approved.event_risk })) return { kind: 'unchanged' };
+  // ⭐ IDEMPOTENT, by identity: a retry after THIS proposal's own write landed finds exactly the card's node with this block. The
+  // same block found without that identity is a node that changed since the card (refused below), never this card's write.
+  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], { ...approved.expected_node, event_risk: approved.event_risk })) return { kind: 'unchanged' };
   if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'risk_changed' };
   const subject = riskOccurrenceSubject(persistedGraph, approved.risk_id);
   if (subject.kind === 'ineligible') return { kind: 'refused', reason: subject.reason };
