@@ -4,7 +4,6 @@
  * maps the verified reading to the door member that already owns that carrier; no field gets its own store or writer.
  */
 import type { DoorReading } from './read.js';
-import type { StatementField } from './subject.js';
 
 export const RECORD_STATEMENT_OP = 'record_statement' as const;
 /** The level door's members (`dispatch.ts` OptionLevelsCommitInput) a field may write through. */
@@ -19,12 +18,10 @@ export interface DoorWrite {
   readonly holds: (after: unknown) => boolean;
 }
 
-/** A field's adapter onto its member. A reading the carrier cannot represent is refused here, never written approximately. */
+/**
+ * A row's adapter onto its carrier (`RoleRow.writer`, looked up with the row by `doorRowFor`). A reading the carrier cannot
+ * represent is refused here, never written approximately. Its write's member is the row's carrier.
+ */
 export interface FieldWriter {
-  readonly member: DoorWriteMember;
   readonly approve: (reading: DoorReading, graph: unknown) => DoorWrite | { readonly refused: string };
 }
-
-/** The adapters. Empty in the contract (PR-0); each migration registers its field's adapter with its table row. */
-export const FIELD_WRITERS: Partial<Record<StatementField, FieldWriter>> = {};
-export const fieldWriterFor = (field: StatementField): FieldWriter | undefined => FIELD_WRITERS[field];
