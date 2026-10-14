@@ -181,7 +181,7 @@ const proposeLink = [{ type: 'function_call', name: 'propose_model_change', call
   arguments: JSON.stringify({ from_label: 'Price-release alignment', to_label: 'Pro conversion rate',
     direction: 'positive', strength: 'strong', rationale: 'Timing changes how the price lands.' }) }];
 
-describe('selected Sol-high coach on the actual Agent route', () => {
+describe('selected Sol coach on the actual Agent route', () => {
   let app: FastifyInstance;
   let turn = 0;
   let interpretOnlyConstraint: string;
@@ -253,7 +253,8 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   };
   const selected = (body: Sent) => {
     expect(body.model).toBe('gpt-6.1-sol');
-    expect(body.reasoning?.effort).toBe('high');
+    // SPEED (DL 14 Oct, EFFORT-REPLAY.md): the selected coach is sent at low (was high).
+    expect(body.reasoning?.effort).toBe('low');
     expect(body.max_output_tokens).toBe(3400);
   };
   const conversationBodies = () => sent.filter((body) => body.text?.format?.name !== 'whole_candidate');
@@ -354,8 +355,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
       expect(body.max_output_tokens).toBe(3400);
       expectCoachInstructions(body);
     }
-    // The deciding call stays high; the call after a held proposal only states it and asks for the yes.
-    expect(sent[0]!.reasoning?.effort).toBe('high');
+    // The deciding call is at the conversation budget's low (SPEED, 14 Oct); the call after a held proposal only states it
+    // and asks for the yes, at the narrate effort, also low.
+    expect(sent[0]!.reasoning?.effort).toBe('low');
     expect(JSON.stringify(sent[0]!.input)).not.toContain(NARRATE_LABEL_LINE);
     expect(sent[1]!.reasoning?.effort).toBe('low');
     const narrateInput = sent[1]!.input as { content?: { text?: string }[] }[];
@@ -377,7 +379,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
     // AI HARNESS 2a: the interpreting call keeps the selected model, prompt and cap, at the interpret role's measured
-    // effort (low; `model-budgets.ts` evidence). The ordinary conversation above stays high.
+    // effort (low; `model-budgets.ts` evidence). The ordinary conversation above is low too since SPEED (14 Oct).
     expect(body.model).toBe('gpt-6.1-sol');
     expect(body.reasoning?.effort).toBe('low');
     expect(body.max_output_tokens).toBe(3400);
@@ -396,7 +398,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(body.instructions.split(AIE_SCOPE_LINE)).toHaveLength(2);
   });
 
-  it('keeps Terra-low for every hop of a known-empty construction, then uses Sol-high on the next turn', async () => {
+  it('keeps Terra-low for every hop of a known-empty construction, then uses the Sol coach on the next turn', async () => {
     readMode = 'empty';
     await sendTurn(BRIEF, [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'build-1',
       arguments: JSON.stringify({ brief: BRIEF }) }]], undefined, FIRST_SCENARIO);

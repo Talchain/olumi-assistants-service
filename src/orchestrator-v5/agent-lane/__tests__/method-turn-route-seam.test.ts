@@ -330,7 +330,9 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     const { budgetFor, interpretBudget } = await import('../model-budgets.js');
     const conversation = budgetFor('gpt-6.1-sol', 'conversation');
     const interpret = interpretBudget();
-    expect(conversation.reasoning_effort, 'vacuity: the two banked budgets differ').not.toBe(interpret.reasoning_effort);
+    // SPEED (DL 14 Oct, EFFORT-REPLAY.md): the conversation budget is now low too, so both calls are pinned at low by value;
+    // this row no longer tells the two budgets apart by effort (both are Sol/low/3400).
+    expect([conversation.reasoning_effort, interpret.reasoning_effort]).toEqual(['low', 'low']);
     reply = 'In the current model, the link matters.';
     await ask('What do you make of this?');
     expect(sent[0].reasoning?.effort, 'an ordinary turn on a built model: the conversation budget').toBe(conversation.reasoning_effort);

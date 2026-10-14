@@ -116,7 +116,10 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     model: 'gpt-6.1-sol',
     role: 'conversation',
     max_output_tokens: 3400,
-    reasoning_effort: 'high',
+    // ⭐ SPEED (DL 14 Oct, undeployed/EFFORT-REPLAY.md): high → low. Replayed on 7 served coach bodies: 2/7/3 against high,
+    // the same judged score (6.42), median 14.0 → 6.4 s. The one consistent regression (a relative deadline anchored on
+    // the analysis date) is fixed at its source, the `propose_goal_deadline` description.
+    reasoning_effort: 'low',
     evidence:
       'Selected Sol-high coach v0.2 by AI Experience/DL (programme-docs #78 5915140232 / 5915156800). ' +
       'Real-route paired gate at docs 50ce5eba, n=1/row: largest Sol-high hop across 20 gate turns ' +

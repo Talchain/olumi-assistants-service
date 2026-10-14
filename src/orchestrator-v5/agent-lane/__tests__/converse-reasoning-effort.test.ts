@@ -2,7 +2,8 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
- * Populated-model conversation uses Sol/high/3400; the Run's interpretation uses the interpret role, Sol/low/3400 (2a).
+ * Populated-model conversation uses Sol/low/3400 (SPEED, DL 14 Oct, EFFORT-REPLAY.md; was high); the Run's interpretation
+ * uses the interpret role, Sol/low/3400 (2a).
  * This supersedes PJ-C1 batch 5's Terra/low conversation setting; authoritative
  * empty-model turns retain Terra/low, covered by selected-coach-wiring.test.ts.
  * Construction keeps its separate Terra/medium budget. These captured requests
@@ -24,13 +25,14 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 type Body = Record<string, unknown>;
+const RELATIVE_DEADLINE_LINE = 'For a relative deadline (for example "6 months from last Friday"), pass the user\'s exact words and leave reference_date and deadline_date unset: Olumi resolves them from the recorded reference.';
 const GRAPH = {
   nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }],
   edges: [{ from: 'f', to: 'g' }],
 };
 const STATE = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
 
-describe('selected coach: populated conversation and Run use high; construction keeps its own', () => {
+describe('selected coach: populated conversation and Run use low; construction keeps its own', () => {
   let app: FastifyInstance;
   let modelBodies: Body[] = [];
 
@@ -68,15 +70,19 @@ describe('selected coach: populated conversation and Run use high; construction 
   });
   beforeEach(() => { modelBodies = []; });
 
-  it('⭐ RED: a populated turn’s conversation call uses selected Sol/high/3400', async () => {
+  it('⭐ RED (SPEED, DL 14 Oct): a populated turn’s conversation call uses Sol/LOW/3400, and the deadline tool it is sent asks for a relative date as words', async () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: randomUUID(), message: 'What drives the result most?' } });
     expect(res.statusCode, res.body).toBe(200);
     expect(modelBodies.length).toBeGreaterThan(0);
     for (const b of modelBodies) {
       expect(b.model).toBe('gpt-6.1-sol');
-      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'high' });
+      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'low' });
       expect(b.max_output_tokens).toBe(3400);
     }
+    // The one consistent low-effort regression (EFFORT-REPLAY.md: marketing's "6 months … from last Friday" set the analysis
+    // date as the reference) is fixed at its source: the deadline tool SENT on this call asks for the words, dates unset.
+    const deadlineTool = ((modelBodies[0]!.tools ?? []) as Body[]).find((t) => t.name === 'propose_goal_deadline');
+    expect(String(deadlineTool?.description)).toContain(RELATIVE_DEADLINE_LINE);
   });
 
   it('⭐ RED (AI HARNESS 2a): the Run button’s one interpreting call (tool_choice none) uses the interpret role — Sol/LOW/3400', async () => {
