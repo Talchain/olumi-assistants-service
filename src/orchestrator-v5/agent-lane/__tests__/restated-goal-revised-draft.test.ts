@@ -1197,18 +1197,23 @@ describe('a revised draft over the link limit only is admitted as drafted (L20 s
   const servedLane = (s: ReturnType<typeof server>, first = SERVED.first_pass) => {
     const answers = [first, SERVED.size_retry];
     let drafted = 0;
-    const call = (async () => { const text = answers[drafted] ?? ''; drafted += 1; return { text }; }) as unknown as CallStructuredModel;
+    const sent: Rec[] = [];
+    const call = (async (req: Rec) => { sent.push(req); const text = answers[drafted] ?? ''; drafted += 1; return { text }; }) as unknown as CallStructuredModel;
     const caps = createAgentCapabilities(s.dispatch, new ProposalStore(), call, 'full', undefined, {
       readCommittedTurnLedger: s.readCommittedTurnLedger, readStatedObjections: async () => [] });
-    return { caps, drafts: () => drafted };
+    return { caps, drafts: () => drafted, sent };
   };
 
-  it('RED: the served first pass is offered as drafted (no retry), says why it is larger once, and both goals are saved on approval', async () => {
+  it('RED: the served first pass is offered as drafted (no size compaction), says why it is larger once, and both goals are saved on approval', async () => {
     const s = server();
-    const { caps, drafts } = servedLane(s);
+    const { caps, sent } = servedLane(s);
     const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(offer.ok, JSON.stringify(offer)).toBe(true);
-    expect(drafts(), 'one drafter call: the retry that lost the user\'s figures is not asked').toBe(1);
+    // ⛔ PL #94 19:41: only the size compaction is skipped. The first pass's own coverage gaps still take their checked
+    // repair retry; it answers with the served demoting retry, which the existing checks reject, so the first pass stands.
+    expect(sent, 'the first pass and one repair retry').toHaveLength(2);
+    expect(String(sent[1]!.instructions), 'a repair retry').toContain('Repair only the listed construction issues.');
+    expect(String(sent[1]!.input), 'never the size compaction').not.toContain('Your previous model, to shrink');
     expect(String(offer.public_label).split(REVISED_DRAFT_MORE_LINKS), 'said once').toHaveLength(2);
     s.said(FX.l20.turn_id);
     const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
@@ -1219,6 +1224,18 @@ describe('a revised draft over the link limit only is admitted as drafted (L20 s
     // Both of L20's figures land as written (comparator, figure, unit), never as Olumi's estimates.
     expect(rows.find((r) => r.role === 'goal_target' && r.value === 15)).toMatchObject({ unit: '%', operator_as_stated: '>' });
     expect(rows.find((r) => r.role === 'goal_target' && r.value === 20)).toMatchObject({ node_id: goal.id });
+  });
+
+  it('RED (PL #94 19:41): a non-size defect on an over-links revised draft is still caught: its repair names the gaps, and the size compaction is never asked', async () => {
+    const s = server();
+    const { caps, sent } = servedLane(s);
+    await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(sent).toHaveLength(2);
+    const input = String(sent[1]!.input);
+    const issues = JSON.parse(input.slice(input.indexOf('Construction issues: ') + 'Construction issues: '.length, input.indexOf('\nCandidate to repair'))) as unknown[];
+    // The served first pass's own non-size gaps (options x factors with no level), each named for repair.
+    expect(issues.length, input.slice(0, 400)).toBeGreaterThan(0);
+    expect(String(sent[1]!.instructions)).not.toContain('Your previous model, to shrink');
   });
 
   it('CONTRAST: a FIRST model over the link limit takes today\'s path: the size retry is asked, and the served pair is refused', async () => {
