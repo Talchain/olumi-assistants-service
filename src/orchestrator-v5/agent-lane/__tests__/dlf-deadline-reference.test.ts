@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: async () => undefined }));
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { deadlineCardSubjectOf } from '../proposal-object/still-applies.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
@@ -85,6 +86,7 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     const proposal = w.proposals.get(String(card.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: 'event_goal', value: {
       deadline: '2027-04-13', expected_deadline: null, reference: '2026-10-13', stated_months: 6, words: WORDS,
+      expected_goal: deadlineCardSubjectOf(before, 'event_goal'),
     } }]);
     expect(proposal.provenance.authored_by).toBe('user_stated');
     expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
@@ -131,7 +133,7 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     ['old report comma before deadline dating', 'as of 2026-09-01 for the old report, our launch deadline is 6 months from today as of 2026-10-13', undefined],
     ['deadline before unrelated revenue date', 'Our launch deadline is 6 months from today, and revenue was 2m as of 2026-09-01.', undefined],
   ])('DLf4 %s never becomes the saved deadline reference', async (_name, text, reference_date) => {
-    const w = world();
+    const w = world(), atOffer = w.read();
     const card = await w.offer(reference_date === undefined ? {} : { reference_date }, text);
     expect(card.ok, JSON.stringify(card)).toBe(true);
     expect(await w.approve(String(card.proposal_id))).toMatchObject({ ok: true, applied: true });
@@ -139,19 +141,21 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     const proposal = w.proposals.get(String(card.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: 'event_goal', value: {
       deadline: '2027-04-13', expected_deadline: null, words: WORDS, reference: '2026-10-13', stated_months: 6,
+      expected_goal: deadlineCardSubjectOf(atOffer, 'event_goal'),
     } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
     expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
     expect(w.rows.filter(r => r.write.graph !== undefined)).toHaveLength(1);
   });
   it('DLf4 an explicit as-of dates the deadline with a matching model echo', async () => {
-    const w = world();
+    const w = world(), atOffer = w.read();
     const card = await w.offer({ deadline_words: 'six months', reference_date: '2026-11-01' }, 'as of 2026-11-01 our deadline is six months');
     expect(card.ok, JSON.stringify(card)).toBe(true);
     expect(card.public_label).toBe('Is your deadline 1 May 2027 (6 months from 1 November 2026)? Your words: “six months”.');
     const proposal = w.proposals.get(String(card.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: 'event_goal', value: {
       deadline: '2027-05-01', expected_deadline: null, words: 'six months', reference: '2026-11-01', stated_months: 6,
+      expected_goal: deadlineCardSubjectOf(atOffer, 'event_goal'),
     } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
     expect(w.rows).toEqual([]);
@@ -162,13 +166,14 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     const w = world(); await saveDeadline(w, { reference_date: '2026-11-01' });
   });
   it.each([undefined, '2026-11-01', 'today'])('(d) current-turn as-of overrides only with matching model echo %s', async reference_date => {
-    const w = world();
+    const w = world(), atOffer = w.read();
     const card = await w.offer({ reference_date }, `${WORDS}, as of 2026-11-01`);
     expect(card.ok, JSON.stringify(card)).toBe(true);
     const expected = reference_date === '2026-11-01'
       ? { ...EXPECTED, deadline: '2027-05-01', reference: '2026-11-01' } : EXPECTED;
     expect(w.proposals.get(String(card.proposal_id))!.operations[0].value).toEqual({
       deadline: expected.deadline, expected_deadline: null, reference: expected.reference, stated_months: 6, words: WORDS,
+      expected_goal: deadlineCardSubjectOf(atOffer, 'event_goal'),
     });
     expect(await w.approve(String(card.proposal_id))).toMatchObject({ ok: true, applied: true });
     expect(tuple(w.read())).toEqual(expected);

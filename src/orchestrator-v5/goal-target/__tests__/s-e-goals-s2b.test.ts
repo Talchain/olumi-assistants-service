@@ -713,11 +713,16 @@ describe('DL accepted root rows and controls', () => {
     const targetControl = await ordinary.caps.proposeGoalTarget!(ctx('at least £150') as never, { constraint_type: 'at_least', value: 150, unit: 'GBP', rationale: '' }) as Rec;
     expect(targetControl.ok, JSON.stringify(targetControl)).toBe(true);
   });
+  // ⛔ EXPECTATION CHANGED (#3024, DL 14 Oct ruling (A)): the deadline card's subject is its goal's complete projection, label
+  // included, so a goal renamed before the press retires the card (conservative) instead of writing under the new name.
+  // The unchanged-label control is kept: it writes, and its confirmation names the goal.
   it('P2-deadline-confirmation-current-label with unchanged-label control', async () => {
     for (const rename of [false, true]) {
       const w = world(admitted()), r = await w.caps.proposeGoalDeadline!(ctx('deadline in 6 months') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
       if (rename) { const g = w.graph(); part(g).goal.label = 'Our renamed launch'; w.replace(g); }
+      const before = JSON.stringify(w.graph());
       const saved = await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec;
+      if (rename) { expect(saved).toMatchObject({ ok: false, mutated: false }); expect(JSON.stringify(w.graph())).toBe(before); continue; }
       expect(saved.ok).toBe(true); expect(saved.follow_up).toContain(part(w.graph()).goal.label);
     }
   });
