@@ -22,7 +22,18 @@ const CAPACITY = ((): Json => {
   const j = (JSON.parse(readFileSync(new URL('./fixtures/capacity-post2996-run2-read.json', import.meta.url), 'utf8')) as { j: Json }).j;
   return { ...j, scenario_id: SCENARIO };
 })();
+/**
+ * Capacity on CEE 5b6e5eb7 (live run 2026-10-14T065335Z-capacity-post3017, judge row 4): the served graph read right after
+ * turn 01, its bound current card saying "‘Add one specialist’: about 34% chance …" while the reply said it again.
+ */
+const CAPACITY_3017 = ((): Json => {
+  const j = (JSON.parse(readFileSync(new URL('./fixtures/capacity-post3017-turn01-read.json', import.meta.url), 'utf8')) as { j: Json }).j;
+  return { ...j, scenario_id: SCENARIO };
+})();
 const count = (text: string, part: string): number => text.split(part).length - 1;
+/** The faces the shipped card displays: each option cell that shows a chance (`figure` or `range`). */
+const cardFaces = (view: Json | undefined): string[] => ((view?.options ?? []) as { cell: { kind: string; face?: string } }[])
+  .filter((o) => o.cell.kind === 'figure' || o.cell.kind === 'range').map((o) => o.cell.face!);
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const store = {
@@ -194,9 +205,13 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(detail.notes.length).toBeGreaterThan(0);
     const reply = run.assistant_text as string;
     for (const line of [detail.status_quo.line, ...detail.notes]) expect(count(reply, line), line).toBe(0);
-    // The headline stays in the reply: the chance and its shortfall sentence, once each.
-    expect(reply).toMatch(CHANCE_LINE);
-    expect(count(reply, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(1);
+    // ⭐ AMENDED (DL, PL #94 07:24Z: THE RESULT CARD IS THE CHANCE). Was "the headline stays in the reply: the chance and its
+    // shortfall sentence, once each". The card's own cell face carries both, so the reply says neither again.
+    const faces = cardFaces(run.canonical_analysis_view);
+    expect(faces).toEqual([expect.stringContaining('In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')]);
+    for (const face of faces) expect(count(reply, face), face).toBe(0);
+    expect(reply).not.toMatch(CHANCE_LINE);
+    expect(count(reply, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(0);
   });
 
   it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
@@ -205,5 +220,43 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     const run = await runPress();
     expect(run.canonical_analysis_view).toBeUndefined();
     expect(count(run.assistant_text as string, 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.')).toBe(1);
+    // The truthful fallback: no card displays the chance, so the reply says it, with its shortfall, once.
+    expect(run.assistant_text).toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(1);
+  });
+
+  /**
+   * ⭐ THE RESULT CARD IS THE CHANCE, ON THE SERVED 5b6e5eb7 TURN-01 SHAPE (capacity post3017 row 4). The card (DGAI
+   * `V5AnalysisResultBlock`, bound to this response's `canonical_analysis_view` by run id and hash) displays each option's
+   * face; the host does not say it again in the reply, so the chance is on screen once. No displayed card → the line stays.
+   */
+  it('RED (served 5b6e5eb7 turn 01): the bound current card displays the chance, and the reply does not say it again', async () => {
+    served = CAPACITY_3017;
+    const run = await runPress();
+    const view = run.canonical_analysis_view as Json;
+    expect(view.run.graph_hash_at_run).toBe(CAPACITY_3017.analysis_result.computed_against_hash);
+    expect(view.staleness.stale).toBe(false);
+    const faces = cardFaces(view);
+    expect(faces).toEqual([expect.stringMatching(/^‘Add one specialist’: about 34% chance of meeting your goal, in this model/)]);
+    const reply = run.assistant_text as string;
+    expect(count(reply, faces[0]!)).toBe(0);
+    expect(reply).not.toMatch(CHANCE_LINE);
+  });
+
+  it('CONTRAST (served 5b6e5eb7 turn 01, no card to display): the reply keeps the canonical chance line, once', async () => {
+    const { canonical_analysis_view: view, ...withoutView } = CAPACITY_3017;
+    served = withoutView;
+    const run = await runPress();
+    expect(run.canonical_analysis_view).toBeUndefined();
+    const face = cardFaces(view as Json)[0]!;
+    expect(count(run.assistant_text as string, face)).toBe(1);
+  });
+
+  it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
+    const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
+    view.staleness = { ...view.staleness, stale: true };
+    served = { ...CAPACITY_3017, canonical_analysis_view: view };
+    const run = await runPress();
+    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
   });
 });

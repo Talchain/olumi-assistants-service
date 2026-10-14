@@ -323,19 +323,24 @@ const LIST_START = /^\s*(?:[-*•]|\d{1,3}[.)])\s/;
  * MOVED to follow that figure for options without shortfalls. A shortfall option only appends its missing canonical unit;
  * its existing wording, notes and driver sentence stay as they stand.
  */
-export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScreenLine[], notes: readonly string[] = []): { text: string; added: number } {
+export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScreenLine[], notes: readonly string[] = [],
+  opts: { readonly onCard?: ReadonlySet<string> } = {}): { text: string; added: number } {
   // Recovery Batch C: the run-wide sentences said once, after the chance lines, each only when the reply does not already
   // carry it word for word (quotes aside).
   const owedNotes = notes.filter((n) => n.trim() !== '');
-  if (owedNotes.length === 0) return withScreenLinesOwedOnly(text, lines);
-  const base = withScreenLinesOwedOnly(text, lines);
+  if (owedNotes.length === 0) return withScreenLinesOwedOnly(text, lines, opts.onCard);
+  const base = withScreenLinesOwedOnly(text, lines, opts.onCard);
   const missing = owedNotes.filter((n) => !sameWordsIn(base.text, n));
   if (missing.length === 0) return base;
   const said = missing.join(' ');
   return { text: base.text.trim() === '' ? said : `${base.text.trimEnd()}\n\n${said}`, added: base.added + missing.length };
 }
 
-function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenLine[]): { text: string; added: number } {
+/**
+ * `onCard`: the options whose chance this reply's bound result card displays (the route decides, by the Run's identity).
+ * Their lines are not said in the chat; every line still feeds RC4's narrator guard and the shortfall units below.
+ */
+function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenLine[], onCard?: ReadonlySet<string>): { text: string; added: number } {
   // Narration never supplies k, even when it guessed correctly. Complete producer-bound sentences are already authorised;
   // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
   const authorised: string[] = [];
@@ -369,6 +374,7 @@ function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenL
   const owed: string[] = [];
   let added = 0;
   for (const l of lines) {
+    if (onCard?.has(l.option_id) === true) continue;
     if (l.shortfall_note !== undefined) {
       if (alreadySaid(body, l)) continue;
       owed.push(l.chance);

@@ -5178,9 +5178,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // what the card says; a line the card does not say (the range census note) stays, and an Explain (no card) keeps all.
       const cardDetail = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
         ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
+      // ⭐ THE RESULT CARD IS THE CHANCE (DL, PL #94 07:24Z; capacity post3017 row 4: the face said by the reply, then
+      // again by the card under it). When this reply displays the Run's bound result card (this readback's result block
+      // beside a shipped, current canonical view of that SAME Run), an option whose card cell shows this exact chance is
+      // not said again here; the AI's answer explains it. No such card (an Explain, a view that cannot ship, another or a
+      // stale Run): the line stays, the truthful fallback. By the Run's identity and the cell's own face, never by words.
+      const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
+        ? composedRead.canonicalAnalysisView as { run?: { graph_hash_at_run?: unknown }; staleness?: { stale?: unknown };
+          options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] } : undefined;
+      const cardFaces = new Map(cardView !== undefined && cardView.staleness?.stale === false
+        && cardView.run?.graph_hash_at_run === (analysisResult as { computed_against_hash?: unknown }).computed_against_hash
+        ? cardView.options.flatMap(({ option_id, cell }) => (cell.kind === 'figure' || cell.kind === 'range')
+          && typeof cell.face === 'string' ? [[option_id, cell.face] as const] : []) : []);
+      const onCard = new Set(screenLines.filter((l) => {
+        const face = cardFaces.get(l.option_id);
+        return face !== undefined && (l.chance === face || l.chance.startsWith(`${face} `));
+      }).map((l) => l.option_id));
       const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
         goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
-          .filter((note) => cardDetail === null || !cardDetail.has(note)));
+          .filter((note) => cardDetail === null || !cardDetail.has(note)), { onCard });
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
