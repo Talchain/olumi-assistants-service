@@ -21,6 +21,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { getModelManagementService } from '../orchestrator-v5/model-management/index.js';
+import { boundedSupabaseFetch } from '../utils/supabase-bounded-fetch.js';
 import {
   refuse,
   type CollabParticipant,
@@ -494,6 +495,7 @@ export function getCollabStore(): CollabStore {
   cached = new SupabaseCollabStore(
     createClient(url, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: boundedSupabaseFetch() },
     }),
   );
   return cached;

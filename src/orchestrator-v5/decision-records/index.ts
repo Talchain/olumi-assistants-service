@@ -19,6 +19,7 @@ import { createClient } from '@supabase/supabase-js';
 
 import { SupabaseDecisionRecordStore } from './store-adapter.js';
 import type { DecisionRecordStorePort } from './store-adapter.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 let cachedInstance: DecisionRecordStorePort | null = null;
 
@@ -35,6 +36,7 @@ export function getDecisionRecordStore(): DecisionRecordStorePort {
   }
   const client = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedSupabaseFetch() },
   });
   cachedInstance = new SupabaseDecisionRecordStore(client);
   return cachedInstance;

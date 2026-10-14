@@ -20,6 +20,7 @@ import { createClient } from '@supabase/supabase-js';
 
 import { SupabaseBriefProvenanceStore } from './store-adapter.js';
 import type { BriefProvenanceStorePort } from './store-adapter.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 let cachedInstance: BriefProvenanceStorePort | null = null;
 
@@ -39,6 +40,7 @@ export function getBriefProvenanceStore(): BriefProvenanceStorePort {
   // here, not merely an unnecessary one.
   const client = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedSupabaseFetch() },
   });
   cachedInstance = new SupabaseBriefProvenanceStore(client);
   return cachedInstance;
