@@ -63,9 +63,13 @@ function namedOwner(node: ts.Node, source: ts.SourceFile): { name: string; text:
   }
   return { name: '<module>', text: source.text };
 }
+const RUN_MARKERS = /v5_handler_facts|run_analysis|RunAnalysisFact|RunAnalysisRows/;
 function scanSource(file: string, input: string): Hit[] {
+  // Text prefilter first: stripping comments only removes text, so a file without a marker cannot have one after it, and the
+  // tokeniser never runs over the thousands of files that cannot match (#3095 CI: the scan took 36.6 s on the runner).
+  if (!RUN_MARKERS.test(input)) return [];
   const stripped = stripComments(input);
-  if (!/v5_handler_facts|run_analysis|RunAnalysisFact|RunAnalysisRows/.test(stripped)) return [];
+  if (!RUN_MARKERS.test(stripped)) return [];
   const source = ts.createSourceFile(file, stripped, ts.ScriptTarget.Latest, true);
   const hits = new Map<string, Hit>();
   function add(node: ts.Node, kind: Hit['kind']) {
@@ -207,7 +211,8 @@ const PRIVATE_PICK_CONTROLS = [
 
 describe('S1 Run-selection census ratchet', () => {
   let scanned: Hit[];
-  beforeAll(() => { scanned = scan(); }, 30_000);
+  // A runner-sized budget for the whole-tree scan (DL 14 Oct: 30 s timed out on the CI runner at 36.6 s).
+  beforeAll(() => { scanned = scan(); }, 120_000);
   it('pins the remaining OWN reader families at n=8 (up AND down fail)', () => {
     // The census counts reader families, not the number of syntaxes one reader uses.
     const hits = [...new Map(scanned.filter(hit => hit.file !== FRESHNESS)
