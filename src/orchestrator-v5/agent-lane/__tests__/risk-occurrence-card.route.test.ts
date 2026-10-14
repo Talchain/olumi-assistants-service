@@ -37,7 +37,7 @@ const SERVED = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-h
 const RISK = 'code_quality_deterioration';
 const LABEL = 'Code quality deterioration';
 /** AIE packet 6e52e896 `event_risk.readiness_copy` (the eligible event path), then the ask's existing sentences. */
-const ASK = 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers until '
+const ASK = 'Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers until '
   + 'this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.';
 const BASIS = 'Adding people under a three-month launch deadline often strains review time.';
 const ARGS = { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: BASIS, user_stated: false,
@@ -337,7 +337,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     // Codex r2: the cold reopen admits no Run on the 3-month range under the 6-month goal; it asks the occurrence over 6 months.
     expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: false });
     expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
-      'How likely is ‘Code quality deterioration’ to happen at least once within 6 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
+      'Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 6 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     sentBodies.length = 0;
     await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() });
     expect(sentReadiness()).toMatchObject({ checked: true, may_run: false });
@@ -372,7 +372,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(riskOf(w.graph()).event_risk).toEqual(BLOCK);
     expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: false });
     expect(levelAsks(w.graph()).map((i) => i.factor_id)).toEqual(['key_developer_leaves']);
-    expect(String(pressed.assistant_text)).toContain('The analysis can\'t run yet. How likely is ‘Key developer leaves’ to happen at least once within 3 months?');
+    expect(String(pressed.assistant_text)).toContain('The analysis can\'t run yet. Is ‘Key developer leaves’ already true now? If so, say so. If not: How likely is ‘Key developer leaves’ to happen at least once within 3 months?');
     expect(String(pressed.assistant_text)).not.toMatch(NO_RUN_CLAIM);
   }, ROUTE_MS);
 });

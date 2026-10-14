@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardHolds, riskOccurrenceGoalSubject, riskOccurrencePostimageIsScoped,
-  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { heldCardStillApplies, heldCardSubjectMoved } from '../proposal-object/still-applies.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
@@ -129,7 +129,7 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     const moved = structuredClone(written); goalOf(moved).goal_target_basis.period_months = 6;
     expect(buildCanonicalAnalysisReadyFromGraph(moved)).toMatchObject({ may_run: false });
     const asks = (((buildCanonicalAnalysisReadyFromGraph(moved) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.factor_id === RISK).map((i) => i.message);
-    expect(asks).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 6 months? Olumi can’t run the numbers '
+    expect(asks).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 6 months? Olumi can’t run the numbers '
       + 'until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     expect(riskOccurrenceSubject(moved, RISK)).toMatchObject({ kind: 'eligible', window_months: 6 });
     // CONTRAST: a user's range keeps its own stated horizon; it still counts.
@@ -239,7 +239,7 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
   it('AIE readiness copy: the eligible event path asks the occurrence within the window; an ineligible risk keeps its question, never promising a card', () => {
     const ask = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
       .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message);
-    expect(ask(G)).toEqual(['How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers '
+    expect(ask(G)).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers '
       + 'until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     // PL 05:53Z: where no card can exist (no single saved goal period), the ask never offers one.
     const honest = ['How likely or how large is "Code quality deterioration" today? Olumi can’t run the numbers until this '
@@ -249,5 +249,75 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     const noPeriod = structuredClone(G); delete goalOf(noPeriod).goal_target_basis;
     expect(riskOccurrenceSubject(noPeriod, RISK)).toEqual({ kind: 'ineligible', reason: 'no_window' });
     expect(ask(noPeriod)).toEqual(honest);
+  });
+});
+
+/**
+ * ⭐ S2 "HOLDS NOW" (SCIENCE 16:49Z; AIE #94 6173489813): a risk the user says is ALREADY TRUE NOW is recorded as theirs, from
+ * their verified words, never asked as an occurrence chance. Real capabilities, real writer, real readiness.
+ */
+describe('S2 holds now: the user’s statement that a risk already holds', () => {
+  const SAID = 'Honestly, our code quality is already slipping.';
+  const world = (initial: Rec = G) => {
+    let g = structuredClone(initial);
+    let commits = 0;
+    const caps = createAgentCapabilities(async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(g), graph_hash: computeAnalysisAffectingGraphHash(g as never) } };
+      if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+      throw new Error(path);
+    }, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: async (input) => {
+      commits += 1;
+      const r = applyRiskOccurrenceEdit(g, input.risk_occurrence!);
+      if (r.kind !== 'mutated') return { status: 'refused', reason: r.kind } as never;
+      g = r.mutatedGraph as Rec;
+      return { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(g as never)!, already_applied: false, committed_levels: [], links_resized: [], receipt: null } as never;
+    } });
+    return { caps, graph: () => g, commits: () => commits };
+  };
+  const ctx = (said: string, extra: Rec = {}): Rec => ({ scenario_id: 'dc4e09b6-3727-4b14-a3af-dceef435b7d9', authenticated_user_id: null, request_id: 'r',
+    turn_id: 't', user_text: said, user_turn_text: said, ...extra });
+  const holdsNow = (quote: string): Rec => ({ assumptions: [{ factor_label: riskOf(G).label, value: 0, unit: '', basis: '', user_stated: true, holds_now: { quote } }] });
+  const asks = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
+    .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message as string);
+
+  it('RED→GREEN: their words → ONE card quoting them → the press → the risk holds now as THEIRS (occurrence 1, basis user); its gap closes', async () => {
+    const w = world();
+    // Before: readiness offers the held-state reading first, then the AIE occurrence ask.
+    expect(asks(w.graph())).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ '
+      + 'to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
+    const card = await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
+    expect(card).toMatchObject({ ok: true, risk_holds_now: { risk: 'Code quality deterioration', quote: SAID, within_months: 3 } });
+    expect(card.public_label).toBe(`From your message: ‘${SAID}’ Do you want to record that ‘Code quality deterioration’ is already true now? `
+      + 'How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.');
+    expect(card.public_label).not.toMatch(/chance|likely|Olumi’s starting assumption/);
+    // Card-only: the Agent's reading of a yes never applies it.
+    expect(await w.caps.authoriseChange(ctx('Yes') as never, { proposal_id: String(card.proposal_id) })).toMatchObject({ ok: false, refusal: 'approval_required' });
+    expect(w.commits()).toBe(0);
+    const res = await w.caps.authoriseChange({ ...ctx('Yes, use that.'), typed_approval_of: String(card.proposal_id), typed_approval_words: 'Yes, use that.' } as never,
+      { proposal_id: String(card.proposal_id) }) as Rec;
+    expect(res).toMatchObject({ ok: true, applied: true, follow_up: 'Recorded from your words: ‘Code quality deterioration’ is already true now. '
+      + 'How strongly it affects the model is still Olumi’s placeholder on its link.' });
+    expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
+    expect(asks(w.graph())).toEqual([]);
+    expect(w.commits()).toBe(1);
+  });
+  it('never on unverified, partial or other words; a risk that cannot hold it says why; the writer refuses a holds-now block without its statement', async () => {
+    const w = world(), before = JSON.stringify(w.graph());
+    // "code quality is already slipping" drops "Honestly, our": not their whole statement (T2A5's one check).
+    expect(await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow('code quality is already slipping.') as never)).toMatchObject({ ok: false, refusal: 'holds_now_not_stated' });
+    expect(await w.caps.proposeAssumptions(ctx('Please record it.', { user_text: 'Please record it.', unverified_user_text: SAID }) as never, holdsNow(SAID) as never))
+      .toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
+    const c = await world(conflict).caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
+    expect(c).toMatchObject({ ok: false, refusal: 'holds_now_not_recordable' });
+    expect(c.detail).toContain('the goal does not have one clear time window yet');
+    expect(JSON.stringify(w.graph())).toBe(before);
+    expect(w.commits()).toBe(0);
+    // The writer: a user block needs its verified statement, and a statement never carries Olumi's range.
+    const userBlock = userHoldsNowBlock(3)!;
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock })).toEqual({ kind: 'refused', reason: 'invalid_block' });
+    const statement = { speaker: 'user', quote: SAID, source: SAID, subject: { quantity: 'risk_holds_now', node_id: RISK }, form: 'holds_now', unit: '', reading: 'olumi' } as never;
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), holds_now: statement })).toEqual({ kind: 'refused', reason: 'invalid_block' });
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock, holds_now: statement })).toMatchObject({ kind: 'mutated' });
   });
 });

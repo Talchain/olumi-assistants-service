@@ -1377,7 +1377,11 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   // one current goal period, `riskOccurrenceSubject`, the card's own eligibility), the question is its occurrence within that
   // window, never a level "today". Every other risk keeps its ask, byte for byte.
   const eventPath = gap.kind === 'risk' ? riskOccurrenceSubject(rawGraph, gap.id) : undefined;
-  const question = eventPath?.kind === 'eligible' ? riskOccurrenceAskWords(gap.label, eventPath.window_months) : `How likely or how large is "${gap.label}" today?`;
+  // S2 (SCIENCE item (2), AIE #94 6173489813): on the event path a risk may be a condition that already holds ("I'm not that
+  // experienced with marketing"), so the ask offers that reading first and never assumes it is an event still to happen.
+  const question = eventPath?.kind === 'eligible'
+    ? `Is ‘${gap.label.trim()}’ already true now? If so, say so. If not: ${riskOccurrenceAskWords(gap.label, eventPath.window_months)}`
+    : `How likely or how large is "${gap.label}" today?`;
   // The offer to propose is said only where the card can exist (PL 05:53Z): with no single saved goal period there is no
   // window, so no card, and the ask never promises one.
   if (gap.kind === 'risk') return `${question} Olumi can’t run the numbers until this risk has a figure.`

@@ -307,6 +307,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'records that the user accepted it. Never on the user\u2019s own figure or one from their brief, never with a ' +
               'different number, and never in the same call as other values. Omit it in every other case.',
           },
+          // S2 (SCIENCE 16:49Z; AIE #94 6173489813): a risk the user says is already true now.
+          holds_now: { ...obj({ quote: { type: 'string' } }, ['quote']), description: 'For an existing RISK the user says is ALREADY TRUE NOW (for example "I\u2019m not that experienced with marketing" for \u2018Limited marketing experience\u2019): their complete statement, copied exactly from one of their messages. Give it with user_stated true, alone in the call; value and unit are not used. Olumi records that the risk holds now, never a chance of it happening; how strongly it acts stays on its link. Omit it otherwise.' },
           // AIE packet 6e52e896 `event_risk.occurrence_range_description`, byte for byte (hiring path (a)).
           occurrence_range: { ...obj({
             low_percent: { type: 'number' },

@@ -26,6 +26,7 @@ import { goalTargetBasisOf } from '../goal-target/goal-target-basis.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import { goalReadingProjectionOf } from '../goal-target/goal-reading-write.js';
 import { EventRiskV1, type EventRiskV1T } from '../../schemas/event-risk.js';
+import type { UserStatement } from './user-statements.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -49,6 +50,13 @@ export interface ApprovedRiskOccurrence {
    * holds exactly the card's block a verified no-op. An equal block is never identity on its own (DL 08:08Z; Codex r1 on #3024).
    */
   readonly own_write_landed?: boolean;
+  /**
+   * ⭐ S2 "HOLDS NOW" (SCIENCE 16:49Z, AIE #94 6173489813): the user's verified statement that this risk is ALREADY TRUE NOW
+   * ("I'm not that experienced with marketing" for ‘Limited marketing experience’). Its block is the user's (`basis: 'user'`,
+   * occurrence 1 over the window): never an occurrence chance for a condition the user says already holds. How strongly it
+   * acts stays on its link, still Olumi's placeholder.
+   */
+  readonly holds_now?: UserStatement;
 }
 
 /**
@@ -142,6 +150,15 @@ export function riskOccurrenceSubject(graph: unknown, nodeId: string):
     : { kind: 'eligible', node, window_months: window, goal_id: goalId as string, goal };
 }
 
+/** The user's "holds now" as a validated block: certain over the window, the user's own (`ApprovedRiskOccurrence.holds_now`). */
+export function userHoldsNowBlock(windowMonths: number): EventRiskV1T | undefined {
+  const parsed = EventRiskV1.safeParse({ version: 1,
+    occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: windowMonths } });
+  return parsed.success ? parsed.data : undefined;
+}
+const isHoldsNowBlock = (block: EventRiskV1T): boolean =>
+  block.occurrence.basis === 'user' && block.occurrence.p_low === 1 && block.occurrence.p_high === 1 && block.mitigations === undefined;
+
 /** Olumi's range as a validated block, from percentages (0 ≤ low ≤ high ≤ 100), or `undefined`. */
 export function olumiOccurrenceBlock(lowPercent: unknown, highPercent: unknown, windowMonths: number): EventRiskV1T | undefined {
   if (!finite(lowPercent) || !finite(highPercent) || lowPercent < 0 || highPercent > 100 || lowPercent > highPercent) return undefined;
@@ -174,6 +191,11 @@ export const riskOccurrenceAskWords = (label: string, windowMonths: number): str
   .replace('{label}', () => label.trim()).replace('{window}', () => windowWords(windowMonths));
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
+/** S2 "holds now": the card and receipt. The user's words are quoted; Olumi's reading of them is offered, never assumed. */
+export const riskHoldsNowCardWords = (label: string, source: string): string => `From your message: ‘${source}’ Do you want to record that `
+  + `‘${label.trim()}’ is already true now? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.`;
+export const riskHoldsNowRecordedWords = (label: string): string => `Recorded from your words: ‘${label.trim()}’ is already true now. `
+  + 'How strongly it affects the model is still Olumi’s placeholder on its link.';
 
 export type RiskOccurrenceRefusal = 'invalid_graph' | 'invalid_block' | 'risk_not_found' | 'risk_changed' | 'goal_changed' | RiskOccurrenceIneligible;
 
@@ -188,7 +210,10 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
     return { kind: 'refused', reason: 'invalid_graph' };
   }
   const block = EventRiskV1.safeParse(approved.event_risk);
-  if (!block.success || block.data.occurrence.basis !== 'olumi' || !isDeepStrictEqual(block.data, approved.event_risk)) {
+  // Olumi's range, or the user's "holds now" with its verified statement: no other block is ever written here.
+  const holdsNow = approved.holds_now !== undefined && approved.holds_now.form === 'holds_now';
+  if (!block.success || (holdsNow ? !isHoldsNowBlock(block.data) : block.data.occurrence.basis !== 'olumi')
+    || !isDeepStrictEqual(block.data, approved.event_risk)) {
     return { kind: 'refused', reason: 'invalid_block' };
   }
   // The window's goal exactly as the card bound it, before anything else (a retry included): its dates, period and reading.
@@ -219,12 +244,13 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
       affected_entities: [{ kind: 'risk', label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: 'Recorded Olumi’s starting assumption for a risk',
+      safe_summary: holdsNow ? 'Recorded from your words that a risk is already true now' : 'Recorded Olumi’s starting assumption for a risk',
       impact: 'low',
       rerun_recommended: true,
     },
   });
-  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact], confirmation: riskOccurrenceRecordedWords(label, block.data) };
+  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
+    confirmation: holdsNow ? riskHoldsNowRecordedWords(label) : riskOccurrenceRecordedWords(label, block.data) };
 }
 
 /** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
@@ -237,7 +263,8 @@ export function riskOccurrencePostimageIsScoped(before: unknown, after: unknown,
 export function approvedRiskOccurrenceOf(op: { readonly path: string; readonly value?: unknown }): ApprovedRiskOccurrence | undefined {
   const v = (isRec(op.value) ? op.value : {}) as Rec;
   if (!isRec(v.event_risk) || !isRec(v.expected_node) || typeof v.goal_id !== 'string' || !isRec(v.expected_goal)) return undefined;
-  return { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node, goal_id: v.goal_id, expected_goal: v.expected_goal };
+  return { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node, goal_id: v.goal_id, expected_goal: v.expected_goal,
+    ...(isRec(v.holds_now) ? { holds_now: v.holds_now as unknown as UserStatement } : {}) };
 }
 
 /**
