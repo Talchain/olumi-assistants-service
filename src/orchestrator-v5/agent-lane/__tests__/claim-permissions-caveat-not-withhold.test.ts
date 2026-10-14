@@ -97,16 +97,21 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     expect(run.canonical_state.run_explanation.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
   });
 
-  it('ORDER: "Otherwise" still follows the permission sentence, and the provisional rule refines a nameable result AFTER the prohibition (review 5830350204)', async () => {
+  it('ORDER: the permission and withheld rules come first, and the provisional rule refines a nameable result AFTER them (review 5830350204)', async () => {
     // Placed before "Otherwise", the provisional rule re-bound it: an ordinary permitted leader was told to withhold
     // (measured 2/4 "no option can be put forward"). Writing "When … not true" instead let a WITHHELD run name the
     // separated option (3/4, blind-labelled). This order measured 0/4 and 0/4 (provisional-clause/labels-1900.json).
     bodies = [];
     await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
     const sent = String(bodies.find((b) => b.tool_choice === 'none')!['instructions']);
-    const anchor = 'never name a leader from it.';
-    expect(sent.slice(sent.indexOf(anchor) + anchor.length).trimStart().startsWith('Otherwise do not name, rank or hint at one'), 'Otherwise binds to the permission').toBe(true);
-    const tail = 'say in plain words why no option can be put forward yet.';
-    expect(sent.slice(sent.indexOf(tail) + tail.length).trimStart().startsWith(PROVISIONAL_RULE), 'the provisional rule comes after the prohibition').toBe(true);
+    // ⛔ CHANGED EXPECTATION (AIE one-pass packet 94ad9c8f…: #34 is replaced whole, "Otherwise …" included). The measured order
+    // is kept: the CURRENT-Run permission and the withheld rule come first, and the provisional rule refines a nameable
+    // result right AFTER them, sent once.
+    const permission = 'Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.';
+    const tail = 'that difference does not establish an overall option to favour.';
+    expect(sent.indexOf(permission)).toBeGreaterThan(-1);
+    expect(sent.indexOf(permission)).toBeLessThan(sent.indexOf(tail));
+    expect(sent.slice(sent.indexOf(tail) + tail.length).trimStart().startsWith(PROVISIONAL_RULE), 'the provisional rule comes after the withheld rule').toBe(true);
+    expect(sent.split(PROVISIONAL_RULE)).toHaveLength(2);
   });
 });

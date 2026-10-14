@@ -44,6 +44,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** Introduction is separate from figure/display provenance. Only admission's positive stamp licenses this verdict. */
+export function nodeIntroductionOf(node: unknown): { readonly origin: 'olumi_added' | 'unknown'; readonly adopted: boolean } {
+  const n = rec(node);
+  if (n?.proposed_by !== 'olumi') return { origin: 'unknown', adopted: false };
+  // The option card records inclusion; subsequent user exclusion preserves that earlier adoption.
+  const adopted = n.kind === 'option' && (n.analysis_participation === 'included'
+    || n.option_status === 'infeasible' || n.option_status === 'removed');
+  return { origin: 'olumi_added', adopted };
+}
+
 // ============================================================================
 // The display vocabulary (moved verbatim from `cee/transforms/provenance-display.ts`, which re-exports it)
 // ============================================================================

@@ -876,15 +876,14 @@ describe('the served corpus', () => {
 });
 
 describe('the producer half: one shape rule for every model', () => {
-  it('names the construct: one sentence, at most three bullets, More detail, the question last', () => {
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('begin with one short sentence that answers');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('at most three bullets');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 20 words');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('More detail');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('If you ask a question, it stays your last sentence.');
+  it('names the shape rule: the useful answer stays in the visible reply, never a hidden fold', () => {
+    // ⛔ CHANGED EXPECTATION (prompt P12, AIE one-pass packet 94ad9c8f…): the construct's word budgets and its "More detail"
+    // fold premise are retired; the role's own schema stays and the answer is said where the user sees it.
+    expect(REPLY_SHAPE_INSTRUCTION).toBe('Keep the existing reply structure where required by this role’s schema, but put the useful answer '
+      + 'and necessary explanation in the visible answer. Do not rely on a host-authored headline, hidden More detail section or later '
+      + 'appendix to communicate it.');
     expect(REPLY_SHAPE_INSTRUCTION).not.toMatch(/[‒-―]/);
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 75 words, with one reasoning move and at most one question or next action');
-    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toEqual(['20', '75']);
+    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toBeNull();
   });
 });
 

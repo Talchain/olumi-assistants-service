@@ -8,6 +8,7 @@ import {
   cardCallFor, fallbackReply, methodTurnForReadback, methodTurnFromSignals, PREMORTEM_PRESS_ID, selectorSignalsOf, settleMethodTurn,
   type MethodReadback, type MethodTurn, type RunMethodTurn,
 } from '../../method-turn.js';
+import { withApprovedMethodWords } from './approved-method-words.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[]; goal_constraints?: unknown };
 type Read = {
@@ -99,7 +100,7 @@ rows['licensed-leader B: whole adapter, fallback and settlement remain byte-iden
   }
   const actual = turn(c);
   const base = load('w9c/base-controls').leader as RunMethodTurn;
-  assert.equal(JSON.stringify(actual), JSON.stringify(base));
+  assert.equal(JSON.stringify(actual), JSON.stringify(withApprovedMethodWords(base)));
   assert.equal(fallbackReply(actual.context), fallbackReply(base.context));
   const reply = [
     'Imagine this plan has gone badly.',

@@ -1,6 +1,7 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { latestLinkBands } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -3614,7 +3615,7 @@ export function createAgentCapabilities(
       base_revision: g.graph_hash,
       revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
-        + 'targets, limits, options and what is redrafted; do not repeat the full card or show its id. '
+        + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
         + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
@@ -4760,7 +4761,7 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         card: { words: card.words, ...(card.one_off_words !== undefined ? { one_off_words: card.one_off_words } : {}) },
-        note: 'Nothing has changed yet. Ask the user `card.words` exactly as written, and tell them to confirm on the button. '
+        note: 'Nothing has changed yet. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. Tell them to confirm on the button. '
           + (card.one_off_words !== undefined ? 'The second button records the one-off reading shown on this card. ' : 'If they say no, nothing is recorded: carry on without it. ')
           + 'Never run the analysis again yourself.',
       };
@@ -4772,8 +4773,11 @@ export function createAgentCapabilities(
      * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
      * `propose_link_strength` holds one link and refuses a band the user did not type.
      *
-     * Each link here is the user's estimate when they named its band in THIS turn's typed words (`bandTheUserWrote`, the
-     * one matcher), and otherwise OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
+     * Each link here is the user's estimate only when the Agent quotes THIS message's words for it as `from_words` (the
+     * user's exact words, naming an end and the band) AND the host's reading of this message agrees (`latestLinkBands`):
+     * words binding both resolved ends, words naming an end of the ONE link the request selects, or "<X> effects … to
+     * <band>" for a link leaving X. Earlier messages credit nothing here until T2A5's quote (T2A3 DL ruling).
+     * Otherwise it is OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
      * (`olumi_estimate`), never as the user's. A strength that is already the user's own is never replaced by an
      * estimate. Directions are kept (a reversal is one link, in the user's words). One proposal, one chip, one commit.
      */
@@ -4785,15 +4789,6 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const labels = g.nodes.map((n) => String(n.label ?? ''));
-      /**
-       * ⛔ B2 (DL CHANGES_REQUIRED on #2255): a band is the user's only when THEIR words for THIS link say it — a phrase
-       * written in this turn (`wordsTheUserWrote`), holding the band word (`bandTheUserWrote`), and naming an end of this
-       * link (`factorTheUserNamed`, own words only). A band word anywhere in the message credits no link on its own.
-       */
-      const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
-        typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
-        && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
       type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean;
         wasEdge: unknown; sizedBefore: LinkSizing; sizedAfterApproval: LinkSizing };
       const ops: ProposalOperation[] = [];
@@ -4886,7 +4881,21 @@ export function createAgentCapabilities(
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
           continue;
         }
-        if (namedByTheUser(band, l.from_words, from.label, to.label)) {
+        // The user's statement for this exact link in THIS message decides (`latestLinkBands`): words naming both ends, a
+        // selection binding exactly this ONE directed link with words naming an end of it, or "<X> effects" for links
+        // leaving X. The model's `user_stated` is not source authority (PL 22:07Z): attributed or questioned words fail.
+        const selection = ctx.grounded_selection;
+        const bound = selection?.unresolved === 'none' && selection.element_ids.length === 0 ? ctx.grounded_links ?? [] : [];
+        // ⛔ T2A3 (DL ruling, Codex FAIL on c78b4ad4): it is the user's only with the Agent's own quote of it (`from_words`,
+        // the tool's contract and staging's rule). No quote is the Agent saying "not the user's" ("Alice says…", "strong
+        // evidence"), and the host reading never overrides it; the reading stays a veto on a quote. Earlier messages credit
+        // nothing here (staging never did): the tool asks for THIS message's words, so history waits for T2A5's quote.
+        const quoted = typeof l.from_words === 'string' && wordsTheUserWrote(l.from_words, ctx.user_turn_text)
+          && bandTheUserWrote(band, l.from_words) && [String(from.label ?? ''), String(to.label ?? '')].some((end) =>
+            factorTheUserNamed(end, l.from_words as string, { options: [], others: g.nodes.map((n) => String(n.label ?? '')).filter((x) => x !== end) }));
+        const thisMessage = latestLinkBands(ctx.user_turn_text, g.nodes, from.id, to.id, { bound });
+        const stated = quoted ? thisMessage : null;
+        if (stated?.includes(band) === true) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
           // and never credits. Only a band that MOVES the link is theirs, and a placeholder has no band to sit in (D1).
@@ -5199,7 +5208,7 @@ export function createAgentCapabilities(
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
       if (inclusiveType === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',
-          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Tell the user that, in those words.` };
+          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
       }
       // ⛔ A figure in another kind of unit is never this goal's target (the lane's one family check, `unit-conflict.ts`).
       // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.
@@ -5306,7 +5315,7 @@ export function createAgentCapabilities(
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
-            + (levelLeftOut.host_line !== undefined ? '; Olumi already tells the user it was not included, so do not repeat it.' : '.') : ''),
+            + (levelLeftOut.host_line !== undefined ? '. Explain any actual exclusion or unsupported part recorded by the tool, and its effect on the proposed change or analysis. Keep the original reasoning and source available; do not imply the complete goal or condition was included when it was not.' : '.') : ''),
       };
     },
 
@@ -6919,7 +6928,7 @@ export function createAgentCapabilities(
         if (res.status >= 400 && res.status < 500) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
             follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
-            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship. Ask what target they would like instead.` };
         }
         const after = await readGraph(ctx.scenario_id);
         // Landed is what the model HOLDS (the rule #1995 sets for every writer): another writer moving the revision afterwards
@@ -7086,7 +7095,7 @@ export function createAgentCapabilities(
         if (res.status === 'refused' && isTarget) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
             follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
-            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship. Ask what target they would like instead.` };
         }
         if (res.status === 'refused') {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
@@ -10191,8 +10200,7 @@ export function createAgentCapabilities(
       }
       return {
         ok: true, mutated: false, provisional_view: checked.view,
-        detail: 'Olumi shows this beneath your reply as one paragraph, labelled as your provisional view, with why the analysis '
-          + 'cannot confirm it yet. Do not repeat it, and do not rank or favour an option in your reply text.',
+        detail: 'Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions. A provisional view directs investigation in this model. It may name and explain options and their unresolved assumptions only from current supplied facts; preserve scope, source, uncertainty and conditions, and do not favour an option or turn the view into a recommendation.',
       };
     },
 

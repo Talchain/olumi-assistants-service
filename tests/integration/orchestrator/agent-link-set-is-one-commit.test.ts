@@ -1,3 +1,4 @@
+import type { AgentToolContext } from '../../../src/orchestrator-v5/agent-lane/runtime/agent-tools.js';
 /**
  * ⭐ A SET OF LINK STRENGTHS IS ONE APPROVAL AND ONE COMMIT, END TO END (DL #72 5871594233; seam Canonical 5871633483,
  * DL 5871661097; rows Canonical's five).
@@ -123,13 +124,13 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   });
 
   let doorCalls = 0;
-  const agent = (userTurnText: string, store = new ProposalStore()) => {
+  const agent = (userTurnText: string, store = new ProposalStore(), interaction: Partial<AgentToolContext> = {}) => {
     const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
     doorCalls = 0;
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-agent'); },
     });
-    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText, ...interaction } };
   };
 
   it('RED (Paul\'s delegated set: "I\'m aligned with these. Please make these updates."): ONE proposal, ONE commit, every placeholder sized as Olumi\'s accepted estimate (D1)', async () => {
@@ -259,6 +260,11 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     e.effect_direction = 'positive';
     return JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
   };
+  // The inspector/review card grounds this shorthand; model argument labels do not.
+  const workloadReview = () => ({
+    grounded_selection: { element_ids: [], unresolved: 'none' as const },
+    grounded_links: [{ from: edge('workloadHours').from, to: edge('workloadHours').to }],
+  });
   const NAMED = 'Keep Delegable routine workload strong';
   const named = [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1], strength: 'strong', from_words: NAMED }];
   const expectHeldByteEqual = (before: Record<string, unknown>, hashBefore: string) => {
@@ -276,7 +282,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   it('RED (#2473 P1, chat words): the user NAMES the band a sized estimate already sits in — approval holds it byte-equal', async () => {
     const before = sizedEstimate();
     const hashBefore = currentHash();
-    const { caps, ctx } = agent(NAMED);
+    const { caps, ctx } = agent(NAMED, undefined, workloadReview());
     const p = await caps.proposeLinkStrengths!(ctx, { links: named as never, rationale: 'the user named the band it already sits in' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     // M1 Accept receipt (Codex pre-review P2): naming the band is review, so the kept figure stays Olumi's — never "yours".
@@ -296,7 +302,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { proposalPendingAction, rehydrateProposals } = await import('../../../src/orchestrator-v5/agent-lane/durable-proposal.js');
     const before = sizedEstimate();
     const hashBefore = currentHash();
-    const first = agent(NAMED);
+    const first = agent(NAMED, undefined, workloadReview());
     const p = await first.caps.proposeLinkStrengths!(first.ctx, { links: named as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const offered = first.store.get(String(p.proposal_id))!;
@@ -345,7 +351,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   it('CONTROL (#2473): a named band that MOVES the link still writes it — the user\'s band, its spread', async () => {
     sizedEstimate();
     const words = 'Make Delegable routine workload very strong';
-    const { caps, ctx } = agent(words);
+    const { caps, ctx } = agent(words, undefined, workloadReview());
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ ...named[0], strength: 'very strong', from_words: words }] as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
@@ -473,6 +479,42 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(await userStated(), 'the leader gate opens on his own words alone').toBeGreaterThan(0);
   });
 
+  // ⭐ T2A3 (DL): "<X> effects" credits links LEAVING the listed X, in THIS message, and nothing wider.
+  const pluralRun = async (words: string, keys: readonly Key[], quote?: string) => {
+    placeholderBase();
+    const { censusConfidenceParameters } = await import('../../../src/orchestrator-v5/admission/analysis-admission.js');
+    const confidence0 = censusConfidenceParameters(persisted).confidence_parameters_user_stated;
+    const { caps, ctx, store } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: keys.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong',
+      ...(quote === undefined ? {} : { from_words: quote }) })) as never, rationale: words });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const authors = Object.fromEntries(store.get(String(p.proposal_id))!.operations.map((op) => [op.path, (op.value as { author: string }).author]));
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    return { authors, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
+  };
+  const pathOf = (k: Key): string => `${L[k][2]}::${L[k][3]}`;
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
+  // EXPECTATION CHANGED: unquoted, old capacityQuality user_stated → new model_proposed; the quoted run keeps the old outcome.
+  it.each([[undefined, 'model_proposed'], ['set human capacity\u2019s effect on delegation quality to strong', 'user_stated']] as const)('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link (from_words %s)', async (quote, want) => {
+    const { authors } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead'], quote);
+    expect(authors).toEqual({ [pathOf('capacityQuality')]: want, [pathOf('capacityOverhead')]: 'model_proposed' });
+    expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
+  });
+  it('T2A3 plural: a second entity named beside the plural ("… effects on delegation quality") gives no blanket credit', async () => {
+    // The AI quoting the whole message (the adverse case since the T2A3 ruling): the host's veto keeps it Olumi's.
+    const { authors } = await pluralRun('set human capacity effects on delegation quality to strong', ['capacityQuality', 'capacityOverhead'],
+      'set human capacity effects on delegation quality to strong');
+    expect(authors[pathOf('capacityOverhead')]).toBe('model_proposed');
+    expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
+  });
+  it('T2A3 plural: "Olumi says … effects are strong" credits none of the listed links', async () => {
+    const { authors, credited } = await pluralRun(`Olumi says ${PAUL_STRONG}`, STRONG, `Olumi says ${PAUL_STRONG}`);
+    expect(Object.values(authors)).toEqual(STRONG.map(() => 'model_proposed'));
+    expect(credited, 'nothing is the user\u2019s').toBe(0);
+    for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) expect(linkSizing(edge(k)), k).not.toBe('user');
+  });
+
   it('CONTROL: a band the user names for a link, in words naming it, that MOVES it is theirs — and is credited', async () => {
     placeholderBase();
     const said = 'The effect of human assistant capacity on delegation quality is very strong.';
@@ -504,7 +546,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const before = projectedPriceRevenue();
     const hashBefore = currentHash();
     const words = 'Price is strong.';
-    const { caps, ctx, store } = agent(words);
+    // The user has the drawn link selected (DGAI `selected_elements` → the host-resolved `grounded_links`).
+    const drawn = edge('capacityQuality');
+    const { caps, ctx, store } = agent(words, undefined, { grounded_selection: { element_ids: [], unresolved: 'none' },
+      grounded_links: [{ from: drawn.from, to: drawn.to }] });
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
       strength: 'strong', from_words: words }], rationale: words });
     expect(p.ok, JSON.stringify(p)).toBe(true);
@@ -528,6 +573,25 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(earnsAuthorshipCredit(edgeStrengthProvenance(after))).toBe(true);
     expect(currentHash(), 'a size moves the analysis identity').not.toBe(hashBefore);
     expect(String(out.follow_up)).toContain('as strong, your estimate');
+  });
+
+  it('T2A2: Price is strong. without a current drawn/reviewed link cannot borrow the stored drawing provenance', async () => {
+    projectedPriceRevenue();
+    const before = JSON.stringify(edge('capacityQuality'));
+    const words = 'Price is strong.';
+    const { caps, ctx, store } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
+      strength: 'strong', from_words: words }], rationale: words });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(store.get(String(p.proposal_id))!.operations).toEqual([expect.objectContaining({
+      value: expect.objectContaining({ author: 'model_proposed', intent: 'confirm_current', magnitude: 0.5 }),
+    })]);
+    expect(p.public_label).toBe('Record 1 review: "Price" → "Revenue", whose strength nobody has set yet (kept as it is)');
+    expect(JSON.stringify(edge('capacityQuality'))).toBe(before);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(linkSizing(edge('capacityQuality'))).toBe('placeholder');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge('capacityQuality')))).toBe(false);
   });
 
   it('RED (R7 class reader): the adopted-strength door does not refuse projected Price → Revenue as the user’s own; genuine user-sized control refuses', async () => {

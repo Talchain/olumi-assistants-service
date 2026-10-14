@@ -37,8 +37,7 @@ export interface GoalCertaintyRead {
 
 /** The rule the Agent follows for `goal_certainty` (AIQ 5882366427: an unearned certainty is never 100% or certain). */
 export const GOAL_CERTAINTY_NOTE =
-  'For each option here whose `earned` is false, never call its chance 100% or 0%, certain, guaranteed or impossible, and never say it ' +
-  'will or will not reach the goal: say its `say` sentence instead, as written. An option whose `earned` is true may be said as the run reports it.';
+  "For each option here whose `earned` is false, never call its chance 100% or 0%, certain, guaranteed or impossible, and never say it will or will not reach the goal: Explain the supplied current withholding or certainty reason in ordinary language, keeping its actual scope and limitation. Preserve relevant conditions and give a supported next action when available; do not output raw reason codes, invent an action, or drop a known limitation merely to shorten the answer. An option whose `earned` is true may be said as the run reports it.";
 export const GOAL_CERTAINTY_UNCHECKED_NOTE =
   'Some options came out at a chance of exactly 0 or 1, and whether that certainty is earned could not be checked. Never call any of them ' +
   '100% or 0%, certain, guaranteed or impossible: say it is what this model gives, not a certainty.';
