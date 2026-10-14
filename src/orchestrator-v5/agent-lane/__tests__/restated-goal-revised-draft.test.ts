@@ -950,8 +950,10 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     expect(prepared.nodes.find((n: Rec) => n.id === original.node_id)).toEqual(FX.graph.nodes.find((n: Rec) => n.id === original.node_id));
     expect(prepared.edges.filter((e: Rec) => e.from === original.node_id || e.to === original.node_id)).toEqual([]);
     expect(offer.public_label).toBe(omissionCard.replace(carriedCardEnd, RETAINED_LIMIT_QUANTITY_WITHHELD + ' ' + carriedCardEnd));
-    // ⛔ SAID ONCE (SCIENCE marketing capture, judge row 2): the card owns the withheld cause; the AI is told to point to it.
+    // ⛔ SAID ONCE (SCIENCE marketing capture, judge row 2; AIE #94 6178720067): the card carries the full reason, and THIS
+    // turn's AI input holds both the card (with that reason) and the note to point to it once.
     expect(String(offer.note).split(CARD_OWNS_WITHHELD_NOTE), 'the AI is told the card says it').toHaveLength(2);
+    expect(String(offer.public_label).split(RETAINED_LIMIT_QUANTITY_WITHHELD), 'the full reason is on the card the AI receives').toHaveLength(2);
     expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD)).toBe(true);
     expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD + ' All conditions passed.')).toBe(false);
     s.said(FX.l20.turn_id);
