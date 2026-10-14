@@ -47,6 +47,11 @@ function capacityInputFailure(extra: Rec): string | null {
       return "Not shown. This option's start is given as a range, and this forecast can't yet work out a capacity change with an uncertain start. Say when it would take full effect.";
     }
     // PL 6135017311 item 3: the ratio is compiled from the saved figures; an unreadable one, or one that slows the team, fails closed.
+    if (Array.isArray(extra.ratio_source_owner_unknown) && extra.ratio_source_owner_unknown.length > 0) {
+      const names = (extra.ratio_source_owner_unknown as unknown[]).map((l) => `‘${String(l)}’`).join(' and ');
+      return `Not shown. This option's effect is worked out from ${names}, and the model doesn't record whether that figure is yours or `
+        + `Olumi's estimate. Confirm or edit ${names} to show this option's chance.`;
+    }
     if (extra.ratio_source_unreadable === true) {
       return "Not shown. This option's effect is worked out from the model's capacity figures, and one of them is missing or unreadable now.";
     }

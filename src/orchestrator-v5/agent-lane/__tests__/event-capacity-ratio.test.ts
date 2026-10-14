@@ -253,6 +253,39 @@ describe('PL 6135017311 item 3: a live compiler — r follows the SAVED figures 
     expect(shareOptionEstimateWords(after, LEGACY)).not.toContain('worked out on Olumi’s assumption');
   });
 
+  // ⛔ PL (14 Oct, #3127 first pass): whose figure it is comes from POSITIVE evidence only (`valueAuthorshipOf`).
+  it.each([
+    // `valueAuthorshipOf` defers an unrecognised or missing source to the node's own extraction type (an `inferred` figure is
+    // Olumi's by that stamp); with no recognised stamp of either kind, whose figure it is is unknown.
+    ['an unrecognised source and no extraction type', (os: Rec) => { os.source = 'store'; delete os.extractionType; }],
+    ['no source and no extraction type', (os: Rec) => { delete os.source; delete os.extractionType; }],
+    ['no source and an unrecognised extraction type', (os: Rec) => { delete os.source; os.extractionType = 'pasted'; }],
+  ] as const)('⛔ PL: feature time with %s is neither relabelled nor overwritten; the option\'s chance waits for it to be confirmed', async (_name, stamp) => {
+    const g = await saved();
+    stamp(node(g, FEATURE).observed_state);
+    const was = structuredClone(node(g, FEATURE).observed_state);
+    const basisWas = structuredClone(extra(g).ratio_basis.factors[1]);
+    Object.assign(node(g, LEGACY_FIX).observed_state, { raw_value: 20, value: 0.2 });
+    const after = commit(g);
+    expect(node(after, FEATURE).observed_state, 'never overwritten as Olumi-owned').toEqual(was);
+    expect(extra(after).ratio_basis.factors[1], 'never relabelled (neither as the person\'s nor re-derived)').toEqual(basisWas);
+    expect(extra(after).ratio_source_owner_unknown).toEqual(['Time on feature work']);
+    expect(shareChanceInputFailure(after, LEGACY)).toBe("Not shown. This option's effect is worked out from ‘Time on feature work’, and the "
+      + "model doesn't record whether that figure is yours or Olumi's estimate. Confirm or edit ‘Time on feature work’ to show this option's chance.");
+  });
+
+  it('⛔ PL: Olumi\'s 75% that the user ACCEPTED stays Olumi\'s estimate and keeps the accepted figure (never overwritten)', async () => {
+    const g = await saved();
+    Object.assign(node(g, FEATURE).observed_state, { source: 'user_assumption', reviewed_by_user: { intent: 'confirm', at: '2026-10-14T20:00:00Z' } });
+    Object.assign(node(g, LEGACY_FIX).observed_state, { raw_value: 20, value: 0.2 });
+    const after = commit(g);
+    expect(node(after, FEATURE).observed_state).toMatchObject({ raw_value: 75, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
+    expect(extra(after).ratio_source_owner_unknown).toBeUndefined();
+    expect(extra(after).ratio_basis.factors[1]).toMatchObject({ label: 'Time on feature work', today: 75, estimated: true });
+    expect(shareOptionEstimateWords(after, LEGACY)).toContain('‘Time on feature work’ at 75% of development time today, Olumi’s estimate');
+    expect(shareOptionEstimateWords(after, LEGACY)).not.toContain('worked out on Olumi’s assumption');
+  });
+
   it('⭐ the option\'s setting (15% → 10%) recompiles r; an edit to the 6 developers is read live and cancels in this option\'s ratio', async () => {
     const g = await saved();
     extra(g).ratio_source.settings[LEGACY_FIX] = 10;

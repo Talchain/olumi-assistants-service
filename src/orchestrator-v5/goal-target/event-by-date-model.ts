@@ -11,6 +11,7 @@ import { CURRENCY_WORD_TO_CODE } from '../../utils/currency-alphabet.js';
 import { figureTheUserWroteForSpan } from '../agent-lane/stated-by-user.js';
 import { sameUnit, unitsAt } from '../agent-lane/same-unit.js';
 import { readTeamTime } from './team-share-write.js';
+import { valueAuthorshipOf } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -649,8 +650,6 @@ export function withCompiledCapacityRatios<T>(graph: T): T {
   return out as T;
 }
 
-/** The saved-figure sources that mean Olumi produced it; anything else (a user's edit or answer) is a human figure. */
-const OLUMI_FIGURE_SOURCES: ReadonlySet<string> = new Set(['cee_inference', 'cee_hypothesis', 'olumi_estimate']);
 
 function compileCapacityRatios(graph: Rec): void {
   const byId = new Map<string, Rec>(graph.nodes.filter(rec).map((n: Rec) => [n.id as string, n]));
@@ -659,7 +658,17 @@ function compileCapacityRatios(graph: Rec): void {
   for (const carrier of graph.nodes.filter(rec)) {
     const c = carrier.observed_state?.extra_share_by_date, src = c?.ratio_source;
     if (!rec(src) || !Array.isArray(src.factor_ids) || !Array.isArray(src.set_ids)) continue;
-    delete c.ratio_source_unreadable;
+    delete c.ratio_source_unreadable; delete c.ratio_source_owner_unknown;
+    // ⛔ PL (14 Oct, #3127 first pass): whose figure each Olumi-labelled factor holds is read from POSITIVE evidence only
+    // (`valueAuthorshipOf`, the one authority): Olumi's unaccepted estimate follows its derivation; the person's own figure
+    // ends it and keeps no Olumi label; an Olumi estimate they accepted stays Olumi's and is never overwritten. An unknown or
+    // missing source is neither relabelled nor overwritten: the option's chance is withheld until the figure is confirmed.
+    const labelled = (src.factor_ids as string[]).filter((id, i) => (rec(src.derived) && rec(src.derived[id]))
+      || (Array.isArray(c.ratio_basis?.factors) && rec(c.ratio_basis.factors[i]) && (c.ratio_basis.factors[i].estimated === true
+        || rec(c.ratio_basis.factors[i].derived))));
+    const owner = new Map(labelled.map((id) => [id, valueAuthorshipOf(byId.get(id)?.observed_state)]));
+    const unknown = labelled.filter((id) => owner.get(id) === 'unknown');
+    if (unknown.length > 0) { c.ratio_source_owner_unknown = unknown.map((id) => String(byId.get(id)?.label ?? id)); continue; }
     const options = graph.nodes.filter((n: Rec) => rec(n) && n.kind === 'option' && on(n.interventions?.[carrier.id]) === 1);
     // Each factor's figure today and the option's setting on it, in the user's units (raw), never a scaled value.
     const today = (id: string): number | undefined => num(byId.get(id)?.observed_state?.raw_value);
@@ -675,9 +684,10 @@ function compileCapacityRatios(graph: Rec): void {
         const d = rec(src.derived) ? src.derived[f] : undefined;
         return rec(d) && typeof d.source_id === 'string' && num(d.total) !== undefined ? { source: d.source_id, total: d.total as number } : undefined;
       };
-      // ⛔ PL (14 Oct): a human correction to the derived factor keeps its authorship and ENDS the derivation, never overwritten.
+      // ⛔ PL (14 Oct): only Olumi's unaccepted figure follows the derivation. The person's correction ENDS it (theirs, kept);
+      // an accepted estimate keeps the figure they accepted (still Olumi's). Neither is overwritten.
       for (const f of Object.keys(rec(src.derived) ? src.derived : {})) {
-        if (!OLUMI_FIGURE_SOURCES.has(String(byId.get(f)?.observed_state?.source ?? 'cee_inference'))) delete src.derived[f];
+        if (owner.get(f) !== 'olumi_estimate') delete src.derived[f];
       }
       const todayOf = (f: string): number | undefined => {
         const d = split(f); if (d === undefined) return today(f);
@@ -722,10 +732,12 @@ function compileCapacityRatios(graph: Rec): void {
     if (Array.isArray(basis.factors)) {
       basis.factors = (src.factor_ids as string[]).map((id, i) => {
         const { derived: _was, estimated: _est, ...kept } = (basis.factors[i] ?? {}) as Rec;
-        const human = !OLUMI_FIGURE_SOURCES.has(String(byId.get(id)?.observed_state?.source ?? 'cee_inference'));
+        const who = owner.get(id);
         return { ...kept, label: byId.get(id)?.label ?? basis.factors[i]?.label, today: compiled.base[i], withOption: compiled.withOption[i],
-          // A human figure is theirs: no Olumi derivation or estimate label survives it.
-          ...(human ? {} : _was !== undefined && rec(src.derived) && rec(src.derived[id]) ? { derived: _was } : _est !== undefined ? { estimated: _est } : {}) };
+          // The person's own figure is theirs: no Olumi label survives it. An accepted Olumi figure stays Olumi's estimate.
+          ...(who === 'yours' || who === undefined ? {}
+            : _was !== undefined && rec(src.derived) && rec(src.derived[id]) ? { derived: _was }
+            : who === 'olumi_accepted' || _est !== undefined ? { estimated: true as const } : {}) };
       });
     }
     if (Array.isArray(basis.settings)) {
