@@ -125,6 +125,11 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     // On his own 7–8 months the user's bound decides (PL 6135017311 item 1): out of reach, with the arithmetic, never a tail figure.
     expect(shareChanceInputFailure(g, LEGACY)).toBeNull();
     expect(capacityRatioOutOfReach(g, LEGACY)).toMatch(/^No chance is shown for this option: on your own soonest estimate it can’t reach 100% of next feature launch by 14 April 2027\. Even at 7 months, it gets about 97% done by then/);
+    // ⛔ Served 7f5659fd (22:50Z, wrong author): carrying on as now said "rests on figures Olumi can’t yet confirm" and offered
+    // a speed-up step, over HIS 7–8 months. Today's team (no part on, k = 1) gets the same bound reason, with its arithmetic.
+    expect(capacityRatioOutOfReach(g, 'event_option_1')).toBe('No chance is shown for this option: on your own soonest estimate it can’t '
+      + 'reach 100% of next feature launch by 14 April 2027. Even at 7 months, it gets about 85% done by then (7 months of work, past the '
+      + '6 months to the deadline).');
   });
 
   it('⛔ authorship: the carrier and the r reading are Olumi\'s (adopted by the press); "25% → 15%" is kept as HIS statement', async () => {
