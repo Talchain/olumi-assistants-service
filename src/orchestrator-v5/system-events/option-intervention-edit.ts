@@ -96,6 +96,7 @@ import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } fr
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady, type HorizonBasisWrite } from '../goal-target/goal-steady-write.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import { applyGoalReadingEdit, goalReadingPostimageIsScoped, type ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
 import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
@@ -865,6 +866,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    /** ⭐ G: the user's answer to the goal's open question, `goal_target_basis.open_question` removed only: ONE append, alone. */
+    readonly goalReading?: ApprovedGoalReading;
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
@@ -894,6 +897,14 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
     || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
     return { kind: 'refused', reason: 'goal_steady_not_alone' };
+  }
+  // G: the answer to the goal's open question is one approved card, never part of a compound edit.
+  if (input.goalReading !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.goalSteady !== undefined || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0
+    || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'goal_reading_not_alone' };
   }
   const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
   if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
@@ -951,7 +962,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   }
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
-    lastRunIdentityUse: _callerRunUse, ...common } = input;
+    goalReading: _callerReading, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -1201,6 +1212,32 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     valueConfirmations = [written.confirmation];
   }
+  /**
+   * ⭐ G — THE ANSWER TO THE GOAL'S OPEN QUESTION, the deadline card's own shape: alone (checked above), on the persisted base,
+   * through the one writer in memory, scoped to removing that one member, then the ONE append and read-back below. The reading
+   * is in the analysis hash, so the caller's base is checked here and the writer's own gate is the reading the card showed.
+   */
+  const goalReading = input.goalReading;
+  if (goalReading !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyGoalReadingEdit(before, goalReading);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `goal_reading_${written.reason}` };
+    // A retry of a write that landed: the answered reading is already held, so the batch is a verified no-op.
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalReadingPostimageIsScoped(projectGraphForPersistence(before), graph, goalReading)) {
+      return { kind: 'refused', reason: 'goal_reading_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
   let horizonBasisWrite: HorizonBasisWrite | undefined;
   const goalSteady = input.goalSteady;
   if (goalSteady !== undefined) {
@@ -1241,7 +1278,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = [written.confirmation];
   }
   const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
-    + (goalHorizon !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
+    + (goalHorizon !== undefined ? 1 : 0) + (goalReading !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

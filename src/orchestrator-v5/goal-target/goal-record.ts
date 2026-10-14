@@ -1,4 +1,4 @@
-import { GoalHorizonSchema, GoalThresholdFrame } from '@talchain/schemas';
+import { GoalHorizonSchema, GoalPeriod, GoalThresholdFrame } from '@talchain/schemas';
 import type { NodeV3T } from '../../schemas/cee-v3.js';
 import type { GoalConstraintT } from '../../schemas/assist.js';
 import { statedOperatorOf } from '../agent-lane/limit-operator-words.js';
@@ -25,6 +25,8 @@ export type GoalRecord = Readonly<{
     deadline?: Extract<NonNullable<NodeV3T['goal_horizon']>, { deadline: string }>['deadline'];
     as_stated?: NodeV3T['goal_deadline_as_stated'];
   }> | null;
+  /** The period the goal's figures are per (week, month …), when held as a valid period. */
+  period?: NonNullable<NodeV3T['goal_period']>;
   /** UNVERIFIED: unverified stored bytes; callers MUST use horizonSteadyAttested(graph) for any permission */
   horizon_basis?: UnverifiedHorizonBasis;
   provenance?: NodeV3T['provenance'] | GoalConstraintT['provenance'];
@@ -56,6 +58,7 @@ export const GOAL_RECORD_PRECEDENCE = {
   source: ['threshold_source'],
   horizon: ['goal_horizon', 'goal_horizon_months'],
   as_stated: ['goal_deadline_as_stated'],
+  period: ['goal_period (a valid GoalPeriod only)'],
   horizon_basis: ['horizon_basis (exact key, well-formed only): not merged; horizon = goal_horizon → goal_horizon_months'],
   provenance: ['selected goal.provenance', 'own target row.provenance'],
 } as const;
@@ -120,6 +123,7 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
     const horizonBasis = basis !== undefined && text(basis.basis) && text(basis.source)
       && finite(basis.bound_months) && basis.bound_months > 0 && text(basis.metric)
       ? { basis: basis.basis, source: basis.source, bound_months: basis.bound_months, metric: basis.metric } : undefined;
+    const period = GoalPeriod.safeParse(goal.goal_period).data;
     const provenance = nodeProvenance(goal.provenance) ? goal.provenance
       : rowProvenance(row?.provenance) ? row.provenance : undefined;
     return {
@@ -128,6 +132,7 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
       target: Object.keys(target).length > 0 ? target : null,
       // Preserve a valid schema arm as a projection even when it supplies no held count or calendar date.
       horizon: approvedHorizon !== undefined || Object.keys(horizon).length > 0 ? horizon : null,
+      ...(period !== undefined ? { period } : {}),
       ...(horizonBasis !== undefined ? { horizon_basis: horizonBasis } : {}),
       ...(provenance !== undefined ? { provenance } : {}),
     };

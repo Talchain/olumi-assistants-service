@@ -29,6 +29,7 @@ import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { CONFIRM_GOAL_READING_OP } from '../goal-target/held-change-target.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -41,6 +42,9 @@ const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
 // and £ never meets % (#2641's twins).
 const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
   || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
+
+/** AIE_TEXT_PENDING: the button on the card answering the goal's open question (`goal-target/held-change-target.ts`). */
+export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' } as const;
 
 /** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
 const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
@@ -208,6 +212,13 @@ export function approvalChipsFor(
   // cannot prove that its omitted operations were gap-free. Offer no approval.
   if (labelSourceFor !== undefined && stored === undefined
     && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
+  // ⭐ G (card-only, so before the generic card-only button): the answer to the goal's open question has its own button, never "Set this target" (it sets none); the card's words
+  // ride in `detail`, only when the proposer's own result for that id returned the same card.
+  if (stored?.operations.length === 1 && stored.operations[0]?.op === CONFIRM_GOAL_READING_OP) {
+    if (stored.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored.public_label !== 'string' || held.public_label !== stored.public_label) return [];
+    return [{ id: approvalChipIdFor(proposalId), ...CONFIRM_GOAL_READING_APPROVE, detail: stored.public_label }, AMEND_CHIP];
+  }
   if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
     // This must precede every generic/special chip path: the exact stored gap
     // card and its operands are the subject of the existing typed approval.

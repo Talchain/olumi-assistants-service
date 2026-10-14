@@ -7,6 +7,8 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
@@ -3730,6 +3732,60 @@ export function createAgentCapabilities(
   };
 
   /**
+   * ⭐ G: the approved answer to the goal's open question, through the atomic level door's `goal_reading` member (ONE commit,
+   * alone). The writer's gate is the stored reading the card showed; applied only on the door's committed outcome AND a
+   * read-back holding that reading without its question, every other member unchanged.
+   */
+  const applyGoalReading = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const pid = parent.proposal_id;
+    const v = (op.value ?? {}) as { expected_basis?: unknown; answer_words?: unknown; expected_goal?: unknown };
+    const expected = v.expected_basis;
+    const answer = typeof v.answer_words === 'string' ? v.answer_words : undefined;
+    if (!isPlainRecord(expected) || !isPlainRecord(v.expected_goal) || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
+    }
+    const approved = { goal_id: op.path, expected_basis: expected, ...(answer !== undefined ? { answer_words: answer } : {}),
+      expected_goal: v.expected_goal };
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(pid), links: [], levels: [], goal_reading: approved });
+    // A write that LANDED keeps this proposal's expected bytes, so a retry recovers through the writer's verified no-op instead
+    // of reading its own landed write as another writer's change. Only a landed one: committed, or an unconfirmed commit whose
+    // re-read holds exactly that postimage. An unconfirmed write that did not land leaves the base as it was, so a plain retry
+    // goes through again (Codex buddy r2).
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const written = applyGoalReadingEdit(before.raw, approved);
+      const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
+      const landed = postimage !== undefined && (res.status === 'committed'
+        || isDeepStrictEqual((await readGraph(ctx.scenario_id).catch(() => null))?.raw, postimage));
+      if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+        landed: [op.path], receipts: [], expected_postimage: postimage });
+    }
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
+    }
+    const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+      detail: 'Your answer was sent but could not be confirmed in the saved model.' };
+    if (res.status === 'unconfirmed') return notConfirmed;
+    const check = await readGraph(ctx.scenario_id);
+    const goal = check?.nodes.find((n) => n.id === op.path && n.kind === 'goal') as Record<string, unknown> | undefined;
+    const basis = goalTargetBasisOf(goal);
+    // The receipt says the card's reading, so the read-back holds the card's WHOLE projection (label, target, horizon, period
+    // and reading): any member moved after the commit is never "confirmed" under the new words (Codex check r2 on #2995).
+    const projection = check === null ? undefined : goalReadingProjectionOf(check.raw, op.path);
+    if (check === null || goal === undefined || basis === undefined || basis.open_question !== undefined
+      || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))
+      || !isDeepStrictEqual(projection, v.expected_goal)) return notConfirmed;
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(pid, receipts);
+    const reading = goalReadingWords(projection) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
+      follow_up: goalReadingRecordedWords(reading, answer) };
+  };
+
+  /**
    * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
    * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
    * held when the card was made (`expected_deadline`), plus the analysis revision read at approval (no write in between).
@@ -4063,8 +4119,37 @@ export function createAgentCapabilities(
     }
   };
 
+  /** How many date or duration phrases one message holds: every word start, read by the one reader over the words after
+   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does); overlapping readings are one phrase. ⛔ DLf5 r2
+   * (Codex on 3e43cebc: "thirteen weeks" was missed): FAIL SAFE, any time-unit word or month name the reader's spans do
+   * not cover ("thirteen weeks", "a fortnight", "in 180 days", "this year") is a phrase of its own. An "as of D" is not one. */
+  const datePhrasesIn = (text: string): number => {
+    const plain = text.replace(/(?:^|[^\p{L}\p{N}])as of\s+\d{4}-\d{2}-\d{2}(?=$|[^\p{L}\p{N}])/gu, ' ');
+    const spans: (readonly [number, number])[] = [];
+    for (const start of plain.matchAll(/\S+/gu)) {
+      const tail = plain.slice(start.index);
+      for (const word of tail.matchAll(/\S+/gu)) {
+        const end = word.index + word[0].length;
+        if (end > 80) break;
+        if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true }) !== null) spans.push([start.index, start.index + end]);
+      }
+    }
+    const read = [...spans];
+    // "may" is a month only beside a number ("1 May", "May 2027"); every other unit word or month name always counts.
+    for (const m of plain.matchAll(/(?<![\p{L}\p{N}])(?:days?|weeks?|fortnights?|months?|quarters?|years?|january|february|march|april|june|july|august|september|october|november|december|(?<=\d\s{0,2})may|may(?=\s{0,2}\d))(?![\p{L}\p{N}])/gu)) {
+      if (!read.some(([from, to]) => m.index >= from && m.index < to)) spans.push([m.index, m.index + m[0].length]);
+    }
+    let phrases = 0;
+    let reach = -1;
+    for (const [from, to] of spans.sort((a, b) => a[0] - b[0])) {
+      if (from >= reach) phrases += 1;
+      reach = Math.max(reach, to);
+    }
+    return phrases;
+  };
+
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReference = true): Promise<ToolResult> => {
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4073,13 +4158,18 @@ export function createAgentCapabilities(
       const named = lastWeekdayNamedIn(words);
       const parsed = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
         : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
-      if (args.deadline_date !== undefined && (!isCalendarDate(args.deadline_date) || args.deadline_date <= today)) {
+      // ⛔ DLf5 (served ffe10d51 deadline journey, 12 refusals): the model's OPTIONAL date is a fallback only. A blank one
+      // (`""`, whitespace, null) is absent, and it is checked only when the user's own phrase did not resolve: "in six
+      // months time" places 2027-04-13 whatever the model put beside it.
+      const modelDate = typeof args.deadline_date === 'string' && args.deadline_date.trim() !== '' ? args.deadline_date : undefined;
+      if (parsed === null && modelDate !== undefined && (!isCalendarDate(modelDate) || modelDate <= today)) {
         return { ok: false, mutated: false, refusal: 'unreadable_deadline', detail: 'The proposed deadline must be a valid future ISO calendar date.' };
       }
       // A resolved source owns both its date and stated count; a model date is only an interpretation fallback.
-      const stated: StatedDeadline | null = parsed ?? (args.deadline_date === undefined ? null
-        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today });
-      const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
+      const stated: StatedDeadline | null = parsed ?? (modelDate === undefined ? null
+        : { words, form: 'date' as const, date: modelDate, reference: today });
+      // `userReading` false: the user's words, but WHICH of their phrases is the deadline is Olumi's reading (DLf5 Codex check).
+      const authoredBy = userWords && userReading && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
           ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'));
@@ -5216,7 +5306,9 @@ export function createAgentCapabilities(
       // a fraction). This path writes a LEVEL target, so it would silently turn the user's change into a level. Refused by
       // name until a change can be edited as a change; the goal doors refuse it too (`add-constraint.ts`, `goal-target-edit.ts`).
       if (isChangeFrame((goal as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
-        return { ok: false, mutated: false, refusal: 'goal_is_a_change',
+        const held = heldChangeTargetAnswer({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, user_text: ctx.user_text, user_turn_text: ctx.user_turn_text, graph: g, goal_id: goal.id, requested: { operator: TARGET_OPERATOR[type], value, unit }, rationale: args.rationale, proposals });
+        if (held !== undefined) return held;
+        return { ok: false, mutated: false, refusal: 'goal_is_a_change', saved_goal: savedGoalMeaningOf(g.raw, goal.id),
           detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
             + 'Tell the user plainly, and never offer a level target in its place.' };
       }
@@ -5414,7 +5506,18 @@ export function createAgentCapabilities(
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
       const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
-      const asOf = typedAsOfDates.find(date => date === args.reference_date);
+      // ⛔ DLf5 Codex check (blocking 1) + buddy r2/r3: a typed "as of D" dates the deadline ONLY as part of the deadline's
+      // own phrase: right after its words ("<words>, as of D"), or opening it with nothing between but the reader's own lead
+      // words ("As of D, our deadline is <words>", read by `readStatedDeadline`, lead words only). "Revenue was 2m as of D,
+      // and/whereas/plus our launch deadline is …" keeps the host reference, and the card becomes Olumi's reading to check.
+      const beside = (date: string): boolean =>
+        new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}\\s*,?\\s*as of\\s+${date}(?=\\s*(?:$|[.;!?]))`, 'u').test(typed)
+        || typed.split(/[.;!?\n]/).some(sentence => {
+          const open = new RegExp(`^as of\\s+${date}\\s*,?\\s*(.*?)(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(sentence.trim());
+          return open !== null && (open[1]!.trim() === '' || readStatedDeadline(`${open[1]!.trim()} ${plainOf(words)}`, '1900-01-01', { leadWordsOnly: true }) !== null);
+        });
+      const asOf = typedAsOfDates.find(date => date === args.reference_date && beside(date));
+      const echoedAsOfSetAside = asOf === undefined && typedAsOfDates.some(date => date === args.reference_date);
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       if (args.reference_date !== undefined && args.reference_date !== asOf) {
@@ -5425,10 +5528,16 @@ export function createAgentCapabilities(
       }
       if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
         detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
+      // ⛔ DLf5 Codex check (blocking 2): "Our office lease expires in six months, and our launch deadline is in nine months"
+      // with the quote "in six months" credited the lease. A message holding MORE THAN ONE date or duration phrase (read by
+      // the one reader, as `eventDateSpans` does; an "as of D" reference is not one) offers the card as Olumi's reading.
+      // The message the words came from (verified messages, newest first); words from no message are counted alone.
+      const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse().map(plainOf)
+        .find(writes) ?? plainOf(words);
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        origin === 'human', true);
+        origin === 'human', !echoedAsOfSetAside && datePhrasesIn(source) <= 1);
     },
 
     /**
@@ -7174,6 +7283,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_HIRING_TIMES) return applyHiringTimes(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === CONFIRM_GOAL_READING_OP) return applyGoalReading(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);

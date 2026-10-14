@@ -26,6 +26,8 @@ import { toTypedRunRows } from '../../runs/typed-run-rows.js';
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../../agent-lane/coach-route-v0_2.js';
 import { GOAL_CHANCE_RANKING_INSTRUCTION, SELECTED_RUN_SCOPE_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
+import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
+import { applyGoalReadingEdit } from '../goal-reading-write.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -246,6 +248,30 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     const live = analysisResultForAgent(runAsTheHandlerDoes().view, FX.graph, true);
     const stored = { type: 'analysis_result', enrichment: JSON.parse(JSON.stringify(runAsTheHandlerDoes().envelope)) as Rec };
     expect(analysisResultForAgent(stored, JSON.parse(JSON.stringify(FX.graph)), true)).toEqual(live);
+  });
+
+  it('CONTINUATION (13 Oct "relative to today"): the same Run with the target\'s open question is withheld; the recorded answer licenses it', () => {
+    // The question as the 13:18Z draft held it, verbatim; the served run-4 reading is otherwise the same relative reading.
+    const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
+    const asked = withGoal(FX.graph, (g) => { g.goal_target_basis.open_question = QUESTION; });
+    const before = runAsTheHandlerDoes({ graph: asked });
+    expect(goalChanceLicenceForAgent(before.view)).toBeUndefined();
+    const gated = withholdForOpenTargetQuestion(before.envelope, asked, GOAL) as Rec;
+    expect((gated.inference_warnings as Rec[]).find((w) => w.detail?.reason === 'target_reading_open'))
+      .toMatchObject({ message: `Not shown. Your target can be read more than one way. ${QUESTION}`, option_ids: [...HIRING, SQ] });
+    // The user's answer, through the one writer: its postimage is the served graph without the question, byte for byte.
+    const written = applyGoalReadingEdit(asked, { goal_id: GOAL, expected_basis: goalOf(asked).goal_target_basis });
+    if (written.kind !== 'mutated') throw new Error(written.kind);
+    expect(written.mutatedGraph).toEqual(FX.graph);
+    const after = runAsTheHandlerDoes({ graph: written.mutatedGraph });
+    expect(withholdForOpenTargetQuestion(after.envelope, written.mutatedGraph, GOAL)).toBe(after.envelope);
+    const licence = goalChanceLicenceForAgent(after.view)!;
+    expect(licence.chance_words).toBe(OWN_TARGET);
+    expect(licence.period_end_assumption).toEqual({ origin: 'olumi', period_months: 3, reference: 'today' });
+    expect([...goalChanceCellFacesForAgent(after.view, written.mutatedGraph, true)]).toEqual(Object.entries(FACE));
+    const notes = goalChanceNotesForAgent(after.view, written.mutatedGraph, true);
+    expect(notes.filter((n) => n === NOTE)).toHaveLength(1);
+    expect(notes).toContain(CONDITIONS);
   });
 
   it('NEGATIVE (c): a stated PARTIAL effect by the period withholds with E\'s sentence', () => {
