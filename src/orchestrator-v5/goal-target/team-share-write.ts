@@ -10,6 +10,7 @@ import { cappedTeamShareMean, teamShareMoments } from './event-by-date-share.js'
 import { displayedPctAt } from './goal-chance-driver.js';
 import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { confirmationQuoteLine, confirmedSelection, verbatimSourceLine, type QuoteConfirmation } from '../agent-lane/quote-confirmation.js';
+import { combineStatementEnds, statementReadingWords, verifyStatements, type StatementForm, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, any>;
@@ -90,8 +91,8 @@ export const TEAM_TIME_LOW_CONFIDENCE = new RegExp(String.raw`\b(?:low|little|li
   + String.raw`|\bnot\s+(?:very\s+|that\s+|so\s+|really\s+|fully\s+|too\s+)?(?:confident|sure|certain)\s+(?:in|about|of)\s+${FORECAST_OBJECT}`
   + String.raw`|\b(?:unsure|uncertain|sceptical|skeptical|doubtful)\s+(?:about|of)\s+${FORECAST_OBJECT}`
   + String.raw`|\bI\s+doubt\s+${FORECAST_OBJECT}|\b(?:don['’]t|do\s+not)\s+(?:trust|believe)\s+${FORECAST_OBJECT}`, 'iu');
-export type TeamTimeRangeRule = keyof typeof TEAM_TIME_WIDENING;
-export function widenedTeamTime(p: number, rule: TeamTimeRangeRule): { low_months: number; high_months: number } {
+export type TeamTimeRangeRule = keyof typeof TEAM_TIME_WIDENING | 'likely_end';
+export function widenedTeamTime(p: number, rule: keyof typeof TEAM_TIME_WIDENING): { low_months: number; high_months: number } {
   const f = TEAM_TIME_WIDENING[rule], step = p >= 1 ? 10 : 100;
   // Factors as whole hundredths, so binary floating point never moves a rounded end (13 × 0.75 = 9.75 → 9.8).
   const end = (factor: number): number => Math.round(p * step * Math.round(factor * 100) / 100) / step;
@@ -108,6 +109,8 @@ export interface BoundTeamTime {
   readonly forecast_words?: string;
   readonly range_origin?: 'olumi_estimate';
   readonly range_rule?: TeamTimeRangeRule;
+  /** S2: the user's verified statements the time was read from (`teamTimeFromStatements`), kept whole beside it. */
+  readonly statements?: readonly UserStatement[];
 }
 /** AIE 6122738619, verbatim: the Agent re-reads what the user already said, and asks only if the forecast is missing or unclear. */
 export const TEAM_TIME_NOT_STATED = "No change was prepared. Re-read the verified human messages and quote the words that give the current team's time to finish. Ask for that forecast only if the user has not supplied it or its meaning is still ambiguous.";
@@ -155,7 +158,7 @@ export function bindTeamTimeQuote(texts: { readonly now?: string | null; readonl
     return { kind: 'refused', detail: TEAM_TIME_NOT_STATED };
   }
   if (stated.low_months !== stated.high_months) return { kind: 'bound', time: stated, quote: quoted };
-  const rule: TeamTimeRangeRule = TEAM_TIME_LOW_CONFIDENCE.test(sentencesHolding(source, quote)) ? 'low_confidence' : 'default';
+  const rule: keyof typeof TEAM_TIME_WIDENING = TEAM_TIME_LOW_CONFIDENCE.test(sentencesHolding(source, quote)) ? 'low_confidence' : 'default';
   return { kind: 'bound', quote: quoted, time: { ...widenedTeamTime(stated.low_months, rule),
     forecast_months: stated.low_months, forecast_words: quoted, range_origin: 'olumi_estimate', range_rule: rule } };
 }
@@ -187,9 +190,61 @@ export function quotedTeamTime(texts: { readonly now?: string | null; readonly c
  */
 export function withAssumedTeamRange(stated: BoundTeamTime, words: string, sentence: string): BoundTeamTime {
   if (stated.low_months !== stated.high_months) return stated;
-  const rule: TeamTimeRangeRule = TEAM_TIME_LOW_CONFIDENCE.test(sentence) ? 'low_confidence' : 'default';
+  const rule: keyof typeof TEAM_TIME_WIDENING = TEAM_TIME_LOW_CONFIDENCE.test(sentence) ? 'low_confidence' : 'default';
   return { ...widenedTeamTime(stated.low_months, rule),
     forecast_months: stated.low_months, forecast_words: words, range_origin: 'olumi_estimate', range_rule: rule };
+}
+
+/**
+ * ⭐ S2 — TODAY'S TEAM TIME FROM THE USER'S STATEMENTS (RCA-PAUL-TEST-1617Z Symptom 2; AIE #94 6173489813). Paul said "At least
+ * 7 months", then "8 months" when Olumi asked for the likely upper end; the one-quote door turned each into a single forecast
+ * with Olumi's 6–10, below his own minimum, and nothing was saved. Each statement is verified by the one shared contract
+ * (`verifyStatements`) and the ends combine (`combineStatementEnds`):
+ *   · a lone figure keeps the E2 (a) convention, unchanged (the user's forecast, Olumi's labelled assumed range);
+ *   · two hard ends ("at least 7", "no more than 9") are the user's own range, as given;
+ *   · a QUALIFIED end ("likely upper end 8") is not a hard limit (AIE, via the DL 14 Oct): the engine draws today's time evenly
+ *     between two ends, so Olumi assumes the end beyond it by one convention (`TEAM_TIME_LIKELY_END`), labelled as Olumi's on the
+ *     card and adopted only by the press. The user's hard end never moves; nothing is clipped to fit;
+ *   · a lone bound, or two statements that disagree, prepares nothing: the Agent asks only for what is missing.
+ */
+export const TEAM_TIME_LIKELY_END = { share_within: 0.8 } as const;
+export const TEAM_TIME_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound'];
+/** Olumi's assumed hard ends for a range whose qualified end(s) the user's time stays within `share_within` of the time. */
+export function likelyEndRange(low: number, high: number, lowQualified: boolean, highQualified: boolean): { low_months: number; high_months: number } {
+  const tail = 1 - TEAM_TIME_LIKELY_END.share_within;
+  const tLow = lowQualified ? tail : 0, tHigh = highQualified ? tail : 0;
+  const width = (high - low) / (1 - tLow - tHigh);
+  const a = low - tLow * width, b = high + tHigh * width;
+  if (lowQualified && a <= 0) return likelyEndRange(low, high, false, highQualified);
+  // Two decimals, rounded outward: an assumed end never crosses the user's own.
+  return { low_months: Math.min(low, Math.floor(a * 100 + 1e-9) / 100), high_months: Math.max(high, Math.ceil(b * 100 - 1e-9) / 100) };
+}
+export type TeamTimeFromStatements =
+  | { readonly kind: 'found'; readonly time: BoundTeamTime; readonly confirmation: TeamTimeConfirmation }
+  | { readonly kind: 'refused'; readonly refusal: string; readonly detail: string };
+export function teamTimeFromStatements(texts: StatementTexts, raw: unknown): TeamTimeFromStatements {
+  const v = verifyStatements(raw, texts, { subject: { quantity: 'months_to_finish' }, unit: 'months', forms: TEAM_TIME_FORMS,
+    figuresIn: (q) => teamTimesInQuote(q).map((r) => ({ low: r.low_months, high: r.high_months })),
+    sameFigure: (q, given, stated) => teamTimeArgumentsMatch(q, { low_months: given, high_months: given }, { low_months: stated, high_months: stated }) });
+  if (v.kind === 'refused') return { kind: 'refused', refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'team_time_not_stated', detail: v.detail };
+  const statements = v.statements;
+  const ends = combineStatementEnds(statements);
+  if (ends.kind === 'conflict') return { kind: 'refused', refusal: 'team_time_statements_conflict', detail: `No change was prepared. ${ends.detail}` };
+  if (ends.kind === 'one_end') {
+    const missing = ends.have === 'lower' ? 'the latest time today\'s team could take' : 'the soonest time today\'s team could finish';
+    return { kind: 'refused', refusal: 'team_time_needs_other_end', detail: `No change was prepared. The user already gave ${statementReadingWords(ends.statement, 'months')} `
+      + `(“${ends.statement.quote}”), one end only, so the model still needs ${missing}. Ask only for that, without asking them to repeat `
+      + `the ${ends.value} months, then call propose_team_time with both statements. Never turn this end into a single forecast or add a range of your own beside it.` };
+  }
+  if (ends.kind === 'point') {
+    const s = ends.statement;
+    return { kind: 'found', confirmation: { source: s.source, quote: s.quote }, time: { ...withAssumedTeamRange({ low_months: ends.value, high_months: ends.value },
+      s.quote, sentencesHolding(plainWords(s.source), plainWords(s.quote))), statements } };
+  }
+  const confirmation = { source: [...new Set(statements.map((s) => s.source))].join('\n'), quote: statements.map((s) => s.quote).join('\n') };
+  if (!ends.low_qualified && !ends.high_qualified) return { kind: 'found', confirmation, time: { low_months: ends.low, high_months: ends.high, statements } };
+  return { kind: 'found', confirmation, time: { ...likelyEndRange(ends.low, ends.high, ends.low_qualified, ends.high_qualified),
+    range_origin: 'olumi_estimate', range_rule: 'likely_end', statements } };
 }
 
 export interface ApprovedTeamTime {
@@ -211,6 +266,8 @@ export interface ApprovedTeamTime {
   readonly range_rule?: TeamTimeRangeRule;
   /** EBD: what the card read (`teamTimeReadDigest`) — its approval precondition, field-scoped. */
   readonly read_digest?: string;
+  /** S2: the user's verified statements (`teamTimeFromStatements`), stored whole with the time they give. */
+  readonly statements?: readonly UserStatement[];
 }
 
 /**
@@ -247,6 +304,9 @@ export function teamObservedState(a: ApprovedTeamTime, unit: string): Rec {
         forecast: a.forecast_months, forecast_origin: a.confirmation !== undefined ? 'user_confirmed' : 'user',
         ...(a.forecast_words !== undefined ? { forecast_words: a.forecast_words } : {}),
         range_origin: 'olumi_estimate', range_rule: a.range_rule } : {}),
+      // S2: a range Olumi assumed past the user's qualified end is Olumi's (`range_origin`), apart from their statements.
+      ...(a.range_rule === 'likely_end' ? { range_origin: 'olumi_estimate', range_rule: 'likely_end' } : {}),
+      ...(a.statements !== undefined ? { statements: a.statements } : {}),
       ...(a.confirmation !== undefined ? { selection: confirmedSelection(a.confirmation) } : {}) } };
 }
 /** Single estimates live on the held definition carrier, outside modelled numeric observed_state. */
@@ -277,6 +337,8 @@ export function teamTimeCardParts(a: ApprovedTeamTime, _unit: string, deliverabl
  * AIE's ACK, `recovery/bB/B-STRINGS-FOR-AIE.md`), and Olumi's range alone if even that is too long.
  */
 export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: string): string {
+  if (a.range_rule === 'likely_end') return `Team time: from your statements, Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
+  if (a.statements !== undefined && a.forecast_months === undefined) return `Team time: ${a.low_months}–${a.high_months} months from your statements`;
   if (a.forecast_months !== undefined && a.range_origin === 'olumi_estimate') {
     const both = `Team time: your ${a.forecast_months}-month forecast, Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
     return both.length <= 80 ? both : `Team time: Olumi’s assumed ${a.low_months}–${a.high_months}-month range`;
@@ -292,6 +354,7 @@ export function teamTimeSummary(a: ApprovedTeamTime, unit: string, deliverable: 
 export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: string): { readonly quoteLine: string; readonly question: string; readonly disclosure: string } {
   // A quote line only for words the user typed, verbatim; otherwise the card is Olumi's reading alone.
   const quoteLine = a.confirmation !== undefined && a.confirmation.source !== '' ? confirmationQuoteLine(a.confirmation) : '';
+  if (a.statements !== undefined && a.forecast_months === undefined) return statementsCardParts(a, deliverable);
   if (a.forecast_months === undefined || a.range_origin !== 'olumi_estimate') {
     const { confirmation: _source, ...range } = a;
     const parts = teamTimeCardParts(range, '', deliverable);
@@ -301,6 +364,25 @@ export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: 
     question: `Do you want to use ${a.forecast_months} months as your forecast for today's team to finish ${deliverable}?`,
     disclosure: `Olumi’s assumed ${a.low_months}–${a.high_months}-month range informs this approximate calculation; modelled outcomes can fall outside those time bounds.`
       + (a.range_rule === 'low_confidence' ? ' You described low confidence in that forecast.' : '') };
+}
+/**
+ * S2: the card for a time read from the user's statements. Each statement's own line is quoted; Olumi's reading of it (its
+ * form and qualifier) is said once, as theirs to adopt; an end Olumi assumed past a likely end is Olumi's, with its basis.
+ */
+function statementsCardParts(a: ApprovedTeamTime, deliverable: string): { readonly quoteLine: string; readonly question: string; readonly disclosure: string } {
+  const statements = a.statements ?? [];
+  const lines = [...new Set(statements.map((s) => s.source))].map((l) => `‘${l}’`);
+  const quoteLine = lines.length === 0 ? '' : `From your message${lines.length > 1 ? 's' : ''}: ${lines.join(' and ')}`;
+  const readings = statements.filter((s) => s.negated !== true).map((s) => statementReadingWords(s, 'months').replace(/^a /, 'your ')).join(' and ');
+  if (a.range_rule === 'likely_end') {
+    return { quoteLine,
+      question: `Do you want to use Olumi’s provisional model for today's team to finish ${deliverable}, based on ${readings}?`,
+      disclosure: `A likely end is not a hard limit, so Olumi assumes a ${a.low_months}–${a.high_months}-month range from your words. `
+        + 'It informs this approximate calculation; modelled outcomes can fall outside those time bounds.' };
+  }
+  return { quoteLine,
+    question: `Do you want to use ${a.low_months}–${a.high_months} months for today's team to finish ${deliverable}, from ${readings}?`,
+    disclosure: 'The calculation uses bell-curve approximations of progress and can include outcomes outside those time bounds.' };
 }
 export function teamTimeConfirmationCard(a: ApprovedTeamTime, deliverable: string): string {
   const { quoteLine, question, disclosure } = teamTimeConfirmationCardParts(a, deliverable);

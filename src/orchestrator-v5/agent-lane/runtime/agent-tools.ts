@@ -14,6 +14,7 @@
 import type { EffectsTiming } from '../../goal-target/period-end-assumption.js';
 import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import type { ProposalEditsRequest } from '../proposal-object/amend.js';
+import type { StatementArgs } from '../user-statements.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
@@ -520,11 +521,22 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function', name: 'propose_team_time',
-    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Use a time the user stated in ANY of their messages in this conversation, this one or an earlier one. Never use a recruitment or hiring time, a deadline, a delay ("a month late") or a historical duration. Give quote: the user’s exact words stating that time, copied from one message, including any words about how sure they are (for example "a month late (so, 7 months), but I have low confidence"). Give low_months and high_months as that time in months: a single time such as "7 months" means both 7; convert weeks or years to months (weeks may be rounded to two decimals; the server keeps the exact conversion). Olumi checks the quote is the user’s and that the figure is in it. For a single time it adds its own range for the uncertainty, which the card labels as Olumi’s estimate from the user’s figure, never as the user’s. When the user asks what the model still needs and has already stated this time, call this. This prepares a card; authorise_change writes it only after approval.',
+    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Use a time the user stated in ANY of their messages in this conversation, this one or an earlier one. Never use a recruitment or hiring time, a deadline, a delay ("a month late") or a historical duration. Give quote: the user’s exact words stating that time, copied from one message, including any words about how sure they are (for example "a month late (so, 7 months), but I have low confidence"). Give low_months and high_months as that time in months: a single time such as "7 months" means both 7; convert weeks or years to months (weeks may be rounded to two decimals; the server keeps the exact conversion). Olumi checks the quote is the user’s and that the figure is in it. For a single time it adds its own range for the uncertainty, which the card labels as Olumi’s estimate from the user’s figure, never as the user’s. When the user asks what the model still needs and has already stated this time, call this. When the user gave the time as a bound ("at least 7 months", "no more than 9") or across several messages, give statements instead of quote, low_months and high_months: one per statement, each its complete sentence copied from any of their messages, with your reading of it. Olumi combines a lower and an upper end into one range and never turns a bound into a single forecast or adds its own range beside a bound. A lone bound prepares nothing: then ask only for the other end, never for what they already said. This prepares a card; authorise_change writes it only after approval.',
     parameters: obj({
       quote: { type: 'string', description: 'The user’s own words that state the time, copied exactly from one of their messages, including any words about how sure they are.' },
       low_months: { type: 'number', exclusiveMinimum: 0 }, high_months: { type: 'number', exclusiveMinimum: 0 },
-    }, ['quote', 'low_months', 'high_months']),
+      statements: { type: 'array', minItems: 1, maxItems: 6, description: 'The user’s statements of this time, one per statement, in place of quote, low_months and high_months.',
+        items: obj({
+          quote: { type: 'string', description: 'The user’s complete statement, copied exactly from one of their messages (for example "At least 7 months", or "8 months" when they answered your question about the likely upper end).' },
+          form: { type: 'string', enum: ['point', 'range', 'lower_bound', 'upper_bound'], description: 'Your reading: a single time, a range, the soonest it could be (lower_bound, for example "at least"), or the latest (upper_bound, for example "no more than", or an answer to a question about the upper end).' },
+          value: { type: 'number', exclusiveMinimum: 0, description: 'For point, lower_bound or upper_bound: the months the quote states.' },
+          low: { type: 'number', exclusiveMinimum: 0, description: 'For range: its soonest end in months.' },
+          high: { type: 'number', exclusiveMinimum: 0, description: 'For range: its latest end in months.' },
+          qualifier: { type: 'string', description: 'Only when the end is not a hard limit: the hedging word, from the quote or from the question it answered (for example "likely" for "the likely upper end"). Leave it out for a hard bound such as "at least".' },
+          negated: { type: 'boolean', description: 'True when the statement says the time is NOT this figure.' },
+          conditions: { type: 'string', description: 'Any condition the statement depends on, verbatim (for example "if we hire two developers"). Statements under different conditions are never combined.' },
+        }, ['quote', 'form']) },
+    }, []),
   },
   {
     // ⭐ E5 (Paul's manual test, 12 Oct): the start of each person an option adds, quoted; Olumi reads the months (`hiring-times.ts`).
@@ -950,7 +962,7 @@ export interface AgentCapabilities {
     measures?: string;
   }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
-  proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months: number; high_months: number }): Promise<ToolResult>;
+  proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months?: number; high_months?: number; statements?: readonly StatementArgs[] }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
   proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
