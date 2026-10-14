@@ -15,6 +15,9 @@ import { buildModelFromBrief, strictForTheDrafter } from '../runtime/build-model
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/constructor-text/t6-d4-b-r2.json', 'utf8')) as Rec;
 const OPS = FX.aie_operations as Rec[];
+/** The AIE's packet 20dfa110: items 4, 6, 7 and 8 whole, and the one literal item-3 delta (b34d6ebb's own text stays as was). */
+const SRC = FX.aie_source_fields.exact_whole_descriptions as Record<string, string>;
+const DELTA = FX.aie_source_fields.one_reached_instruction_delta as { old_clause: string; replacement_clause: string };
 const DRIFT = 'No-change cycle increase by next quarter';
 const GOAL = 'median delivery cycle';
 const sid = '4d4d4d4d-4d4d-4d4d-8d4d-4d4d4d4d4d4d';
@@ -48,28 +51,34 @@ describe('D1 and D4 constructor text: what is sent', () => {
     expect(instructions).toContain(OPS[0].replacement);
     expect(instructions).not.toContain(OPS[0].old);
     expect(sent.schema.properties.decision_question.description).toBe(OPS[1].replacement);
-    expect(instructions).toContain(`${OPS[2].anchor}${OPS[2].insertion}`);
+    // Item 3 is b34d6ebb's paragraph with exactly one clause replaced (packet 20dfa110): a genuine zero forecast is allowed.
+    expect((OPS[2].insertion as string).split(DELTA.old_clause)).toHaveLength(2);
+    expect(instructions).toContain(`${OPS[2].anchor}${(OPS[2].insertion as string).replace(DELTA.old_clause, DELTA.replacement_clause)}`);
+    expect(instructions).not.toContain(DELTA.old_clause);
   });
 
   it('the two field descriptions are the AIE\'s, whole and byte for byte, so they no longer contradict the paragraph', async () => {
     const { sent } = await construct(FX.draft);
     const factor = sent.schema.properties.factors.items.properties;
     const link = sent.schema.properties.links.items.properties;
-    expect(factor.baseline_known.description).toBe(FX.aie_d4_fields.baseline_known_description);
+    // Item 4 is packet 20dfa110's: today's structural zero is restored for a CHANGE FROM TODAY, never for a future drift.
+    expect(factor.baseline_known.description).toBe(SRC.baseline_known);
+    expect(factor.baseline_known.description).toContain('baseline_known true, baseline_value 0');
     expect(link.definitional.description).toBe(FX.aie_d4_fields.definitional_description);
   });
 });
 
 describe('the generation source contract\'s drafter fields (DL 02:0xZ ruling; host checks: session 4 and HIRING)', () => {
-  it('are required where the drafter is called (the route\'s provider boundary), each with its text', async () => {
+  it('are required where the drafter is called (the route\'s provider boundary), each with the AIE\'s whole text', async () => {
     const { sent } = await construct(FX.draft);
     // `agent-v1-turn.ts` callStructured sends `strictForTheDrafter(reqBody.schema)`: the same function, its defaults.
     const atBoundary = strictForTheDrafter(sent.schema) as Rec;
     expect(atBoundary.required).toContain('unknown_concerns');
     expect(atBoundary.properties.goal.required).toContain('source_quote');
     expect(atBoundary.properties.links.items.required).toContain('source_quote');
-    expect(atBoundary.properties.goal.properties.source_quote.description).toMatch(/^The user\u2019s own complete statement of the target, copied VERBATIM from the brief/);
-    expect(atBoundary.properties.links.items.properties.source_quote.description).toMatch(/^For a link the user stated \(provenance "explicit"\)/);
+    expect(atBoundary.properties.goal.properties.source_quote.description).toBe(SRC.goal_source_quote);
+    expect(atBoundary.properties.links.items.properties.source_quote.description).toBe(SRC.link_source_quote);
+    expect(atBoundary.properties.unknown_concerns.description).toBe(SRC.unknown_concerns);
     expect(atBoundary.properties.unknown_concerns.items.required).toEqual(['unknown', 'concerns']);
   });
 
