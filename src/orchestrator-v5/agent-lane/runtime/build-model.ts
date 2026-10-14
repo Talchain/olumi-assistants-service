@@ -1,5 +1,6 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -2011,13 +2012,15 @@ export async function buildModelFromBrief(
       // ⛔ The redraft goal's own target is credited only as ADMISSION RETAINED it (Codex post-merge 3026: a redraft with
       // `target_stated: false` registered productivity without its ≥10% target, credited from the raw candidate).
       const admittedGoal = retryAdmitted.nodes.find((n) => n.kind === 'goal') as Record<string, unknown> | undefined;
+      // Read through the one goal-record authority (S5), never the node's fields.
+      const held = admittedGoal === undefined ? null : readGoalRecord(retryAdmitted, String(admittedGoal.id))?.target ?? null;
       const retainedTarget = {
         metric: String(admittedGoal?.description ?? admittedGoal?.label ?? ''),
-        // The comparator is the goal's own claim (admission sets `goal_direction` later, from it); the figure is what it RETAINED.
-        operator: String(admittedGoal?.goal_direction ?? retryCandidate.goal.operator),
-        value: typeof admittedGoal?.goal_threshold_raw === 'number' && Number.isFinite(admittedGoal.goal_threshold_raw) ? admittedGoal.goal_threshold_raw : null,
-        unit: typeof admittedGoal?.goal_threshold_unit === 'string' ? admittedGoal.goal_threshold_unit : null,
-        frame: typeof admittedGoal?.goal_threshold_frame === 'string' ? admittedGoal.goal_threshold_frame : null,
+        // The comparator is the goal's own claim (admission writes the node's comparator later, from it); the figure is what it RETAINED.
+        operator: String(held?.comparator ?? retryCandidate.goal.operator),
+        value: typeof held?.raw === 'number' && Number.isFinite(held.raw) ? held.raw : null,
+        unit: held?.unit ?? null,
+        frame: held?.frame ?? null,
       };
       const keepsUserMaterial = unattested === null ? keepsEveryUserStatedIdentity(first.size, retrySize)
         : keepsEveryUserStatedIdentityWhenGoalRechosen(first.size, retrySize, retainedTarget);
