@@ -705,13 +705,28 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
  * Anything else stays exactly as written before. The typed-unit equality is defence in depth: V2's neighbour rule
  * already withholds a factor whose figure the goal's sentence writes as another quantity.
  */
+/**
+ * The ORIGIN half of `verifiedGoalLevel`, alone: a direct sentence of the brief names the goal and writes its drafted level in the
+ * goal's typed frame, not as an aim or bound (`sentencesWritingFigure`). Admission's level path reads it so a level the brief never
+ * writes is not taken for the user's (DL 13:49Z 14 Oct); the ROLE half stays `verifiedGoalLevel`'s (`extractionType`).
+ */
+export function briefWritesGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
+  try {
+    const goal = model.goal; const value = goal.baseline_value;
+    if (typeof value !== 'number' || !Number.isFinite(value) || readUnitParts(goal.unit) === null) return false;
+    return sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
   try {
     const goal = model.goal; const value = goal.baseline_value;
     if (typeof value !== 'number' || !Number.isFinite(value)) return false;
     const unit = readUnitParts(goal.unit);
     if (unit === null) return false;
-    if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
+    if (!briefWritesGoalLevel(model, brief)) return false;
     return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
       && verifiedFactorLevel(model, f, brief));
   } catch {
