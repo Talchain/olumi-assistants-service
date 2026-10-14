@@ -846,7 +846,9 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "(`eventRiskIngressIssues`); the chat add-risk door's hold stamp (event_risk.v1 slice 2a: `readStatedEventRisk` " +
       "reads the user's own words, `basis: 'user'`, validated by `EventRiskV1` before holding, stamped after the " +
       "re-referee); and the draft door (slice 2c, `holdStatedEventRisks` in `buildModelFromBrief`: the same reader over " +
-      "one sentence of the BRIEF that names exactly that risk, `basis: 'user'`, never from the drafter). No producer may " +
+      "one sentence of the BRIEF that names exactly that risk, `basis: 'user'`, never from the drafter); and the approved " +
+      "card of Olumi's range for an unvalued risk ROOT (`risk-occurrence.ts`: `basis: 'olumi'`, over the goal's own period, " +
+      "validated by `EventRiskV1`, written only by the atomic level door after the user's press). No producer may " +
       "author it (field-safety pipeline-owned). Never defaulted. It IS an analysis input: ISL draws occurrence from it.",
   },
   {

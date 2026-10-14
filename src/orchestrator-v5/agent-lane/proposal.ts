@@ -126,6 +126,12 @@ export interface ProposalOperation {
      * question. The reading stays Olumi's.
      */
     | 'confirm_goal_reading'
+    /**
+     * ⭐ OLUMI'S STARTING ASSUMPTION FOR A RISK ROOT (DL 14 Oct; `risk-occurrence.ts`) — `path` is the risk's id, `value` is
+     * `{event_risk, expected_node}`: Olumi's occurrence range over the goal's period (`basis: 'olumi'`) and the node as stored
+     * when the card was made. Written only through the atomic level door's `risk_occurrence` member, alone, card-only.
+     */
+    | 'set_risk_occurrence'
     | 'set_team_time'
     /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
     | 'set_hiring_times'
@@ -306,7 +312,9 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   // AIE #94 6132054663: never a typed yes without the current permission binding, a reseeded message or another card).
   if (operations.some(carriesQuoteConfirmation)) return true;
   // G: the answer to the goal's open question about its reading is the user's choice on the card that shows that reading.
-  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading' || op.op === 'set_option_intervention'
+  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
+    // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
+    || op.op === 'set_risk_occurrence' || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));
 }

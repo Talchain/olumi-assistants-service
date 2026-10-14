@@ -280,7 +280,7 @@ describe('T4 real first-Run caller and kept K1 negatives', () => {
     root.kind = 'risk'; root.category = 'observable'; delete root.observed_state;
     storedGraph = graph; await construct(); expect(runs).toBe(0);
     expect(assessCanonicalAnalysisReadiness(graph).analysisReady?.unvalued_roots).toBeUndefined();
-    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual(['How likely or how large is "Demand" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.']);
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual(['How likely or how large is "Demand" today? The numerical analysis is withheld until this risk has a supported value.']);
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect((await firstRun(graph)).called).toBe(0);
   });

@@ -22,7 +22,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   return { ...actual, log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } };
 });
 
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, type CallStructuredModel, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { goalLevelTheUserWrote } from '../stated-by-user.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -46,7 +46,7 @@ const rawGoal = (e: Episode): Rec => (JSON.parse(e.calls[0]!.text) as { goal: Re
 const SCENARIO = '73737373-7373-4737-8737-737373737373';
 
 /** One build: the raw answers in the order T5 received them; a request past them fails the row (nothing is invented). */
-async function build(e: Episode): Promise<{ result: Rec; goal: Rec; questions: string[] }> {
+async function run(e: Episode, brief = e.brief): Promise<{ result: Rec; stored: Rec | undefined; next: number; inputs: string[] }> {
   let stored: Rec | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -56,18 +56,36 @@ async function build(e: Episode): Promise<{ result: Rec; goal: Rec; questions: s
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   };
   let next = 0;
-  const call: CallStructuredModel = async () => {
+  const inputs: string[] = [];
+  const call: CallStructuredModel = async (req) => {
+    inputs.push(String((req as { input?: unknown }).input));
     const c = e.calls[next++];
     if (c === undefined) throw new Error(`${e.episode}: a call T5 never answered`);
     return { text: c.text, status: c.status };
   };
-  const result = await buildModelFromBrief(SCENARIO, e.brief, dispatch, call, undefined, undefined, call) as Rec;
+  const result = await buildModelFromBrief(SCENARIO, brief, dispatch, call, undefined, undefined, call) as Rec;
+  return { result, stored, next, inputs };
+}
+async function build(e: Episode, brief = e.brief): Promise<{ result: Rec; goal: Rec; questions: string[] }> {
+  const { result, stored, next } = await run(e, brief);
   expect(result.ok, JSON.stringify(result).slice(0, 400)).toBe(true);
   expect(next, 'every T5 answer kept for this build is consumed').toBe(e.calls.length);
   const goals = ((stored?.nodes ?? []) as Rec[]).filter((n) => n.kind === 'goal');
   expect(goals).toHaveLength(1);
   return { result, goal: goals[0]!, questions: (result.open_questions ?? []) as string[] };
 }
+/**
+ * ⛔ D2's served answers take "Feature launch" as the goal, which the brief does not state ("Success means a conversion
+ * rate of over 15% and at least 20 new customers…"): T5 saved `feature_launch`. That draft is never saved as the goal
+ * (unattested-event-goal.test.ts). L1's horizon rows therefore read the same answers against the brief with its launch
+ * sentence stating the launch as a dated event ("The feature launch deadline is six months from today."); the span
+ * order L1 is about ("three months" before "six months") is unchanged.
+ */
+const D2_ATTESTED = (brief: string): string => {
+  const variant = brief.replace('We plan to launch six months from today.', 'The feature launch deadline is six months from today.');
+  expect(variant, 'PRECONDITION: the variant applies').not.toBe(brief);
+  return variant;
+};
 
 describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months, never "three months")', () => {
   it('PRECONDITION: the raw answers say 6 months, and the brief writes "three months" before "six months"', () => {
@@ -80,12 +98,24 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
     expect(brief.indexOf('three months')).toBeLessThan(brief.indexOf('six months'));
   });
 
-  it.each(['D2_r1', 'D2_r2'])('⭐ RED %s: the saved goal holds "six months", the count is not held silently, and no "within 3 months" is asked', async (key) => {
-    const { goal, questions } = await build(ep(key));
+  it.each(['D2_r1', 'D2_r2'])('⭐ the served %s answers take an unattested "Feature launch" as the goal: the one retry is asked with the reason, T5\'s recorded retry is still the event, and nothing is saved', async (key) => {
+    const { result, stored, next, inputs } = await run(ep(key));
+    expect(next).toBe(2);
+    expect(inputs[1]).toContain(UNATTESTED_GOAL_RETRY_ISSUE);
+    expect(stored).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+  });
+
+  it.each(['D2_r1', 'D2_r2'])('⭐ RED %s (brief stating the launch as an event): the saved goal holds "six months", the count is not held silently, and no "within 3 months" is asked', async (key) => {
+    const { goal, questions } = await build(ep(key), D2_ATTESTED(ep(key).brief));
     expect(goal.goal_deadline_as_stated).toBe('six months');
     expect(Object.hasOwn(goal, 'goal_horizon_months'), 'a number-word count is proposed, never held silently').toBe(false);
     expect(questions.some((q) => /within 3 months/.test(q)), JSON.stringify(questions)).toBe(false);
-    expect(questions).toContain('Does "Feature launch" get there within 6 months? The model holds no deadline yet, so no result answers that.');
+    // Each draw's own deadline question, exactly (r2 reads the stated launch as an event with its date still to be given).
+    expect(questions).toContain({
+      D2_r1: 'Does "Feature launch" get there within 6 months? The model holds no deadline yet, so no result answers that.',
+      D2_r2: 'What is the deadline for "feature launch"? A date or a time from now is fine, for example "6 months"; I\'ll propose it as your deadline.',
+    }[key]);
   });
 
   it.each([['D3_r1', 'three months'], ['D3_r2', 'three months'], ['D5_r1', 'two months']])(

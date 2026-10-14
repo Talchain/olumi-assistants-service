@@ -9,6 +9,7 @@
  * `authorise` still checks the user. Each kind's rule is its own writer's gate:
  *  · a team-time card: what it read is unchanged (`teamTimeReadHolds`);
  *  · a hiring-times card: its parts, carriers and deadline stand (`hiringTimesStillApply`);
+ *  · a risk occurrence card: its own writer would not refuse it (`riskOccurrenceCardHolds`: the goal as bound, the node as shown);
  *  · a deadline card: the goal's COMPLETE projection (`goalReadingProjectionOf`: label, target, horizon, period, reading; DL 14 Oct,
  *    the PL's "reuse the complete current goal/reading") is exactly the one the card was made against, so ANY change to the goal
  *    lapses it (conservative) and an unrelated link edit does not. The rule is strict: a retry after the card's own write
@@ -24,6 +25,7 @@ import { teamTimeReadHolds } from '../../goal-target/team-share-write.js';
 import { hiringTimesStillApply, type ApprovedHiringTimes } from '../../goal-target/hiring-times.js';
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { goalReadingProjectionOf } from '../../goal-target/goal-reading-write.js';
+import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurrence.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -66,6 +68,8 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   const op = p.operations[0]!;
   if (op.op === 'set_hiring_times') return hiringTimesStillApply(op.value as ApprovedHiringTimes, graph);
   if (op.op === 'set_goal_deadline') return deadlineSubjectHolds(op, graph) === true;
+  // A risk occurrence card: its own writer's gate (its goal as bound, its node as shown; #3013).
+  if (op.op === SET_RISK_OCCURRENCE_OP) return riskOccurrenceCardHolds(op, graph);
   return false;
 }
 
@@ -75,7 +79,10 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
  * with no recorded subject is never judged here (the whole-model rule owns it).
  */
 export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
-  return p.operations.length === 1 && p.operations[0]!.op === 'set_goal_deadline' && deadlineSubjectHolds(p.operations[0]!, graph) === false;
+  if (p.operations.length !== 1) return false;
+  const op = p.operations[0]!;
+  if (op.op === SET_RISK_OCCURRENCE_OP) return !riskOccurrenceCardHolds(op, graph);
+  return op.op === 'set_goal_deadline' && deadlineSubjectHolds(op, graph) === false;
 }
 
 /**
@@ -89,4 +96,14 @@ export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): bo
   const proposal = (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'];
   const operations = isRec(proposal) ? proposal['operations'] : undefined;
   return Array.isArray(operations) && heldCardStillApplies({ operations } as Pick<StructuredProposal, 'operations'>, graph);
+}
+
+/**
+ * Whether a held card applies to `graph` NOW, the whole rule in one place (#3024): on the model it was made against, unless
+ * its own subject moved (`heldCardSubjectMoved`); on a moved model, only by its own field-scoped rule (`heldCardStillApplies`).
+ * Read wherever a held card is SHOWN (the turn's cards and fields, a replay, a cold reload), as the press and the lapse read it.
+ */
+export function heldCardAppliesAt(p: Pick<StructuredProposal, 'operations' | 'base_graph_identity_hash'>, graph: unknown, graphHash: string | undefined): boolean {
+  if (graphHash === undefined || graphHash === '') return false;
+  return p.base_graph_identity_hash === graphHash ? !heldCardSubjectMoved(p, graph) : heldCardStillApplies(p, graph);
 }

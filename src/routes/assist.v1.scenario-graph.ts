@@ -16,7 +16,7 @@ import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-exte
 import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
-import { proposalRecord, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
@@ -508,7 +508,8 @@ export default async function route(app: FastifyInstance) {
       const issuedTurnIds = await issuedTurnIdsForProposalRecords(proposalIssuances(heldProposalRecords, latestPending), proposalRows, CONVERSATION_ROWS_READ,
         typeof store.readCommittedTurn === 'function' ? turnId => store.readCommittedTurn!(scenarioId, turnId) : undefined);
       const proposalFields = conversationRequested && graphPresent
-        ? proposalFieldsWire(heldProposalRecords, computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined, issuedTurnIds)
+        ? ((hash) => proposalFieldsWire(heldProposalRecords, hash, issuedTurnIds, heldRecordsApplyAt(latestPending, graph, hash)))(
+          computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
         : undefined;
 
       /**
