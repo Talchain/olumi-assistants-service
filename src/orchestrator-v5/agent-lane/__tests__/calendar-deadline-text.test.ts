@@ -1,5 +1,5 @@
 /**
- * ⭐ GEN D4 ITEM B (DL 14 Oct; AIE_TEXT_PENDING, `recovery/prompt/GEN-D4-DRAFTER-TEXT-DRAFT.txt`): A CALENDAR DEADLINE IS
+ * ⭐ GEN D4 ITEM B (DL 14 Oct; the AIE's text, packet fc17c200): A CALENDAR DEADLINE IS
  * NOT A MONTH COUNT. T5-integrated (staging 14b1e544) D4, both runs: "…by the end of that quarter" was drafted as
  * horizon_months 3 and basis.period_months 3, a count that needs today's date and a fiscal calendar to be true.
  *
