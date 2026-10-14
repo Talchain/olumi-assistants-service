@@ -29,11 +29,11 @@ export interface WidenDraftInput {
   finalGraph?: (admitted: AdmittedModel) => FinalGraph;
   /** The build owns candidate admission, including construction context and fallback. */
   admit: (candidate: CandidateModel) => AdmittedModel;
-  /** PARKED (DL 6065138437: 0 options kept from 1 live trigger, pure latency on B1). The served seam never sets it, so
-   *  an options-only deficiency is diagnosed and logged but makes no call. Kept for the word-rule follow-up. */
+  /** The options arm. Parked 8 Oct (DL 6065138437) and RESTORED on the served seam (Paul, #94 6166259456): the build
+   *  sets it. Unset → an options deficiency is diagnosed and logged only. */
   optionsArm?: boolean;
-  /** PARKED (E6, DL 12 Oct, Paul's test): a risk added here never enters the Run, so the served seam never sets this; a
-   *  risk deficiency is diagnosed and logged, and the build reply's thin-draft offer suggests risks instead. Unit rows opt in. */
+  /** The risks arm. Parked 12 Oct (E6) and RESTORED on the served seam (Paul, #94 6166259456): the build sets it. An added
+   *  risk enters OUT of the calculation (`retained_excluded`), and the reply says so (`widenedRiskNote`). Unset → logged only. */
   risksArm?: boolean;
 }
 export interface WidenCounts { options: number; risks: number }
@@ -211,10 +211,9 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
       ...(input.admitted.goal_constraints.length > 0 ? { goal_constraints: input.admitted.goal_constraints } : {}) };
     const finalBefore = input.finalGraph?.(input.admitted);
     diagnosis = diagnoseDraft(finalBefore ?? graph);
-    // ⭐ E6 (Paul's test 12 Oct, DL): a risk added here enters OUT of the calculation (zero goal-path links,
-    // `retained_excluded`), so the Run leaves it out and the reply has to say so. It is SUGGESTED instead and never added
-    // at draft time: the build reply's thin-draft offer (`thinDraftOffer`, ≤ 1 risk) holds one risk per press, for approval,
-    // through the existing risks door. The risk diagnosis is still logged.
+    // A risk added here enters OUT of the calculation (zero goal-path links, `retained_excluded`), so the Run leaves it
+    // out and the reply says so (E6). Where this pass added a risk, the build reply's thin-draft offer is not made
+    // (`thinDraftOffer`): Olumi has already suggested risks. An arm left unset is diagnosed and logged only.
     const repair: DraftDiagnosis = { risks: input.risksArm === true ? diagnosis.risks : null, options: input.optionsArm === true ? diagnosis.options : null };
     if (repair.risks === null && repair.options === null) { outcome = diagnosis.risks === null ? 'sufficient' : 'risks_suggested'; return null; }
     // Registration, readbacks and narration retain the tail already reserved beyond this absolute deadline.

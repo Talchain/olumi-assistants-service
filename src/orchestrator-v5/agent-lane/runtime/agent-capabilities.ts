@@ -3627,7 +3627,8 @@ export function createAgentCapabilities(
       const context: ConstructionContext | undefined = gate.later ? { current_model: projectModelContext(g),
         ...(gate.messages.length > 0 ? { messages: gate.messages } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : undefined;
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
-        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured, undefined, context)));
+        // No widening for a revised draft (prepare-only card): it stays exactly as served before the arms were restored.
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context)));
     } catch {
       out = { ok: false, mutated: false };
     }
