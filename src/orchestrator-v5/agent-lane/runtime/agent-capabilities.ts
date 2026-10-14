@@ -2316,6 +2316,9 @@ const LINK_SET_THIRD_PARTY_AGENT_NOTE = 'Some proposed links were left out as at
 /** The user's line when a link set's save cannot be confirmed: the AIE's exact text (packet 2b19ae59, `card_receipt`). */
 export const LINK_SET_SAVE_NOT_CONFIRMED = 'The save could not be confirmed. Check the current model before retrying.';
 
+/** A revised-draft card that withholds a result for a carried limit says so itself: the reply points to it, said once. */
+export const CARD_OWNS_WITHHELD_NOTE = 'The card itself says which result is withheld and why. Do not restate that reason in your reply; point to the card for it instead.';
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
@@ -3660,7 +3663,8 @@ export function createAgentCapabilities(
     }).join(' and ');
 
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
-  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; /** The deadline goal's deliverable, when the draft holds one. */ readonly event: string | null }
+  type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; /** The deadline goal's deliverable, when the draft holds one. */ readonly event: string | null;
+    /** The card's own sentence on a result withheld for a carried limit (`limitsKeptBy`), when it has one. */ readonly withheld?: string }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
   /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
@@ -3798,7 +3802,7 @@ export function createAgentCapabilities(
       public_label: card,
     });
     proposals.put(proposal);
-    return { proposal, held, event: event?.deliverable ?? null };
+    return { proposal, held, event: event?.deliverable ?? null, ...(limits.withheld === undefined ? {} : { withheld: limits.withheld }) };
   };
 
   /** This target (or deadline goal) call's answer from the turn's one revised draft: the same card, or why it is not in it. */
@@ -3826,7 +3830,10 @@ export function createAgentCapabilities(
     }
     const offered = 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
       + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
-      + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.';
+      + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
+      // ⛔ SAID ONCE (SCIENCE's marketing capture, judge row 2, 14 Oct): the card states the withheld result for a carried
+      // limit, and the reply restated the same cause in its own words. The card owns it; the reply points to it.
+      + (draft.withheld === undefined ? '' : ` ${CARD_OWNS_WITHHELD_NOTE}`);
     /**
      * ⭐ A WITHDRAWN CARD IS RE-ISSUED FRESH, NEVER RETURNED DEAD (served marketing turn 02 on 00a51f7d; Codex
      * CHECK-3020-45e7c1e3 item 1; DL r2): the turn's one draft is reused, so a target call after `withdraw_proposal` returned
@@ -3841,7 +3848,7 @@ export function createAgentCapabilities(
       reissuedDrafts.set(key, reissues);
       draft = { proposal: createProposal({ ...content, base_graph_identity_hash: g.graph_hash,
         provenance: { ...content.provenance, basis: `${content.provenance.basis ?? ''} Offered again after a withdrawal this turn (${reissues}).` } }),
-        held: draft.held, event: draft.event };
+        held: draft.held, event: draft.event, ...(draft.withheld === undefined ? {} : { withheld: draft.withheld }) };
       revisedDrafts.set(key, Promise.resolve(draft));
     }
     if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
