@@ -251,7 +251,9 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       expect(writer.mock.calls[0]![0]).toMatchObject({ identity_confirm: {
         outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
       } });
-      expect(runRequests, 'Yes records the reading without running analysis').toHaveLength(1);
+      // Adopted (Paul #94 6166259456): the committed Yes is analysed by the route's automatic Run, once, on the saved reading.
+      expect(runRequests, 'the Run press, then ONE automatic Run after the committed Yes').toHaveLength(2);
+      expect(runRequests[1]).toMatchObject({ stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
       expect(modelCalls, 'pre-tool Run interpretation; approval adds no model call').toBe(1);
     } finally { issue.mockRestore(); writer.mockRestore(); }
   });
