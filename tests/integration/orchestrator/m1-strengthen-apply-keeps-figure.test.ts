@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { assignEntityRefs } from '../../../src/orchestrator-v5/graph/entity-refs.js';
 
 const SCENARIO_ID = 'd1d1d1d1-0000-4000-8000-000000000481';
@@ -132,7 +133,8 @@ describe('M1: placeholder Strengthen asks for a size; a sized-link card Apply ho
     expect(card, JSON.stringify(card)).toMatchObject({ tool: 'propose_link_strengths', args: { links: [{ strength: 'moderate' }] } });
     if (card?.tool !== 'propose_link_strengths') throw new Error('sized-link pre-mortem card missing');
     // The read returns the model as stored NOW (the write's own read-back confirms against it), as the harness does.
-    const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: computeAnalysisAffectingGraphHash(persisted as never) } });
+    // ⛔ INPUT CHANGE (#3002 whole read-back): the read carries the route's identity of the stored bytes, as the route does.
+    const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: computeAnalysisAffectingGraphHash(persisted as never), graph_identity_hash: computeGraphIdentityHash(persisted as never) } });
     const caps = createAgentCapabilities(d as never, new ProposalStore(), undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-m1'),
     });

@@ -80,6 +80,7 @@ import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
@@ -3502,7 +3503,13 @@ export type CommitOptionLevelsResult =
        * door always sets it; optional only so a port's existing fakes still type-check.
        */
       readonly links_resized?: readonly { readonly from: string; readonly to: string }[];
-      readonly reencoded_siblings?: readonly ReencodedSibling[] }
+      readonly reencoded_siblings?: readonly ReencodedSibling[];
+      /**
+       * #3002 (AIE packet 2b19ae59, card_receipt): the identity of the bytes this commit stored, by the function the graph
+       * read route uses (`computeGraphIdentityHash`, over the writer's own reload), so a caller's read-back can prove the
+       * stored graph is exactly what was committed. The door always sets it; optional only so a port's fakes type-check.
+       */
+      readonly graph_identity_hash?: string }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string };
       /** The approved value, range or link that was refused (the whole approval is refused with it). */
@@ -3628,14 +3635,21 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     : { goal_steady_attested: goalHorizonVerdict(committedGraph) === 'steady_attested' };
   if (r.commitSkippedReason === 'verified_no_op') {
     return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: verifiedLevels,
-      links_resized: [], ...steadyReadBack };
+      links_resized: [], ...steadyReadBack, ...identityOf(committedGraph) };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
   return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: verifiedLevels,
-    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [], ...steadyReadBack };
+    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [], ...steadyReadBack,
+    ...identityOf(committedGraph) };
+}
+
+/** The read route's identity of the stored bytes (`assist.v1.scenario-graph.ts`), or nothing when there is none to name. */
+function identityOf(graph: unknown): { graph_identity_hash?: string } {
+  const id = computeGraphIdentityHash(graph as Parameters<typeof computeGraphIdentityHash>[0])?.value;
+  return typeof id === 'string' ? { graph_identity_hash: id } : {};
 }
 
 /**

@@ -23,6 +23,7 @@ import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import { formatEdgeStrengthConfirmed, formatEdgeStrengthUnchanged } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 
 type Edge = { from: string; to: string; strength: { mean: number; std: number }; provenance?: Record<string, unknown> } & Record<string, unknown>;
 type Graph = { nodes: { id: string; label: string }[]; edges: Edge[] } & Record<string, unknown>;
@@ -65,7 +66,8 @@ function world(variant = false, servedBytes = false) {
   let graph = before; let hash = FX.before.graph_hash;
   const sent: Record<string, unknown>[] = [];
   const dispatch: InternalDispatch = async (path) => {
-    if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: hash } };
+    // ⛔ INPUT CHANGE (#3002 whole read-back): the read carries the route's identity of the stored bytes, as the route does.
+    if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: hash, graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     throw new Error(`unexpected dispatch ${path}`);
   };
   const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', undefined, {
@@ -82,7 +84,7 @@ function world(variant = false, servedBytes = false) {
         return { ...structuredClone(e), provenance: { ...was.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-12T00:17:53.645Z' } } };
       }) };
       hash = FX.after.graph_hash;
-      return { status: 'committed', graph_hash: hash, receipt: null, already_applied: false, committed_levels: [] };
+      return { status: 'committed', graph_hash: hash, receipt: null, already_applied: false, committed_levels: [], graph_identity_hash: computeGraphIdentityHash(graph as never)!.value };
     },
   });
   return { caps, sent, graph: () => graph };

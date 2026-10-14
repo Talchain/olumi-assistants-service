@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { CANVAS_BAND_WORD } from '../../../src/orchestrator-v5/format/edge-strength-bands.js';
 import { assignEntityRefs } from '../../../src/orchestrator-v5/graph/entity-refs.js';
 import { linkSizing } from '../../../src/cee/magnitude/link-sizing.js';
@@ -102,7 +103,8 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
   beforeEach(() => { persisted = servedGraph(); rows.clear(); });
 
   const agent = (userTurnText: string) => {
-    const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
+    // ⛔ INPUT CHANGE (#3002 whole read-back): the read carries the route's identity of the stored bytes, as the route does.
+    const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash(), graph_identity_hash: computeGraphIdentityHash(persisted as never) } });
     const caps = createAgentCapabilities(d as never, new ProposalStore(), undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
     });

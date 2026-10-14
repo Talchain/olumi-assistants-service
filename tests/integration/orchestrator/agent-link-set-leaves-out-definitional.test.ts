@@ -10,6 +10,7 @@ import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 
 const SCENARIO_ID = '13acc577-f1d4-4859-b272-e34feafb38ce'; // the served scenario_id (T2/T3 requests)
 
@@ -123,7 +124,8 @@ describe('⛔ R3-9 × R12: a link set leaves out the links a declared identity d
   const agent = (runUse: { withdrawn_node_ids: string[] } | null) => {
     const store = new ProposalStore();
     const hash = (): string => { const h = computeAnalysisAffectingGraphHash(persisted as never); if (h === null) throw new Error('no hash'); return h; };
-    const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: hash(), analysis_identity_run_use: runUse } });
+    // ⛔ INPUT CHANGE (#3002 whole read-back): the read carries the route's identity of the stored bytes, as the route does.
+    const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: hash(), graph_identity_hash: computeGraphIdentityHash(persisted as never), analysis_identity_run_use: runUse } });
     let doorCalls = 0;
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-r12'); },

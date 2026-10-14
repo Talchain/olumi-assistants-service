@@ -5,6 +5,7 @@ import { narrateWriteOutcome } from '../write-outcome.js';
 import { ProposalStore } from '../proposal.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 import type { SessionTurnWrite } from '../../session/store.js';
@@ -36,7 +37,8 @@ function harness(mean: number, tamper?: (g: ReturnType<typeof initial>) => void)
   });
   const dispatch: InternalDispatch = async path => {
     expect(path.endsWith('/graph')).toBe(true);
-    return { status: 200, json: { graph: read(), graph_hash: computeAnalysisAffectingGraphHash(read()) } };
+    // ⛔ INPUT CHANGE (#3002 whole read-back): the read carries the route's identity of the stored bytes, as the route does.
+    return { status: 200, json: { graph: read(), graph_hash: computeAnalysisAffectingGraphHash(read()), graph_identity_hash: computeGraphIdentityHash(read() as never) } };
   };
   const proposals = new ProposalStore();
   const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, {
@@ -52,7 +54,9 @@ function harness(mean: number, tamper?: (g: ReturnType<typeof initial>) => void)
       if (result.kind !== 'committed') throw new Error(JSON.stringify(result));
       // A row may change the stored graph after the commit, before Olumi reads it back.
       if (tamper !== undefined) { const g = read(); tamper(g); bytes = JSON.stringify(g); }
-      return { status: 'committed', graph_hash: result.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [] };
+      // The identity of the writer's own reload of what it stored (as `commitOptionLevelsInProcess` returns it).
+      return { status: 'committed', graph_hash: result.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [],
+        graph_identity_hash: computeGraphIdentityHash(result.graph as never)!.value };
     },
   });
   return { caps, proposals, writes, read };
@@ -631,6 +635,11 @@ describe('#3002 the AIE\u2019s texts and the whole-postimage receipt (packet 2b1
     ['an approved review\u2019s spread moved (0.1 → 0.99)', review, (g: ReturnType<typeof initial>) => { g.edges.find((e) => e.from === 'quality')!.strength.std = 0.99; }],
     ['an approved Olumi estimate\u2019s source moved', mixed({ origin: 'third_party', source: 'Alice' }),
       (g: ReturnType<typeof initial>) => { g.edges.find((e) => e.from === 'price')!.provenance.source = 'brief_extraction'; }],
+    // Buddy r2's probes: members the link writer owns but the analysis never reads, on the APPROVED link (only the stored
+    // graph's identity, against the writer's own, sees them).
+    ['an approved review gained a display stamp', review, (g: ReturnType<typeof initial>) => { (g.edges.find((e) => e.from === 'quality') as Record<string, unknown>).provenance_display = 'user_set'; }],
+    ['an approved review\u2019s reasoning changed', review, (g: ReturnType<typeof initial>) => { (g.edges.find((e) => e.from === 'quality')!.provenance as Record<string, unknown>).reasoning = 'changed after the write'; }],
+    ['an approved review gained std_defaulted', review, (g: ReturnType<typeof initial>) => { (g.edges.find((e) => e.from === 'quality') as Record<string, unknown>).std_defaulted = true; }],
     // Outside what the analysis reads (only the writer's scope rule sees it): a review stamp appears on the LEFT-OUT link.
     ['a left-out link gained a review stamp', mixed({ origin: 'third_party', source: 'Alice' }),
       (g: ReturnType<typeof initial>) => { (g.edges.find((e) => e.from === 'quality')!.provenance as Record<string, unknown>).reviewed_by_user = { intent: 'confirm', at: '2026-10-14T09:00:00.000Z' }; }],

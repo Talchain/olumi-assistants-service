@@ -3997,14 +3997,15 @@ export function createAgentCapabilities(
     /**
      * ⭐ #3002 card_receipt (AIE packet 2b19ae59): the receipt, the card's left-out links included, is said only once the WHOLE
      * postimage reads back, otherwise the save is unconfirmed, in the AIE's words, and nothing says it was recorded or left
-     * unchanged. Whole means all three (buddy r1 on 0bbc66bc: an approved link's spread or source could move unseen):
+     * unchanged. Whole means all three (buddy r1 + r2 on 0bbc66bc: an approved link's spread, source, display or any other
+     * member the writer owns could move unseen):
      *  · every approved link as approved (`holds`);
-     *  · the graph the analysis reads is the one the writer committed (`res.graph_hash`): every size and spread, each link's
-     *    direction and its source and sizing marks, and every figure that decides a Run;
-     *  · the link writer's own scope rule: only the approved links changed, each only in what that writer owns, so each
-     *    left-out link (its review stamp and display included) and everything else are as they were when approved.
+     *  · the stored graph IS the one the writer committed: the read's identity (the route's `graph_identity_hash`, over every
+     *    stored member) equals the identity the writer returned for its own reload of the bytes it stored;
+     *  · the link writer's own scope rule against the APPROVED read: only the approved links changed, each only in what that
+     *    writer owns, so each left-out link (its review stamp and display included) and everything else are as approved.
      */
-    const retained = check !== null && check.graph_hash === res.graph_hash
+    const retained = check !== null && typeof res.graph_identity_hash === 'string' && check.graph_identity_hash === res.graph_identity_hash
       && linkStrengthsPostimageIsScoped(approvedRead.raw, check.raw, sent.map(({ from, to }) => ({ from, to })));
     if (!holds || !retained) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
