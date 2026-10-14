@@ -338,7 +338,8 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
 
 /**
  * `onCard`: the options whose chance this reply's bound result card displays (the route decides, by the Run's identity).
- * Their lines are not said in the chat; every line still feeds RC4's narrator guard and the shortfall units below.
+ * Their chance is not said in the chat (their `depends` sentence still is); every line still feeds RC4's narrator guard
+ * and the shortfall units below.
  */
 function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenLine[], onCard?: ReadonlySet<string>): { text: string; added: number } {
   // Narration never supplies k, even when it guessed correctly. Complete producer-bound sentences are already authorised;
@@ -374,7 +375,15 @@ function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenL
   const owed: string[] = [];
   let added = 0;
   for (const l of lines) {
-    if (onCard?.has(l.option_id) === true) continue;
+    // DL ruling on #3027 (PL 07:45Z): the card says the face, so the chance is not said again; what it rests on, the
+    // coaching question on the consequential assumption, is still said once.
+    if (onCard?.has(l.option_id) === true) {
+      if (l.depends !== '' && !sameWordsIn(body, l.depends)) {
+        owed.push(l.depends);
+        added += 1;
+      }
+      continue;
+    }
     if (l.shortfall_note !== undefined) {
       if (alreadySaid(body, l)) continue;
       owed.push(l.chance);

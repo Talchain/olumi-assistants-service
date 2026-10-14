@@ -5181,8 +5181,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⭐ THE RESULT CARD IS THE CHANCE (DL, PL #94 07:24Z; capacity post3017 row 4: the face said by the reply, then
       // again by the card under it). When this reply displays the Run's bound result card (this readback's result block
       // beside a shipped, current canonical view of that SAME Run), an option whose card cell shows this exact chance is
-      // not said again here; the AI's answer explains it. No such card (an Explain, a view that cannot ship, another or a
-      // stale Run): the line stays, the truthful fallback. By the Run's identity and the cell's own face, never by words.
+      // not said again here; what it rests on still is (DL ruling on #3027), and the AI's answer explains it. No such card
+      // (an Explain, a view that cannot ship, another or a stale Run): the line stays, the truthful fallback. By the Run's
+      // identity and the cell's own face, never by words.
       const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
         ? composedRead.canonicalAnalysisView as { run?: { graph_hash_at_run?: unknown }; staleness?: { stale?: unknown };
           options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] } : undefined;

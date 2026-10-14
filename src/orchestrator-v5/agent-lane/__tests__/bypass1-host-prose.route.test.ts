@@ -31,6 +31,8 @@ const CAPACITY_3017 = ((): Json => {
   return { ...j, scenario_id: SCENARIO };
 })();
 const count = (text: string, part: string): number => text.split(part).length - 1;
+/** The served Run's depends sentence (the route's own output on CAPACITY_3017, before and after #3027). */
+const DEPENDS_3017 = 'It rests most on Olumi’s own estimate of how strongly ‘Additional specialist capacity’ affects ‘Weekly support capacity’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?';
 /** The faces the shipped card displays: each option cell that shows a chance (`figure` or `range`). */
 const cardFaces = (view: Json | undefined): string[] => ((view?.options ?? []) as { cell: { kind: string; face?: string } }[])
   .filter((o) => o.cell.kind === 'figure' || o.cell.kind === 'range').map((o) => o.cell.face!);
@@ -212,6 +214,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     for (const face of faces) expect(count(reply, face), face).toBe(0);
     expect(reply).not.toMatch(CHANCE_LINE);
     expect(count(reply, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(0);
+    // DL ruling on #3027 (PL 07:45Z): the coaching question on the consequential assumption, and what would change it, stay.
+    expect(count(reply, 'It rests most on Olumi’s own assumption that ‘Additional specialist capacity’ affects ‘Weekly support capacity’: in the model runs without that link, the chance is less than 1%. Is that right?')).toBe(1);
+    expect(count(reply, 'What would change it: ')).toBe(1);
   });
 
   it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
@@ -241,6 +246,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     const reply = run.assistant_text as string;
     expect(count(reply, faces[0]!)).toBe(0);
     expect(reply).not.toMatch(CHANCE_LINE);
+    // DL ruling on #3027 (PL 07:45Z): what the chance rests on is still said, once, and so is what would change it.
+    expect(count(reply, DEPENDS_3017)).toBe(1);
+    expect(count(reply, 'What would change it: ')).toBe(1);
   });
 
   it('CONTRAST (served 5b6e5eb7 turn 01, no card to display): the reply keeps the canonical chance line, once', async () => {
@@ -250,6 +258,7 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(run.canonical_analysis_view).toBeUndefined();
     const face = cardFaces(view as Json)[0]!;
     expect(count(run.assistant_text as string, face)).toBe(1);
+    expect(count(run.assistant_text as string, DEPENDS_3017)).toBe(1);
   });
 
   it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
