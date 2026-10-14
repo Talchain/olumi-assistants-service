@@ -39,6 +39,7 @@ import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVer
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { midSentence } from '../agent-lane/guidance/render.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
+import { recordedMeasureOf } from '../statement-door/fields/measure.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -660,10 +661,16 @@ export function goalChanceLicenceOf(
   // basis records its denominator as today's level of THIS goal and its effect unit as that unit of it, exactly. Any
   // other percent-family change says no shortfall (it would be ambiguous); other units keep their own.
   const percentChange = changeFrame !== undefined && classifyUnitScaleClass(target.unit) !== 'unknown';
+  // ⭐ M3a (AIE 6180193788 §1): the SAME approved reading's quantity is the goal's own label, or the measure the user's recorded
+  // statement defines on this goal ("story points completed per sprint": `recordedMeasureOf`), never a hidden generic denominator.
+  const measure = recordedMeasureOf(goal);
+  const unitWords = target.unit.trim();
+  const quantity = goalLabel === undefined ? undefined
+    : [...(measure !== undefined ? [measure] : []), goalLabel].find((q) => sameWords(basis?.denominator, `today's ${q}`)
+      && sameWords(basis?.effect_unit, `${unitWords} of today's ${q}`));
   const ofTodayBound = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today'
-    && goalLabel !== undefined && PERCENT_TOKENS.includes(target.unit.trim().toLowerCase())
-    && sameWords(basis.denominator, `today's ${goalLabel}`) && sameWords(basis.effect_unit, `${target.unit.trim()} of today's ${goalLabel}`);
-  const ofToday = ofTodayBound ? ` of today’s ${midSentence(goalLabel!)}` : undefined;
+    && quantity !== undefined && PERCENT_TOKENS.includes(target.unit.trim().toLowerCase());
+  const ofToday = ofTodayBound ? ` of today’s ${quantity === goalLabel ? midSentence(goalLabel!) : quantity}` : undefined;
   const shortfall = percentChange && ofToday === undefined ? {}
     : shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope, ofToday ?? '');
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.

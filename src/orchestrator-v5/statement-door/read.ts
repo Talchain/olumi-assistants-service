@@ -27,8 +27,11 @@ export interface DoorContext {
   readonly asks?: readonly StatementAsk[];
 }
 
-/** One statement as the Agent gives it: the user's exact words, and the ask of Olumi's they answer (its exact words), if any. */
-export type DoorQuote = string | { readonly quote: string; readonly answering?: string };
+/**
+ * One statement as the Agent gives it: the user's exact words, the ask of Olumi's they answer (its exact words), if any, and for a
+ * figure-free field its reading in the user's own words (`reading_words`), which the field's reader checks inside the quote.
+ */
+export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string };
 
 export interface DoorReading {
   readonly subject: DoorSubject;
@@ -37,6 +40,8 @@ export interface DoorReading {
   /** Olumi's reading, and every Olumi assumption it rests on, in the table's words. */
   readonly reading: string;
   readonly assumptions: readonly string[];
+  /** The user's own words a figure-free reading rests on (`DoorFigure.words`). */
+  readonly words?: string;
 }
 
 export type DoorRefusal = 'no_table_row' | 'statement_malformed' | 'not_this_field' | 'not_this_subject' | 'origin_unknown' | 'statement_not_found'
@@ -79,10 +84,11 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     return { kind: 'refused', refusal: 'statement_malformed', detail: `Give one to ${row.maxStatements} of the user's complete statements about ‘${label}’, copied exactly. Nothing was prepared.` };
   }
   const statements: UserStatement[] = [];
+  let words: string | undefined;
   for (const raw of quotes) {
     const quote = (typeof raw === 'string' ? raw : raw.quote).trim();
     const answering = typeof raw === 'string' ? undefined : raw.answering;
-    const fig = row.read(quote, subject, graph);
+    const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words);
     if ('refused' in fig) return { kind: 'refused', refusal: 'not_this_field', detail: `${fig.refused} Nothing was prepared. ${KEEP}` };
     if (statementBoundTo(graph, subject, quote, ctx, answering) !== 'bound') {
       return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
@@ -97,7 +103,8 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
       return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
     }
     statements.push(v.statement);
+    words ??= fig.words;
   }
-  return { kind: 'read', reading: { subject, label, statements, reading: row.readingWords(statements, subject, label, graph),
-    assumptions: row.assumptions(statements, subject, graph) } };
+  return { kind: 'read', reading: { subject, label, statements, reading: row.readingWords(statements, subject, label, graph, words),
+    assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}) } };
 }

@@ -25,3 +25,6 @@ export interface DoorWrite {
 export interface FieldWriter {
   readonly approve: (reading: DoorReading, graph: unknown) => DoorWrite | { readonly refused: string };
 }
+
+/** The ONE record writer and reader of the user's words (`statements.ts`), called by a row's writer in the same commit. */
+export { withUserStatement, userStatementFor, holdsUserStatement, userStatementRecord } from './statements.js';
