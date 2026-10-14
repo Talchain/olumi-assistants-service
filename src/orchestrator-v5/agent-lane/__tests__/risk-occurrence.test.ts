@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrencePostimageIsScoped, riskOccurrenceSubject,
   type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+import { goalChanceEstimateCensus, olumiEstimateWords } from '../goal-chance-estimate-attribution.js';
 
 type Rec = Record<string, any>;
 const G = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-hiring-post3007-read01-20261014.json', 'utf8')) as Rec).body.graph as Rec;
@@ -47,5 +48,20 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     const users = { ...approved(), event_risk: { ...BLOCK, occurrence: { ...BLOCK.occurrence, basis: 'user' as const } } };
     expect(applyRiskOccurrenceEdit(G, users)).toEqual({ kind: 'refused', reason: 'invalid_block' });
     expect(riskOccurrenceSubject(G, 'leadership_coverage')).toEqual({ kind: 'ineligible', reason: 'not_a_risk' });
+  });
+
+  it('DL Q2: the chance rests on Olumi’s occurrence too — counted on the face and listed on the panel, by the risk’s id', () => {
+    const OPTIONS = ['hire_tech_lead', 'hire_two_developers', 'continue_as_now'];
+    const before = goalChanceEstimateCensus(G, OPTIONS, 'productivity');
+    expect(before.estimates!.values.map((v) => v.id)).not.toContain(RISK);
+    const written = (applyRiskOccurrenceEdit(G, approved()) as Rec).mutatedGraph as Rec;
+    const after = goalChanceEstimateCensus(written, OPTIONS, 'productivity');
+    expect(after.estimates!.values.filter((v) => v.id === RISK)).toEqual([expect.objectContaining({ kind: 'value', id: RISK, label: 'Code quality deterioration' })]);
+    expect(after.counts.values).toBe(before.counts.values + 1);
+    expect({ ...after.counts, values: before.counts.values }).toEqual(before.counts);
+    expect(olumiEstimateWords({ values: after.counts.values, links: after.counts.links })).toContain(`${after.counts.values} starting value`);
+    // CONTRAST: the user's own stated range on the same risk is not Olumi's estimate.
+    const users = structuredClone(written); riskOf(users).event_risk.occurrence.basis = 'user';
+    expect(goalChanceEstimateCensus(users, OPTIONS, 'productivity').counts).toEqual(before.counts);
   });
 });
