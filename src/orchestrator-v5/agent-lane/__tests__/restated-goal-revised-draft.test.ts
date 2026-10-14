@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAgentCapabilities, draftGateDetail, levelFrameOf, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { CARD_OWNS_WITHHELD_NOTE, createAgentCapabilities, draftGateDetail, levelFrameOf, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
 import { isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -377,6 +377,8 @@ describe('M1 captured marketing limit spellings through revised-draft offer and 
     const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(offer.ok, JSON.stringify(offer)).toBe(true);
     expect(offer.public_label).toBe(marketingCard);
+    // This card withholds the full goal's result while two limits are unconfirmed: the reply is told the card says so.
+    expect(String(offer.note).split(CARD_OWNS_WITHHELD_NOTE)).toHaveLength(2);
     expect(s.commits).toHaveLength(0);
     s.said(FX.l20.turn_id);
     const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
@@ -475,6 +477,8 @@ describe('L20 on the served early draft: ONE revised-draft card, prepared once, 
       + 'Limits in the revised draft: ‘Annual marketing spend’ at most £100,000 / year; ‘Founder marketing time’ at most 25%. '
       + 'Options: ‘Hire a marketing manager’, ‘AI planning plus advertising’. '
       + 'Not carried: Olumi’s earlier estimates and links, which are drafted afresh. Check the targets, limits and options on this card before choosing.');
+    // CONTRAST (said once): a card that withholds nothing carries no note pointing to a withheld result.
+    expect(String(a.note)).not.toContain(CARD_OWNS_WITHHELD_NOTE);
     // ONE chip, the card's own button, and the card rides in its detail.
     const calls = [a, b, again].map((r) => ({ name: 'propose_goal_target', ok: r.ok, mutated: false, proposal_id: r.proposal_id as string }));
     const chips = approvalChipsFor(calls, (id) => ({ proposal: proposals.get(id), result: a }));
@@ -946,6 +950,8 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     expect(prepared.nodes.find((n: Rec) => n.id === original.node_id)).toEqual(FX.graph.nodes.find((n: Rec) => n.id === original.node_id));
     expect(prepared.edges.filter((e: Rec) => e.from === original.node_id || e.to === original.node_id)).toEqual([]);
     expect(offer.public_label).toBe(omissionCard.replace(carriedCardEnd, RETAINED_LIMIT_QUANTITY_WITHHELD + ' ' + carriedCardEnd));
+    // ⛔ SAID ONCE (SCIENCE marketing capture, judge row 2): the card owns the withheld cause; the AI is told to point to it.
+    expect(String(offer.note).split(CARD_OWNS_WITHHELD_NOTE), 'the AI is told the card says it').toHaveLength(2);
     expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD)).toBe(true);
     expect(isAllowedRunAnalysisAssistantText(RETAINED_LIMIT_QUANTITY_WITHHELD + ' All conditions passed.')).toBe(false);
     s.said(FX.l20.turn_id);
