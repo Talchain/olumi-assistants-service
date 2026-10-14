@@ -31,7 +31,9 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // #2994 AMEND (14 Oct, AIE rulings 1ad7f7b2… Q2): #35 is the AIE's whole replaced entry; staging's three protection
 // sentences it did not see (its pin 0c90d3cc) follow as their own entry, pending the AIE: 21,010 → 21,188 bytes. Replacing
 // that HOST with the previous one on the SENT prefix reproduces 1a6ad616… (below).
-const HOST_SHA = '74f55b0cfd64634c4f9c1bedae675c5beaa8dfe47a349299a93c112d63d80c74';
+// BYPASS1 (14 Oct): two AIE_TEXT_PENDING entries appended last (Q4's next-step rule; the stated-figure rule): 21,188 → 22,536
+// bytes. Every captured body differs from the #2994 head's only by this HOST (10 leaves; 0 unexplained).
+const HOST_SHA = '680c7975dc16dfa325a10a1f29aae44566a7187c1dca33ebb2ebe5194fecbd9f';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -68,8 +70,9 @@ const HOST_SHA = '74f55b0cfd64634c4f9c1bedae675c5beaa8dfe47a349299a93c112d63d80c
 //   exactly those five pieces with staging's on the SENT body reproduces 96cd8417… and 35,782 bytes.
 // + #2994 AMEND (AIE Q2): the host contract above only: 32,007 → 32,185 bytes. The previous head's SENT prefix reproduces
 //   1a6ad616…; swapping in this HOST gives exactly this, and the captured bodies differ only by the five AIE constants.
-const RENDERED_SHA = '163ff51430cd8d1ac8eea92c852bfd0b64021a78d610fecf54d7ee086238260e';
-const RENDERED_BYTES = 32_185;
+// + BYPASS1: the host contract above only: 32,185 → 33,533 bytes; the #2994 head's SENT prefix with this HOST swapped in.
+const RENDERED_SHA = '91de769121ddef5a2c1b2a945a852dfc81cb80c7ec48fc68645bbebf77aedfa1';
+const RENDERED_BYTES = 33_533;
 /** ⛔ CHANGED EXPECTATION (prompt P13): the result-reply rule that replaced "N% of runs supported X", matched as SENT bytes. */
 const NAMING_RULE_FORM = 'Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present.';
 /** G (AIE #94 6133027121): the approved selected-Run scope line, verbatim; SENT once on every coaching path. */
