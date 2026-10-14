@@ -196,6 +196,26 @@ export function linkBandTheUserStated(
 const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[ \t]+/g, ' ').trim();
 
 /**
+ * T2A5 check (b), exported for every quote check (HIRING's relation and level checks reuse it): `quote` is a WHOLE statement
+ * of `message`, verbatim in one spelling (`plainQuote`). It starts at the message's start or after . ! ? ; or a line, and
+ * ends at the message's end or before one. A colon does not end a statement ("Alice says: …" keeps its speaker), so a
+ * substring that drops "Alice says …", "Olumi suggested …" or "I disagree" is not whole.
+ */
+export function wholeStatementIn(message: string, quote: unknown): boolean {
+  const said = typeof quote === 'string' ? plainQuote(quote) : '';
+  const text = plainQuote(message);
+  return said !== '' && quoteSpansIn(text, said).some((at) =>
+    /(?:^|[.!?;\n])\s*$/.test(text.slice(0, at)) && (/[.!?;]$/.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length))));
+}
+
+/** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */
+export function namesBothEnds(text: string, nodes: readonly Entity[], from: string, to: string): boolean {
+  const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  return [labelOf(from), labelOf(to)].every((end) =>
+    factorTheUserNamed(end, text, { options: [], others: nodes.map((n) => n.label).filter((x) => x !== end) }));
+}
+
+/**
  * ⭐ T2A5 (AIE rulings on 6157593360, 14 Oct): whose band a link set's `strength` is. The AI reads the meaning and quotes the
  * user's complete, still-operative statement as `from_words`; the host only VERIFIES it, mechanically:
  * - verbatim in a VERIFIED user message, this one or an earlier one (the latest that holds it);
@@ -215,13 +235,9 @@ export function linkBandSource(quote: unknown, band: InfluenceBand, conversation
   const reading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, i === now ? { bound } : undefined);
   // Copying is read more widely than credit: "<X> effects" in an earlier or unverified message also holds the band.
   const copyReading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, { bound: i === now ? bound : [] });
-  const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
-  const namesTheLink = (text: string): boolean => [labelOf(from), labelOf(to)].every((end) =>
-    factorTheUserNamed(end, text, { options: [], others: nodes.map((n) => n.label).filter((x) => x !== end) }));
+  const namesTheLink = (text: string): boolean => namesBothEnds(text, nodes, from, to);
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
-  // A statement ends at . ! ? ; or a line; a colon does not end one ("Alice says: …" keeps its speaker).
-  const whole = (message: string): boolean => said !== '' && quoteSpansIn(message, said).some((at) =>
-    /(?:^|[.!?;\n])\s*$/.test(message.slice(0, at)) && (/[.!?;]$/.test(said) || /^\s*(?:$|[.!?;\n])/.test(message.slice(at + said.length))));
+  const whole = (message: string): boolean => wholeStatementIn(message, said);
   let k = -1;
   for (let i = messages.length - 1; i >= 0 && k < 0; i -= 1) if (whole(messages[i]!)) k = i;
   const verified = k >= 0 && (reading(k, said)?.includes(band) ?? false) && (reading(k, messages[k]!)?.includes(band) ?? false)
