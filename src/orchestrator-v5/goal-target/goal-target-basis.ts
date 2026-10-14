@@ -335,23 +335,26 @@ export interface StatusQuoLevel {
 }
 
 /**
- * Amendment 1: the status quo row's own line. Never a Monte Carlo figure or interval, never a chance.
- * ⭐ Capacity judge row 3 (DL GO 14 Oct; AIE_TEXT_PENDING, `recovery/prompt/STATUS-QUO-ROW-DRAFT.txt`): on a LEVEL goal
- * whose level today is held, the line says what "no change" means here (today's level against the stated target) and the
- * one step that would give carrying on its own reading in the model. Every other case keeps the convention's own words.
+ * Amendment 1: the status quo row's own line, for the Run's recorded same-draw reference (`status_quo_by_assumption`) only.
+ * Never a Monte Carlo figure, an interval or a chance, and never a forecast: a held reference value is named as recorded,
+ * never compared with the target as a future event.
+ * ⭐ AIE #94 6160089127 (`recovery/codex/AIE-STATUS-QUO-REFERENCE-AND-NEXT-STEP-RULING-20261014.json`; capacity judge row 3):
+ * the two exact lines, byte for byte. The LEVEL line only where the caller holds the same Run's level and target in one
+ * unit; every other case the generic line.
  */
 export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string {
   const bound = level === undefined ? undefined : COMPARATOR_WORDS[level.comparator];
   if (level === undefined || bound === undefined || !Number.isFinite(level.today) || !Number.isFinite(level.target)
-    || level.unit.trim() === '') return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
-  const { today, comparator: c, target } = level;
-  const meets = c === '>=' ? today >= target : c === '>' ? today > target : c === '<=' ? today <= target : today < target;
-  // The shared formatter's rate separator (" / month") is the panel's; a sentence says the period in words, as the face does.
-  const say = (v: number): string => sayFigureAsWritten(v, level.unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
-  return `Carrying on as now: ‘${label}’ stays at ${say(today)} in this model, which `
-    + `${meets ? 'meets' : 'does not meet'} your target of ${bound} ${say(target)}, by assumption. `
-    + 'If it would change anyway, without any of these options, tell me what would change it and by how much, and Olumi '
-    + 'can add that to the model.';
+    || level.unit.trim() === '') {
+    return `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference, by assumption. `
+      + `Its own chance of meeting the recorded target is not shown. `
+      + `You can review what could make ‘${label}’ change if you carried on as now.`;
+  }
+  const say = (v: number): string => sayFigureAsWritten(v, level.unit);
+  return `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference. `
+    + `The model's held reference value is ${say(level.today)}; the target for this Run is ${bound} ${say(level.target)}. `
+    + `This option's own chance of meeting that target is not shown. `
+    + `You can review what could make ‘${label}’ change if you carried on as now.`;
 }
 
 /**

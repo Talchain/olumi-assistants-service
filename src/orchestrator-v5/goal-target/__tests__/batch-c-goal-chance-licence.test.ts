@@ -1121,7 +1121,8 @@ describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the R
     expect(l.status_quo).toBeUndefined();
     expect(l.withheld_option_ids).toContain('carry_on');
     expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Annual spend') } });
-    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change/);
+    // AMENDED (AIE #94 6160089127): the single-target status-quo line now reads "…unchanged reference…"; still neither is said.
+    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change|unchanged reference/);
   });
 
   it('RED on e58b8dbd: every condition — both targets and the paired limit — on the same-draw reference: the line names all three, no figure', () => {
