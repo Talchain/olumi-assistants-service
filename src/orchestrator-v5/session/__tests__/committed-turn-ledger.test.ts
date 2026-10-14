@@ -28,7 +28,7 @@ const row = (turn_id: string, user_message: string | null, mutation: string | nu
   ({ id: `${turn_id}-${at}`, turn_id, user_message, model_version_mutation_id: mutation, created_at: at });
 
 describe('readCommittedTurnLedger', () => {
-  it('commit turns and message turns, distinct and oldest first; the first message\'s text as the brief, the later ones as context; scoped to the scenario', async () => {
+  it('commit turns and message turns, distinct and oldest first; only the first message\'s text; scoped to the scenario', async () => {
     const { store, seen } = storeOver({ data: [
       row('brief-turn', '', null, '02:12:58'),
       row('graph_registration:c3beefc1-8cdc-4a6e-b7ae-5b1bac596790', null, 'b5d33658-68ae-52f1-addc-2d70e062cd4b', '02:14:02'),
@@ -41,7 +41,6 @@ describe('readCommittedTurnLedger', () => {
       write_turn_ids: ['graph_registration:c3beefc1-8cdc-4a6e-b7ae-5b1bac596790', 'ui-edit-turn'],
       user_message_turn_ids: ['brief-turn', 'l20-turn'],
       first_user_message: 'Should I hire a marketing manager?',
-      later_user_messages: [{ turn_id: 'l20-turn', text: 'I have two goals' }],
       complete: true,
     });
     expect(seen.table).toBe('v5_conversation_turns');

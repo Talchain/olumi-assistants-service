@@ -23,7 +23,7 @@ import { retainedLimitOnlyNodeIds, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../.
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
-import { constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, type CallStructuredModel } from '../runtime/build-model.js';
+import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -97,9 +97,7 @@ const candidate = (): Rec => ({
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
 function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void;
   /** A route that stores something other than the approved candidate, and acknowledges what it stored (AIE B34). */
-  beforeAck?: (stored: Rec) => void;
-  /** The register route refuses with this 409 code, writing nothing (as every 409 of `assist.v1.scenario-graph-register.ts` does). */
-  refuse?: string } = {}) {
+  beforeAck?: (stored: Rec) => void } = {}) {
   let graph: Rec = structuredClone(opts.graph ?? FX.graph);
   const commits: { turn_id: string; bytes: string }[] = [];
   const ledger = {
@@ -114,7 +112,6 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
     }
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
       const b = body as { graph: Rec; expected_graph_hash?: unknown; expected_graph_identity_hash?: unknown; operation_id?: string };
-      if (opts.refuse !== undefined) return { status: 409, json: { details: { code: opts.refuse } } };
       const stored = GraphV3.parse(b.graph) as Rec;
       opts.beforeAck?.(stored);
       const bytes = JSON.stringify(stored);
@@ -541,185 +538,6 @@ describe('approve → save → Run → cold reopen, on the same model', () => {
   });
 });
 
-/** A lane whose drafter records what it was sent, with the objections reader the row supplies. */
-function laneWith(s: ReturnType<typeof server>, o: { draft?: () => Rec; objections?: () => Promise<readonly { finding_id: string; analysis_id: string; statement: string }[]> } = {}) {
-  const inputs: string[] = [];
-  const proposals = new ProposalStore();
-  const call = (async (req: { input: string }) => { inputs.push(String(req.input)); return { text: JSON.stringify((o.draft ?? candidate)()) }; }) as unknown as CallStructuredModel;
-  const caps = createAgentCapabilities(s.dispatch, proposals, call, 'full', undefined, {
-    readCommittedTurnLedger: s.readCommittedTurnLedger,
-    readStatedObjections: o.objections ?? (async () => []),
-  });
-  return { caps, proposals, inputs, drafts: () => inputs.length };
-}
-const typedBrief = `${FX.brief_text.trim()}\n\n${L20.trim()}`;
-const cardOf = (proposals: ProposalStore, r: Rec): string => String(proposals.get(String(r.proposal_id))!.public_label);
-const candidateOf = (proposals: ProposalStore, r: Rec): Rec => (proposals.get(String(r.proposal_id))!.operations[0]!.value as Rec).candidate as Rec;
-
-/**
- * ⭐ CURRENT-MODEL CALLER (PL #94 07:32Z, DL-ACKed): later human work no longer refuses a revised draft; it is KEPT.
- * What the user set is carried by identity with its own stamp; later saved changes, messages and objections are the
- * drafter's context, never the user's verified words; the card names what is kept, added and omitted against the current
- * saved model. An unedited draft is prepared exactly as before.
- */
-describe('later human work is kept: carried by identity, read as context, named on the card', () => {
-  it('CONTROL: an unedited draft is prepared exactly as before: the drafter is sent the brief and the typed goal, nothing else', async () => {
-    const { caps, inputs } = laneWith(server());
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r).toMatchObject({ ok: true, mutated: false });
-    expect(inputs).toEqual([typedBrief]);
-  });
-
-  it('⭐ G1 (adopted): a reviewed Olumi estimate is KEPT: carried onto the revision with its review, named on the card, and its saved model is the drafter\'s context', async () => {
-    const g = structuredClone(FX.graph);
-    const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
-    f.observed_state = { ...f.observed_state, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } };
-    expect(humanMaterialAfterTheDraft(g)).toEqual(['your review of the value for \u2018Advertising spend\u2019']);
-    const { caps, proposals, inputs } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect(inputs).toHaveLength(1);
-    expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
-    const carried = (candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
-    expect(carried.observed_state).toEqual(f.observed_state);
-    expect(cardOf(proposals, r)).toContain('Kept as you set them: your review of the value for \u2018Advertising spend\u2019. ');
-  });
-
-  it('⭐ Q3: the user\'s own figure is carried back over the drafter\'s, with its stamp (a drafter never re-authors it)', async () => {
-    const g = structuredClone(FX.graph);
-    const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
-    f.observed_state = { unit: 'GBP/year', value: 0.4, raw_value: 40000, cap: 100000, source: 'user_specified', extractionType: 'explicit' };
-    const { caps, proposals } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const node = (candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
-    expect(node.observed_state).toEqual(f.observed_state);
-    expect(cardOf(proposals, r)).toContain('Kept as you set them: your figure for \u2018Advertising spend\u2019. ');
-  });
-
-  it('a revision that lacks a part the user set is not offered, and the card names what it would lose', async () => {
-    const g = structuredClone(FX.graph);
-    const f = (g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!;
-    f.observed_state = { unit: 'score out of 100', value: 0.6, raw_value: 60, cap: 100, source: 'user_specified', extractionType: 'explicit' };
-    expect(humanMaterialAfterTheDraft(g)).toEqual(['your figure for \u2018Marketing experience\u2019']);
-    const { caps, inputs } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(inputs).toHaveLength(1);
-    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
-    expect(r.detail).toBe('The revised draft does not hold your figure for \u2018Marketing experience\u2019, so nothing was offered and the model is unchanged. '
-      + 'Tell the user plainly which of their changes a revised draft would lose.');
-  });
-
-  it('Q3, a level: the user\'s setting for an option is carried onto the same option and factor of the revision, re-keyed', async () => {
-    const g = structuredClone(FX.graph);
-    const option = (g.nodes as Rec[]).find((n) => n.id === 'hire_marketing_manager')!;
-    const cell = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_specified' };
-    option.interventions = { ...option.interventions, advertising_spend: cell };
-    const sameOption = (): Rec => { const c = candidate(); c.options[0].label = 'Hire marketing manager'; return c; };
-    const { caps, proposals } = laneWith(server({ graph: g }), { draft: sameOption });
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const c = candidateOf(proposals, r);
-    const factor = (c.nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
-    expect(((c.nodes as Rec[]).find((n) => n.label === 'Hire marketing manager')!.interventions as Rec)[factor.id]).toEqual(cell);
-    expect(cardOf(proposals, r)).toContain('Kept as you set them: your level for \u2018Hire marketing manager\u2019 on \u2018Advertising spend\u2019. ');
-  });
-
-  it('Q3, a link: the user\'s reviewed link is carried between the same two parts of the revision, with its review', async () => {
-    const g = structuredClone(FX.graph);
-    const edge = (g.edges as Rec[]).find((e) => e.from === 'advertising_spend' && e.to === 'annual_marketing_spend')!;
-    edge.provenance = { ...edge.provenance, reviewed_by_user: { intent: 'confirm' } };
-    const { caps, proposals } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const c = candidateOf(proposals, r);
-    const id = (label: string): string => (c.nodes as Rec[]).find((n) => n.label === label)!.id as string;
-    const carried = (c.edges as Rec[]).filter((e) => e.from === id('Advertising spend') && e.to === id('Annual marketing spend'));
-    expect(carried).toHaveLength(1);
-    expect(carried[0]!.provenance).toEqual(edge.provenance);
-  });
-
-  it('Q3, a limit: the user\'s own limit row replaces the revision\'s row with the same terms, so it stays the user\'s', async () => {
-    const g = structuredClone(FX.graph);
-    const row = (g.goal_constraints as Rec[]).find((c) => c.node_id === 'founder_marketing_time')!;
-    row.provenance = 'user';
-    const { caps, proposals } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const c = candidateOf(proposals, r);
-    const founder = (c.nodes as Rec[]).find((n) => n.label === 'Founder marketing time')!;
-    const rows = (c.goal_constraints as Rec[]).filter((x) => x.node_id === founder.id && x.operator === '<=' && x.value === 25);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.provenance).toBe('user');
-  });
-
-  it('ADVERSARIAL (equal figure, other identity): a user row with the same figure in another unit replaces nothing; it is added beside the revision\'s', async () => {
-    const g = structuredClone(FX.graph);
-    const row = (g.goal_constraints as Rec[]).find((c) => c.node_id === 'founder_marketing_time')!;
-    Object.assign(row, { provenance: 'user', unit: 'hours/week', constraint_id: 'agent-lane:founder_marketing_time:<=:hours' });
-    delete row.provenance_unit_relabelled;
-    const { caps, proposals } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const c = candidateOf(proposals, r);
-    const founder = (c.nodes as Rec[]).find((n) => n.label === 'Founder marketing time')!;
-    const rows = (c.goal_constraints as Rec[]).filter((x) => x.node_id === founder.id && x.value === 25);
-    expect(rows.map((x) => [x.unit, x.provenance]).sort()).toEqual([['%', 'explicit'], ['hours/week', 'user']]);
-  });
-
-  it('a part the user added that the revision lacks: not offered, naming it', async () => {
-    const g = structuredClone(FX.graph);
-    Object.assign((g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!, { provenance: 'user_specified' });
-    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Marketing experience\u2019, which you added']);
-    const r = await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
-    expect(String(r.detail)).toContain('does not hold \u2018Marketing experience\u2019, which you added, so nothing was offered');
-  });
-
-  it('G2 (adopted): a saved edit since the draft no longer refuses; the card names what the revision adds and omits against the current saved model', async () => {
-    const { caps, proposals, inputs } = laneWith(server({ ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'd920b614-9d04-413f-a047-dab6bcf807ac'] } }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
-    const card = cardOf(proposals, r);
-    expect(card).toMatch(/Added to the current model: [^.]*\u2018Conversion rate\u2019/);
-    expect(card).toMatch(/Not in the revised draft: [^.]*\u2018Marketing experience\u2019/);
-    expect(card).not.toContain('Kept as you set them');
-  });
-
-  it('G3 (adopted): a later message is the drafter\'s context only, after the brief and typed goal, never part of them; the press binds it', async () => {
-    const s = server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'],
-      later_user_messages: [{ turn_id: 'chip-turn-run-analysis', text: 'Run the analysis' }] } });
-    const { caps, inputs } = laneWith(s);
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
-    expect(inputs[0]!.endsWith(`\n\n${LATER_MESSAGES_CONTEXT_LEAD} ["Run the analysis"]`)).toBe(true);
-    s.said(FX.l20.turn_id);
-    const applied = await caps.authoriseChange(pressed(String(r.proposal_id)), { proposal_id: r.proposal_id } as never);
-    expect(applied, JSON.stringify(applied).slice(0, 600)).toMatchObject({ ok: true, applied: true });
-  });
-
-  it('a message after the card that the offer did not bind still refuses the press', async () => {
-    const s = server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'],
-      later_user_messages: [{ turn_id: 'chip-turn-run-analysis', text: 'Run the analysis' }] } });
-    const { caps } = laneWith(s);
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    s.said(FX.l20.turn_id);
-    s.said('another-message-after-the-card');
-    const applied = await caps.authoriseChange(pressed(String(r.proposal_id)), { proposal_id: r.proposal_id } as never);
-    expect(applied).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
-    expect(s.commits).toHaveLength(0);
-  });
-
-  it('a recorded objection is the drafter\'s context, verbatim', async () => {
-    const { caps, inputs } = laneWith(server(), { objections: async () => [{ finding_id: 'f1', analysis_id: 'a1', statement: 'Agency fees will not fall this year.' }] });
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect(inputs[0]!.endsWith(`\n\n${OBJECTIONS_CONTEXT_LEAD} ["Agency fees will not fall this year."]`)).toBe(true);
-  });
-});
-
 /** AIE 6128697025 (row 10), verbatim: said whenever a target's quantity is not on the canvas, then what is missing. */
 const AIE_NOT_HELD = 'This goal change was not applied. The model needs quantities or conditions it does not yet hold, and this route cannot add them without replacing your saved work.';
 
@@ -742,27 +560,20 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     expect(typeof r.proposal_id).toBe('string');
   });
 
-  it('G3 (unknown): a later message whose text this read does not return still refuses, typed or chip alike', async () => {
-    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }));
+  it('G2: one saved edit since the draft (a UI edit\'s commit row, as on this scenario at 02:18:35Z) refuses', async () => {
+    await refusedAtOffer(server({ ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'd920b614-9d04-413f-a047-dab6bcf807ac'] } }));
   });
 
-  it('G2 (unknown): a ledger with no record that the draft is the one built from the brief still refuses', async () => {
-    await refusedAtOffer(server({ ledger: { write_turn_ids: ['d920b614-9d04-413f-a047-dab6bcf807ac'] } }));
-  });
-
-  it('a target for the goal the user set still refuses (PL 07:32Z: the human-goal-target refusal is kept)', async () => {
+  it('G1: a reviewed Olumi estimate refuses (an adopted figure is the user\'s act, whatever its number)', async () => {
     const g = structuredClone(FX.graph);
-    Object.assign((g.nodes as Rec[]).find((n) => n.kind === 'goal')!, { threshold_source: 'user' });
-    expect(humanMaterialAfterTheDraft(g)).toEqual(['your target for \u2018product feature launch\u2019']);
+    const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
+    f.observed_state = { ...f.observed_state, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } };
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['your review of the value for \u2018Advertising spend\u2019']);
     await refusedAtOffer(server({ graph: g }));
   });
 
-  it('objections that cannot be read still refuse', async () => {
-    const s = server();
-    const { caps, drafts } = laneWith(s, { objections: async () => { throw new Error('stated_objections_read_failed'); } });
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
-    expect(drafts()).toBe(0);
+  it('G3: a message between the brief and this turn refuses, typed or chip alike', async () => {
+    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }));
   });
 
   it('an omission carries the founder-time row forward unchanged through approval, Run and reopen', async () => {
@@ -865,20 +676,6 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
     expect(s.commits).toHaveLength(0);
-  });
-
-  it.each([
-    ['GRAPH_STALE', 'superseded'], ['OPERATION_ID_REUSED', 'not_applied'], ['SHARE_BY_DATE_SERVER_OWNED', 'not_applied'],
-  ])('a definite 409 from the register (%s) wrote nothing: the press says not replaced (%s), never "changed"', async (code, refusal) => {
-    const s = server({ refuse: code });
-    const { caps } = lane(s);
-    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    s.said(FX.l20.turn_id);
-    const before = s.bytes();
-    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
-    expect(r).toMatchObject({ ok: false, mutated: false, applied: false, refusal });
-    expect(s.commits).toHaveLength(0);
-    expect(s.bytes()).toBe(before);
   });
 
   it('G3 at the press: a message after L20 and before the press refuses the replacement', async () => {
