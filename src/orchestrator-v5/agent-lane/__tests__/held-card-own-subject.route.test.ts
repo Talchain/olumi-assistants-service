@@ -51,8 +51,10 @@ const call = (name: string, args: Rec) => ({ output: [{ type: 'function_call', n
 const DEADLINE_ARGS = { deadline_words: 'three months', rationale: 'We have an urgent launch date in the next three months.' };
 /** Served turn 04's two links, as served turn 05 recorded them ("slight"; "moderate"). */
 const LINK_ARGS = { links: [
-  { from_label: 'Mid-weight developers', to_label: 'Code quality degradation', strength: 'weak' },
-  { from_label: 'Code quality degradation', to_label: 'Productivity', strength: 'moderate' },
+  // ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it:
+  // Olumi's own new estimate, with its basis (the hiring card's served shape).
+  { from_label: 'Mid-weight developers', to_label: 'Code quality degradation', strength: 'weak', origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model' },
+  { from_label: 'Code quality degradation', to_label: 'Productivity', strength: 'moderate', origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model' },
 ], rationale: 'Olumi’s starting estimates for the quality pathway, for you to adopt or correct.' };
 
 function world() {

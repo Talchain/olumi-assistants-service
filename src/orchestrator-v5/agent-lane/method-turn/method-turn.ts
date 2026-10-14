@@ -588,8 +588,9 @@ export type CardCall =
 /**
  * The ONE change card the method turn ends in (RC `action_target`), as the existing door's own call. It authors no
  * figure: a link is offered at the band the writer itself reads as current, read through RC's `linkTargetOf` (#2477:
- * the ONE read of a link's mean and band, shared with the S1 picker), with no `from_words`, so it is
- * recorded as Olumi's estimate that the user accepts or edits; a factor is offered as Olumi's STORED figure to keep
+ * the ONE read of a link's mean and band, shared with the S1 picker), with no `from_words` and declared `stored`, so the door
+ * carries that band's stored origin (#3002, AIE packet 2b19ae59): a review of Olumi's estimate, the user's "already", any
+ * other origin left out as unknown; a factor is offered as Olumi's STORED figure to keep
  * (`keep`: the writer re-reads the stored figure and refuses anything not Olumi's own). Labels are the graph's, which
  * the writer resolves.
  *

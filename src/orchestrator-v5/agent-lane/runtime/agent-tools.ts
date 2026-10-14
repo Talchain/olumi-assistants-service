@@ -455,9 +455,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'Use it when the user gives strengths for more than one link in one message, or asks Olumi to size links for them '
       + '(they ask what you recommend, then agree to it). This does NOT change anything: it prepares ONE change and returns its id, '
       + 'which you keep for authorise_change: show the user what each link will hold, never the id, before they approve. '
-      + 'A link is recorded as the user\u2019s own ONLY when its `from_words` are the user\u2019s exact words from THIS message naming that link '
-      + '(one of its ends) AND its band; naming the band a link already sits in keeps it as it is. '
-      + 'Every other link is recorded as OLUMI\u2019S ESTIMATE, applied with their approval \u2014 never as theirs \u2014 and you must say which are which. '
+      + 'A link band is recorded as the user\u2019s own only when from_words quotes their complete, still-operative statement about that directed link, character for character from a verified user message in this conversation, including the words identifying its speaker or source, qualification and any negation. Use their latest applicable statement. A report of someone else\u2019s view, a question or dispute, or a band word about evidence rather than this link\u2019s effect does not establish their own link estimate. Bind the quote to this actual link through its stated ends or the current unambiguous directed selection; naming one endpoint alone is insufficient. Retain the full source and any competing statements separately. If positive human authorship cannot be verified, preserve the held origin or unknown; omission of from_words does not make copied or unknown material Olumi\u2019s estimate. Only an explicitly new, grounded Olumi proposal may be labelled Olumi\u2019s estimate, with its own basis and complete approval card. Naming an existing band retains its source and values. '
       + 'Directions are kept: a link the user says runs the other way is propose_link_strength, one link at a time. '
       + 'A strength the user set themselves is never replaced by an estimate. The set is written whole or not at all.' + SLIGHT_IS_WEAK,
     parameters: obj({
@@ -467,9 +465,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         items: obj({
           from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
           to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
-          strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
-          from_words: { type: 'string', description: 'ONLY when the user named this link\u2019s band: their exact words from THIS message that name this link (one of its ends) and the band. Leave it out for Olumi\u2019s estimate.' },
-        }, ['from_label', 'to_label', 'strength']),
+          // #3002: the AIE's exact text (packet 2b19ae59, #94 6163353417), replacing "or Olumi's estimate when they did not".
+          strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band for this specific directed relationship. Declare its origin separately: a positively verified human statement, an attributed third-party claim, or a genuinely new grounded Olumi estimate. Missing human words do not make the band Olumi\'s. An unknown or unsupported origin stays unknown and is not offered as a change.' },
+          from_words: { type: 'string', description: 'For a positively verified user-authored band only: copy the complete latest applicable statement about this directed link verbatim from a verified user message, retaining speaker/source, qualification and negation. A report, question, dispute, or evidence-strength word is not the user\u2019s own link estimate. Otherwise omit human-credit words and preserve the original source separately; omission alone grants neither AI authorship nor a new estimate.' },
+          // #3002 known-origin transport: the AIE's exact text (packet 491cee5a, #94 6162480601). The host verifies each declared
+          // origin and never writes an unverified one; unknown is the existing outcome.
+          origin: { type: 'string', enum: ['user', 'third_party', 'olumi'], description: 'Declare the source of this specific estimate, independently of approval. \u2018user\u2019 means a positively verified retained human statement supplies this estimate for this subject, quantity, units, reference and period; provide its complete bound quotation. A user-role message, approval, copied statement or incomplete/reseeded history is not proof. \u2018third_party\u2019 means the estimate comes from an identified person, report or other source; retain that source, its complete claim and verification state. \u2018olumi\u2019 means a genuinely new estimate Olumi is making now, with its own grounded basis for this same quantity and context. A false user flag, nonempty basis, paraphrase or copied figure does not make an estimate Olumi\u2019s. Preserve known stored human, AI or third-party origin; if origin cannot be verified, keep it unknown rather than inventing one.' },
+          // #3002: the two companion fields the origin text names, the AIE's exact texts (packet 2b19ae59, #94 6163353417).
+          source: { type: 'string', description: 'Only with origin third_party: identify the person, publication or other source to which this specific directed-link band is attributed, using the retained source words. Preserve its complete applicable claim, qualifications, reference, period and verification state in the existing readable source and context. A name or citation alone does not verify the band or make it the user\'s judgement.' },
+          basis: { type: 'string', description: 'Only with origin olumi: explain the grounded reasons for the genuinely new estimate Olumi is making now for this directed link, at its actual reference, period and conditions. A nonempty sentence, copied band, existing stored estimate or statement that the user did not supply it is not a basis for new AI authorship. If revising a prior estimate, identify the new estimate and its grounds while retaining the prior value and source separately. Preserve the full evidence and qualifications in the existing readable context.' },
+        }, ['from_label', 'to_label', 'strength', 'origin']),
       },
       rationale: { type: 'string', description: 'What the user asked for, in their words.' },
       whole_request: WHOLE_REQUEST,
@@ -927,7 +932,10 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
-    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string }[];
+    // #3002 known-origin transport: whose band the AI declares (`origin`, required in the tool schema), with its quote, cited
+    // source or Olumi's own basis. An absent or unknown origin is never written.
+    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string;
+      origin?: 'user' | 'third_party' | 'olumi'; source?: string; basis?: string }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */

@@ -518,7 +518,11 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
 
   const code = String(r.refusal ?? '');
   const unconfirmed = UNCONFIRMED_WORDS[code];
-  if (unconfirmed !== undefined) return unconfirmed;
+  // A capability's own unconfirmed receipt (the link set's, AIE packet 2b19ae59) is said instead of the generic words; a
+  // re-encoded sibling disclosure keeps them beside it.
+  if (unconfirmed !== undefined) {
+    return typeof r.follow_up === 'string' && !Array.isArray(r.reencoded_siblings) ? withoutAgentDirections(r.follow_up).text : unconfirmed;
+  }
   const mutated = r.mutated === true;
   // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
   if (code === 'approval_required' && !mutated) return exactlyOneCardWaits ? APPROVAL_REQUIRED_WORDS : APPROVAL_REQUIRED_BUTTON_WORDS;
