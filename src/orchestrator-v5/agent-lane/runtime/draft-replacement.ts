@@ -194,7 +194,7 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
      * `GBP/year` as `£` on the SAME constraint id, so it was neither kept nor carriable (the id collides) and the whole card
      * was refused. That row is carried UNCHANGED, the earlier row replacing the candidate's, only when the identity, the
      * quantity, the stated comparator, the value and the frame are the same, the earlier unit is the currency over ONE period
-     * (`ratePeriodOf`, and nothing else after the currency: not "GBP/customer", "GBP million" or "GBP MRR/year"; Codex buddy),
+     * (`ratePeriodOf`, and nothing else after the currency: not "GBP/customer", a scaled unit or "GBP MRR/year"; Codex buddy),
      * the candidate's unit has nothing after its currency, and the two figures say the same amount. `sameFigure` is NOT
      * loosened: "£" never stands for a yearly limit by itself, and any other same-id difference still refuses.
      */

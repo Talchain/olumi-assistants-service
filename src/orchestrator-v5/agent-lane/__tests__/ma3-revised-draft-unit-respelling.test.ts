@@ -197,6 +197,8 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     for (const [said, args] of [
       ["We want at least 20 new customers in first 6 months.", { ...customers, measures: 'new customers in first 6 months' }],
       ["We want at least 20 new customers per month.", { ...customers, unit: 'customers/month' }],
+      // A short qualifier is still a qualifier (DL): "UK" is not a word of the card's target, so it is not held.
+      ["We want at least 20 new UK customers in the first 3 months.", { ...customers, measures: 'new UK customers' }],
     ] as const) {
       const r = await caps.proposeGoalTarget!({ ...turn, turn_id: `turn-${said.length}`, user_turn_text: said, user_text: `${FX.brief_text}\n${said}` } as never,
         { ...args, rationale: said } as never) as Rec;

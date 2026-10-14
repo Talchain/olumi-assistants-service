@@ -3586,16 +3586,16 @@ export function createAgentCapabilities(
   };
 
   /**
-   * Every word (three letters or more, `wordsOf`, so "a", "in" and "of" never count) and every number of `call` is one of
+   * Every word and number of `call`, of ANY length ("UK" too: an unmatched qualifier fails safe to "not held"; DL), is one of
    * `name`'s, exactly, singular or plural; the definite article alone is not a word of the quantity ("new customers in the
    * first 3 months" names ‘New customers in first 3 months’; Codex buddy r2). "per", periods and numbers stay exact.
    */
   const namedWithin = (call: string, name: string): boolean => {
-    const one = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
-    const own = new Set(wordsOf(name).map(one));
-    const numbers = new Set(name.match(/\d+(?:\.\d+)?/g) ?? []);
-    const words = wordsOf(call).filter((w) => !/^\d/.test(w) && w !== 'the');
-    return words.length > 0 && words.every((w) => own.has(one(w))) && (call.match(/\d+(?:\.\d+)?/g) ?? []).every((n) => numbers.has(n));
+    const tokens = (s: string): string[] => (s.toLowerCase().match(/\p{N}+(?:\.\p{N}+)?|\p{L}+/gu) ?? [])
+      .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+    const own = new Set(tokens(name));
+    const named = tokens(call).filter((w) => w !== 'the');
+    return named.some((w) => /\p{L}/u.test(w)) && named.every((w) => own.has(w));
   };
 
   /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
