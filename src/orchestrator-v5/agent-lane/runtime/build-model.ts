@@ -157,7 +157,7 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
         if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence' || name === 'already_true_evidence' || name === 'evidence' || name === 'source_quote'
-          || name === 'unknown_concerns' || name === 'deadline_words')) continue;
+          || name === 'unknown_concerns' || name === 'deadline_words' || name === 'statements')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -389,6 +389,18 @@ export function buildCandidateSchema(): Record<string, unknown> {
     unknown_concerns: { type: 'array', description:
       'One entry for each entry in unknowns, in the same order: copy the complete question exactly and identify what every substantive part is about. concerns lists only the EXACT declared labels of the goal, factors, options, risks or outcomes, with a directed link written as "<from label> → <to label>". Include referents in quoted facts, ranges, forecasts, qualifications, conditions or dissent within the question. Use an empty list when the question concerns the model as a whole or its complete meaning cannot be bound uniquely to the declared labels and directed pairs. Never invent a label, guess a link from a shared number or omit a substantive referent. These are proposed bindings, not evidence that a question is resolved or may be removed.',
       items: obj({ unknown: { type: 'string' }, concerns: { type: 'array', items: { type: 'string' } } }, ['unknown', 'concerns']) },
+    // ⭐ SYSTEM 2: what the brief states, by subject and field, each a complete verbatim sentence (STATEMENTS_INSTRUCTION). Optional in the
+    // contract, required in what is sent; verified once by the host (`sourceMapOf`), never trusted as written.
+    statements: { type: 'array', description: 'Every quantity, condition, timing, measure or current state the brief states, as STATEMENTS describes.',
+      items: obj({
+        quote: { type: 'string' },
+        subject: obj({ kind: { type: 'string', enum: ['goal', 'factor', 'option', 'risk', 'link'] }, label: { type: 'string' },
+          to_label: { anyOf: [{ type: 'string' }, { type: 'null' }] }, factor_label: { anyOf: [{ type: 'string' }, { type: 'null' }] } }, ['kind', 'label', 'to_label', 'factor_label']),
+        field: { type: 'string', enum: ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation'] },
+        form: { type: 'string', enum: ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now', 'describes'] },
+        value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, low: { anyOf: [{ type: 'number' }, { type: 'null' }] }, high: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+        unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, qualifier: { anyOf: [{ type: 'string' }, { type: 'null' }] }, conditions: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      }, ['quote', 'subject', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions']) },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 
@@ -431,6 +443,12 @@ export const AIE_APPROVED_DECLARED_SUM = {
 // ⭐ DRAFTER TEXT 3 (DL 14 Oct; the AIE's texts, packet 281e8b3d, #94 6162120876): the goal is the user's governing aim, and a
 // date keeps its role (hiring raw 9d75b605 chose "Urgent launch"); the deadline is asked once, by the host
 // (`chanceGoalDeadlineAsk`); today's level of the same whole goal quantity, stated in other words, is its level (capacity).
+/**
+ * ⭐ SYSTEM 2 (DL re-plan 14 Oct): the drafter cites the brief ONCE, as statements the host verifies (`construction-source-map.ts`).
+ * AIE_TEXT_PENDING: recovery/sys2/AIE-STATEMENTS-PARAGRAPH.txt is with the AIE; this is that draft, byte for byte in meaning.
+ */
+export const STATEMENTS_INSTRUCTION = 'STATEMENTS. For every quantity, condition, timing, measure or current state the brief states, add one entry to statements: quote, the complete sentence copied verbatim from the brief; subject, the drafted item it is about (kind goal, factor, option, risk or link, with its label; for a link, both labels; for an option\u2019s value, the option label and factor_label); field, one of level (a current or stated value, including an option\u2019s value for a factor), target (what the goal must reach), holds_now (a condition already true today), occurrence (how likely a risk is), lead (when an effect starts or how long it takes), effect (how much one thing changes another), measure (what the goal counts, and whether at a month or over a period) or relation (a quantity defined by others, such as developers \u00d7 share of time = developer-equivalents); form, point, range, lower_bound, upper_bound, holds_now or describes; and the figure or figures exactly as the sentence states them, in its own unit, with any qualifier and conditions in the user\u2019s words. A sentence may give several statements. Never add a statement for your own estimate, and never shorten a sentence to fit. Where no sentence states it, there is no statement: keep the value as your labelled estimate, or put the question in unknowns.';
+
 export const BUILD_INSTRUCTIONS = [
   // ⭐ OLUMI'S PURPOSE (Paul's principle; DL 14 Oct): the drafter is sent alone, so it carries the core lines itself.
   ...OLUMI_PURPOSE_CORE_LINES,
@@ -578,6 +596,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'SEVERAL TARGETS. When the user names several success targets, keep one as the goal and each other as a constraint with role target. Give each its stated comparator and target frame by the same level/change rules; never force a change target into level. For the conversion/new-customer example both are level targets over the same first three months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused clarification, rather than inventing a shared period or claiming the full conjunction. Budget, time and other constraints keep role limit. A period count is the cumulative total from that period\'s start, and a period conversion rate is the conversion rate over that window, never a month-end snapshot.',
   'Labels are NAMES, not sentences.',
   'Set decision_question to the brief\'s governing question or statement of intent, copied VERBATIM as one span of 8–240 characters, including a statement such as \'We need to decide whether ...\'. Preserve its compound purposes and conditions. Use null only when no such span exists. Never reword it or turn exploration into a decision.',
+  STATEMENTS_INSTRUCTION,
   'Output only the schema.',
 ].join(' ');
 
