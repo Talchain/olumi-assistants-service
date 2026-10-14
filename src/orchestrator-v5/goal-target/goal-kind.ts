@@ -151,6 +151,8 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   const heldGraph = withHeldUserLinks(graph);
   const heldEdges = Array.isArray(heldGraph.edges) ? heldGraph.edges.filter(isRec) : [];
   const teams: string[] = [];
+  const ratioParts: { readonly ratio: number; readonly link: Rec; readonly held: Rec }[] = [];
+  let teamMoments: { readonly mean: number; readonly sd: number } | undefined;
   const options = nodes.filter(n => n.kind === 'option');
   if (options.length === 0) return null;
   for (const e of inbound) {
@@ -178,23 +180,35 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
           : !finite(source.observed_state.std) || source.observed_state.std < 0
             || Math.abs(source.observed_state.std - expected.sd) > 0.0005)) return null;
       teams.push(source.id);
+      teamMoments = expected;
       continue;
     }
     // The option's extra share rides on its switch -> goal STRENGTH, exactly
     // as Science's ISL harness. A natural size alone cannot supply lead time.
     const c = source.observed_state.extra_share_by_date;
     const ne = isRec(e.provenance) && isRec(e.provenance.natural_effect) ? e.provenance.natural_effect : undefined;
-    if (!isRec(c) || c.deadline !== deadline || !isShareCalendarDate(c.reference_date)
-      || c.unit !== `${unit} per month` || !finite(c.monthly_share) || c.monthly_share < 0 || c.monthly_share > 100
-      || !finite(c.lead_low) || c.lead_low < 0 || !finite(c.lead_high) || c.lead_high < c.lead_low
-      || source.observed_state.value !== 0 || source.observed_state.std !== undefined
-      || ne?.amount_unit !== unit || ne.per_source_change !== 1 || ne.strength_mean !== e.strength.mean
-      || e.exists_probability !== 1 || edges.some(l => l.to === source.id && (
+    const switchHeld = source.observed_state.value === 0 && source.observed_state.std === undefined
+      && ne?.amount_unit === unit && ne.per_source_change === 1 && ne.strength_mean === e.strength.mean
+      && e.exists_probability === 1 && !edges.some(l => l.to === source.id && (
         // Only option -> switch structure is allowed here; the team part remains a root.
         !options.some(o => o.id === l.from) || l.edge_type === 'bidirected'
         || !isRec(l.strength) || l.strength.mean !== 1
         || l.exists_probability !== 1 || l.effect_direction !== 'positive'))
-      || options.some(o => setting(o) !== 0 && setting(o) !== 1)) return null;
+      && options.every(o => setting(o) === 0 || setting(o) === 1);
+    // L4 (DL ruling (A)): a capacity-ratio part is sized from the team part itself; its moments are checked after the loop.
+    if (isRec(c) && c.capacity_ratio !== undefined) {
+      if (c.deadline !== deadline || !isShareCalendarDate(c.reference_date) || c.unit !== `${unit} per month`
+        || !finite(c.capacity_ratio) || c.capacity_ratio < 1 || c.monthly_share !== undefined
+        || !isRec(c.ratio_sizing) || c.ratio_sizing.rule !== 'marginal_exact' || !switchHeld
+        || !finite(e.strength.mean) || !finite(e.strength.std) || !finite(held.strength.mean) || !finite(held.strength.std)
+        || held.exists_probability !== 1) return null;
+      ratioParts.push({ ratio: c.capacity_ratio, link: e.strength as Rec, held: held.strength as Rec });
+      continue;
+    }
+    if (!isRec(c) || c.deadline !== deadline || !isShareCalendarDate(c.reference_date)
+      || c.unit !== `${unit} per month` || !finite(c.monthly_share) || c.monthly_share < 0 || c.monthly_share > 100
+      || !finite(c.lead_low) || c.lead_low < 0 || !finite(c.lead_high) || c.lead_high < c.lead_low
+      || !switchHeld) return null;
     const D = timeBetween(c.reference_date, deadline, 'months');
     if (D <= 0) return null;
     const expected = extraShareLinkMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high, hirePaceIsOlumisOwn(source));
@@ -207,6 +221,13 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   // E5: an option may switch on several capacity parts ("two developers" start at different times); each part passed
   // its own checks above, and the per-option chance sums them (share-by-date-run.ts sharePartsForOption).
   if (teams.length !== 1) return null;
+  // A ratio part's link is (r−1) × the team's mean with sd √(r²−1) × the team's sd, so the option's goal has exactly the
+  // moments of r × the same team share (`withRatioCarrierSizes`); a stale or hand-edited size fails closed.
+  for (const p of ratioParts) {
+    const mean = (p.ratio - 1) * teamMoments!.mean, sd = Math.sqrt(p.ratio * p.ratio - 1) * teamMoments!.sd;
+    if (Math.abs((p.link.mean as number) - mean) > 0.0005 || !partSpreadMatches(p.link.std as number, sd)
+      || Math.abs((p.held.mean as number) - mean) > 0.0005 || !partSpreadMatches(p.held.std as number, sd)) return null;
+  }
   return { goal, deadline, threshold_raw: goal.goal_threshold_raw, cap: 100, team_part_id: teams[0]!,
     parts: inbound.map(e => ({ from: e.from as string, to: e.to as string })) };
 }

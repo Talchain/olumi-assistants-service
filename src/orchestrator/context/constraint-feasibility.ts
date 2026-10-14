@@ -330,7 +330,9 @@ const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'r
 export function withholdOptionGoalFigures<E>(
   envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>,
   /** Keep each withheld option's outcome distribution (F1b [R1]): only the claims AGAINST the target go. */
-  opts: { readonly keepOutcome?: boolean; readonly keepOrdering?: boolean } = {},
+  opts: { readonly keepOutcome?: boolean; readonly keepOrdering?: boolean;
+    /** L4 (DL ruling (A) condition 2): withhold ONLY the comparison (shares, leader, flips); every option keeps its chance. */
+    readonly keepGoalFigures?: boolean } = {},
 ): E {
   if (withheld.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const stripEntry = (entry: unknown): unknown => {
@@ -344,7 +346,7 @@ export function withholdOptionGoalFigures<E>(
       delete out.robustness;
     }
     const id = optionIdOf(r);
-    if (id !== undefined && withheld.has(id)) {
+    if (id !== undefined && withheld.has(id) && opts.keepGoalFigures !== true) {
       delete out.probability_of_goal;
       for (const k of GOAL_CHANCE_COMPANION_KEYS) delete out[k];
       delete out.probability_of_joint_goal;
@@ -397,7 +399,9 @@ export function withholdOptionGoalFigures<E>(
   // off the envelope BEFORE the strip). Every entry's share goes above, so a later reader sees none and cannot tell a
   // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
   const sharesRemoved = opts.keepOrdering !== true && identityBoundWinProbabilities(env).size > 0;
-  const withheldClaims: readonly WithheldGoalClaim[] | undefined = opts.keepOrdering === true
+  const withheldClaims: readonly WithheldGoalClaim[] | undefined = opts.keepGoalFigures === true && opts.keepOrdering !== true
+    ? ['win_share']
+    : opts.keepOrdering === true
     // `downside` goes with them as before R2 (in the goal's outcome units; its `expected_regret` compares options).
     ? [...TARGET_ONLY_CLAIMS, ...(opts.keepOutcome === true ? [] : ['outcome' as const]), 'downside' as const]
     : opts.keepOutcome === true ? OUTCOME_KEPT_CLAIMS : undefined;

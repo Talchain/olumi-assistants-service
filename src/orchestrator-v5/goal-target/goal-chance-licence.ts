@@ -46,7 +46,7 @@ import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption, capacityRatioOptionIds, CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { effectsTimingOf, periodEndAssumptionNote, type EffectsTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
@@ -722,8 +722,11 @@ export function goalChanceLicenceOf(
   const onShare = share !== null && share.goal.id === goalId && licensed.length > 0;
   const assumedRange = onShare ? olumiAssumedTeamRange(graph) : null;
   // ⭐ E-TAIL (b), AIE 6130197656 §2: a licensed option whose hire link rests on Olumi's limit says so once, verbatim.
+  // L4 (DL conditions 2–3): a licensed capacity-ratio option says what its chance leaves out, and why no comparison is shown.
+  const ratioLicensed = onShare && capacityRatioOptionIds(graph).some(id => licensed.includes(id));
   const notes = [...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
-    ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : [])];
+    ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
+    ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
   return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
 }
 

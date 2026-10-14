@@ -41,6 +41,11 @@ export function shareChanceRunBlock(graph: unknown): { reason_code: 'team_time_r
 
 /** Exact words for capacity metadata that cannot support the added option. */
 function capacityInputFailure(extra: Rec): string | null {
+  if (typeof extra.capacity_ratio === 'number') {
+    // A capacity-ratio carrier (L3): sized only from today's team time; until then, no chance rests on it.
+    return Number.isFinite(extra.capacity_ratio) && extra.capacity_ratio >= 1 && extra.ratio_sizing?.rule === 'marginal_exact' ? null
+      : "Not shown yet. This option's effect is worked out from today's team time to finish, which the model doesn't hold yet.";
+  }
   if (typeof extra.lead_low !== 'number' || typeof extra.lead_high !== 'number'
     || !Number.isFinite(extra.lead_low) || !Number.isFinite(extra.lead_high)
     || extra.lead_low < 0 || extra.lead_high < extra.lead_low) {
@@ -128,6 +133,10 @@ export function sharePartsForOption(graph: unknown, optionId: string): SharePart
   const active = activePartsOf(g, share, optionId);
   if (active === null) return null;
   if (active.length === 0) return { team };
+  // One mechanism per option (DL ruling): a capacity-ratio part stands alone.
+  const ratioParts = active.filter(n => typeof n?.observed_state?.extra_share_by_date?.capacity_ratio === 'number');
+  if (ratioParts.length > 0) return ratioParts.length === 1 && active.length === 1
+    ? { team, ratio: ratioParts[0]!.observed_state.extra_share_by_date.capacity_ratio as number } : null;
   const extras = active.map(n => {
     const c = n.observed_state.extra_share_by_date;
     return { monthlyShare: c.monthly_share / 100,
@@ -187,6 +196,10 @@ export function shareOptionEstimateWords(graph: unknown, optionId: string, opts:
   // EBD E2: a team time held as Olumi's assumption from the user's single forecast is attributed as that on every option.
   const assumed = opts.withoutTeam === true ? null : olumiAssumedTeamRange(graph);
   const team = assumed === null ? '' : olumiAssumedRangeAttribution(assumed);
+  if (parts.ratio !== undefined) {
+    const ratioWords = capacityRatioWords(activePartsOf(graph as Rec, share, optionId)?.[0]);
+    return `using ${[team, ratioWords].filter(w => w !== '').join(', and ')}`;
+  }
   if (parts.extra === undefined) return team === '' ? '' : `using ${team}`;
   const extras = extrasOf(parts);
   const lead = (x: ExtraShare): string => x.leadLow === x.leadHigh ? months(x.leadLow) : `${months(x.leadLow)}–${months(x.leadHigh)}`;
@@ -197,3 +210,38 @@ export function shareOptionEstimateWords(graph: unknown, optionId: string, opts:
     : `Olumi’s estimates of hiring times (${extras.map(lead).join(' months, then ')} months) and of the additional progress from the hires (${months(extras.reduce((t, x) => t + x.monthlyShare * 100, 0))}% of ${deliverable} per month, split equally between the two starts)`;
   return `using ${team === '' ? '' : `${team}, and `}${hires}`;
 }
+
+/**
+ * What a capacity-ratio chance rests on, after "using " (DL condition 3): the identity, as Olumi's reading unless the brief
+ * states it, and each of the option's settings that is Olumi's proposal. Never calls Olumi's reading or setting the user's.
+ */
+export function capacityRatioWords(part: Rec | undefined): string {
+  const basis = part?.observed_state?.extra_share_by_date?.ratio_basis;
+  if (!basis || !Array.isArray(basis.factors)) return '';
+  const q = (label: unknown): string => `‘${String(label)}’`;
+  const identity = `${q(basis.capacity)} = ${basis.factors.map((f: Rec) => q(f.label)).join(' × ')}`;
+  const reading = basis.identity_stated === true ? `your brief’s ${identity}` : `Olumi’s reading that ${identity}`;
+  const olumis = (Array.isArray(basis.settings) ? basis.settings : []).filter((x: Rec) => x.olumis === true)
+    .map((x: Rec) => `${q(x.label)} at ${months(Number(x.value))}${typeof x.unit === 'string' && x.unit !== '' ? (x.unit.startsWith('%') ? x.unit : ` ${x.unit}`) : ''}`);
+  return olumis.length === 0 ? reading : `${reading}, and Olumi’s proposed setting of ${olumis.join(' and ')}`;
+}
+
+/** The options whose active part is a capacity-ratio carrier (one mechanism per option), in graph order. */
+export function capacityRatioOptionIds(graph: unknown): string[] {
+  const g = graph as Rec | null;
+  if (g === null || typeof g !== 'object' || !Array.isArray(g.nodes)) return [];
+  const ratioNodes = new Set(g.nodes.filter((n: Rec) => typeof n?.observed_state?.extra_share_by_date?.capacity_ratio === 'number').map((n: Rec) => n.id));
+  return g.nodes.filter((n: Rec) => n.kind === 'option' && Object.entries(n.interventions ?? {})
+    .some(([id, v]) => ratioNodes.has(id) && (typeof v === 'number' ? v : (v as Rec)?.value) === 1)).map((n: Rec) => n.id as string);
+}
+
+/**
+ * DL condition 2 (ruling (A)): a ratio option's link is drawn beside the team part, not as the same draw, so a run-by-run
+ * comparison with any other option is distorted (it would let the option lose to carrying on, impossible when r > 1). The
+ * win share and leader are withheld; this says why, once. The per-option chances are exact in their moments.
+ */
+export const CAPACITY_RATIO_COMPARISON_NOTE = 'Which option comes out ahead most often isn’t shown: an option worked out from the team’s own '
+  + 'capacity can’t yet be compared run by run with the others. Each option’s chance is unaffected.';
+/** PL L3: what a capacity-ratio chance leaves out, said once beside it. */
+export const CAPACITY_RATIO_ASSUMPTION_NOTE = 'For an option worked out from the team’s own capacity, the chance assumes the change takes effect now '
+  + 'and the team’s pace grows in step with its capacity; it leaves out any slowdown while the change beds in.';

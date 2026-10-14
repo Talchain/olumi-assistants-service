@@ -365,6 +365,76 @@ function validEventCapacity(capacity: CandidateModel['options'][number]['added_c
     && capacity.lead_months_low >= 0 && capacity.lead_months_high >= capacity.lead_months_low;
 }
 
+/** An option's change to the team's capacity, through the brief's own product identity (Paul's legacy-code brief, c1494f4d). */
+export interface EventCapacityRatio {
+  /** capacity with the option ÷ capacity today, both from the identity's own factors. */
+  readonly ratio: number;
+  /** The identity's outcome (the capacity), and each factor's value today and with the option. */
+  readonly capacity: string;
+  readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number }[];
+  /** True only when the drafter typed the identity as stated in the brief; otherwise it is Olumi's reading. */
+  readonly identity_stated: boolean;
+  /** The option's own settings the ratio rests on, each with whether it is Olumi's proposal. */
+  readonly settings: readonly { readonly label: string; readonly value: number; readonly unit: string | null; readonly olumis: boolean }[];
+}
+
+const sameLabel = (a: unknown, b: unknown): boolean => typeof a === 'string' && typeof b === 'string'
+  && a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Each non-status-quo option's capacity ratio (by option index), read only from what the draft states: a PRODUCT identity
+ * whose outcome links positively to the goal, its factors' baselines, the option's ABSOLUTE settings, and one hop of a stated
+ * linear link into an identity factor (e.g. legacy time → feature time, −1 per 1). Anything it cannot read gives no ratio
+ * (fail closed): no such identity, a missing or non-positive baseline, a non-absolute setting, or no change.
+ */
+export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, EventCapacityRatio> {
+  const out = new Map<number, EventCapacityRatio>();
+  const c: Rec = candidate !== null && typeof candidate === 'object' ? candidate as Rec : {};
+  const factors: Rec[] = Array.isArray(c.factors) ? c.factors : [];
+  const links: Rec[] = Array.isArray(c.links) ? c.links : [];
+  const baseline = (label: string): number | undefined => {
+    const f = factors.find(x => sameLabel(x.label, label));
+    return f && f.baseline_known === true && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value) && f.baseline_value > 0
+      ? f.baseline_value : undefined;
+  };
+  const identity = (Array.isArray(c.identities) ? c.identities as Rec[] : []).find(i => i.operation === 'product'
+    && Array.isArray(i.factors) && i.factors.length >= 2 && i.factors.length <= 4
+    && links.some(l => sameLabel(l.from, i.outcome) && sameLabel(l.to, c.goal?.metric) && l.direction === 'positive'));
+  if (identity === undefined) return out;
+  const labels = identity.factors as string[];
+  const today = labels.map(baseline);
+  if (today.some(v => v === undefined)) return out;
+  const options: Rec[] = Array.isArray(c.options) ? c.options : [];
+  options.forEach((o, index) => {
+    if (o.is_status_quo === true) return;
+    const settings: Rec[] = Array.isArray(o.interventions) ? o.interventions : [];
+    if (settings.some(iv => iv.value_kind !== 'absolute' || typeof iv.value !== 'number' || !Number.isFinite(iv.value))) return;
+    const withOption = labels.map((label, k) => {
+      const direct = settings.find(iv => sameLabel(iv.factor_label, label));
+      if (direct) return direct.value as number;
+      // One stated linear hop from a set factor into this identity factor.
+      let value = today[k]!;
+      for (const iv of settings) {
+        const link = links.find(l => sameLabel(l.from, iv.factor_label) && sameLabel(l.to, label)
+          && typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0);
+        const from = baseline(iv.factor_label);
+        if (link && from !== undefined) value += (link.effect_amount / link.effect_per_source_change) * ((iv.value as number) - from);
+      }
+      return value;
+    });
+    if (withOption.some(v => !Number.isFinite(v) || v <= 0) || withOption.every((v, k) => v === today[k])) return;
+    const product = (vs: readonly number[]): number => vs.reduce((a, b) => a * b, 1);
+    const ratio = product(withOption) / product(today as number[]);
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) return;
+    out.set(index, { ratio, capacity: String(identity.outcome),
+      factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]! })),
+      identity_stated: identity.provenance === 'explicit',
+      settings: settings.map(iv => ({ label: String(iv.factor_label), value: iv.value as number,
+        unit: typeof iv.unit === 'string' ? iv.unit : null, olumis: iv.provenance !== 'explicit' })) });
+  });
+  return out;
+}
+
 /** Preconditions for a construction that already selected the event prompt; never classifies text. */
 export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof EVENT_BY_DATE_REFUSALS[number] | null {
   const deliverable = candidate.goal?.deliverable;
@@ -400,13 +470,37 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
       natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
         strength_mean: 1, strength_mean_frame: 'edge_strength' } } }];
   const switches: string[] = [];
+  // An option with no Olumi pace that changes the brief's own capacity chain acts through it (Paul c1494f4d).
+  const ratios = eventCapacityRatios(candidate);
   candidate.options.forEach((o, i) => {
     const id = `event_option_${i + 1}`, capacity = o.added_capacity;
     nodes.push({ id, kind: 'option', label: o.label, provenance: o.provenance === 'explicit' ? 'from_brief' : 'ai_inferred',
       ...(o.is_status_quo === true ? { is_baseline: true } : {}), interventions: {} });
     edges.push({ from: 'event_decision', to: id, exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive' });
     if (o.is_status_quo === true) return;
-    if (!capacity) { unresolved.push(id); return; }
+    if (!capacity) {
+      const r = ratios.get(i);
+      if (r === undefined) { unresolved.push(id); return; }
+      // ⛔ PL: a ratio below 1 (the option would SHRINK the team's capacity) is never a negative size or a silent clip.
+      if (r.ratio < 1) {
+        unresolved.push(id);
+        loss.push({ field_path: `nodes[${id}].capacity_ratio`, before: r, after: null, severity: 'warn',
+          reason: `"${o.label}" would lower ${r.capacity} (to ${Math.round(r.ratio * 100)}% of today), and this deadline forecast doesn't yet model an option that slows the team down.` });
+        return;
+      }
+      const sw = `event_capacity_${i + 1}`;
+      switches.push(sw);
+      // The ratio carrier: its link's size comes from the team's own share once that is held (`withEventShareDate` /
+      // the team-time writer); until then the link stays explicitly defaulted, never an estimate of extra share.
+      nodes.push({ id: sw, kind: 'factor', category: 'controllable', label: `${o.label} changes ${r.capacity}`, provenance: 'ai_inferred',
+        observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: { capacity_ratio: r.ratio,
+          ratio_basis: { capacity: r.capacity, factors: r.factors, identity_stated: r.identity_stated, settings: r.settings },
+          lead_low: 0, lead_high: 0, unit: `${unit} per month` } } });
+      edges.push({ from: sw, to: 'event_goal', exists_probability: 1, effect_direction: 'positive',
+        strength: { mean: 0.5, std: 0.125 }, defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
+      nodes.find(n => n.id === id)!.interventions[sw] = { value: 1 };
+      return;
+    }
     const { monthly_share_pct, lead_months_low, lead_months_high } = capacity;
     if (!validEventCapacity(capacity)) {
       unresolved.push(id);
@@ -438,6 +532,38 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
   return withEventNumberLoss(model as unknown as AdmittedModel, brief);
 }
 
+/**
+ * L3 (DL ruling (A), 14 Oct): each capacity-ratio carrier is sized from the team part's own share moments (m, sd), so the
+ * option's goal has EXACTLY the mean (r·m) and variance (r²·sd²) of "r × the same team draw": link mean (r−1)·m and sd
+ * √(r²−1)·sd. Without the team's moments (no time held, or a single estimate with no spread on the node) the link stays
+ * explicitly defaulted and the option shows no chance. A ratio below 1 is never sized (admission already refused it).
+ */
+export function withRatioCarrierSizes(graph: Rec): Rec {
+  const carrier = eventShareCarrierOf(graph)?.provenance?.share_by_date;
+  if (!carrier || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return graph;
+  const team = graph.nodes.find((n: Rec) => n.id === carrier.team_id)?.observed_state;
+  const m = team?.value, sd = team?.std;
+  const held = typeof m === 'number' && Number.isFinite(m) && m >= 0 && typeof sd === 'number' && Number.isFinite(sd) && sd >= 0;
+  for (const edge of graph.edges.filter((e: Rec) => e.to === carrier.goal_id)) {
+    const c = graph.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
+    if (!c || typeof c.capacity_ratio !== 'number') continue;
+    const r = c.capacity_ratio;
+    if (!held || !Number.isFinite(r) || r < 1) {
+      edge.strength = { mean: 0.5, std: 0.125 }; edge.defaulted = true; delete c.ratio_sizing;
+      if (edge.provenance) delete edge.provenance.natural_effect;
+      continue;
+    }
+    const mean = (r - 1) * m, std = Math.sqrt(r * r - 1) * sd;
+    // The team part's unit is the goal's (the share attestation requires it), so the goal record is not read again here.
+    edge.strength = { mean, std };
+    delete edge.defaulted;
+    c.ratio_sizing = { team_mean: m, team_sd: sd, rule: 'marginal_exact' };
+    edge.provenance = { ...(edge.provenance ?? {}), natural_effect: { amount: mean * 100, amount_unit: team.unit,
+      per_source_change: 1, per_source_change_unit: 'switch', strength_mean: mean, strength_mean_frame: 'edge_strength' } };
+  }
+  return graph;
+}
+
 /** A held S1 date materialises only this definition's forecast carriers. Pure clone; all other graph fields survive. */
 export function withEventShareDate(graph: unknown, deadline: string, reference: string): unknown {
   const part = draftedTeamPartOf(graph);
@@ -464,6 +590,8 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
   for (const edge of out.edges.filter((e: Rec) => e.to === goal.id && e.from !== team.id)) {
     const node = out.nodes.find((n: Rec) => n.id === edge.from), c = node?.observed_state?.extra_share_by_date;
     if (!c) continue;
+    // A capacity-ratio carrier is sized from the team's own share (L3), never from a pace; until then it stays defaulted.
+    if (typeof c.capacity_ratio === 'number') { Object.assign(c, { deadline, reference_date: c.reference_date ?? reference }); continue; }
     Object.assign(c, { deadline, reference_date: c.reference_date ?? reference });
     const m = extraShareLinkMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high,
       hirePaceIsOlumisOwn(node));
@@ -476,5 +604,5 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
     edge.provenance.natural_effect = { amount: m.mean * 100, amount_unit: unit, per_source_change: 1,
       per_source_change_unit: 'switch', strength_mean: m.mean, strength_mean_frame: 'edge_strength' };
   }
-  return out;
+  return withRatioCarrierSizes(out);
 }
