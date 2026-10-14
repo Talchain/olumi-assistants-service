@@ -121,6 +121,27 @@ describe('attestHorizon: the brief confirms the drafter\'s month count, or it is
     expect(attestHorizon(withDeadline(words), { horizon_months: months })).toMatchObject({ months: null, proposed_months: months, status: 'unresolved' });
   });
 
+  /** Paul's funding brief, verbatim (served 13 Oct 23:12Z, scenario 0677d1f3; `codex/AIE-INITIAL-GENERATION-PAUL-CAPTURE-20261014.json`). */
+  const FUNDING = 'How do we determine the right amount of funding to accelerate the development of our AI startup? At the moment, '
+    + "we're asking for 1.3 million, which should give us a runway of 12 months if we run lean. In today's competitive market, "
+    + 'it would be better to build a bigger team and move faster, but I need to understand the risks and issues with raising more money at pre-seed.';
+
+  it('⭐ RED→GREEN (funding): the runway\'s "12 months" is the length of something else, never the goal\'s deadline', () => {
+    expect(attestHorizon(FUNDING, { horizon_months: null })).toEqual({ months: null, wording: '', status: 'absent' });
+    expect(attestHorizon(FUNDING, { horizon_months: 6 })).toEqual({ months: null, wording: '', status: 'absent' });
+    expect(attestHorizon(FUNDING.replace('a runway of 12 months', 'twelve months of runway'), null).status).toBe('absent');
+  });
+
+  it('CONTRAST (funding): the same brief with the goal\'s own deadline keeps it — forward-led or allotted, claimed or not', () => {
+    const withGoal = `${FUNDING} We want the MVP ready to pilot within 6 months.`;
+    expect(attestHorizon(withGoal, { horizon_months: null })).toEqual({ months: null, wording: 'within 6 months', status: 'unresolved' });
+    expect(attestHorizon(withGoal, { horizon_months: 6 })).toEqual({ months: 6, wording: 'within 6 months', status: 'attested' });
+    expect(attestHorizon(`${FUNDING} We have six months to get it pilot-ready.`, null))
+      .toMatchObject({ months: null, proposed_months: 6, wording: 'six months', status: 'unresolved' });
+    // The drafter's own claim still attests an exactly matching span, bare or not: the claim is the reading.
+    expect(attestHorizon(FUNDING, { horizon_months: 12 })).toEqual({ months: 12, wording: '12 months', status: 'attested' });
+  });
+
   it('absence-tolerant: no brief, no goal, or an older candidate with no horizon', () => {
     expect(attestHorizon(undefined, { horizon_months: 12 }).status).toBe('absent');
     expect(attestHorizon(BRIEF, null).status).toBe('unresolved');
