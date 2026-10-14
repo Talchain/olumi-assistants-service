@@ -110,6 +110,15 @@ export function boundedSupabaseFetch(
 function freshConnectionFetch(): Fetch {
   const agent = new Agent({ keepAliveTimeout: 1_000 });
   setTimeout(() => { void agent.close().catch(() => undefined); }, 60_000).unref();
-  return ((input: Parameters<Fetch>[0], init?: Parameters<Fetch>[1]) =>
-    globalThis.fetch(input, { ...init, dispatcher: agent } as unknown as Parameters<Fetch>[1])) as Fetch;
+  return ((input: Parameters<Fetch>[0], init?: Parameters<Fetch>[1]) => globalThis.fetch(input, onAgent(init, agent))) as Fetch;
+}
+
+/**
+ * The request's own options, on `agent`. Node's fetch reads `dispatcher` from them; the DOM type does not name it, and the
+ * userland undici `Agent` is not the bundled type, so it is set as a property, never cast in.
+ */
+function onAgent(init: Parameters<Fetch>[1], agent: Agent): Parameters<Fetch>[1] {
+  const options: NonNullable<Parameters<Fetch>[1]> = { ...init };
+  Reflect.set(options, 'dispatcher', agent);
+  return options;
 }
