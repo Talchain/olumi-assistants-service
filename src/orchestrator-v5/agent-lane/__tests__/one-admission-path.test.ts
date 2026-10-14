@@ -5,7 +5,6 @@ import zlib from 'node:zlib';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
-import { widenDraft } from '../runtime/widen-draft.js';
 import type { AdmittedModel, CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
@@ -39,18 +38,6 @@ async function replay(row: Row, widening = false, observe?: (s: Snapshot) => voi
   const result = await buildModelFromBrief('00000000-0000-4000-8000-000000000077', row.brief, dispatch, drafter,
     undefined, undefined, widening ? wider : undefined, observe);
   return { graph, result: result as Rec, wideningCalls: w };
-}
-
-/** E6 CONTRAST: the parked risks arm, opted in on the build's own widening boundary (the served build never sets it). */
-async function armWiden(row: Row, s: Snapshot) {
-  let w = 0;
-  const wider: CallStructuredModel = async () => {
-    if (w >= (row.widening_texts?.length ?? 0)) throw new Error(`${row.id}: unexpected widening call`);
-    return { text: row.widening_texts![w++]!, status: 'completed' };
-  };
-  const out = await widenDraft({ admitted: s.admitted, candidate: s.candidate, brief: row.brief, callStructured: wider,
-    deadlineAt: Date.now() + 60_000, admit: s.admit, risksArm: true });
-  return { out, calls: w };
 }
 
 function ratchetFailures(now: string[], baseline: Baseline): string[] {
@@ -234,7 +221,7 @@ const revenueCandidate: CandidateModel & { readonly unknowns: readonly unknown[]
   links: [{ from: 'Plan price', to: 'Monthly revenue', direction: 'positive', provenance: 'ai_proposed' }],
   unknowns: [],
 };
-it('overlapping revenue risk keeps the served baseline; E6: the served build adds no draft-time risk, the opted-in arm does', async () => {
+it('overlapping revenue risk keeps the served baseline and registers widening', async () => {
   const row: Row = { id: 'revenue-overlap', brief: 'Revenue is £75k; should we raise price or discount to increase monthly revenue by 20%?',
     drafter_texts: [JSON.stringify(revenueCandidate)], widening_texts: [JSON.stringify({ risk_suggestions: [{
       label: 'Revenue shortfall', category: 'external', mechanism: 'relies_on', hits_id: 'raise_price', through_id: 'plan_price',
@@ -251,15 +238,10 @@ it('overlapping revenue risk keeps the served baseline; E6: the served build add
   const after = merged.nodes.find(n => n.id === goal.id);
   process.stdout.write(`S7 REVENUE FIRSTDIFF ${JSON.stringify({ before: goal, after })}\n`);
   expect(JSON.stringify(after)).toBe(JSON.stringify(goal));
-  // E6 (DL 12 Oct, Paul's test): the served build never adds a risk at draft time; it asks nothing and registers the base.
-  const served = await replay(row, true);
-  expect(served.graph, JSON.stringify(served.result)).toBeDefined();
-  expect(served.wideningCalls).toBe(0);
-  expect(JSON.stringify(served.graph)).toBe(JSON.stringify(base.graph));
-  // CONTRAST: the parked arm, opted in, still adds it and keeps every base node byte for byte.
-  const arm = await armWiden(row, snapshot!);
-  expect(arm.out?.admitted.nodes.map(n => n.label)).toContain('Revenue shortfall');
-  for (const n of snapshot!.admitted.nodes) expect(JSON.stringify(arm.out!.admitted.nodes.find(x => x.id === n.id))).toBe(JSON.stringify(n));
+  const widened = await replay(row, true);
+  expect(widened.graph, JSON.stringify(widened.result)).toBeDefined();
+  expect(widened.graph!.nodes.map((n: Rec) => n.label)).toContain('Revenue shortfall');
+  for (const n of base.graph!.nodes as Rec[]) expect(JSON.stringify(widened.graph!.nodes.find((x: Rec) => x.id === n.id))).toBe(JSON.stringify(n));
 });
 
 describe('recorded widening keeps base identities and bytes', () => {
@@ -269,27 +251,19 @@ describe('recorded widening keeps base identities and bytes', () => {
     'B1-d2': ['Feature release delay', 'Value messaging fails', 'Competitor pricing pressure'],
   };
   for (const row of recorded) it(row.id, async () => {
-    let snapshot: Snapshot | undefined;
-    const base = await replay(row, false, s => { snapshot = s; });
-    const served = await replay(row, true);
+    const base = await replay(row);
+    const widened = await replay(row, true);
     expect(base.graph, `${row.id}: base not registered: ${JSON.stringify(base.result)}`).toBeDefined();
-    expect(served.graph, `${row.id}: served not registered: ${JSON.stringify(served.result)}`).toBeDefined();
-    // E6 (DL 12 Oct, Paul's test): the served build never widens risks at draft time: 0 calls, the base graph byte for byte.
-    expect(served.wideningCalls, `${row.id}: E6 served build asks nothing`).toBe(0);
-    expect(JSON.stringify(served.graph), `${row.id}: E6 served build registers the base graph`).toBe(JSON.stringify(base.graph));
-    // CONTRAST: the parked arm, opted in, still adds exactly the recorded risks and keeps base identities and bytes.
-    const arm = await armWiden(row, snapshot!);
-    expect(arm.out, `${row.id}: opted-in arm widened nothing`).not.toBeNull();
-    const widened = arm.out!.admitted;
-    const oldIds = new Set(snapshot!.admitted.nodes.map(n => n.id));
-    const added = widened.nodes.filter(n => !oldIds.has(n.id)) as unknown as Rec[];
-    expect(added.map(n => n.label), `${row.id}: widened exact labels`).toEqual(expected[row.id]);
+    expect(widened.graph, `${row.id}: widened not registered: ${JSON.stringify(widened.result)}`).toBeDefined();
+    const oldIds = new Set((base.graph!.nodes as Rec[]).map(n => n.id));
+    const added = (widened.graph!.nodes as Rec[]).filter(n => !oldIds.has(n.id));
+    expect(added.map(n => n.label), `${row.id}: widened exact labels; result=${JSON.stringify(widened.result)}`).toEqual(expected[row.id]);
     expect(added.every(n => n.kind === 'risk' && n.analysis_participation === 'retained_excluded' && n.draft_widening)).toBe(true);
-    for (const n of snapshot!.admitted.nodes) expect(JSON.stringify(widened.nodes.find(x => x.id === n.id)), `${row.id}: base node ${n.id} (${n.label})`).toBe(JSON.stringify(n));
-    for (const e of snapshot!.admitted.edges) expect(JSON.stringify(widened.edges.find(x => x.from === e.from && x.to === e.to)), `${row.id}: base edge ${e.from}->${e.to}`).toBe(JSON.stringify(e));
-    expect(JSON.stringify(widened.goal_constraints)).toBe(JSON.stringify(snapshot!.admitted.goal_constraints));
-    expect(arm.calls).toBe(row.widening_texts!.length);
-    if (row.id === 'B3-d2') expect(widened.nodes.map(n => n.label)).not.toContain('Senior salary budget overrun');
+    for (const n of base.graph!.nodes as Rec[]) expect(JSON.stringify((widened.graph!.nodes as Rec[]).find(x => x.id === n.id)), `${row.id}: base node ${n.id} (${n.label})`).toBe(JSON.stringify(n));
+    for (const e of base.graph!.edges as Rec[]) expect(JSON.stringify((widened.graph!.edges as Rec[]).find(x => x.from === e.from && x.to === e.to)), `${row.id}: base edge ${e.from}->${e.to}`).toBe(JSON.stringify(e));
+    expect(JSON.stringify(widened.graph!.goal_constraints)).toBe(JSON.stringify(base.graph!.goal_constraints));
+    expect(widened.wideningCalls).toBe(row.widening_texts!.length);
+    if (row.id === 'B3-d2') expect((widened.graph!.nodes as Rec[]).map(n => n.label)).not.toContain('Senior salary budget overrun');
   });
 });
 
