@@ -67,7 +67,7 @@ export interface MagnitudeNode {
   readonly quantity_frame?: unknown;
   /**
    * A GOAL's distance to its target in its own natural unit (£9,000 for "cut £45k by 20%"), when admission can read it.
-   * Only ever used to refuse an Olumi estimate sized FROM the target (`target_sized`, R3 #72 5899493499).
+   * Used to ask about an Olumi estimate equal to the target gap; equality does not invalidate its size.
    */
   readonly goal_gap?: number;
   /** The unit the drafter gave this quantity, for a node whose graph fields carry none. */
@@ -565,20 +565,18 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
         ...(issue !== undefined ? { problem: issue, question: question! } : {}),
       };
     }
-    /**
-     * ⛔ THE TARGET IS NOT AN EFFECT (R3 #72 5899493499 / 5899535464; served cut-costs on `0a89a01`, 2 of 3 drafts): the
-     * drafter sized "GCP workload share → Monthly spend" as 20% of £45,000 — the user's own target — so the full switch
-     * landed exactly on the threshold and its chance was a coin toss. Olumi's estimate on a link INTO the goal whose
-     * largest option move shifts the goal by the gap to its target (within 1%) is set aside like D5/D8, and asked.
-     */
+    // T4 A5: equality with the target gap is a question, not evidence that
+    // this convertible estimate is numerically invalid. Keep its Olumi label.
     const reach = swing === null || targetFrame === undefined ? null : Math.abs(beta) * Math.max(Math.abs(swing.lo), Math.abs(swing.hi)) * targetFrame;
     const targetSized = issue === undefined && reach !== null && finite(target.goal_gap) && target.goal_gap > 0
       && Math.abs(reach - target.goal_gap) <= 0.01 * target.goal_gap;
-    if (issue === undefined && !targetSized) {
-      return { outcome: 'estimate', mean: beta, std: sigma, magnitude: 'olumi_estimate', statement, stated_strength: beta, ...natural(beta, per as number) };
+    if (issue === undefined) {
+      return { outcome: 'estimate', mean: beta, std: sigma, magnitude: 'olumi_estimate', statement, stated_strength: beta, ...natural(beta, per as number),
+        ...(targetSized ? { question: `Olumi estimated that ${statement}; at the largest change an option makes, that moves "${target.label}" by exactly the gap to your target. A target is not evidence for an effect size. What evidence supports this provisional estimate?` } : {}),
+      };
     }
     // D5 / D8: Olumi's estimate is set aside — never clamped to the boundary.
-    problem = issue ?? 'target_sized';
+    problem = issue;
   }
 
   // D6. A placeholder is sized to the frame only where D4 can run; at a bound with no room on the side the link
@@ -599,12 +597,6 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     }
     if (problem === 'not_representable') {
       return `Olumi estimated that ${statement}, ${NOT_REPRESENTABLE}, so it was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
-    }
-    if (problem === 'target_sized') {
-      // The per-unit statement is not the gap; the largest option move is (live arm, draft 3: "−£450 per point" × 20 points).
-      return `Olumi estimated that ${statement}; at the largest change an option makes, that moves "${target.label}" by exactly the `
-        + `gap to your target. A target is what you want, not evidence of what an option does, so it was not used: ${standIn} `
-        + `stands in for it. ${HOW_MUCH(source, target)}`;
     }
     // ⛔ Olumi's size that no frame can read is still ASKED, in words that never place it in the model (AIQ 5914222384):
     // with no range to size a placeholder to, it was said only in `not_represented`, and the Agent listed it as an input.

@@ -33,7 +33,7 @@ const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const graph = (): Rec => ({ goal_node_id: 'goal', nodes: [
   { id: 'decision', kind: 'decision', label: 'Choose' },
   { id: 'goal', kind: 'goal', label: 'Revenue', goal_threshold: .7 },
-  { id: 'factor', kind: 'factor', label: 'Demand' },
+  { id: 'factor', kind: 'factor', label: 'Demand', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
   { id: 'a', kind: 'option', label: 'A', interventions: { factor: 1 } },
   { id: 'b', kind: 'option', label: 'B', interventions: { factor: 0 } },
 ], edges: [['decision', 'a'], ['decision', 'b'], ['a', 'factor'], ['b', 'factor'], ['factor', 'goal']]

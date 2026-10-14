@@ -18,8 +18,6 @@ import {
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
 import { nameMappingNeed } from "../../cee/transforms/option-status.js";
-import { isSwitch, resolveMagnitudeFrame } from "../../cee/magnitude/link-effect.js";
-import type { MagnitudeNode } from "../../cee/magnitude/link-effect.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
@@ -42,6 +40,11 @@ import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analys
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
+import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
+// The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
+import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
+import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
+import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -185,7 +188,7 @@ export interface CanonicalReadinessRepairProposal {
 }
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']> & {
-  /** Non-factor sampled roots disclosed as zero; never Run blockers. */
+  /** Legacy result carrier; new unknown sampled roots withhold numerical Runs. */
   readonly unvalued_roots?: Array<{
     node_id: string;
     label: string;
@@ -836,7 +839,7 @@ const BLOCKER_ISSUE_BY_TYPE = {
   constraint_dropped: {
     code: 'CONSTRAINT_REVIEW_REQUIRED',
     category: 'option_values',
-    message: ({ suffix }) => `Review the unresolved constraint${suffix}.`,
+    message: ({ suffix }) => `This limit was not checked${suffix}; analysis describes the current model without that check.`,
   },
 } as const satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>;
 
@@ -915,12 +918,12 @@ export function blockerIssue(
     ...(factorId ? { factor_id: factorId } : {}),
     ...(factorLabel ? { factor_label: factorLabel } : {}),
   };
-  if (status === 'needs_user_mapping' && !optionId && factorId) {
+  if (status === 'needs_user_mapping' && !optionId && factorId && blockerType !== 'constraint_dropped') {
     return {
       ...common,
       code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
       category: 'option_mapping',
-      message: `Choose which option changes${suffix} and by how much.`,
+      message: `No option changes "${factorLabel ?? factorId}"; it remains part of the current model.`,
     };
   }
   // A carrier with no usable `blocker_type` at all is malformed, not
@@ -1208,7 +1211,7 @@ function relationshipAsk(option: unknown): string | undefined {
  *     (`hasSampledPrior`) — PLoT's only two ParameterUncertainty sources.
  *   · REACHES THE GOAL = any directed causal path.
  *
- * TWO DELIBERATE DEPARTURES FROM ISL:
+ * DELIBERATE DEPARTURE FROM ISL:
  *   · ISL does not flag a root that EVERY option intervenes on. It is flagged
  *     here: the status quo is the un-intervened world, which still reads the
  *     root at 0.0, and B1a reports every level as `o + (option − status quo)`.
@@ -1216,11 +1219,50 @@ function relationshipAsk(option: unknown): string | undefined {
  *     5860802299): such a root unvalued gave carry-on £80,358.51, and the same
  *     root valued at £49 gave the correct £75,000.00. The walk to the goal does
  *     not stop at an everywhere-pinned node for the same reason.
- *   · A switch (`isSwitch`, levels only 0/1) is exempt, because 0 is a real
- *     status-quo level for it ("not done"), not a placeholder.
+ * Binary option levels describe possible interventions, not today's state.
+ * Stated absence, explicit Olumi estimates and structural starting levels
+ * remain supported through their held level; binary shape supplies none.
  * Every sampled root kind is covered; risks carry a likelihood/magnitude ask.
  * Goal, option, decision and constraint (limit) nodes are not sampled roots.
+ *
+ * ⭐ JUDGED ON THE GRAPH THE RUN SENDS (T4i). The participation guard
+ * (`run-analysis-participation-guard.ts`) withholds every `retained_excluded`
+ * node and each edge touching it, so that node owes no level, and a node whose
+ * only cause it was is a root the engine samples. Where the guard would refuse
+ * instead (the goal, a compared option or a lever's target is excluded) it
+ * withholds nothing, and neither does this reader.
+ * The options are the ones the Run SUBMITS, through the Run's own chain: the user's exclusions, the analysable gate,
+ * then Olumi's filter (an unadopted suggestion leaves when two of the user's options remain). An option the Run drops
+ * cannot make the guard refuse (#2999 check: one targeting an excluded node had kept its unvalued child out of the ask).
  */
+function optionsTheRunSubmits(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload): ReadonlyArray<Record<string, unknown>> {
+  // As the snapshot loader builds them (`build-turn-context.ts` mergeOptionInterventionObjects).
+  const optionNodes = new Map<string, Record<string, unknown>>(graph.nodes
+    .filter((node) => node.kind === 'option').map((node): [string, Record<string, unknown>] => [node.id, { ...node }]));
+  const options = (payload.options ?? []).map((option) => {
+    const node = optionNodes.get(option.option_id);
+    return { id: option.option_id, option_id: option.option_id, label: option.label,
+      interventions: node ? mergeInterventionSourceObjects(node) : {},
+      ...((option as { is_baseline?: boolean }).is_baseline !== undefined
+        ? { is_baseline: (option as { is_baseline?: boolean }).is_baseline } : {}) };
+  });
+  const user = userExcludedOptions({ options, graph: rawGraph });
+  const gate = gateAnalysableOptions({ options: user.options, graph, rawPersistedGraph: rawGraph, scaleNetEnabled: true });
+  return filterOlumiProposedOptions({ submitted: gate.options as ReadonlyArray<Record<string, unknown>>, graph: rawGraph,
+    unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options;
+}
+
+function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
+  const options = optionsTheRunSubmits(graph, rawGraph, payload) as ReadonlyArray<{ option_id?: unknown; interventions?: unknown }>;
+  const refusing = new Set<string>([
+    goalId,
+    ...options.flatMap((option) => (typeof option.option_id === 'string' ? [option.option_id] : [])),
+    ...options.flatMap((option) => (isPlainObject(option.interventions) ? Object.keys(option.interventions) : [])),
+  ]);
+  const excluded = graph.nodes.filter(isRetainedExcluded).map((node) => node.id);
+  return excluded.some((id) => refusing.has(id)) ? new Set() : new Set(excluded);
+}
+
 function goalRootsWithoutStatusQuoLevel(
   graph: GraphV3T,
   payload: AnalysisReadyPayload,
@@ -1238,17 +1280,16 @@ function goalRootsWithoutStatusQuoLevel(
     const kind = kindOf.get(id);
     return kind === 'option' || kind === 'decision' || kind === 'constraint';
   };
+  const goalId = payload.goal_node_id;
+  const notSent = leftOutOfRun(graph, rawGraph, payload, goalId);
   const parents = new Map<string, number>();
   const children = new Map<string, string[]>();
   for (const edge of graph.edges) {
     if (nonCausal(edge.from) || nonCausal(edge.to)) continue;
+    if (notSent.has(edge.from) || notSent.has(edge.to)) continue;
     parents.set(edge.to, (parents.get(edge.to) ?? 0) + 1);
     children.set(edge.from, [...(children.get(edge.from) ?? []), edge.to]);
   }
-  const levelsOf = (id: string): number[] =>
-    payload.options
-      .map((option) => (option.interventions ?? {})[id])
-      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const reachesGoal = (rootId: string): boolean => {
     const stack = [rootId];
     const seen = new Set([rootId]);
@@ -1257,7 +1298,7 @@ function goalRootsWithoutStatusQuoLevel(
       for (const child of children.get(current) ?? []) {
         if (seen.has(child)) continue;
         seen.add(child);
-        if (child === payload.goal_node_id) return true;
+        if (child === goalId) return true;
         stack.push(child);
       }
     }
@@ -1271,11 +1312,16 @@ function goalRootsWithoutStatusQuoLevel(
     ((payload.blockers ?? []) as unknown[])
       .filter(isPlainObject)
       .filter((blocker) => readNonEmptyString(blocker.option_id) === null)
+      .filter((blocker) => {
+        const issue = blockerIssue(blocker, 0, payload.status);
+        return issue?.code !== 'CONSTRAINT_REVIEW_REQUIRED' && issue?.code !== 'UNREACHABLE_CONTROLLABLE_FACTOR';
+      })
       .map((blocker) => readNonEmptyString(blocker.factor_id)),
   );
   const gaps: Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> = [];
   for (const node of graph.nodes) {
     if (node.kind === 'goal' || nonCausal(node.id) || node.id === payload.goal_node_id) continue;
+    if (notSent.has(node.id)) continue;
     if (alreadyFactorBlocked.has(node.id)) continue;
     if ((parents.get(node.id) ?? 0) > 0) continue;
     const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
@@ -1291,14 +1337,6 @@ function goalRootsWithoutStatusQuoLevel(
     // event_risk.v1: an event risk's level is its OCCURRENCE, which ISL draws (0/1 per draw);
     // it is never held at zero, so it needs no level today. Only a block the write doors accept counts.
     if (EventRiskV1.safeParse(node.event_risk).success) continue;
-    const magnitudeNode: MagnitudeNode = {
-      label: node.label ?? node.id,
-      kind: 'factor',
-      scale_frame: (node as { scale_frame?: unknown }).scale_frame,
-      observed_state: observed as MagnitudeNode['observed_state'],
-      option_levels: levelsOf(node.id),
-    };
-    if (isSwitch(magnitudeNode, resolveMagnitudeFrame(magnitudeNode))) continue;
     if (!reachesGoal(node.id)) continue;
     gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }
@@ -1330,10 +1368,12 @@ const statusQuoLevelAsk = (label: string): string =>
  * before any option changes it?": a share of the work done by the deadline has no level today, and the coach called that
  * sentence misleading three times. Every other root keeps the status-quo level ask, byte for byte.
  */
-const levelGapAsk = (gap: { id: string; label: string }, rawGraph: unknown): string => {
+const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph: unknown): string => {
   const eventTeam = draftedTeamPartOf(rawGraph)?.team;
   const eventAsk = eventTeam !== undefined && eventTeam.id === gap.id ? eventModelAsk(rawGraph) : null;
-  return eventAsk ?? statusQuoLevelAsk(gap.label);
+  if (eventAsk) return eventAsk;
+  if (gap.kind === 'risk') return `How likely or how large is "${gap.label}" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.`;
+  return statusQuoLevelAsk(gap.label);
 };
 
 function appendSemanticIssues(
@@ -1578,13 +1618,18 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
+    // T4 R4/R5: preserve these limitations as context, without blocking a Run.
+    // Missing root levels and structural/numeric defects below remain independent.
+    const policyIssues = blockingIssues.filter((issue) =>
+      issue.code === 'CONSTRAINT_REVIEW_REQUIRED' || issue.code === 'UNREACHABLE_CONTROLLABLE_FACTOR');
+    for (let i = blockingIssues.length - 1; i >= 0; i--) {
+      if (policyIssues.includes(blockingIssues[i]!)) blockingIssues.splice(i, 1);
+    }
     // PLACEHOLDER-ZERO: node-scoped, so neither admission waiver (both need an
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
-    const factorLevelGaps = levelGaps.filter((gap) => gap.kind === 'factor');
-    const nonFactorLevelGaps = levelGaps.filter((gap) => gap.kind !== 'factor');
-    factorLevelGaps.forEach((gap, index) => {
+    levelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
@@ -1624,7 +1669,9 @@ export function assessCanonicalAnalysisReadiness(
     stampObligationsInPlace(carrierIssues, graph);
     stampObligationsInPlace(blockingIssues, graph);
 
-    const allIssues = [...carrierIssues, ...blockingIssues];
+    stampObligationsInPlace(policyIssues, graph);
+    const limitations = policyIssues.map((issue) => ({ ...issue, obligation: 'offered' as const }));
+    const allIssues = [...carrierIssues, ...blockingIssues, ...limitations];
     const proposal: CanonicalReadinessRepairProposal | null =
       blockingIssues.length >= 2
         ? {
@@ -1660,20 +1707,25 @@ export function assessCanonicalAnalysisReadiness(
         || issue.category === 'numeric_integrity'
         || issue.category === 'internal',
     );
+    const activeSemanticBlockers = (semantic?.blockers ?? []).filter((blocker) => {
+      const issue = blockerIssue(blocker, 0, semantic?.status ?? 'ready');
+      return issue?.code !== 'CONSTRAINT_REVIEW_REQUIRED' && issue?.code !== 'UNREACHABLE_CONTROLLABLE_FACTOR';
+    });
     const analysisReady = semantic
       ? {
           ...semantic,
-          ...(nonFactorLevelGaps.length > 0
-            ? { unvalued_roots: nonFactorLevelGaps.map((gap) => ({
-                node_id: gap.id, label: gap.label, kind: gap.kind, treated_as: 'zero' as const,
-              })) }
-            : {}),
-          ...(factorLevelGaps.length > 0
+          ...(policyIssues.length > 0 ? {
+            blockers: activeSemanticBlockers,
+            ...(blockingIssues.length === 0 && semantic.options.length >= 2
+              && semantic.options.every((option) => option.status === 'ready')
+              ? { status: 'ready', blocked_reason: undefined } : {}),
+          } : {}),
+          ...(levelGaps.length > 0
             ? {
                 status: 'needs_user_input',
                 blockers: [
-                  ...(semantic.blockers ?? []),
-                  ...factorLevelGaps.map((gap) => ({
+                  ...activeSemanticBlockers,
+                  ...levelGaps.map((gap) => ({
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,

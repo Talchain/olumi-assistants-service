@@ -123,7 +123,7 @@ function mutedReadinessPayload() {
   // blocker unrelated to the mute case. Give it one (a disclosed in-test patch;
   // the capture file is not edited).
   graph.nodes = (graph.nodes as unknown as Array<Record<string, unknown>>).map((n) =>
-    n.id === '6d178dfd' ? { ...n, observed_state: { value: 0.5 } } : n) as never;
+    ['6d178dfd', '793be10e'].includes(String(n.id)) ? { ...n, observed_state: { value: 0.5, raw_value: 0.5, source: 'cee_inference', extractionType: 'inferred' } } : n) as never;
   return assessCanonicalAnalysisReadiness(graph).analysisReady;
 }
 

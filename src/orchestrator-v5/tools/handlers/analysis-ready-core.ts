@@ -181,9 +181,12 @@ function readinessResultFrom(
         : first?.category === 'internal'
           ? 'internal'
           : 'option_values';
-  const nextStep = assessment.blockingIssues.length === 1
-    ? first?.message ?? 'Review the model before analysis.'
-    : `Review all ${assessment.blockingIssues.length} readiness issues together before analysis.`;
+  // T4i: a model refused with NO blocking issue (fewer than two options to compare) names no strict step, so the
+  // admission's own no-comparison sentence answers (`blockedNextStep`), never "Review all 0 readiness issues".
+  const nextStep = assessment.blockingIssues.length === 0 ? null
+    : assessment.blockingIssues.length === 1
+      ? first?.message ?? 'Review the model before analysis.'
+      : `Review all ${assessment.blockingIssues.length} readiness issues together before analysis.`;
   return {
     status: 'unrecoverable',
     reasonCodes,

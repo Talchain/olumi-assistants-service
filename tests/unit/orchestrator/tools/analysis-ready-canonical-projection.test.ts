@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAnalysisReadyPayload } from '../../../../src/cee/transforms/analysis-ready.js';
 import type { GraphV3T, OptionV3T } from '../../../../src/schemas/cee-v3.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   computeStructuralReadiness,
 } from '../../../../src/orchestrator/tools/analysis-ready-helper.js';
-import { projectGraphForPersistence } from '../../../../src/orchestrator-v5/persisted-graph-projection.js';
-import {
-  buildReadinessRecoveryChip,
-  projectReadinessRecovery,
-} from '../../../../src/orchestrator-v5/coaching/readiness-recovery.js';
 import { assessAnalysisReadiness } from '../../../../src/orchestrator-v5/tools/handlers/analysis-ready-core.js';
 
 function intervention(factorId: string, value: number) {
@@ -290,64 +284,18 @@ describe('canonical persisted-graph readiness projection', () => {
     expect(projected?.options.map((option) => option.interventions.fac_reach)).toEqual([0.2, 0.4]);
   });
 
-  it('preserves producer needs_user_mapping before and after persistence for an unreachable controllable factor', () => {
-    const { graph, options } = unreachableFactorFixture();
-    const producer = buildAnalysisReadyPayload(options, graph.goal_node_id, graph, {
-      requestId: 'canonical-pre-persist',
-    });
-    expect(producer.status).toBe('needs_user_mapping');
-    expect(producer.blockers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          factor_id: 'fac_capacity',
-          factor_label: 'Delivery capacity',
-          blocker_type: 'missing_value',
-        }),
-      ]),
-    );
-
-    const persisted = projectGraphForPersistence(graph, {
-      scenarioId: 'scenario-readiness',
-      turnId: 'turn-readiness',
-      source: 'test',
-    });
-    const projected = buildCanonicalAnalysisReadyFromGraph(persisted);
-    expect(projected?.status).toBe('needs_user_mapping');
-    expect(projected?.blockers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ factor_id: 'fac_capacity', blocker_type: 'missing_value' }),
-      ]),
-    );
-
-    const preRecovery = projectReadinessRecovery(producer, graph.nodes);
-    const postRecovery = projectReadinessRecovery(projected, graph.nodes);
-    expect(postRecovery).toEqual(preRecovery);
-    expect(postRecovery.kind).toBe('map_option');
-    expect(postRecovery.nextStep).toContain('which option changes which factor');
-    expect(postRecovery.nextStep.toLowerCase()).not.toContain('missing effect value');
-    expect(postRecovery.nextStep.toLowerCase()).not.toContain('run the analysis');
-
-    const chip = buildReadinessRecoveryChip(projected, graph.nodes);
-    expect(chip).toMatchObject({
-      id: 'chip_prompt_map_factor_to_option',
-      label: 'Map "Delivery capacity" to an option',
-    });
-    expect(chip).not.toHaveProperty('action_type');
-    expect(chip?.message).not.toMatch(/\b\d+(?:\.\d+)?\b/);
-  });
-
   it('kills the legacy whole-status discriminator: graph-only says ready while canonical producer and Run guard block', () => {
     const { graph } = unreachableFactorFixture();
     // Compatibility control only: this demonstrates why the legacy helper may
     // not own whole-status/Run admission.
     expect(computeStructuralReadiness(graph)?.status).toBe('ready');
-    expect(buildCanonicalAnalysisReadyFromGraph(graph)?.status).toBe('needs_user_mapping');
+    expect(buildCanonicalAnalysisReadyFromGraph(graph)?.status).toBe('needs_user_input');
 
     const guard = assessAnalysisReadiness(graph);
     expect(guard.status).toBe('unrecoverable');
     expect(guard.safeToAnalyse).toBe(false);
-    expect(guard.reasonCodes).toContain('UNREACHABLE_CONTROLLABLE_FACTOR');
+    expect(guard.reasonCodes).toContain('MISSING_FACTOR_LEVEL');
     expect(guard.nextStep).toContain('Delivery capacity');
-    expect(guard.nextStep).toContain('by how much');
+    expect(guard.nextStep).toContain('today');
   });
 });

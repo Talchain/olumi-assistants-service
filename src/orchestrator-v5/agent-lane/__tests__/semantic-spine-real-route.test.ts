@@ -290,7 +290,12 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     } finally { config.cee.modelVersionsEnabled = enabled; }
   });
   it('SUCCESS: canonical read → readiness → captured Run input → Agent context → explanation → cold reload, with no transcript or process memory', async () => {
-    const h = await harness(); await open(h); await share(h); const p = await clarified(h); expect(await approve(h, p)).toMatchObject({ applied: true });
+    const inputGraph = g0();
+    // Fixture-only supported risk premise for the end-to-end successful Run.
+    inputGraph.nodes.find(n => n.id === 'risk_discount_leakage')!.observed_state = {
+      value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred',
+    };
+    const h = await harness(inputGraph); await open(h); await share(h); const p = await clarified(h); expect(await approve(h, p)).toMatchObject({ applied: true });
     h.clearHistory(); h.restart(); const read = await h.read(); expect(read.status).toBe(200); expect(read.json.brief_text).toBeNull();
     const canonical = GraphV3.parse(read.json.graph); expect(canonical.nodes.find(n => n.id === 'mrr')!.goal_scope?.extent).toBe('total');
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', h.store as never);
