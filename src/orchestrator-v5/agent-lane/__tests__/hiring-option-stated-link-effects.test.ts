@@ -130,6 +130,17 @@ describe('⛔ WRONG AUTHOR: Olumi\'s claim is never the user\'s figure (it bound
       expect(r.ok, `${unit}: ${JSON.stringify(r)}`).toBe(false);
     }
   });
+  it('⭐ DL ruling (14 Oct): a colleague\'s estimate the user relays is HUMAN-SUPPLIED, kept with its attribution, never refused', async () => {
+    const said = 'My CFO thinks: hiring a Tech lead would raise productivity by about 8% of today’s.';
+    const w = world();
+    const r = await w.caps.proposeLinkEffect!(w.ctx({ user_text: said, user_turn_text: said }), link('Tech lead headcount', 8, 'people', said)) as Json;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const proposal = w.store.get(String(r.proposal_id))!;
+    expect(proposal.provenance.authored_by).toBe('user_stated');
+    // The attribution is never stripped: the card and the saved statement quote "My CFO thinks" verbatim.
+    expect(proposal.operations[0]?.value).toMatchObject({ quote: said });
+    expect(quoteIsNotTheUsersClaim(said, said)).toBe(false);
+  });
   it('CONTRAST: the user\'s own claim beside Olumi\'s, and the user\'s plain claim, are theirs', () => {
     const said = 'Olumi suggested 5%, but I think hiring a Tech lead would raise productivity by about 8% of today’s.';
     expect(quoteIsNotTheUsersClaim(said, 'I think hiring a Tech lead would raise productivity by about 8% of today’s.')).toBe(false);
