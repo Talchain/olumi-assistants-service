@@ -162,10 +162,11 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: missing, message: EVENT_START_GAP,
   }, { keepOutcome: true, keepOrdering: true }) : envelope;
   const unsupported = unresolvedEventOptionIds(graph).filter(id => !missing.includes(id));
-  const scopedEnvelope = unsupported.length > 0 ? withholdOptionGoalFigures(capacityScopedEnvelope, new Set(unsupported), {
-    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: unsupported,
-    message: "This option's effect on the deadline is not yet modelled. Say what it changes.",
-  }, { keepOutcome: true, keepOrdering: true }) : capacityScopedEnvelope;
+  // Paul's legacy-code brief (c1494f4d): the option already says what it changes — on a part this forecast keeps out — so the
+  // reason names that part and offers the one step, instead of asking the user to say it again.
+  const scopedEnvelope = unsupported.reduce((acc, id) => withholdOptionGoalFigures(acc, new Set([id]), {
+    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: unsupportedEventOptionWhy(graph, id),
+  }, { keepOutcome: true, keepOrdering: true }), capacityScopedEnvelope);
   let inputScopedEnvelope = scopedEnvelope;
   for (const row of readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? []) {
     const id = row.option_id ?? row.id;
@@ -199,4 +200,22 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     }, { keepOutcome: true, keepOrdering: true });
   }
   return out;
+}
+
+/**
+ * Why an event option with no lever shows no chance. It names the parts the option changes that this deadline forecast keeps
+ * out (its links to `retained_excluded` parts), and offers the one step; with none, the plain reason.
+ */
+export function unsupportedEventOptionWhy(graph: unknown, optionId: string): string {
+  const g = graph as { nodes?: Record<string, unknown>[]; edges?: Record<string, unknown>[] } | null | undefined;
+  const nodes = Array.isArray(g?.nodes) ? g!.nodes : [];
+  const kept = new Map(nodes.filter(n => n.analysis_participation === 'retained_excluded' && typeof n.label === 'string')
+    .map(n => [n.id, n.label as string] as const));
+  const parts = [...new Set((Array.isArray(g?.edges) ? g!.edges : []).filter(e => e.from === optionId && kept.has(e.to))
+    .map(e => kept.get(e.to)!))];
+  if (parts.length === 0) return "This option's effect on the deadline is not yet modelled. Say what it changes.";
+  const named = parts.map(p => `‘${p}’`);
+  const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `No chance is shown for this option yet: it changes ${list}, which this deadline forecast doesn't use yet. `
+    + 'Worth discussing: how much it would speed up the work, and from when.';
 }
