@@ -241,8 +241,9 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
       ['pro_plan_price::monthly_new_paying_subscribers', 'model_proposed']]);
     // The card the user approves (the chip's detail, the stored proposal's own label) says it, never the Agent's prose.
     expect(p.chips).toHaveLength(1);
-    expect(String(p.chips[0].detail)).toContain('Not included, because the source of its band is not verified (nothing changes for it): '
-      + '"Monthly new paying subscribers" \u2192 "Paying subscribers"');
+    // ⛔ EXPECTATION CHANGED (AIE packet 2b19ae59): the AIE's exact singular sentence replaces the host's draft.
+    expect(String(p.chips[0].detail)).toContain('Left out of this change set: '
+      + '"Monthly new paying subscribers" \u2192 "Paying subscribers"' + ', because the proposed band\'s source is unverified. Its current relationship and source are kept.');
     expect(String(p.door.public_label)).toBe(String(p.chips[0].detail));
     expect(edgeNow('monthly_new_paying_subscribers', 'paying_subscribers'), 'the unknown link is untouched').toEqual(unknownBefore);
     expect(edgeNow(...CHURN).provenance.source).toBe('user_specified');
@@ -251,7 +252,7 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   it('CONTROL: a set with nothing left out names nothing on its card', async () => {
     const words = 'Monthly churn has a strong effect on Paying subscribers.';
     const p = await runProbe('mixed-control', words, false, [{ ...churnLink('strong'), origin: 'user', from_words: words }]);
-    expect(String(p.chips[0].detail)).not.toContain('Not included');
+    expect(String(p.chips[0].detail)).not.toContain('Left out of this change set');
   });
   // ⭐ Codex r2's cited-source probes, both shapes: declared third_party with its source, and the r2 shape (no origin, a false user
   // flag plus basis text citing the source). Never Olumi's, never written; the declared source is named on the result.
@@ -261,7 +262,8 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     expect(p.door.operations).toHaveLength(0);
     expect(p.changed, 'nothing written').toBe(false);
     expect(p.chips, 'no card').toHaveLength(0);
-    expect(p.door.left_out_third_party).toEqual([`"Monthly churn" \u2192 "Paying subscribers", cited to "${cited}"`]);
+    // ⛔ EXPECTATION CHANGED (packet 2b19ae59): named as the card names it, "attributed to" its whole source.
+    expect(p.door.left_out_third_party).toEqual([`"Monthly churn" \u2192 "Paying subscribers", attributed to "${cited}"`]);
   });
   it.each(['Alice supplied this weak estimate.', 'The Smith report estimates a weak effect for this link.'])('the r2 shape (no origin; user_stated false + basis "%s") is no declaration: unknown, nothing written', async basis => {
     const p = await runProbe('cited-basis', 'Please suggest link strengths.', false, [{ ...churnLink('weak'), user_stated: false, basis }]);

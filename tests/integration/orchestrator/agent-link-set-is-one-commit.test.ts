@@ -486,9 +486,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect((p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin).toEqual(MODERATE.map(pairName));
     // ⭐ #3002 (DL; Codex CHECK-3002-783a55b8 item 3): the HOST names the four left-out links on the card AND in the receipt, by the
     // model's own labels for their ids, never relying on the Agent saying it.
-    const omitted = `Not included, because the source of their bands is not verified (nothing changes for them): ${MODERATE.map(pairName).join('; ')}`;
+    // ⛔ EXPECTATION CHANGED (AIE packet 2b19ae59): the AIE's exact plural sentence replaces the host's draft.
+    const omitted = `Left out of this change set: ${MODERATE.map(pairName).join('; ')}, because the proposed bands' sources are unverified. Their current relationships and sources are kept.`;
     expect(String(p.public_label)).toContain(omitted);
-    expect(String(out.follow_up)).toContain(`${omitted}.`);
+    expect(String(out.follow_up)).toContain(omitted);
     for (const k of MODERATE) {
       expect(edge(k).strength.mean, k).toBe(before[k]!.mean);
       expect(edge(k).provenance?.source, k).toBe(before[k]!.source);

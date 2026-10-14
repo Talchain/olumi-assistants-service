@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilities, leftOutCard, LINK_SET_SAVE_NOT_CONFIRMED, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { AGENT_TOOLS } from '../runtime/agent-tools.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
 import { ProposalStore } from '../proposal.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -17,7 +19,7 @@ const initial = (mean = 0.55) => ({ nodes, edges: ['price', 'quality'].map(from 
   strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
   provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } })) });
 
-function harness(mean: number) {
+function harness(mean: number, tamper?: (g: ReturnType<typeof initial>) => void) {
   let bytes = JSON.stringify(initial(mean));
   const writes: SessionTurnWrite[] = [];
   const read = () => JSON.parse(bytes) as ReturnType<typeof initial>;
@@ -48,6 +50,8 @@ function harness(mean: number) {
           ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) }, store);
       expect(result.kind, JSON.stringify(result)).toBe('committed');
       if (result.kind !== 'committed') throw new Error(JSON.stringify(result));
+      // A row may change the stored graph after the commit, before Olumi reads it back.
+      if (tamper !== undefined) { const g = read(); tamper(g); bytes = JSON.stringify(g); }
       return { status: 'committed', graph_hash: result.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [] };
     },
   });
@@ -478,7 +482,8 @@ describe('T2A5: the AI quotes the user\u2019s complete statement, the host verif
   it('origin third_party: never written, never Olumi\u2019s, left out and named with the source it cites', async () => {
     const words = 'Alice thinks Price has a weak effect on MRR.';
     const { result, writes } = await offer('Price', { origin: 'third_party', source: 'Alice', basis: undefined }, words, { user_turn_text: words });
-    expect(result).toMatchObject({ ok: false, refusal: 'origin_unknown', left_out_third_party: ['"Price" \u2192 "MRR", cited to "Alice"'] });
+    // ⛔ EXPECTATION CHANGED (packet 2b19ae59): named as the card names it, "attributed to" its whole source.
+    expect(result).toMatchObject({ ok: false, refusal: 'origin_unknown', left_out_third_party: ['"Price" \u2192 "MRR", attributed to "Alice"'] });
     expect(writes).toHaveLength(0);
   });
   // ⛔ DL 14 Oct: reseeded chip text is stored as a user message, so a match there does not prove the user's words. Restored
@@ -542,5 +547,108 @@ describe('T2A5: the AI quotes the user\u2019s complete statement, the host verif
   it('a quote from UNVERIFIED words is never a receipt: origin unknown', async () => {
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR' }, 'Please size the links.',
       { user_turn_text: 'Please size the links.', unverified_user_text: 'Price has a weak effect on MRR' });
+  });
+});
+
+/**
+ * ⭐ #3002: the AIE's companion, mixed-card and receipt texts (packet `AIE-LINK-ORIGIN-COMPANION-AND-MIXED-CARD-TEXTS-20261014.json`,
+ * sha256 2b19ae59…, #94 6163353417). The literals below were extracted from the packet programmatically, never typed.
+ */
+const AIE = {
+  source: 'Only with origin third_party: identify the person, publication or other source to which this specific directed-link band is attributed, using the retained source words. Preserve its complete applicable claim, qualifications, reference, period and verification state in the existing readable source and context. A name or citation alone does not verify the band or make it the user\'s judgement.',
+  basis: 'Only with origin olumi: explain the grounded reasons for the genuinely new estimate Olumi is making now for this directed link, at its actual reference, period and conditions. A nonempty sentence, copied band, existing stored estimate or statement that the user did not supply it is not a basis for new AI authorship. If revising a prior estimate, identify the new estimate and its grounds while retaining the prior value and source separately. Preserve the full evidence and qualifications in the existing readable context.',
+  strength: 'The band for this specific directed relationship. Declare its origin separately: a positively verified human statement, an attributed third-party claim, or a genuinely new grounded Olumi estimate. Missing human words do not make the band Olumi\'s. An unknown or unsupported origin stays unknown and is not offered as a change.',
+  unknownOne: 'Left out of this change set: "A" \u2192 "B", because the proposed band\'s source is unverified. Its current relationship and source are kept.',
+  unknownMany: 'Left out of this change set: <directed relationships>, because the proposed bands\' sources are unverified. Their current relationships and sources are kept.',
+  thirdPartyOne: 'Left out of this change set: "A" \u2192 "B". The proposed band is attributed to "<source>"; it is not presented as your judgement or a new Olumi estimate. Its current relationship and source are kept.',
+  thirdPartyMany: 'Left out of this change set: <directed relationships, each with its attributed source>. These bands are not presented as your judgement or new Olumi estimates. Their current relationships and sources are kept.',
+  thirdPartyNote: 'Some proposed links were left out as attributed third-party bands (`left_out_third_party`). Name the directed relationships and their cited sources as the current card does; preserve the complete claims and their verification state. Say that this proposal does not change those links, not that the bands are absent from the model or have never been recorded. Do not ask the user to claim the source\'s view as their own. If the user independently supplies a new judgement, retain that new statement separately and use only an actually supported bound proposal; agreement or approval does not rewrite the original source.',
+  unknownNote: 'Some proposed links were left out because the source of their bands could not be verified (`left_out_unknown_origin`). Name those directed relationships as the current card does. Their existing values and sources are kept; do not call the proposed bands the user\'s or Olumi\'s. Do not re-ask source already retained: explain the actual missing or conflicting binding, and use a focused clarification or useful evidence review where supported.',
+  scopeNote: 'Nothing has changed yet. One approval applies only the changes listed as included on the current card, together or none; it does not apply any link listed as left out.',
+  unconfirmed: 'The save could not be confirmed. Check the current model before retrying.',
+};
+describe('#3002 the AIE\u2019s texts and the whole-postimage receipt (packet 2b19ae59)', () => {
+  const AB = '"A" \u2192 "B"';
+  const price = '"Price" \u2192 "MRR"';
+  const quality = '"Quality" \u2192 "MRR"';
+  it('the tool\u2019s three field descriptions are the AIE\u2019s, byte for byte', () => {
+    const item = (AGENT_TOOLS.find((t) => (t as { name?: string }).name === 'propose_link_strengths') as unknown as { parameters: any })
+      .parameters.properties.links.items.properties;
+    expect([item.source.description, item.basis.description, item.strength.description]).toEqual([AIE.source, AIE.basis, AIE.strength]);
+    expect(item.origin.enum, 'the host-only `stored` is never offered to the AI').toEqual(['user', 'third_party', 'olumi']);
+  });
+  it('the four card sentences are the AIE\u2019s templates, filled with the model\u2019s labels and the whole source', () => {
+    expect(leftOutCard('unknown_origin', [{ pair: AB }])).toBe(AIE.unknownOne);
+    expect(leftOutCard('unknown_origin', [{ pair: price }, { pair: quality }])).toBe(AIE.unknownMany.replace('<directed relationships>', `${price}; ${quality}`));
+    expect(leftOutCard('third_party', [{ pair: AB, source: '<source>' }])).toBe(AIE.thirdPartyOne);
+    expect(leftOutCard('third_party', [{ pair: price, source: 'Alice' }, { pair: quality, source: 'the Smith report' }])).toBe(AIE.thirdPartyMany
+      .replace('<directed relationships, each with its attributed source>', `${price}, attributed to "Alice"; ${quality}, attributed to "the Smith report"`));
+    expect(leftOutCard('unknown_origin', [])).toBe('');
+  });
+  // The conversation states no band for Price, so Olumi's own estimate for it is not a copy.
+  const asked = 'Please suggest the link strengths.';
+  const mixed = (quality: Record<string, unknown>) => ({ links: [
+    { from_label: 'Price', to_label: 'MRR', strength: 'weak', origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model' },
+    { from_label: 'Quality', to_label: 'MRR', strength: 'weak', ...quality }], rationale: 'Prepare the requested link strengths.' }) as never;
+  it('a mixed card names its third-party link in the AIE\u2019s words, with the AIE\u2019s notes; the receipt repeats it once read back whole', async () => {
+    const { caps, read } = harness(0.55);
+    const ctx = contextOf(asked, { user_turn_text: 'Alice thinks Quality has a weak effect on MRR. Suggest the rest.' });
+    const qualityBefore = JSON.stringify(read().edges.find((e) => e.from === 'quality'));
+    const p = await caps.proposeLinkStrengths!(ctx, mixed({ origin: 'third_party', source: 'Alice' }));
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const card = AIE.thirdPartyOne.replace(AB, quality).replace('<source>', 'Alice');
+    expect(String(p.public_label).endsWith(`. ${card}`), String(p.public_label)).toBe(true);
+    expect(String(p.note).startsWith(`${AIE.scopeNote} `)).toBe(true);
+    expect(String(p.note)).toContain(AIE.thirdPartyNote);
+    expect(String(p.note)).not.toContain(AIE.unknownNote);
+    const out = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(String(out.follow_up)).toContain(card);
+    expect(JSON.stringify(read().edges.find((e) => e.from === 'quality')), 'the left-out link keeps its value and source').toBe(qualityBefore);
+  });
+  it('a mixed card names its unknown link in the AIE\u2019s words, with the unknown note', async () => {
+    const { caps } = harness(0.55);
+    const p = await caps.proposeLinkStrengths!(contextOf(asked, {}), mixed({}));
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(String(p.public_label).endsWith(`. ${AIE.unknownOne.replace(AB, quality)}`), String(p.public_label)).toBe(true);
+    expect(String(p.note)).toContain(AIE.unknownNote);
+    expect(String(p.note)).not.toContain(AIE.thirdPartyNote);
+  });
+  it('⭐ RED→GREEN: a left-out link that does not read back as it was makes the save UNCONFIRMED, in the AIE\u2019s words: no receipt', async () => {
+    const { caps, read } = harness(0.55, (g) => { g.edges.find((e) => e.from === 'quality')!.provenance = { source: 'user_specified', magnitude: 'olumi_estimate' }; });
+    const ctx = contextOf(asked, {});
+    const p = await caps.proposeLinkStrengths!(ctx, mixed({ origin: 'third_party', source: 'Alice' }));
+    const out = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_verified', follow_up: AIE.unconfirmed });
+    expect(out.follow_up).toBe(LINK_SET_SAVE_NOT_CONFIRMED);
+    // The user reads the AIE's one line, never "Recorded" or a left-out sentence.
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status).toBe(AIE.unconfirmed);
+    expect(read().edges.find((e) => e.from === 'price')!.strength.mean, 'the approved link did land').not.toBe(0.55);
+  });
+  it('CONTROL: another writer\u2019s unconfirmed result keeps the generic words (no follow-up of its own)', () => {
+    const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: true, refusal: 'not_verified' }]).status;
+    expect(status).not.toBe(AIE.unconfirmed);
+    expect(status).toContain('could not be confirmed');
+  });
+  it('a third party\u2019s source is named whole, never cut; without a source the band is unknown', async () => {
+    const long = 'the 2026 Smith & Partners pricing elasticity report, chapter 4, table 2 (survey of 312 SaaS firms, revised March 2026 edition)';
+    expect(long.length).toBeGreaterThan(80);
+    const { result } = await offer('Quality', { origin: 'third_party', source: long, basis: undefined });
+    expect(result).toMatchObject({ ok: false, refusal: 'origin_unknown', left_out_third_party: [`${quality}, attributed to "${long}"`] });
+    const blank = await offer('Quality', { origin: 'third_party', source: '  ', basis: undefined });
+    expect(blank.result).toMatchObject({ ok: false, refusal: 'origin_unknown', left_out_unknown_origin: [quality] });
+    expect(blank.result).not.toHaveProperty('left_out_third_party');
+  });
+  it('the host\u2019s `stored` declaration carries the STORED origin only for the band the link holds: a review of Olumi\u2019s estimate; any other band is unknown', async () => {
+    // 0.55 sits in the stored band (strong); the stub's 'weak' does not.
+    const { proposals, caps } = harness(0.55);
+    const current = await caps.proposeLinkStrengths!(contextOf(history, {}), { links: [{ from_label: 'Quality', to_label: 'MRR',
+      strength: 'strong', origin: 'stored' }], rationale: 'Run a pre-mortem' } as never);
+    expect(current.ok, JSON.stringify(current)).toBe(true);
+    expect(proposals.get(String(current.proposal_id))!.operations.map((o) => [(o.value as { intent: string }).intent, (o.value as { author: string }).author]))
+      .toEqual([['confirm_current', 'model_proposed']]);
+    const moved = await offer('Quality', { origin: 'stored', basis: undefined });
+    expect(moved.result).toMatchObject({ ok: false, refusal: 'origin_unknown', left_out_unknown_origin: [quality] });
+    expect(moved.writes).toHaveLength(0);
   });
 });

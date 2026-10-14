@@ -457,10 +457,10 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
       if (isPlaceholderLink(edge)) { expect(card, item.id).toBeNull(); continue; }
       expect(card?.tool).toBe('propose_link_strengths');
       if (card?.tool !== 'propose_link_strengths') return;
-      // ⛔ EXPECTATION CHANGED (#3002 known-origin transport): the host's own card DECLARES its band Olumi's new estimate, with its
-      // basis (the card's rationale), on a link whose stored strength is not the user's; without it the door would leave it unknown.
+      // ⛔ EXPECTATION CHANGED (#3002, the AIE's producer AMEND, packet 2b19ae59): the band is the STORED band, declared `stored`,
+      // so the door carries its stored origin by identity; it claims no basis and no new Olumi estimate.
       expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)),
-        origin: 'olumi', basis: 'Run a pre-mortem' }]);
+        origin: 'stored' }]);
       expect([nodeLabel(edge.from), nodeLabel(edge.to)]).toEqual(item.labels);
       expect(bandEnum).toContain(card.args.links[0].strength);
       expect(Object.keys(card.args.links[0])).not.toContain('from_words');
@@ -563,9 +563,8 @@ describe('round 2 (CODEX_CLI_OVERFLOW 5939415083; DL ruling): a recognised press
     const edge = (D1.body.draft_graph.edges as { from: string; to: string }[]).find((e) => `${e.from}->${e.to}` === link.id)!;
     // Science 393023 LICENCE ruling 3, re-derived: the composer is still the ONE builder; a placeholder link gets none.
     const target = linkTargetOf(D1.body.draft_graph, edge.from, edge.to)!;
-    // ⛔ INPUT CHANGE (#3002): the ONE composer now reads the stored link's origin from the graph (a user-sized link is never Olumi's).
     expect(cardCallFor(link, D1.body.draft_graph)).toEqual(isPlaceholderLink(edge) ? null : {
-      tool: 'propose_link_strengths', args: linkStrengthsCardArgs(target, PREMORTEM_CARD_RATIONALE, D1.body.draft_graph) });
+      tool: 'propose_link_strengths', args: linkStrengthsCardArgs(target, PREMORTEM_CARD_RATIONALE) });
   });
 
   it('ROW N5: the turn\'s record is rebuilt at its explicit boundary: earlier turns byte-equal, then the user\'s words, then what was SENT', () => {

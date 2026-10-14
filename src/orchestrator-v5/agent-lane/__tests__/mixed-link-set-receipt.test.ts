@@ -72,7 +72,11 @@ function world(variant = false, servedBytes = false) {
     commitOptionLevels: async (input) => {
       sent.push(input as unknown as Record<string, unknown>);
       // The stored outcome is the SERVED read after the approval; the variant link is written as that writer writes it.
+      // ⛔ INPUT CHANGE (#3002 whole-postimage readback, AIE packet 2b19ae59): like the real writer, the stub writes only the
+      // links it was SENT; a link not in this set keeps its bytes (the served before/after differ only on the six).
+      const written = new Set((input.link_strengths ?? []).map((l) => `${l.from}::${l.to}`));
       graph = { ...structuredClone(FX.after.graph), edges: FX.after.graph.edges.map((e) => {
+        if (!written.has(key(e))) return structuredClone(before.edges.find((x) => key(x) === key(e))!);
         if (!drawn.has(key(e))) return structuredClone(e);
         const was = before.edges.find((x) => key(x) === key(e))!;
         return { ...structuredClone(e), provenance: { ...was.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-12T00:17:53.645Z' } } };

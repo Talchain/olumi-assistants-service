@@ -143,11 +143,12 @@ describe('⛔ R3-9 × R12: a link set leaves out the links a declared identity d
     for (const s of left) expect(s).toContain('Pro MRR');
     // ⛔ EXPECTATION CHANGED (#3002, DL: the card names every omitted link; old: the link is absent from the whole card → new: it
     // is never OFFERED, and the host names it as not included, by its labels, on the card and in the receipt).
-    const [offered, ...omitted] = String(p.public_label).split('. Not included, because ');
+    // (packet 2b19ae59: the same reason in the AIE's "Left out of this change set" frame.)
+    const [offered, ...omitted] = String(p.public_label).split('. Left out of this change set: ');
     expect(offered).not.toContain('"Pro plan price" → "Pro MRR"');
-    expect(omitted).toEqual(['a calculation the model declares defines them (nothing changes for them): "Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR"']);
+    expect(omitted).toEqual(['"Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR", because a calculation the model declares defines them. Their current relationships are kept.']);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
-    expect(String(out.follow_up)).toContain('Not included, because a calculation the model declares defines them (nothing changes for them): "Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR".');
+    expect(String(out.follow_up)).toContain('Left out of this change set: "Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR", because a calculation the model declares defines them. Their current relationships are kept.');
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(doorCalls()).toBe(1);
     expect(rows.size, 'ONE commit').toBe(1);

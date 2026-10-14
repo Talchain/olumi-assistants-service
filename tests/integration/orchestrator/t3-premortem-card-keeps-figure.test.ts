@@ -13,6 +13,7 @@ import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persist
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { CANVAS_BAND_WORD } from '../../../src/orchestrator-v5/format/edge-strength-bands.js';
 import { assignEntityRefs } from '../../../src/orchestrator-v5/graph/entity-refs.js';
+import { linkSizing } from '../../../src/cee/magnitude/link-sizing.js';
 
 const SCENARIO_ID = '7a1e2d3c-0000-4000-8000-0000000000d1';
 const SERVED = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/turn-context/__tests__/fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: { id: string; capture_sha_matches_case: boolean; body: Record<string, any> }[] };
@@ -127,8 +128,10 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     const card = mt.cardCallFor(item, persisted);
     expect(card?.tool).toBe('propose_link_strengths');
     if (card?.tool !== 'propose_link_strengths') return;
-    // #3002: Olumi's own sized link, so the host's card declares the band Olumi's, with the card's basis.
-    expect(card.args.links[0]).toMatchObject({ origin: 'olumi', basis: expect.any(String) });
+    // ⛔ EXPECTATION CHANGED (#3002, the AIE's producer AMEND, packet 2b19ae59): the card's band is the STORED band, so it declares
+    // `stored` and claims no basis: the door carries Olumi's stored origin (a review), never a new Olumi estimate.
+    expect(card.args.links[0]).toMatchObject({ origin: 'stored' });
+    expect(card.args.links[0]).not.toHaveProperty('basis');
     const before = JSON.parse(JSON.stringify(edgeOf(FROM, TO))) as Edge;
     const { caps, ctx } = agent('Run a pre-mortem on ‘AI Reporting Module Sprint’.');
     const p = await caps.proposeLinkStrengths!(ctx, card.args as never);
@@ -140,6 +143,9 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     const after = edgeOf(FROM, TO);
     expect(after.strength, 'μ 0.6 and σ 0.3 held exactly').toEqual(before.strength);
     expect(after.strength.mean).toBe(0.6);
+    // The stored origin is carried: still Olumi's estimate (now reviewed by the user), never re-stamped.
+    expect(linkSizing(after)).toBe('olumi_accepted');
+    expect([after.provenance?.source, after.provenance?.magnitude]).toEqual([before.provenance?.source, before.provenance?.magnitude]);
   });
 
   it('⭐ #3002 (Codex CHECK-3002-783a55b8 item 4): the SAME card on a link whose strength the USER set keeps it the user\u2019s: no Olumi declaration, nothing written', async () => {
@@ -152,8 +158,8 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     if (turn?.kind !== 'run') throw new Error('expected a run');
     const card = mt.cardCallFor(turn.context.supplied_items.find((i) => i.id === `${FROM}->${TO}`)!, persisted);
     if (card?.tool !== 'propose_link_strengths') throw new Error('expected a link card');
-    // The producer declares no origin for it: its arguments carry no claim of anyone's.
-    expect(card.args.links[0]).not.toHaveProperty('origin');
+    // ⛔ EXPECTATION CHANGED (packet 2b19ae59): the producer declares only that the band is the stored one (`stored`), no one's claim.
+    expect(card.args.links[0]).toMatchObject({ origin: 'stored' });
     expect(card.args.links[0]).not.toHaveProperty('basis');
     const before = JSON.stringify(edgeOf(FROM, TO));
     const { caps, ctx } = agent('Run a pre-mortem on ‘AI Reporting Module Sprint’.');
@@ -162,6 +168,27 @@ describe('T3 pre-mortem card on the SERVED D1 graph, through the real door', () 
     expect(p).not.toHaveProperty('proposal_id');
     expect((p as { already?: string[] }).already).toEqual([`"${card.args.links[0].from_label}" \u2192 "${card.args.links[0].to_label}" is already ${CANVAS_BAND_WORD.strong}, as the user set it`]);
     expect(JSON.stringify(edgeOf(FROM, TO)), 'the user\u2019s figure and its origin are untouched').toBe(before);
+    expect(rows.size, 'nothing committed').toBe(0);
+  });
+
+  it('⭐ #3002 producer AMEND (AIE packet 2b19ae59): the SAME card on a sized link nobody marked is not Olumi\u2019s: unknown, left out, no card, nothing written', async () => {
+    // A sized link with no sizing mark (a brief or structural link the sizer never marked): "not the user's" is not Olumi's.
+    const unmarked = edgeOf(FROM, TO);
+    unmarked.provenance = { source: 'brief_extraction' };
+    expect(linkSizing(unmarked), 'precondition: unmarked').toBe('unmarked');
+    const turn = mt.planMethodTurn({ chipId: mt.planPickChipId('ai_reporting_module_sprint'), signalInputs: {
+      offeredSpecific: [], graph: D1.body.draft_graph, analysisState: D1.body.analysis_state, analysisResult: D1.body.analysis_result,
+      optionParticipation: D1.body.option_participation, leaderLicensed: false } });
+    if (turn?.kind !== 'run') throw new Error('expected a run');
+    const card = mt.cardCallFor(turn.context.supplied_items.find((i) => i.id === `${FROM}->${TO}`)!, persisted);
+    if (card?.tool !== 'propose_link_strengths') throw new Error('expected a link card');
+    const before = JSON.stringify(edgeOf(FROM, TO));
+    const { caps, ctx } = agent('Run a pre-mortem on ‘AI Reporting Module Sprint’.');
+    const p = await caps.proposeLinkStrengths!(ctx, card.args as never);
+    const pair = `"${card.args.links[0].from_label}" \u2192 "${card.args.links[0].to_label}"`;
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown', left_out_unknown_origin: [pair] });
+    expect(p).not.toHaveProperty('proposal_id');
+    expect(JSON.stringify(edgeOf(FROM, TO)), 'its value and source are untouched').toBe(before);
     expect(rows.size, 'nothing committed').toBe(0);
   });
 });
