@@ -26,6 +26,7 @@ import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalCha
 import { unresolvedRetainedLimits, retainedLimitWithheldLine } from '../../graph/retained-limit.js';
 import type { PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { isOlumiEstimateValue } from '../../cee/provenance/provenance-of.js';
+import { cohortTargetsOf, rateQuartilesOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -81,6 +82,13 @@ export interface GoalTargetsBlock {
   readonly unsupported_targets?: readonly string[];
   readonly per_target: readonly GoalTargetChance[];
   readonly joint: GoalJoint;
+  /**
+   * AIE same-cohort law (science PR-4): the targets' chances rest on each option's cohort forecast (`cohort-forecast.ts`), not
+   * on the model's links; the joint covers the targets only, and the notes say so, name the limits left out and give the inputs.
+   */
+  readonly basis?: 'same_cohort_forecast';
+  /** Set when any forecast said rests on Olumi's figures (they stay Olumi's after approval, MA5). */
+  readonly provisional?: true;
 }
 
 const OPS = new Set(['>=', '>', '<=', '<']);
@@ -292,6 +300,43 @@ export function goalTargetsBlockOf(args: {
     const id = optionIdOf(r);
     if (id !== undefined && !recordOf.has(id)) recordOf.set(id, r);
   }
+  // ⭐ AIE same-cohort law (science PR-4, `cohort-forecast.ts`): where the Run scored the two targets on an option's cohort
+  // forecast, their chances come from THAT forecast, never the model's links, so the model's own reasons for withholding a
+  // target's figure (its missing level, its unsized parts) describe the model, not this figure, and are not said beside it.
+  // Every gate on what the targets ARE stays (both stated, both sent as stated, levels, never Olumi's base). Each option's
+  // figures are bound by identity to the forecast it holds: the same people and quartiles, the stated comparison, the exact
+  // threshold. An option without one is named, never filled in. The joint covers the targets only; each limit keeps its reason.
+  const storedTargetRows = stored.filter((r) => r.role === GOAL_TARGET_ROLE);
+  // A LIMIT sent on another scale or comparison is no part of this joint (it is named as left out); a TARGET must be exact.
+  const forecastMode = targetIds.size === 2 && targets.length === 2 && unsupported.length === 0 && !unnamed
+    && ![...targetIds].some((id) => strictLostIds.has(id) || figureLostIds.has(id)) && unsentTargets.length === 0 && olumiBase.size === 0
+    && args.optionIds.some((id) => isRec(recordOf.get(id)?.target_forecast));
+  const forecastOf = (id: string): { forecast: CohortForecast; marginal: Map<string, { p: number; n: number }>; joint: { p: number; n: number } } | null => {
+    const f = readCohortForecast(nodes.find((n) => n.id === id));
+    const tf = recordOf.get(id)?.target_forecast;
+    if (f === undefined || !isRec(tf) || !isRec(tf.law) || !Array.isArray(tf.conditions)) return null;
+    const bound = cohortTargetsOf(storedTargetRows, f);
+    const [q25, q75] = rateQuartilesOf(f);
+    const lq = tf.law.rate_quartiles;
+    if (bound === undefined || tf.law.exposure !== f.people_reached || !Array.isArray(lq) || lq.length !== 2 || lq[0] !== q25 || lq[1] !== q75) return null;
+    const conds = tf.conditions.filter(isRec);
+    if (conds.length !== bound.length || conds.length !== tf.conditions.length) return null;
+    const marginal = new Map<string, { p: number; n: number }>();
+    for (const b of bound) {
+      const t = targets.find((x) => x.constraint_id === b.row.constraint_id);
+      const matches = conds.filter((c) => c.constraint_id === b.row.constraint_id);
+      const c = matches[0];
+      const pr = precisionOf(c?.precision);
+      if (t === undefined || matches.length !== 1 || c === undefined || pr === null || c.quantity !== b.quantity
+        || c.threshold !== b.threshold || c.operator !== t.operator || !unit01(c.probability)) return null;
+      marginal.set(t.constraint_id, { p: c.probability, n: pr.n });
+    }
+    const jp = precisionOf(tf.joint_probability_precision);
+    return unit01(tf.joint_probability) && jp !== null ? { forecast: f, marginal, joint: { p: tf.joint_probability, n: jp.n } } : null;
+  };
+  const figures = new Map<string, NonNullable<ReturnType<typeof forecastOf>>>();
+  if (forecastMode) for (const id of args.optionIds) { const f = forecastOf(id); if (f !== null) figures.set(id, f); }
+
   const sq = args.statusQuo;
   const compared = args.optionIds.filter((id) => !(sq?.fromJoint === true && id === sq.id));
   const comparedFor = (constraintId: string): string[] => args.optionIds.filter((id) => !(sq?.fromTargets.has(constraintId) === true && id === sq.id));
@@ -314,6 +359,7 @@ export function goalTargetsBlockOf(args: {
   const refusedTargets = new Set(targets.filter((t) => (args.primaryRefused && t.node_id === args.primaryGoalId)
     || !sent.some((r) => r.constraint_id === t.constraint_id)).map((t) => t.constraint_id));
   for (const c of ordered) {
+    if (forecastMode && c.role === 'target') continue;
     const verdict = args.perLimit?.find((v) => v.constraint_id === c.constraint_id);
     if (verdict?.state === 'unscored') {
       const reason = retainedIds.has(c.constraint_id) ? retainedLimitWithheldLine(args.graph) : verdict.reason === 'parts_links_placeholder'
@@ -351,8 +397,40 @@ export function goalTargetsBlockOf(args: {
     }
   }
 
+  // Each target's own chance from each option's forecast, with that figure's own precision.
+  const forecastPerTarget: GoalTargetChance[] = !forecastMode ? [] : targets.flatMap((t) => {
+    const pct: Record<string, number> = {};
+    const rounding: Record<string, GoalChanceDisplayRounding> = {};
+    for (const [id, f] of figures) {
+      const m = f.marginal.get(t.constraint_id)!;
+      rounding[id] = displayRoundingFor(wilsonHalfWidthPoints(m.p, m.n));
+      pct[id] = displayedPctAt(m.p, rounding[id]!);
+    }
+    return Object.keys(pct).length === 0 ? [] : [{ constraint_id: t.constraint_id, words: t.clause, pct_by_option: pct, display_rounding_by_option: rounding }];
+  });
+  if (forecastMode) {
+    const optionWords = (id: string): string => `‘${labelOf(id) ?? id}’`;
+    const missing = args.optionIds.filter((id) => !figures.has(id));
+    if (missing.length > 0) {
+      notes.push(`${listWords(missing.map(optionWords))} ${missing.length === 1 ? 'has' : 'have'} no forecast of the people reached and how many convert in this Run, so ${missing.length === 1 ? 'its' : 'their'} chance isn’t shown.`);
+    }
+    const limits = ordered.filter((c) => c.role === 'limit');
+    if (limits.length > 0) {
+      notes.push(`This covers your two targets only. Your ${limits.length === 1 ? 'limit' : 'limits'} on ${listWords(limits.map((c) => `‘${c.label}’`))} ${limits.length === 1 ? 'is' : 'are'} not included, because the forecast it rests on is of the people reached and how many of them convert${limitNotes.size > 0 ? '; the reasons the model gives for each limit are below' : ''}.`);
+    }
+    if (figures.size > 0) {
+      const [rate, count] = cohortTargetsOf(storedTargetRows, [...figures.values()][0]!.forecast)!;
+      const rateLabel = targets.find((t) => t.constraint_id === rate.row.constraint_id)!.label;
+      const countLabel = targets.find((t) => t.constraint_id === count.row.constraint_id)!.label;
+      const inputs = [...figures].map(([id, { forecast: f }]) => `${optionWords(id)} reaches ${f.people_reached.toLocaleString('en-GB')} people${period} with a ‘${rateLabel}’ of ${f.conversion_middle_half_pct[0]}–${f.conversion_middle_half_pct[1]}%`);
+      notes.push(`These chances rest on a forecast, not on the model’s links: ${inputs.join('; ')}. Each range is read as the likely range (the middle half), and the number of people reached is held fixed, so its own uncertainty isn’t included. ‘${countLabel}’ counts the people who convert among those same people, as you said, so meeting both is the same as meeting the harder of the two.`);
+      const olumi = [...figures].filter(([, { forecast: f }]) => f.author === 'olumi').map(([id]) => optionWords(id));
+      if (olumi.length > 0) notes.push(`The figures for ${listWords(olumi)} are Olumi’s estimates, not yours, so the chances that rest on them are provisional.`);
+    }
+  }
+
   // Each target's own chance, per option, from the same Run (never re-derived).
-  const perTarget: GoalTargetChance[] = targets.flatMap((t) => {
+  const perTarget: GoalTargetChance[] = forecastMode ? forecastPerTarget : targets.flatMap((t) => {
     if (refusedTargets.has(t.constraint_id) || olumiBase.has(t.constraint_id) || strictLostIds.has(t.constraint_id) || figureLostIds.has(t.constraint_id)) return [];
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
@@ -390,7 +468,20 @@ export function goalTargetsBlockOf(args: {
       && compared.every((id) => perTarget.every((t) => Object.hasOwn(t.pct_by_option, id))) ? { frechet_line: frechetLine(targets.length) } : {}),
   });
   let joint: GoalJoint;
-  if (unsupported.length > 0) joint = withheld('target_not_supported');
+  if (forecastMode) {
+    const pct: Record<string, number> = {};
+    const rounding: Record<string, GoalChanceDisplayRounding> = {};
+    for (const [id, f] of figures) {
+      rounding[id] = displayRoundingFor(wilsonHalfWidthPoints(f.joint.p, f.joint.n));
+      pct[id] = displayedPctAt(f.joint.p, rounding[id]!);
+    }
+    const missing = args.optionIds.filter((id) => !figures.has(id));
+    // The two targets share the stated period; no limit is part of this joint (the notes say so).
+    joint = figures.size === 0 ? withheld('not_returned') : {
+      status: 'licensed', words: `${listWords(targets.map((c) => period === '' ? c.clause : c.clause.slice(0, -period.length)))}${period}`,
+      pct_by_option: pct, display_rounding_by_option: rounding, ...(missing.length > 0 ? { withheld_option_ids: missing } : {}),
+    };
+  } else if (unsupported.length > 0) joint = withheld('target_not_supported');
   else if (unnamed) joint = withheld('condition_not_named');
   else if (strictLost) joint = withheld('strict_not_preserved');
   else if (figureLostIds.size > 0 || unsentTargets.length > 0) joint = withheld('figure_not_preserved');
@@ -437,7 +528,7 @@ export function goalTargetsBlockOf(args: {
   }
   // A missing marginal or legacy per-limit certificate does not revoke a joint the existing gates licensed.
   // Phase a explains withheld results; full event testability is the separately scoped positive-path work.
-  const shownNotes = joint.status === 'withheld' ? notes : notes.filter((note) => !limitNotes.has(note));
+  const shownNotes = joint.status === 'withheld' || forecastMode ? notes : notes.filter((note) => !limitNotes.has(note));
   const shownCauses = [...causes.values()].filter((cause) => [...cause.notes].every((note) => shownNotes.includes(note)));
   // Join in the existing producer, before prose loses its condition/cause/option bindings. No note is removed from the licence.
   const noteGroups = shownCauses.some((cause) => cause.clauses.size > 1 || (joint.status === 'withheld' && cause.reason === joint.line))
@@ -446,7 +537,9 @@ export function goalTargetsBlockOf(args: {
       ...(joint.status === 'withheld' && cause.reason === joint.line ? { joint_line: joint.line } : {}),
     })) : [];
   return { conditions: ordered, ...(shownNotes.length > 0 ? { notes: shownNotes } : {}),
-    ...(noteGroups.length > 0 ? { note_groups: noteGroups } : {}), per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}) };
+    ...(noteGroups.length > 0 ? { note_groups: noteGroups } : {}), per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}),
+    ...(forecastMode ? { basis: 'same_cohort_forecast' as const } : {}),
+    ...(forecastMode && [...figures.values()].some((f) => f.forecast.author === 'olumi') ? { provisional: true as const } : {}) };
 }
 
 /** The stored block as a reader may use it, or `undefined` when it is malformed (a record at odds with itself speaks for nothing). */
