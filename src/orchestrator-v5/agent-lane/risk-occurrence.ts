@@ -34,6 +34,8 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 
 /** The proposal op (`proposal.ts`): `path` is the risk's id, `value` is {@link RiskOccurrenceValue}. */
 export const SET_RISK_OCCURRENCE_OP = 'set_risk_occurrence' as const;
+/** The S2 subject of a statement of how likely a risk is to happen (`StatementSubject.quantity`, with the risk's `node_id`). */
+export const RISK_OCCURRENCE_QUANTITY = 'risk_occurrence' as const;
 
 /** What the card carries and the door writes. */
 export interface ApprovedRiskOccurrence {
@@ -57,6 +59,13 @@ export interface ApprovedRiskOccurrence {
    * acts stays on its link, still Olumi's placeholder.
    */
   readonly holds_now?: UserStatement;
+  /**
+   * ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): their verified statement of how likely this risk is to happen within the
+   * goal's window ("I'd say there's about a 30% chance it slips before launch"), governed by THIS risk
+   * (`risk-occurrence-statement.ts`). Its block is the user's (`basis: 'user'`), exactly the figure or range the words state over
+   * the goal's window, never rescaled and never given Olumi's spread. How strongly it acts stays on its link.
+   */
+  readonly stated_occurrence?: UserStatement;
 }
 
 /**
@@ -165,6 +174,21 @@ export function userHoldsNowBlock(windowMonths: number): EventRiskV1T | undefine
 const isHoldsNowBlock = (block: EventRiskV1T): boolean =>
   block.occurrence.basis === 'user' && block.occurrence.p_low === 1 && block.occurrence.p_high === 1 && block.mitigations === undefined;
 
+const share = (percent: number): number => Number((percent / 100).toFixed(6));
+/** The user's stated chance as a validated block, from percentages (0 < low ≤ high ≤ 100), over the goal's window, or `undefined`. */
+export function userOccurrenceBlock(lowPercent: unknown, highPercent: unknown, windowMonths: number): EventRiskV1T | undefined {
+  if (!finite(lowPercent) || !finite(highPercent) || lowPercent <= 0 || highPercent > 100 || lowPercent > highPercent) return undefined;
+  const parsed = EventRiskV1.safeParse({ version: 1,
+    occurrence: { p_low: share(lowPercent), p_high: share(highPercent), meaning: 'at_least_once_within_horizon', basis: 'user' },
+    horizon: { months: windowMonths } });
+  return parsed.success ? parsed.data : undefined;
+}
+/** The block is exactly what the user's statement about THIS risk's occurrence states: their point or range, theirs, nothing added. */
+const isStatedBlock = (block: EventRiskV1T, s: UserStatement, riskId: string): boolean => (s.form === 'point' || s.form === 'range')
+  && s.subject.quantity === RISK_OCCURRENCE_QUANTITY && s.subject.node_id === riskId && s.negated !== true
+  && finite(s.low) && finite(s.high) && block.occurrence.basis === 'user' && block.mitigations === undefined
+  && block.occurrence.p_low === share(s.low) && block.occurrence.p_high === share(s.high);
+
 /** Olumi's range as a validated block, from percentages (0 ≤ low ≤ high ≤ 100), or `undefined`. */
 export function olumiOccurrenceBlock(lowPercent: unknown, highPercent: unknown, windowMonths: number): EventRiskV1T | undefined {
   if (!finite(lowPercent) || !finite(highPercent) || lowPercent < 0 || highPercent > 100 || lowPercent > highPercent) return undefined;
@@ -202,6 +226,12 @@ export const riskHoldsNowCardWords = (label: string, source: string): string => 
   + `‘${label.trim()}’ is already true now? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.`;
 export const riskHoldsNowRecordedWords = (label: string): string => `Recorded from your words: ‘${label.trim()}’ is already true now. `
   + 'How strongly it affects the model is still Olumi’s placeholder on its link.';
+/** AIE_TEXT_PENDING (DL relays): S2, the user's own occurrence figure. Their words are quoted; Olumi's reading of them is offered. */
+export const riskStatedOccurrenceCardWords = (label: string, source: string, block: EventRiskV1T): string => `From your message: ‘${source}’ `
+  + `Olumi reads this as your figure: a ${rangeWords(block)} chance that ‘${label.trim()}’ happens at least once within ${windowWords(block.horizon.months)}, `
+  + 'your goal’s time window. Do you want to record it as yours? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.';
+export const riskStatedOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => `Recorded from your words: a ${rangeWords(block)} chance `
+  + `that ‘${label.trim()}’ happens at least once within ${windowWords(block.horizon.months)}. How strongly it affects the model is still Olumi’s placeholder on its link.`;
 
 export type RiskOccurrenceRefusal = 'invalid_graph' | 'invalid_block' | 'risk_not_found' | 'risk_changed' | 'goal_changed' | RiskOccurrenceIneligible;
 
@@ -216,9 +246,12 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
     return { kind: 'refused', reason: 'invalid_graph' };
   }
   const block = EventRiskV1.safeParse(approved.event_risk);
-  // Olumi's range, or the user's "holds now" with its verified statement: no other block is ever written here.
+  // Olumi's range, the user's "holds now", or the user's own stated chance, each with its verified statement: no other block
+  // is ever written here, and one card never carries two statements.
   const holdsNow = approved.holds_now !== undefined && approved.holds_now.form === 'holds_now';
-  if (!block.success || (holdsNow ? !isHoldsNowBlock(block.data) : block.data.occurrence.basis !== 'olumi')
+  const stated = approved.stated_occurrence;
+  if (!block.success || (holdsNow && stated !== undefined)
+    || (holdsNow ? !isHoldsNowBlock(block.data) : stated !== undefined ? !isStatedBlock(block.data, stated, approved.risk_id) : block.data.occurrence.basis !== 'olumi')
     || !isDeepStrictEqual(block.data, approved.event_risk)) {
     return { kind: 'refused', reason: 'invalid_block' };
   }
@@ -250,13 +283,15 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
       affected_entities: [{ kind: 'risk', label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: holdsNow ? 'Recorded from your words that a risk is already true now' : 'Recorded Olumi’s starting assumption for a risk',
+      safe_summary: holdsNow ? 'Recorded from your words that a risk is already true now'
+        : stated !== undefined ? 'Recorded from your words how likely a risk is to happen' : 'Recorded Olumi’s starting assumption for a risk',
       impact: 'low',
       rerun_recommended: true,
     },
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
-    confirmation: holdsNow ? riskHoldsNowRecordedWords(label) : riskOccurrenceRecordedWords(label, block.data) };
+    confirmation: holdsNow ? riskHoldsNowRecordedWords(label)
+      : stated !== undefined ? riskStatedOccurrenceRecordedWords(label, block.data) : riskOccurrenceRecordedWords(label, block.data) };
 }
 
 /** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
@@ -270,7 +305,8 @@ export function approvedRiskOccurrenceOf(op: { readonly path: string; readonly v
   const v = (isRec(op.value) ? op.value : {}) as Rec;
   if (!isRec(v.event_risk) || !isRec(v.expected_node) || typeof v.goal_id !== 'string' || !isRec(v.expected_goal)) return undefined;
   return { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node, goal_id: v.goal_id, expected_goal: v.expected_goal,
-    ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}) };
+    ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}),
+    ...(userStatementOf(v.stated_occurrence) !== undefined ? { stated_occurrence: userStatementOf(v.stated_occurrence)! } : {}) };
 }
 
 /**

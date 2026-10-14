@@ -376,3 +376,49 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(String(pressed.assistant_text)).not.toMatch(NO_RUN_CLAIM);
   }, ROUTE_MS);
 });
+
+/**
+ * ⭐ S2 THE USER'S OWN CHANCE FOR THE RISK, THROUGH THE REAL ROUTE (DL 21:15Z 14 Oct): no card could record it, so the risk was
+ * asked every turn. They type it; the Agent only replies; the route issues ONE card quoting their sentence; the press writes it
+ * through the same level door, as THEIRS (`basis: 'user'`), over the goal's window; readiness stops asking.
+ */
+describe('S2: the user’s own chance for the risk root, through the real route', () => {
+  const SAID = 'I’d say there’s about a 30% chance it slips before launch.';
+  const USER_CARD = `From your message: ‘${SAID}’ Olumi reads this as your figure: a 30% chance that ‘${LABEL}’ happens at least once within 3 months, `
+    + 'your goal’s time window. Do you want to record it as yours? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.';
+  const USERS = { version: 1, occurrence: { p_low: 0.3, p_high: 0.3, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } };
+  const cardsOf = (body: Rec): Rec[] => ((body.suggested_actions ?? []) as Rec[]).filter((c) => String(c.id).startsWith('agent-approve'));
+  const graphWrites = (w: { writes: Rec[] }): number => w.writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
+
+  it('RED→GREEN: they type their chance → ONE card quoting it → the press → saved as THEIRS over the goal’s window → the ask closes', async () => {
+    const w = world(SERVED);
+    const turn = await route(w);
+    const said = await turn({ message: SAID, source: 'composer' }, [say('Thanks.')]);
+    const cards = cardsOf(said);
+    expect(cards, JSON.stringify(said.suggested_actions)).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ label: 'Record what you said', message: 'Yes, record what I said.', detail: USER_CARD });
+    expect(graphWrites(w), 'nothing before the press').toBe(0);
+    const pressed = await turn({ message: cards[0]!.message, source: 'chip_click', chip: { id: cards[0]!.id }, agent_session_id: said._agent.session_id });
+    expect((pressed._agent.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change'), JSON.stringify(pressed._agent.tool_calls))
+      .toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    const expected = structuredClone(SERVED.graph) as Rec;
+    riskOf(expected).event_risk = USERS;
+    expect(w.graph()).toEqual(expected);
+    expect(levelAsks(w.graph())).toEqual([]);
+    expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: true });
+  }, ROUTE_MS);
+
+  it('CONTRAST: another time span, or a chance that names no risk when two are asked: no card, nothing written', async () => {
+    const w = world(SERVED);
+    const turn = await route(w);
+    expect(cardsOf(await turn({ message: 'I’d say there’s about a 30% chance it slips within a year.', source: 'composer' }, [say('Thanks.')]))).toEqual([]);
+    const two = structuredClone(SERVED) as Rec;
+    two.scenario_id = randomUUID();
+    two.graph.nodes.push({ id: 'key_developer_attrition', kind: 'risk', label: 'Key developer attrition', provenance: 'ai_inferred' });
+    two.graph.edges.push({ from: 'key_developer_attrition', to: 'productivity', strength: { mean: -0.2, std: 0.1 }, exists_probability: 0.7, effect_direction: 'negative' });
+    const w2 = world(two);
+    const turn2 = await route(w2);
+    expect(cardsOf(await turn2({ message: SAID, source: 'composer' }, [say('Thanks.')]))).toEqual([]);
+    expect(graphWrites(w) + graphWrites(w2)).toBe(0);
+  }, ROUTE_MS);
+});

@@ -11,7 +11,9 @@ import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, riskHoldsNowRecordedWords, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
-  riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+  riskOccurrenceRecordedWords, riskOccurrenceSubject, riskStatedOccurrenceCardWords, riskStatedOccurrenceRecordedWords, SET_RISK_OCCURRENCE_OP,
+  userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+import { typedOccurrenceArgs, verifyOccurrenceStatement } from '../risk-occurrence-statement.js';
 import { userStatementOf, verifyStatements, type UserStatement } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
@@ -189,6 +191,10 @@ const notWrittenReason = (value: number, factor: string): string =>
 const RISK_OCCURRENCE_NEEDED_NOTE = 'These risks have no held occurrence likelihood. If the event and listed window are clear and supported, propose one through the available propose_assumptions tool with that risk alone, user_stated false, a grounded basis, and occurrence_range: the low and high chance, in percent, that it happens at least once within within_months. Nothing was proposed for these risks in this call. If event meaning or window is unresolved, preserve its source and clarify only that missing part.';
 /** AIE packet 6e52e896 `event_risk.card_note`, byte for byte: what the Agent is told beside the card. */
 const RISK_HOLDS_NOW_PROPOSED_NOTE = 'Show the card exactly as public_label. It records the user\u2019s own statement that this risk is already true now, quoted from their message; it is not an occurrence chance and not Olumi\u2019s estimate. How strongly it affects the model stays on its link, still Olumi\u2019s placeholder. Only the bound approval button applies it; it does not Run the model.';
+/** AIE_TEXT_PENDING (DL relays): what the Agent is told beside the card recording the user's own occurrence figure. */
+const RISK_STATED_OCCURRENCE_PROPOSED_NOTE = 'Show the card exactly as public_label. It records the user\u2019s own figure for how likely this risk is to happen within the goal\u2019s time window, quoted from their message; it is not Olumi\u2019s estimate. How strongly it affects the model stays on its link, still Olumi\u2019s placeholder. Only the bound approval button applies it; it does not Run the model.';
+/** AIE_TEXT_PENDING (DL relays): Olumi's range is never offered for a risk whose chance the user has just given in their own words. */
+const RISK_OCCURRENCE_USERS_OWN_DETAIL = 'The user has just given their own figure for how likely this risk is, so Olumi\u2019s estimate was not proposed. Nothing was prepared. Propose it as theirs: user_stated true, with their complete statement copied exactly in statements (form point, their figure as value). Do not ask them to repeat it.';
 const RISK_OCCURRENCE_PROPOSED_NOTE = 'Show the card exactly as public_label. It proposes Olumi’s estimated occurrence likelihood within the stated window, not a human figure or a measurement. It stays Olumi’s after approval. Occurrence, the effect relationship’s existence, and its effect size remain distinct; its effect size is still Olumi’s placeholder. Only the bound approval button applies the shown change; it does not Run the model.';
 /** AIE packet 6e52e896 `event_risk.mixed_refusal`, byte for byte. */
 const RISK_OCCURRENCE_ALONE_DETAIL = 'Olumi’s starting assumption for a risk needs its own approval. Nothing was proposed: propose the risk alone in one call, and any other values in another.';
@@ -4067,10 +4073,23 @@ export function createAgentCapabilities(
    */
   const proposeRiskOccurrence = async (ctx: AgentToolContext, g: GraphRead,
     risk: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string; goal_id: string;
-      goal: Record<string, unknown>; holds_now?: UserStatement }): Promise<ToolResult> => {
+      goal: Record<string, unknown>; holds_now?: UserStatement; stated?: UserStatement }): Promise<ToolResult> => {
     const operations: ProposalOperation[] = [{ op: SET_RISK_OCCURRENCE_OP, path: risk.id,
       value: { event_risk: risk.block, expected_node: structuredClone(risk.node), goal_id: risk.goal_id, expected_goal: structuredClone(risk.goal),
-        ...(risk.holds_now !== undefined ? { holds_now: risk.holds_now } : {}) } }];
+        ...(risk.holds_now !== undefined ? { holds_now: risk.holds_now } : {}),
+        ...(risk.stated !== undefined ? { stated_occurrence: risk.stated } : {}) } }];
+    if (risk.stated !== undefined) {
+      // S2: the user's own chance, quoted; Olumi's reading of it (figure, risk, window) is the card, adopted only by the press.
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+        operations, provenance: { authored_by: 'model_proposed', basis: risk.stated.source },
+        validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: riskStatedOccurrenceCardWords(risk.label, risk.stated.source, risk.block) });
+      proposals.put(proposal);
+      const preview = await readinessIfApplied(ctx, operations);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        risk_stated_occurrence: { risk: risk.label, quote: risk.stated.quote, chance_low_percent: risk.stated.low, chance_high_percent: risk.stated.high,
+          within_months: risk.block.horizon.months, your_figure: true },
+        note: RISK_STATED_OCCURRENCE_PROPOSED_NOTE + stillBlockedNote(preview) };
+    }
     if (risk.holds_now !== undefined) {
       // S2: the user's statement, quoted; Olumi's reading of it is the card, adopted only by the press.
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
@@ -4115,7 +4134,8 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
-    const v = (op.value ?? {}) as { event_risk?: unknown; expected_node?: unknown; goal_id?: unknown; expected_goal?: unknown; holds_now?: unknown };
+    const v = (op.value ?? {}) as { event_risk?: unknown; expected_node?: unknown; goal_id?: unknown; expected_goal?: unknown; holds_now?: unknown;
+      stated_occurrence?: unknown };
     if (!isPlainRecord(v.event_risk) || !isPlainRecord(v.expected_node) || typeof v.goal_id !== 'string' || !isPlainRecord(v.expected_goal)
       || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
@@ -4126,7 +4146,8 @@ export function createAgentCapabilities(
     const ownWriteLanded = proposals.partialProgressOf(pid) !== undefined || await ownCommitInLedger();
     const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
       goal_id: v.goal_id, expected_goal: v.expected_goal, own_write_landed: ownWriteLanded,
-      ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}) };
+      ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}),
+      ...(userStatementOf(v.stated_occurrence) !== undefined ? { stated_occurrence: userStatementOf(v.stated_occurrence)! } : {}) };
     // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
     // that moved since the card was made writes nothing, whatever the analysis hash says (Codex r1 on #3013).
     if (!riskOccurrenceGoalHolds(approved, before.raw)) {
@@ -4162,6 +4183,7 @@ export function createAgentCapabilities(
     proposals.markApplied(pid, receipts);
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
       follow_up: approved.holds_now !== undefined ? riskHoldsNowRecordedWords(String(approved.expected_node.label))
+        : approved.stated_occurrence !== undefined ? riskStatedOccurrenceRecordedWords(String(approved.expected_node.label), approved.event_risk)
         : riskOccurrenceRecordedWords(String(approved.expected_node.label), approved.event_risk) };
   };
 
@@ -6490,7 +6512,7 @@ export function createAgentCapabilities(
       const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'unverified_brief' | 'already_accepted' }[] = [];
       // ⭐ Hiring path (a): an unvalued risk ROOT takes Olumi's occurrence range on its own card (`risk-occurrence.ts`).
       const riskRanges: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string;
-        goal_id: string; goal: Record<string, unknown>; holds_now?: UserStatement }[] = [];
+        goal_id: string; goal: Record<string, unknown>; holds_now?: UserStatement; stated?: UserStatement }[] = [];
       const riskRangeNeeded: { label: string; within_months: number }[] = [];
 
       for (const given of input) {
@@ -6519,13 +6541,31 @@ export function createAgentCapabilities(
            * statement is verified by the one shared contract (`verifyStatements`); the card quotes it and only the press records
            * it, as theirs. Never an occurrence chance for a condition the user says already holds.
            */
-          if (subject?.kind === 'ineligible' && isPlainRecord(a?.holds_now)) {
+          const userStatesChance = a?.user_stated === true && Array.isArray(a?.statements) && !isPlainRecord(a?.holds_now);
+          if (subject?.kind === 'ineligible' && (isPlainRecord(a?.holds_now) || userStatesChance)) {
             const why = subject.reason === 'holds_a_level' ? 'it already holds a likelihood or level'
               : subject.reason === 'has_a_cause' ? 'another factor in the model drives it, so it cannot be set directly'
               : subject.reason === 'no_window' ? 'the goal does not have one clear time window yet' : 'the model could not be read for it';
-            return { ok: false, mutated: false, refusal: 'holds_now_not_recordable',
-              detail: `‘${res.node.label}’ cannot be recorded as already true now, because ${why}. Nothing was prepared. Say so plainly, `
-                + 'keep what the user said in this conversation, and do not ask them to repeat it.' };
+            return { ok: false, mutated: false, refusal: userStatesChance ? 'occurrence_not_recordable' : 'holds_now_not_recordable',
+              detail: `‘${res.node.label}’ cannot be recorded ${userStatesChance ? 'with the user’s chance of it happening' : 'as already true now'}, `
+                + `because ${why}. Nothing was prepared. Say so plainly, keep what the user said in this conversation, and do not ask them to repeat it.` };
+          }
+          /**
+           * ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): their complete statement of how likely this risk is
+           * ("I'd say there's about a 30% chance it slips before launch"), verified as theirs, governed by THIS risk and bound to
+           * the goal's held window (`verifyOccurrenceStatement`). The card quotes it; only the press records it, as theirs.
+           */
+          if (subject?.kind === 'eligible' && userStatesChance) {
+            const v = verifyOccurrenceStatement(g.raw, res.node, subject.window_months, a.statements, { now: ctx.user_turn_text, conversation: ctx.user_text,
+              unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') });
+            if (v.kind === 'refused') {
+              return { ok: false, mutated: false, refusal: v.refusal, detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+            }
+            if (!riskRanges.some((r) => r.id === res.node.id)) {
+              riskRanges.push({ id: res.node.id, label: res.node.label, node: subject.node, block: v.block, basis: v.statement.source,
+                goal_id: subject.goal_id, goal: subject.goal, stated: v.statement });
+            }
+            continue;
           }
           if (subject?.kind === 'eligible' && isPlainRecord(a?.holds_now)) {
             const v = verifyStatements([{ quote: a.holds_now.quote, form: 'holds_now' }],
@@ -6543,6 +6583,10 @@ export function createAgentCapabilities(
             continue;
           }
           if (subject?.kind === 'eligible' && a?.user_stated === false && a?.keep !== true && a?.revise !== true) {
+            // The user's own chance for this risk, in THIS turn's typed words, is theirs: never offered back as Olumi's estimate.
+            if (typedOccurrenceArgs(g.raw, ctx.user_turn_text)?.assumptions[0]?.factor_label === res.node.label) {
+              return { ok: false, mutated: false, refusal: 'occurrence_is_the_users', detail: RISK_OCCURRENCE_USERS_OWN_DETAIL };
+            }
             const range = isPlainRecord(a?.occurrence_range) ? a.occurrence_range : undefined;
             const block = range === undefined ? undefined : olumiOccurrenceBlock(range.low_percent, range.high_percent, subject.window_months);
             if (block === undefined) riskRangeNeeded.push({ label: res.node.label, within_months: subject.window_months });

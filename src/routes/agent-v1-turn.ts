@@ -130,6 +130,7 @@ import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue, identityReadingOf } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { briefHoldsNowArgs, briefHoldsNowToIssue, heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
+import { typedOccurrenceArgs, typedOccurrenceToIssue } from '../orchestrator-v5/agent-lane/risk-occurrence-statement.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -4722,6 +4723,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
         tool_results: [...result.tool_results, issued] };
       log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: confirm card for the user\'s own figure issued by the route after the Run');
+    }
+    // ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): when THIS turn's typed words state one chance for the one risk it is
+    // about ("I'd say there's about a 30% chance it slips before launch") and nothing was offered, the route issues the card
+    // itself, quoting their statement: the SAME tool, once, writing nothing; the door re-verifies it and only the press records it.
+    const typedOccurrence = fastPath === 'approve' || readbackGraph == null || typedNow === null || !typedOccurrenceToIssue({ toolCalls: result.tool_calls,
+      mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 })
+      ? undefined : typedOccurrenceArgs(readbackGraph, typedNow);
+    if (typedOccurrence !== undefined) {
+      const issued = await dispatchTool('propose_assumptions', JSON.stringify(typedOccurrence), toolCtx, capabilities, mode);
+      result = { ...result,
+        tool_calls: [...result.tool_calls, { name: 'propose_assumptions', ok: issued.ok === true, mutated: false,
+          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+        tool_results: [...result.tool_results, issued] };
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: card for the user\'s own risk chance issued by the route');
     }
     // ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd): a risk the brief already says holds gets S2-B's card,
     // quoting the brief's own sentence (`already_true_quote`), on a turn that proposed and approved nothing: the SAME tool, once.
