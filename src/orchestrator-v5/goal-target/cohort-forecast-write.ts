@@ -59,13 +59,20 @@ export function peopleFiguresIn(quote: string): { low: number; high: number }[] 
     .map((m) => Number(m[1]!.replace(/,/g, ''))).filter((n) => Number.isInteger(n) && n >= 1).map((n) => ({ low: n, high: n }));
 }
 
-/** Percentage ranges a quote states ("12–18%", "between 12 and 18 percent", "12% to 18%"), low below high. */
-export function percentRangesIn(quote: string): { low: number; high: number }[] {
+/** The ONE percentage-range pattern ("12–18%", "between 12 and 18 percent", "12% to 18%"). */
+const percentRangePattern = (): RegExp => {
   const n = '(\\d{1,2}(?:\\.\\d{1,2})?)';
   const pct = '\\s*(?:%|percent|per\\s*cent)';
-  const re = new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
-  return [...quote.matchAll(re)].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
+  return new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
+};
+
+/** Percentage ranges a quote states, low below high. */
+export function percentRangesIn(quote: string): { low: number; high: number }[] {
+  return [...quote.matchAll(percentRangePattern())].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
 }
+
+/** The quote with its percentage ranges' own words removed (so a range's lower figure is never read as something else). */
+export const withoutPercentRanges = (quote: string): string => quote.replace(percentRangePattern(), ' ');
 
 /** The goal's window as the forecast is read over it ("the first three months after launch"), or `undefined` without one goal. */
 export function cohortWindowOf(graph: unknown): string | undefined {
