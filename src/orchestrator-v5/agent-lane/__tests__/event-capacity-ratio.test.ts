@@ -14,6 +14,7 @@ import { CAPACITY_RATIO_COMPARISON_WITHHELD, withoutCapacityRatioComparison, wit
 import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, capacityRatioOutOfReach, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
 import { normalChance } from '../../goal-target/event-by-date-share.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceWithheldReasonsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
@@ -453,5 +454,38 @@ describe('AIE 6174736249 (retained origins) + PL (14 Oct): a figure the brief di
       + 'assumption that the time is split only between it and ‘Time on legacy fixes’)');
     Object.assign(g.nodes.find((n: Rec) => n.label === 'Time on legacy fixes').observed_state, { raw_value: 20, value: 0.2 });
     expect(node(projectGraphForPersistence(g) as Rec, 'event_capacity_2').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(90 / 80, 12);
+  });
+});
+
+describe('DL (14 Oct): the hire WITH a pace read "Chance not shown yet" with no reason (capture de659cfd, turn 7)', () => {
+  const HIRE = 'event_option_3';
+  // The served Run's rows, in shape: the hire's every draw meets the target (p10 1.24, spread 0.07), so its 1 is exact but
+  // not zero-spread; the Run's goal certainty did not earn it (no decision ⇒ unearned).
+  const run = (hire: Rec): Rec => ({ option_comparison: [
+    { option_id: CARRY_ON, probability_of_goal: 0.2, outcome: { p10: 0.7, p50: 0.85, p90: 0.98, std: 0.1 } },
+    { option_id: LEGACY, probability_of_goal: 0.3, outcome: { p10: 0.75, p50: 0.9, p90: 1.02, std: 0.1 } },
+    { option_id: HIRE, probability_of_goal: 1, ...hire }], inference_warnings: [] as Rec[] });
+  const spread = { outcome: { p10: 1.2350859803491727, p50: 1.3259448831432001, p90: 1.4178740146926914, std: 0.07113488512172908 } };
+  const LINE = 'No chance is shown for this option: this model has it reaching 100% of next feature launch by 14 April 2027 in every run, '
+    + 'but that rests on Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires (8% of next feature '
+    + 'launch per month). Worth discussing: how much it would speed up the work, and from when.';
+
+  it('⭐ RED→GREEN: the unearned 1 stays withheld (rule unchanged) and carries its reason, what it rests on and one step', async () => {
+    const g = await saved(5, 7);
+    const licence = goalChanceLicenceOf(run(spread), g, 'event_goal')!;
+    expect(licence.withheld_option_ids).toContain(HIRE);
+    expect(licence.pct_by_option[HIRE]).toBeUndefined();
+    expect(licence.withheld_reason_by_option?.[HIRE]).toEqual({ reason: 'unearned_certainty', side: 'meets', line: LINE });
+    // The cell's reader: the typed reason with its words, never `reason_not_recorded`.
+    expect(goalChanceWithheldReasonsForAgent({ inference_warnings: [licence] }, HIRE)).toEqual([{ code: 'unearned_certainty', message: LINE }]);
+  });
+
+  it('CONTRASTS: an EARNED 1 is licensed (no reason); a zero-spread 1 keeps its own zero-spread reason', async () => {
+    const g = await saved(5, 7);
+    const earned = goalChanceLicenceOf(run(spread), g, 'event_goal', (id, p) => id === HIRE && p === 1)!;
+    expect(earned.pct_by_option[HIRE]).toBe(100);
+    expect(earned.withheld_reason_by_option?.[HIRE]).toBeUndefined();
+    const flat = goalChanceLicenceOf(run({ outcome: { p10: 1.3, p50: 1.3, p90: 1.3, std: 0 } }), g, 'event_goal')!;
+    expect(flat.withheld_reason_by_option?.[HIRE]?.reason).toBe('zero_spread');
   });
 });

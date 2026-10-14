@@ -46,7 +46,7 @@ import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption, capacityRatioOptionIds, CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE } from './share-by-date-run.js';
+import { hireLinkLimitedFor, OLUMI_HIRE_LIMIT_NOTE, olumiAssumedRangeLine, olumiAssumedTeamRange, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption, capacityRatioOptionIds, CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, shareUnearnedCertaintyLine } from './share-by-date-run.js';
 import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldChange, withSentTargetWithheld, type SentRunInputs } from './goal-own-constraint-chance.js';
 import { effectsTimingOf, periodEndAssumptionNote, type EffectsTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
@@ -138,7 +138,17 @@ export interface GoalChanceReferenceMoved {
   readonly line: string;
 }
 
-export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved;
+/**
+ * DL (14 Oct): a deadline-forecast option whose exact 0 or 1 the Run did not earn (and whose draws did spread): withheld as
+ * before, now with its reason: which side the model puts it on, what that rests on, and one next step.
+ */
+export interface GoalChanceUnearnedCertainty {
+  readonly reason: 'unearned_certainty';
+  readonly side: 'meets' | 'falls_short';
+  readonly line: string;
+}
+
+export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved | GoalChanceUnearnedCertainty;
 
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
@@ -563,6 +573,7 @@ export function goalChanceLicenceOf(
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
   const zeroSpreadSide: Record<string, 'meets' | 'falls_short'> = {};
+  const unearnedSide: Record<string, 'meets' | 'falls_short'> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
@@ -582,6 +593,7 @@ export function goalChanceLicenceOf(
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) {
       withheld.push(id);
       if ((p === 0 || p === 1) && zeroSpread(r)) zeroSpreadSide[id] = p === 1 ? 'meets' : 'falls_short';
+      else if ((p === 0 || p === 1) && share !== null && share.goal.id === goalId) unearnedSide[id] = p === 1 ? 'meets' : 'falls_short';
       continue;
     }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
@@ -600,7 +612,8 @@ export function goalChanceLicenceOf(
   // said nothing before, so no record is added for it (fewer claims, never more).
   const sqSaid = (sqByAssumption || sqReading === 'moved') && statusQuoId !== undefined && withheld.includes(statusQuoId)
     && typeof sqP === 'number' && goalLabel !== undefined;
-  if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0 && !sqSaid)) return null;
+  if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0
+    && Object.keys(unearnedSide).length === 0 && !sqSaid)) return null;
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
   // A status quo withheld by assumption counts as withheld here too, exactly as a change target's always has: no superlative
@@ -670,6 +683,10 @@ export function goalChanceLicenceOf(
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
     ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope) : {}),
+    ...Object.fromEntries(Object.entries(unearnedSide).flatMap(([id, side]) => {
+      const line = shareUnearnedCertaintyLine(graph, id, side);
+      return line === undefined ? [] : [[id, { reason: 'unearned_certainty' as const, side, line }]];
+    })),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
   };
@@ -1530,6 +1547,9 @@ export function goalChanceLicenceForAgent(result: unknown): {
         && reason.line === retiredPlainZeroSpreadLine(reason.side, storedTarget.value as number, storedTarget.unit as string);
       const line = retired ? ZERO_SPREAD_LINE : reason.line;
       zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line };
+    } else if (reason.reason === 'unearned_certainty' && (reason.side === 'meets' || reason.side === 'falls_short')) {
+      // DL (14 Oct): the stored Run's own words for a deadline-forecast certainty it did not earn.
+      zeroSpreadReasons[id] = { reason: 'unearned_certainty', side: reason.side, line: reason.line };
     } else if (reason.reason === 'reference_moved' && reason.side === undefined) {
       // AIE status-quo disposition: the status quo's row disagrees with the same-draw reference (a typed reason, no side).
       zeroSpreadReasons[id] = { reason: 'reference_moved', line: reason.line };
