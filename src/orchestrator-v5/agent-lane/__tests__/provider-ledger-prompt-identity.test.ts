@@ -171,8 +171,13 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     const withoutView = await runChip(RUN_NOTHING_ON_RECORD);
     const interpretedPlain = sent[0]!['instructions'] as string;
 
-    // The premises: the three prompts really differ, and only by what was appended.
-    expect(interpretedPlain.startsWith(`${conversed}\n\n`), 'the interpreter appends its constraint to the Agent prompt').toBe(true);
+    // The premises: the three prompts really differ, and only by what was appended. BYPASS1 (AIE #94 6158232014): the
+    // tool-bearing converse call ends with the stated-figure rule; the tool-less interpreter appends to the prompt before it.
+    const { STATED_FIGURE_INSTRUCTION } = await import('../../../routes/agent-v1-turn.js');
+    expect(conversed.endsWith(`\n\n${STATED_FIGURE_INSTRUCTION}`), 'the converse call offers tools').toBe(true);
+    const agentPrompt = conversed.slice(0, -`\n\n${STATED_FIGURE_INSTRUCTION}`.length);
+    expect(interpretedPlain.startsWith(`${agentPrompt}\n\n`), 'the interpreter appends its constraint to the Agent prompt').toBe(true);
+    expect(interpretedPlain).not.toContain(STATED_FIGURE_INSTRUCTION);
     expect(interpretedWithView.length, 'the withheld run adds C5b’s view line').toBeGreaterThan(interpretedPlain.length);
 
     expect(converse[0]!.prompt_sha256).toBe(sha(conversed));

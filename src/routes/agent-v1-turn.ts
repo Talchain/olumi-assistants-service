@@ -116,7 +116,7 @@ import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-g
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
-import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
+import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
@@ -647,6 +647,23 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
   return text;
 }
 
+/**
+ * BYPASS1: the goal-chance detail lines the Run's card says from this view (DGAI `goalChanceDetailLines`): the joint's
+ * withheld line and bound, each target on its own (matched by its words; the card names options by the canvas), the status
+ * quo by assumption, and the notes. `null` when the view carries no goal-chance detail.
+ */
+function cardDetailLinesOf(view: unknown): { has(line: string): boolean } | null {
+  const detail = (view as { goal_chance?: CanonicalGoalChanceDetail } | null | undefined)?.goal_chance;
+  if (detail === undefined || detail === null) return null;
+  const joint = detail.targets?.joint;
+  const exact = new Set([
+    ...(joint?.status === 'withheld' ? [joint.line, ...(joint.frechet_line !== undefined ? [joint.frechet_line] : [])] : []),
+    ...(detail.status_quo !== undefined ? [detail.status_quo.line] : []), ...(detail.notes ?? []),
+  ]);
+  const targetLeads = (detail.targets?.per_target ?? []).map((t) => `On its own, the chance of ${t.words}, in this model: `);
+  return { has: (line) => exact.has(line) || targetLeads.some((lead) => line.startsWith(lead)) };
+}
+
 /** The latest successful build's typed receipt owns the draft words; narrator prose is never a receipt. */
 function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
   for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
@@ -832,12 +849,22 @@ export const GOAL_CHANCE_RANKING_INSTRUCTION =
   + 'out options by it. '
   + SELECTED_RUN_SCOPE_INSTRUCTION;
 
+/**
+ * ⭐ HIRING (e) (Paul's funding test 14 Oct: 0 tool calls on a stated capacity effect, per-option staffing and hiring starts).
+ * AIE #94 6158232014 (recovery/codex/AIE-Q4-AND-STATED-FIGURE-INSTRUCTIONS-20261014.json), verbatim. Only where tools are
+ * offered (`AGENT_TOOL_INSTRUCTIONS`): never on the tool-less Explain, a method, risks or widen call.
+ */
+export const STATED_FIGURE_INSTRUCTION =
+  "When the user supplies a figure that an available proposing tool can faithfully represent, prepare the matching proposal in this turn under that tool's current source and permission contract; do not leave it as acknowledgement in prose. Keep the complete relevant words, speaker, subject, quantity, unit, reference, period, conditions and uncertainty. A question, denial, target, ceiling or forecast is not an observed starting value. Use propose_link_effect for supported magnitudes along an existing matching link; propose_model_change can propose a new link under its own contract, not save its numerical effect. Use propose_option_interventions for an option's supported level, propose_hiring_times for starts after the deadline is held, and propose_assumptions or propose_starting_point for eligible starting values. Use propose_starting_point when starting values and option levels need one compatible approval. Additional hires are distinct from total headcount; a hiring start is distinct from full effectiveness. Never silently change quantity, unit or meaning, invent a missing operand, choose a point from a range or change origin. Show the complete returned card before bound approval; a proposal is not a saved change or Run permission. If the matching quantity, writer or prerequisite is absent, state that actual gap and the supported next step. Retain supplied source for that step rather than asking the user to repeat it after the prerequisite is met.";
+
 // Prompt P13 (AIE one-pass packet 94ad9c8f…): MODEL_RELATIVE_NAMING_INSTRUCTION is now the packet's P13 text, which the
 // AIE placed inside HOST_TOOL_CONTRACT's whole replaced entry, so it is sent ONCE there and no longer joined a second time.
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
   [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
 );
+/** The Agent's call that offers its proposing tools: the shared instructions, then the stated-figure rule. */
+const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
 
 /**
  * Read the persisted state back for the response: `graph_hash`, readiness and
@@ -3984,7 +4011,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
               : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
-              : eligibleIntervention === undefined ? AGENT_INSTRUCTIONS : `${AGENT_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
+              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
@@ -4098,7 +4125,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The AIE conflict copy is a source-owned limitation, not a narration to paraphrase.
     const hiringConflicts = result.tool_results.filter(r => r.refusal === 'hiring_bound_conflict' && typeof r.detail === 'string');
     if (hiringConflicts.length > 0) text = hiringConflicts.map(r => r.detail).join(' ');
-    if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
+    // BYPASS1: a host-composed exit of the loop (`reply_author: 'host'`) is not the narrator's words.
+    if (fastPath === undefined && result.stopped_reason === 'answered' && result.reply_author === 'ai') narratorWords = result.assistant_text;
 
     // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
     // (never a repair, never a second call). Then ONE card on the story's target, through the existing door, exactly as
@@ -4309,6 +4337,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // The typed identity ask owns the unconfirmed reading; no second goal-chance explanation is produced.
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
+    // BYPASS1: the owed lines the AI holds as typed facts (rescaled/ranges/resized values, `identity_ask_say`).
+    const owedHeldByAi = new Set([...valueChangeDisclosures(stateFacts),
+      ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null)]);
     // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
     // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
     askEachOnce(owed, await repliesToCheckAsks(owed, historyReader, scenarioId, undefined));
@@ -4364,6 +4395,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
       narrationStatus = 'stale';
     }
+    /**
+     * ⭐ BYPASS1 (DL, 14 Oct; recovery/codex/BYPASS1.md): the reply is the AI's own words: a model wrote it (`narratorWords`, set
+     * only where one did) and no host swap above replaced it. Only then does the host stop restating, in prose, facts the AI
+     * holds as typed facts: the readiness sentence (`readiness_after`), the D1
+     * target/objective/deadline ask, the value changes and the identity ask, and (on an ordinary turn) the withheld
+     * goal-chance line; the code stays, dormant. A host-written reply keeps every host line. Server truth stays on both:
+     * receipts and refusals, what a proposal left out, the post-write ask (a root treated as zero), the first analysis and
+     * open questions, the methods note, the gate's
+     * reason for a sentence it cut, the science Why? line, the link ask (never said beside another ask), and the chance and
+     * draft faces on every Run/Explain/Draft reply. Every authority check (ranking redaction, the count guard, the final
+     * leader egress, the estimate-% binding, the completion-claim stripper, currentness) runs on both.
+     */
+    const aiWroteReply = narratorWords !== null && hiringConflicts.length === 0
+      && text !== RUN_RESULT_UNVERIFIED_TEXT && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT;
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -4844,7 +4889,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const readinessLine = (staleLine !== null || firstPassRan) && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     // ⭐ D1 + A7 (DL #75 5923918068; AIQ words 5923963470): on the brief and Run turns, at rest — the deadline the model holds
     // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
-    const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    const hostStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    // BYPASS1: the AI holds `readiness_after`, so the readiness sentence goes. The save or refusal receipt (with any claim the
+    // stripper removed), what a proposal left out, goal-not-checked, stale, the post-write ask (gate 2: a root treated as zero
+    // is always said) and held lapses stay: server truth "whatever the model said" (write-outcome, starting-point-omission,
+    // real-writer, one-reply-build rows). After a refused first analysis the readiness line is the REST of that refusal
+    // (T4: "Review all N readiness issues" names none; `refusalSaid` drops what it already said), so it stays with it.
+    const aiStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine,
+      firstAnalysisRefusalSaid ? readinessLine : null, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     // The retained fresh scope question is this turn's existing step, even if the
     // narrator parked it behind the questions toggle. Count it before another ask.
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
@@ -4878,6 +4930,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
       : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
+    // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
+    const hostProse = !aiWroteReply || noDirectLink !== null;
+    const statusText = hostProse ? hostStatusText : aiStatusText;
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
@@ -4900,7 +4955,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
-    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
+    // BYPASS1: on the AI's reply only the value changes and the identity ask it holds as typed facts are not restated. Every
+    // other owed line (receipts, what was left out, the first analysis, open questions, the methods note, the Run lines) is
+    // server truth and stays, and so does every line when the current state is unknown (the no-present-claim rule).
+    const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed
+      : owed.filter((line) => !owedHeldByAi.has(line));
+    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
       // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
@@ -4918,9 +4978,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     };
     // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
-    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined);
+    // BYPASS1: the AI asks for a missing target, objective or deadline itself (R:784); the host keeps K3 and A7's facts.
+    const decisionLines = (await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined))
+      .filter((line) => hostProse || !isDecisionInputAsk(line));
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
+    // BYPASS1 keeps it: it is never said when the reply at rest already asks (the AI's own ask included), so it cannot double.
     const linkAsk = decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
       message, restingText: textAtRest(composedWithout), awaitingApproval: decisionTurn.awaitingApproval,
     });
@@ -4932,7 +4995,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
+        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owedShown, ...decisionLines]), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
       answerKind: 'substantive',
@@ -5022,6 +5085,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
+        // BYPASS1 keeps it: the gate appends its reason only when it cut a sentence, so the reply accounts for the cut.
         sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
         ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
@@ -5051,7 +5115,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
       return reading !== undefined && action.detail === reading.words;
     });
-    goalChanceOwed = stateFacts.current_state_unknown === true ? null
+    // BYPASS1: on an ordinary AI reply the AI explains the withholding from `goal_chance.say`; a turn that ran an analysis
+    // or explains the current Run keeps the line with the rest of the chance face (never-reask, one-reply-build rows).
+    const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
+      || (fastPath === 'explain' && narrationStatus !== 'stale');
+    goalChanceOwed = stateFacts.current_state_unknown === true || (!hostProse && !chanceFaceTurn) ? null
       : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
         identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
@@ -5097,8 +5165,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
       // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
+      // BYPASS1 keeps the chance face on every Run/Explain reply (the screen's lines are the headline, K-pinned).
+      // ⭐ BYPASS1 (capacity witness on 351eeda0, turn 01 and the Run): on a turn that ran an analysis, the Run's card under
+      // this reply says the goal-chance detail from this response's `canonical_analysis_view.goal_chance`, in these same
+      // words (DGAI `goalChanceDetailLines`): "Doing nothing: … by assumption." was said twice. The reply does not repeat
+      // what the card says; a line the card does not say (the range census note) stays, and an Explain (no card) keeps all.
+      const cardDetail = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
+        ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
       const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
-        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent));
+        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
+          .filter((note) => cardDetail === null || !cardDetail.has(note)));
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
@@ -5404,6 +5480,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult,
         text: reply,
         // A host-only answer did not consume the carrier and keeps its existing bytes.
+        // BYPASS1: on the AI's reply the Why? line is not added (the AI has `eligible_intervention.why`). The chance and
+        // draft faces (lines, markers, horizon, what would change, estimates, widened receipt) stay: they are the headline.
         ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
           interventionWhySaid: preReplySelection?.whySaid === true }),
         chanceCells,
@@ -5751,6 +5829,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
+        // BYPASS1: who wrote the reply as the route read it ('ai' → host prose for facts the AI has stopped); the served
+        // witness counts host-deleted sentences, double asks and reply length by it.
+        reply_author: hostProse ? 'host' as const : 'ai' as const,
         /**
          * C6 (ChatGPT #70 5857276235 item 4: measurement on served turns before any optimisation). The loop's own split
          * (model, tools, model time inside tools, residual overhead) plus the whole route, so a served turn says where its

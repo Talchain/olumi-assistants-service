@@ -123,6 +123,13 @@ function withoutActionBar(raw: string, live: boolean): string {
  * OTHER byte must still equal the pristine pre-fix capture (the baselines are not re-recorded).
  */
 function withoutModelGap(raw: string, live = true): string {
+  // BYPASS1 (#3001): the reply's typed author was added to the live trace after these captures (the fixtures stay as
+  // captured). It is checked by identity, once, then removed exactly as written, so every other byte still compares.
+  const author = ',"reply_author":"host"';
+  if (live) {
+    expect(raw.split(author), 'the trace names the host as the author, once').toHaveLength(2);
+    raw = raw.replace(author, '');
+  }
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   // A replay re-sends the stored answer and carries no live signal, exactly as it carries no live guidance row.
   if (!live) { expect(parsed['model_gap']).toBeUndefined(); return raw; }
