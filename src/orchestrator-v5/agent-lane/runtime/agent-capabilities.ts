@@ -290,11 +290,11 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
-import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
-import { approvedGraphHeld, humanMaterialAfterTheDraft, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, writesBesidesTheConstruction } from './draft-replacement.js';
+import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -3536,31 +3536,54 @@ export function createAgentCapabilities(
 
   /**
    * ⭐ B RESTATED GOAL (`draft-replacement.ts`; DL ruling (B), PL 6116779075, AIE 0244): the three gates over ONE read, at
-   * the offer and again at the approval. `allowed` = the message turns the offer already bound (none at the offer; the
-   * typed goal's turn at the approval). What was found, in plain words; empty = an unreviewed draft whose only human
-   * material is the brief's own. A record that cannot be read is listed too: unknown authority never permits replacement.
+   * the offer and again at the approval. `found` = what still refuses, in plain words; empty = a draft the revision may
+   * replace. A record that cannot be read is listed too: unknown authority never permits replacement.
+   *
+   * ⭐ CURRENT-MODEL CALLER (PL #94 07:32Z, DL-ACKed): later human work no longer refuses by itself; it is KEPT.
+   *   · G1: each human-stamped item is carried by identity onto the revised draft (`carryHumanItems`); an unknown author,
+   *     a target for the goal and the steady-horizon judgement still refuse.
+   *   · G2: later saved changes are in the saved model, which the revision reads as context; an incomplete ledger, or no
+   *     record that the draft is the one built from the brief, still refuses.
+   *   · G3: at the OFFER (`'offer'`) every later message is bound to it and read as context, never as the user's verified
+   *     words; at the APPROVAL, `allowed` = the turns the offer bound plus the typed goal's, and any other message refuses.
+   *   · Objections the user recorded are context; objections that cannot be read still refuse.
+   * `later` says whether the draft holds any later material at all (an unedited draft is prepared exactly as before).
    */
+  type DraftGate = { readonly found: string[]; readonly items: readonly HumanItem[]; readonly bound: readonly string[];
+    readonly messages: readonly string[]; readonly objections: readonly string[]; readonly later: boolean };
   const unreviewedDraftGate = async (
-    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, allowed: readonly string[],
-  ): Promise<string[]> => {
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, allowed: readonly string[] | 'offer',
+  ): Promise<DraftGate> => {
     const brief = typeof g.brief_text === 'string' ? g.brief_text.trim() : '';
-    if (brief === '') return ['no saved brief that this draft was built from'];
-    const found = humanMaterialAfterTheDraft(g.raw);
+    if (brief === '') return { found: ['no saved brief that this draft was built from'], items: [], bound: [], messages: [], objections: [], later: false };
+    const items = humanItemsAfterTheDraft(g.raw);
+    const found = items.filter((i) => i.carry === undefined).map((i) => i.words);
+    let bound: string[] = [];
+    let messages: string[] = [];
+    let objections: string[] = [];
+    let laterWrites = false;
     try {
       if (opts.readCommittedTurnLedger === undefined) throw new Error('turn_ledger_unavailable');
       const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id);
-      found.push(...writesBesidesTheConstruction(ledger, ctx.scenario_id, brief), ...messagesBesidesTheBrief(ledger, brief, allowed, ctx.turn_id));
+      const writes = laterWritesThan(ledger, ctx.scenario_id, brief);
+      if (typeof writes === 'string') found.push(writes);
+      else laterWrites = writes > 0;
+      const later = (ledger.later_user_messages ?? []).filter((m) => m.turn_id !== ctx.turn_id);
+      if (allowed === 'offer') {
+        bound = later.map((m) => m.turn_id);
+        messages = later.map((m) => m.text);
+      }
+      found.push(...messagesBesidesTheBrief(ledger, brief, allowed === 'offer' ? bound : allowed, ctx.turn_id));
     } catch {
       found.push('a saved history that could not be read');
     }
     try {
       if (opts.readStatedObjections === undefined) throw new Error('stated_objections_reader_unavailable');
-      const objections = await opts.readStatedObjections(ctx.scenario_id, ctx.request_id);
-      if (objections.length > 0) found.push(`${objections.length} objection${objections.length === 1 ? '' : 's'} you recorded`);
+      objections = (await opts.readStatedObjections(ctx.scenario_id, ctx.request_id)).map((o) => o.statement);
     } catch {
       found.push('recorded objections that could not be read');
     }
-    return found;
+    return { found, items, bound, messages, objections, later: items.length > 0 || laterWrites || messages.length > 0 || objections.length > 0 };
   };
   const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
   const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
@@ -3589,8 +3612,8 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
-    const found = await unreviewedDraftGate(ctx, g, []);
-    if (found.length > 0) return { refused: { ok: false, mutated: false, refusal: DRAFT_GATE_REFUSAL, detail: '' }, found };
+    const gate = await unreviewedDraftGate(ctx, g, 'offer');
+    if (gate.found.length > 0) return { refused: { ok: false, mutated: false, refusal: DRAFT_GATE_REFUSAL, detail: '' }, found: gate.found };
     const typedGoal = (ctx.user_turn_text ?? '').trim();
     if (callStructured === undefined || ctx.turn_id === undefined || g.graph_identity_hash === '' || typedGoal === '') {
       return notOffered('revised_draft_unavailable', 'A revised draft cannot be prepared here, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
@@ -3599,8 +3622,12 @@ export function createAgentCapabilities(
     const input = revisedDraftBrief(g.brief_text as string, typedGoal);
     let out: ToolResult;
     try {
+      // The current saved model (the agent's own view of it), the later messages and the objections, as CONTEXT only; an
+      // unedited draft is prepared exactly as before, byte for byte (its current model is the draft itself).
+      const context: ConstructionContext | undefined = gate.later ? { current_model: projectModelContext(g),
+        ...(gate.messages.length > 0 ? { messages: gate.messages } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : undefined;
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
-        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured)));
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured, undefined, context)));
     } catch {
       out = { ok: false, mutated: false };
     }
@@ -3619,6 +3646,13 @@ export function createAgentCapabilities(
       return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
     }
     Object.assign(candidate, limits.replacement);
+    // What the user set is carried by identity, with its own stamp; a node it needs that the revision lacks → nothing offered.
+    const kept = carryHumanItems(candidate, gate.items, (n) => levelFrameOf(n as never));
+    if (kept.missing.length > 0) {
+      return notOffered('revised_draft_not_prepared', `The revised draft does not hold ${kept.missing.join('; ')}, so nothing was offered and the model is unchanged. `
+        + 'Tell the user plainly which of their changes a revised draft would lose.');
+    }
+    Object.assign(candidate, kept.replacement);
     // The drafter's targets are its reading of the user's goal: `limitsKeptBy` stores them `inferred`, never `explicit`.
     const held = targetsHeldBy(candidate);
     if (held.length === 0) {
@@ -3630,6 +3664,25 @@ export function createAgentCapabilities(
       ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`
       : ` at month ${basis.period_months}${basis.reference === 'launch' ? ' after launch' : ''}`;
     const options = nodesOf(candidate).filter((n) => n?.kind === 'option' && typeof n.label === 'string').map((n) => `\u2018${n.label as string}\u2019`);
+    /**
+     * ⭐ AGAINST THE CURRENT SAVED MODEL (PL #94 07:32Z Q2): after later work, the card names what the user set that is kept,
+     * and every part the revision ADDS (a part the user removed and the drafter brought back included) or OMITS, by kind and
+     * label, before an explicit approval. The goal and the decision are named by the card's own goal clause.
+     */
+    const partKey = (n: Record<string, unknown>): string | null => (typeof n?.label === 'string' && n.kind !== 'goal' && n.kind !== 'decision'
+      ? `${String(n.kind)}:${canonicalLabel(n.label)}` : null);
+    const partsOf = (raw: unknown): Map<string, string> => new Map(nodesOf(raw).flatMap((n) => {
+      const k = partKey(n);
+      return k === null ? [] : [[k, `\u2018${n.label as string}\u2019`] as const];
+    }));
+    const now = partsOf(g.raw);
+    const next = partsOf(candidate);
+    const added = [...next].filter(([k]) => !now.has(k)).map(([, w]) => w);
+    const omitted = [...now].filter(([k]) => !next.has(k)).map(([, w]) => w);
+    const againstCurrent = !gate.later ? ''
+      : (kept.carried.length > 0 ? `Kept as you set them: ${kept.carried.join('; ')}. ` : '')
+        + (added.length > 0 ? `Added to the current model: ${added.join(', ')}. ` : '')
+        + (omitted.length > 0 ? `Not in the revised draft: ${omitted.join(', ')}. ` : '');
     const card = `Replace the early draft with a revised one built from your brief and the goal you just gave: `
       + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
       + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
@@ -3641,6 +3694,7 @@ export function createAgentCapabilities(
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
       + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
         : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
+      + againstCurrent
       + 'Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
@@ -3649,7 +3703,7 @@ export function createAgentCapabilities(
       base_graph_identity_hash: g.graph_hash,
       operations: [{ op: 'replace_draft', path: sid, value: {
         candidate, candidate_hash: candidateHash, base_identity: g.graph_identity_hash, brief_text: g.brief_text,
-        goal_turn_id: ctx.turn_id, typed_goal: typedGoal,
+        goal_turn_id: ctx.turn_id, typed_goal: typedGoal, bound_turn_ids: gate.bound,
         operation_id: constructionOperationId(sid, `replace_draft:${g.graph_identity_hash}:${candidateHash}`),
       } }],
       provenance: { authored_by: 'model_proposed', basis: 'A revised draft prepared from the stored brief and the goal the user typed; only its own card replaces the draft.' },
@@ -3732,7 +3786,7 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
-      goal_turn_id?: unknown; operation_id?: unknown };
+      goal_turn_id?: unknown; operation_id?: unknown; bound_turn_ids?: unknown };
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -3741,7 +3795,9 @@ export function createAgentCapabilities(
     if (before.graph_identity_hash !== v.base_identity) {
       return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
     }
-    const found = await unreviewedDraftGate(ctx, before, [v.goal_turn_id]);
+    // The messages the offer bound (read as its context), then the typed goal's turn; any other message refuses.
+    const bound = Array.isArray(v.bound_turn_ids) ? v.bound_turn_ids.filter((t): t is string => typeof t === 'string') : [];
+    const { found } = await unreviewedDraftGate(ctx, before, [...bound, v.goal_turn_id]);
     if (found.length > 0) {
       const label = (id: string): string => String((((v.candidate as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? [])
         .find((n) => n?.id === id)?.label ?? id);
@@ -3756,6 +3812,18 @@ export function createAgentCapabilities(
       expected_graph_identity_hash: v.base_identity,
       operation_id: v.operation_id,
     });
+    /**
+     * ⛔ A DEFINITE REFUSAL WROTE NOTHING (DL 14 Oct, Codex 3023 r2: a 409 with zero writes was receipted `mutated:true`). Every
+     * 409 the register route returns is refused before any write (`assist.v1.scenario-graph-register.ts`: GRAPH_STALE,
+     * OPERATION_ID_REUSED, SHARE_BY_DATE_SERVER_OWNED …, each "nothing written"), so it is said as not replaced, exactly as
+     * the hiring-times apply above says its STALE. Only an AMBIGUOUS failure reads the model back (AIE 6122431786 §4).
+     */
+    if (reg.status === 409) {
+      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+      return /STALE/.test(code)
+        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
+        : notApplied('not_applied', 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
+    }
     /**
      * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
      * registration acknowledged for the bytes it stored from this exact candidate (`graph_identity_hash`, "the server has the
