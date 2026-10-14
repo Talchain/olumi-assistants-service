@@ -104,6 +104,8 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: served?.graph_hash ?? READ.graph_hash,
       blocks: [served?.analysis_result ?? READ.analysis_result], analysis_ready: served?.analysis_ready ?? READ.analysis_ready,
       analysis_state: runResponseState ?? served?.analysis_state ?? state,
+      // A served Run turn carries its own run-over-run delta beside its result (the read's `current_read.run_delta`).
+      ...(served?.current_read?.run_delta !== undefined ? { run_delta: served.current_read.run_delta } : {}),
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => served ?? withCanonicalAnalysisView({
       graph, graph_hash: READ.graph_hash, analysis_state: state,

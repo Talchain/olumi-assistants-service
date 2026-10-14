@@ -10846,7 +10846,8 @@ export function createAgentCapabilities(
       // SAME comparison facts the state read gives (`runComparisonFacts`) with this Run's output, and is told to coach and
       // compare (`RUN_COMPARISON_NOTE`). The model writes it; no host prose. A first Run, or a read of another Run, adds nothing.
       let runComparison: Record<string, unknown> | undefined;
-      if (result !== undefined && runIdentity !== undefined) {
+      // Only a Run whose own response carries a run-over-run delta has a preceding Run, so no other Run spends a read on it.
+      if (result !== undefined && runIdentity !== undefined && r.json.run_delta !== undefined) {
         if (postRunRead === undefined) {
           try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
         }
