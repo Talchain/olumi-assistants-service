@@ -274,7 +274,8 @@ describe('discriminating controls for selector and rendering', () => {
 });
 
 describe('all deterministic text post-check ids, including methods without vendored reply fixtures', () => {
-  const textCases: { id: PolicyId; good: string; bad: string; inputs: MethodInputs; failed: string[] }[] = [
+  // RC-OUTSIDE-VIEW is a row with no method turn (no reply post-checks), so it is not a text case.
+  const textCases: { id: Exclude<PolicyId, 'RC-OUTSIDE-VIEW'>; good: string; bad: string; inputs: MethodInputs; failed: string[] }[] = [
     { id: 'RC-WHAT-CHANGES', good: 'Olumi varied annual cost at 10. Give your estimate.',
       bad: 'No single assumption matters. Nothing would change. EVPPI is 90%.', inputs: { factor_label: 'Annual cost', factor_current_value: 10 },
       failed: ['WC-NAMES-FACTOR', 'WC-NO-NEW-FIGURES', 'WC-NO-NOTHING', 'WC-BANNED'] },
