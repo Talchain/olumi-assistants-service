@@ -276,3 +276,24 @@ describe('PL 6135017311 item 3: a live compiler — r follows the SAVED figures 
       .toBeCloseTo(g.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength.mean, 12);
   });
 });
+
+describe('Paul\'s legacy brief on the served drafter (capture e635a126, 14 Oct): a stated deadline keeps its forecast when the options act only through the capacity chain', () => {
+  const SERVED = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-e635a126-raw-20261014.json', import.meta.url), 'utf8')) as {
+    brief: string; brief_sha256: string; raw_text: string; raw_sha256: string };
+  it('PRECONDITION: the served answer is byte-exact, kind event_by_date, and no option carries a pace', () => {
+    expect(createHash('sha256').update(SERVED.raw_text, 'utf8').digest('hex')).toBe(SERVED.raw_sha256);
+    expect(createHash('sha256').update(SERVED.brief, 'utf8').digest('hex')).toBe(SERVED.brief_sha256);
+    const d = JSON.parse(SERVED.raw_text) as Rec;
+    expect(d.goal).toMatchObject({ kind: 'event_by_date', deliverable: 'next feature launch', horizon_months: 6 });
+    expect(d.options.map((o: Rec) => o.added_capacity)).toEqual([null, null, null]);
+  });
+
+  it('⭐ RED→GREEN: the deadline forecast is built, and each option acts through the chain (90/75 and 95/75), not the ordinary model', async () => {
+    const g = await construct(JSON.parse(SERVED.raw_text) as Rec);
+    expect(node(g, 'event_team')).toBeDefined();
+    expect(node(g, 'event_goal')).toMatchObject({ goal_threshold_unit: '% of next feature launch' });
+    expect(node(g, 'event_capacity_2').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(90 / 75, 12);
+    expect(node(g, 'event_capacity_3').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(95 / 75, 12);
+    expect(unresolvedEventOptionIds(g)).toEqual([]);
+  });
+});

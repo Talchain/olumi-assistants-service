@@ -471,6 +471,12 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   if (!Array.isArray(candidate.options)) return EVENT_BY_DATE_REFUSALS[1];
   const options = candidate.options.filter(o => o.is_status_quo !== true);
   if (options.length === 0) return EVENT_BY_DATE_REFUSALS[2];
+  // Paul's legacy brief on the served drafter (capture e635a126, 14 Oct): the options set the brief's own capacity chain
+  // (time on legacy fixes / feature work) with no pace. Such an option changes the team's capacity through that chain
+  // (`eventCapacityRatios`, r > 1), so the stated deadline still gets its forecast instead of the ordinary model.
+  const ratios = eventCapacityRatios(candidate);
+  const raisesCapacity = candidate.options.some((o, i) => o.is_status_quo !== true && (ratios.get(i)?.ratio ?? 0) > 1);
+  if (raisesCapacity) return null;
   if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
   return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }
