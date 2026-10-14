@@ -1,4 +1,7 @@
+import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
+import { hasReliesOnRiskWrite } from '../graph-management/field-safety.js';
+import { hasReliesOnRiskStampChange } from '../routing/relies-on-risk.js';
 /**
  * V5 pre-Sonnet dispatch for edit_graph turns.
  *
@@ -32,6 +35,9 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { ModelReadFailedError } from '../graph-revision-conflict.js';
+import { isRevisionConflict } from '../graph-revision-conflict.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   buildEditGraphHandlerFact,
@@ -133,6 +139,8 @@ import type {
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
+import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import type {
   AnalysisStateIngress,
   GraphStateIngress,
@@ -145,6 +153,7 @@ import {
   buildTurnContext,
   loadMostRecentPendingActions,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
   loadRecentConversationTurns,
   loadScenarioBriefText,
 } from '../build-turn-context.js';
@@ -1059,6 +1068,7 @@ function structuralEditDeclineResult(
 }
 
 async function tryStructuralEditTool(input: {
+  readonly persistedBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
   readonly adapter: ReturnType<typeof getAdapter>;
@@ -1099,6 +1109,7 @@ async function tryStructuralEditTool(input: {
 }
 
 async function runStructuralEditTool(input: {
+  readonly persistedBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
   readonly adapter: ReturnType<typeof getAdapter>;
@@ -1159,7 +1170,7 @@ async function runStructuralEditTool(input: {
 
   let persisted: unknown = null;
   try {
-    persisted = await loadPersistedGraphStrict(payload.scenario_id);
+    persisted = useAppendV6() ? input.persistedBase?.graph : await loadPersistedGraphStrict(payload.scenario_id);
   } catch (err) {
     log.warn(
       {
@@ -1364,6 +1375,8 @@ export interface DispatchEditGraphParams {
   readonly request: FastifyRequest;
   /** Permissive ingress shape. Adapter inside converts to GraphV3T. */
   readonly graphState: GraphStateIngress;
+  /** Internal combined server snapshot, consumed only by the dormant v6 path. */
+  readonly persistedEditBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
   readonly analysisState: AnalysisStateIngress | null;
   /**
@@ -1919,9 +1932,25 @@ function editResultToOlumiResponse(
 function graphStateToGraphV3WithParseResult(
   graphState: GraphStateIngress,
   requestId: string,
+  sanctionedPersisted = false,
 ): { graph: GraphV3T; strict: boolean } {
-  const parsed = GraphV3.safeParse(graphState);
+  const parsed = GraphV3.safeParse(sanctionedPersisted ? floorGraphSigmaForCompute(graphState).graph : graphState);
   if (parsed.success) {
+    // The sanctioned projection is a validity gate only. Preserve stored
+    // sigma bytes in the provider/merge graph, just as the atomic version gate
+    // preserves them in hashes and persistence.
+    if (sanctionedPersisted) {
+      parsed.data.edges.forEach((edge, index) => {
+        const strength = graphState.edges[index]?.strength;
+        const std = strength && typeof strength === 'object' && 'std' in strength ? strength.std : undefined;
+        if (typeof std === 'number' && std <= 0 && edge.strength) edge.strength.std = std;
+      });
+      parsed.data.nodes.forEach((node, index) => {
+        const observed = graphState.nodes[index]?.observed_state;
+        const std = observed && typeof observed === 'object' && 'std' in observed ? observed.std : undefined;
+        if (typeof std === 'number' && std <= 0 && node.observed_state) node.observed_state.std = std;
+      });
+    }
     return { graph: parsed.data, strict: true };
   }
   return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
@@ -2170,6 +2199,12 @@ export function mergeAppliedGraphForPersistence(args: {
     persistedUsable ? persistedBase : ingressBase
   ) as Record<string, unknown>;
 
+  // Generic edit/system-event merges have no authority to mint or rebind the
+  // stamp. Compare with the same stored base the merge will actually use.
+  if (hasReliesOnRiskStampChange(base, appliedGraph)) {
+    throw new Error('A precondition risk needs its dedicated proposal and approval; nothing was changed.');
+  }
+
   const merged: Record<string, unknown> = {
     ...base,
     nodes: appliedGraph.nodes,
@@ -2263,7 +2298,8 @@ function conversationSliceToMessages(
 export async function dispatchEditGraph(
   params: DispatchEditGraphParams,
 ): Promise<DispatchEditGraphResult> {
-  const { payload, requestId, graphState, analysisState } = params;
+  const { payload, requestId, analysisState } = params;
+  let graphState = params.graphState == null ? params.graphState : structuredClone(params.graphState);
   const startedAt = Date.now();
   // ROADMAP 2.684 — the deadline baseline. `routeStartedAt` when the route
   // threaded it (the live path); the dispatcher's own start otherwise, which
@@ -2271,8 +2307,26 @@ export async function dispatchEditGraph(
   // the `requestStartMs` jsdoc on DispatchEditGraphParams.
   const requestStartMs = params.requestStartMs ?? startedAt;
 
+  // The provider and merge share one trusted graph/revision snapshot. Only
+  // a successful empty read permits first-touch adoption of the ingress graph.
+  let editBase: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> | undefined;
+  if (useAppendV6()) {
+    try {
+      editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
+      if (!Number.isSafeInteger(editBase.revision) || (editBase.revision ?? -1) < 0) throw new Error('Invalid revision');
+      if (editBase.graph !== null) {
+        if (!assertIngressGraphNumericBounds(editBase.graph).ok) throw new Error('Invalid server graph');
+        const parsed = GraphV3.safeParse(floorGraphSigmaForCompute(editBase.graph).graph);
+        if (!parsed.success) throw new Error('Invalid server graph');
+        graphState = GraphStateIngressSchema.parse(editBase.graph);
+      }
+    } catch (cause) {
+      throw new ModelReadFailedError(cause);
+    }
+  }
+
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
-    graphStateToGraphV3WithParseResult(graphState, requestId);
+    graphStateToGraphV3WithParseResult(graphState, requestId, editBase?.graph != null);
   let recordedAnswer: RecordedEffectAnswer | null = null;
   if (params.recordedEffectAnswer !== undefined) {
     const resolved = resolveRecordedOptionEffectAnswer({
@@ -2315,8 +2369,12 @@ export async function dispatchEditGraph(
   // for edit + repair), so it cannot leak into any other lane.
   let editBriefSlice: ConversationContext['brief'] = null;
   try {
-    const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
-    editBriefSlice = projectBriefForEdit(briefText);
+    if (useAppendV6()) {
+      editBriefSlice = projectBriefForEdit(editBase!.briefText);
+    } else {
+      const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
+      editBriefSlice = projectBriefForEdit(briefText);
+    }
   } catch {
     editBriefSlice = null; // helper already degrades; belt for test doubles
   }
@@ -2457,6 +2515,14 @@ export async function dispatchEditGraph(
     }
   };
 
+  // Early/unchanged candidates have no stored base at this point. Drop only
+  // submitted basis bytes without adding a read or suppressing graph hashes.
+  const preparedIngressForHash = (): GraphStateIngress | null | undefined => {
+    const candidate = graphState == null ? graphState : structuredClone(graphState);
+    prepareHorizonBasisForWrite(candidate, undefined, payload.scenario_id);
+    return candidate;
+  };
+
   try {
     // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
     // catches high-confidence bare "add X as a risk" patterns, but the
@@ -2571,9 +2637,10 @@ export async function dispatchEditGraph(
         // buildHeldPending's "no readable frame → no safe pending" posture)
         // rather than persisting one that can only ever dispatch
         // recovery_graph_changed.
+        const addRiskHashGraph = preparedIngressForHash();
         const addRiskEmitGraphHash = ((): string | null => {
           try {
-            return computeAnalysisAffectingGraphHash(graphState);
+            return computeAnalysisAffectingGraphHash(addRiskHashGraph);
           } catch {
             return null;
           }
@@ -2650,10 +2717,11 @@ export async function dispatchEditGraph(
       // typed rejection reason. The wall-clock TTL mirrors the
       // `isExpired` semantics used by tryClarificationResume /
       // tryShortConfirmResume so all three resumers agree.
+      const earlyHashGraph = preparedIngressForHash();
       let earlyCurrentGraphHash: string | null = null;
       try {
         earlyCurrentGraphHash = computeAnalysisAffectingGraphHash(
-          graphState as GraphStateIngress | null | undefined,
+          earlyHashGraph as GraphStateIngress | null | undefined,
         );
       } catch {
         earlyCurrentGraphHash = null;
@@ -3022,6 +3090,7 @@ export async function dispatchEditGraph(
         const toolOutcome = optionEffectWrite !== null
           ? null
           : await tryStructuralEditTool({
+            ...(useAppendV6() ? { persistedBase: editBase } : {}),
               editResult,
               context,
               adapter,
@@ -3074,6 +3143,13 @@ export async function dispatchEditGraph(
   const editLlmCall = extractEditLlmCallTelemetry(editResult, adapter.name);
 
   try {
+  // Defence at the generic dispatch boundary: every mode obeys server stamp
+  // ownership, including a future producer that bypasses the edit handler.
+  if (hasReliesOnRiskWrite(editResult.operations ?? [])) {
+    editResult = { ...editResult, blocks: [], wasRejected: true, appliedGraph: null,
+      appliedChanges: undefined, pendingClarification: undefined, suggestedActions: undefined,
+      assistantText: 'A precondition risk needs its dedicated proposal and approval; nothing was changed.' };
+  }
   let response = editResultToOlumiResponse(editResult, payload);
 
   // ⭐ CLAIM-THEN-STARVE EXIT — hand the turn back BEFORE committing.
@@ -3189,7 +3265,7 @@ export async function dispatchEditGraph(
   //     also fails fast — it avoids buildTurnContext's extra read against the
   //     already-degraded store — while the outer assembly `finally` still
   //     emits the single edit turn event.
-  let persistedPostEditGraph: unknown = graphState;
+  let persistedPostEditGraph: unknown = successfulAppliedMutation ? graphState : preparedIngressForHash();
   // A3 graph CAS observe-mode: expected-base hashes for this dispatch's
   // graph-bearing commit. Derived ONLY from the strict SERVER-SIDE persisted
   // read below (`loadPersistedGraphStrict`) — the same trusted base the merge
@@ -3205,11 +3281,18 @@ export async function dispatchEditGraph(
   // Graph Management (lane 8): frame-authority PRE-edit base for the referee
   // gate — the strict persisted read when available, else the ingress echo
   // (the same fallback rule the persistence merge applies).
-  let gmFrameBase: unknown = graphState;
+  let gmFrameBase: unknown = persistedPostEditGraph;
+  // Structural checks may fall back to ingress on an empty scenario. Basis
+  // provenance may only come from the actual server read, including its null.
+  let storedGraphForHorizonBasis: unknown;
   if (successfulAppliedMutation) {
     let strictBase: unknown;
     try {
-      strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+      if (useAppendV6()) {
+        strictBase = editBase!.graph;
+      } else {
+        strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+      }
     } catch (err) {
       log.warn(
         {
@@ -3241,6 +3324,8 @@ export async function dispatchEditGraph(
     if (config.features.graphCas.requiresExpectedHash) {
       expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
+    storedGraphForHorizonBasis = strictBase ?? null;
+    prepareHorizonBasisForWrite(graphState, storedGraphForHorizonBasis, payload.scenario_id);
     gmFrameBase = strictBase ?? graphState;
     // Design §3.2 — PROJECT INTO THE PERSISTED FORM HERE, before anything in
     // this dispatch derives a hash from it. `commitDirectAnswer` applies the
@@ -3283,6 +3368,7 @@ export async function dispatchEditGraph(
       clearInheritedInterventionSourceQuotes(strictBase, persistedPostEditGraph),
       { scenarioId: payload.scenario_id, turnId: payload.turn_id, turnClass: payload.turn_class, source: 'edit_graph' },
     );
+    prepareHorizonBasisForWrite(persistedPostEditGraph, storedGraphForHorizonBasis, payload.scenario_id);
   }
 
   let freshness: FreshnessDerivation;
@@ -3388,6 +3474,8 @@ export async function dispatchEditGraph(
       {
         ...freshnessReadOptionsForRecovery,
         currentGraph: persistedPostEditGraph,
+        // A candidate edit has no recorded revision until commit.
+        currentScenarioRevision: undefined,
       },
     );
     emitFreshnessTelemetry(
@@ -3634,6 +3722,7 @@ export async function dispatchEditGraph(
             {
               ...freshnessReadOptionsForRecovery,
               currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
             },
           ).freshness;
     // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
@@ -4022,6 +4111,7 @@ export async function dispatchEditGraph(
         {
           ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
         },
       );
     }
@@ -4072,6 +4162,7 @@ export async function dispatchEditGraph(
         {
           ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
         },
       );
     }
@@ -4164,6 +4255,7 @@ export async function dispatchEditGraph(
         {
           ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
         },
       );
     }
@@ -5558,6 +5650,7 @@ export async function dispatchEditGraph(
             {
               ...freshnessReadOptionsForRecovery,
               currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
             },
           );
         }
@@ -5628,6 +5721,7 @@ export async function dispatchEditGraph(
         turnClass: 'direct_answer',
       });
       if (projected && typeof projected === 'object' && 'nodes' in projected) {
+        prepareHorizonBasisForWrite(projected, storedGraphForHorizonBasis, payload.scenario_id);
         const askedGraphHash = computeAnalysisAffectingGraphHash(projected as GraphStateIngress);
         const asked = askedGraphHash === null ? null : buildReadinessEffectPending({
           analysisReady, nodes: (projected as GraphStateIngress).nodes,
@@ -5690,6 +5784,7 @@ export async function dispatchEditGraph(
       turnId: payload.turn_id,
       site: 'edit_graph_dispatch',
     });
+    const expectedRevision = useAppendV6() ? editBase?.revision : undefined;
     const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -5719,7 +5814,7 @@ export async function dispatchEditGraph(
       // editable (`edit-graph.ts:2750-2755`). Omitted on a non-writing turn,
       // where there is nothing to check.
       ...(graphForCommit !== undefined
-        ? { baseGraphForInvariants: gmFrameBase }
+        ? { baseGraphForInvariants: gmFrameBase, storedGraphForHorizonBasis }
         : {}),
       // A3 graph CAS: expected-base hashes from the strict server read above
       // (undefined when no applied mutation / mode off — the CAS hook only
@@ -5761,6 +5856,7 @@ export async function dispatchEditGraph(
       // post-edit appliedGraph on a successful mutation, else undefined → the
       // egress is graph-free too), keeping stored == wire.
       contentGraph: graphForCommit,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     });
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse
@@ -5831,6 +5927,7 @@ export async function dispatchEditGraph(
       ...(editLlmCall ? { editLlmCall } : {}),
     };
   } catch (err) {
+    if (isRevisionConflict(err)) throw err;
     log.error(
       {
         request_id: requestId,

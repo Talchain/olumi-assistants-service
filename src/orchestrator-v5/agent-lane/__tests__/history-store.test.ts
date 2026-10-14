@@ -122,3 +122,58 @@ describe('a stored history is VALID INPUT by construction', () => {
   });
 });
 
+
+
+describe('A2h authorship grounding keeps boundaries and source tiers', () => {
+  it('retains a verified multiline statement after more than forty typed messages', () => {
+    const store = new HistoryStore();
+    const first = 'Senior engineer salary\ncosts £120k per year.';
+    let messages: unknown[] = [];
+    for (let i = 0; i < 45; i++) {
+      const text = i === 0 ? first : `message ${i}`;
+      store.recordTyped('s', text);
+      messages = [...store.get('s'), { role: 'user', content: [{ type: 'input_text', text }] }];
+      store.set('s', messages);
+    }
+    expect(store.typedWords('s')).not.toContain(first);
+    expect(store.authorshipWords('s').verified).toContain(first);
+    expect(store.authorshipWords('s').unknown).toEqual([]);
+  });
+  it('keeps both windowed and older cold-seeded rows unknown', () => {
+    const store = new HistoryStore(10, 2);
+    store.seed('s', conversation(4), []);
+    expect(store.authorshipWords('s').verified).toEqual([]);
+    expect(store.authorshipWords('s').unknown).toEqual(['q0', 'q1', 'q2', 'q3']);
+    store.recordTyped('s', 'q1');
+    expect(store.authorshipWords('s').unknown).toContain('q1');
+    expect(store.authorshipWords('s').verified).toContain('q1');
+  });
+});
+
+
+describe('A2i source coverage for K3 search misses', () => {
+  it('a complete live source may classify a miss; the typed-history cap makes it incomplete', () => {
+    const store = new HistoryStore();
+    store.recordTyped('s', 'The opening message.');
+    store.set('s', conversation(1));
+    expect(store.authorshipWords('s').complete).toBe(true);
+    for (let i = 1; i < 40; i++) store.recordTyped('s', `message ${i}`);
+    expect(store.authorshipWords('s').complete).toBe(false);
+  });
+  it('fresh or failed source coverage stays incomplete on later turns', () => {
+    const store = new HistoryStore();
+    expect(store.authorshipWords('s').complete).toBe(false);
+    store.recordTyped('s', 'A later message.', false);
+    store.set('s', conversation(1));
+    store.recordTyped('s', 'Another message.');
+    expect(store.authorshipWords('s').complete).toBe(false);
+    expect(store.authorshipWords('s').verified).toEqual(['A later message.', 'Another message.']);
+  });
+  it('an empty restored source is incomplete even after fresh typing', () => {
+    const store = new HistoryStore();
+    store.seed('s', [], []);
+    store.recordTyped('s', 'A later message.');
+    store.set('s', conversation(1));
+    expect(store.authorshipWords('s').complete).toBe(false);
+  });
+});

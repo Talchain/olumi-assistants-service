@@ -1,4 +1,6 @@
+import { assertShareByDatePreserved } from './goal-target/share-by-date-carrier.js';
 import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
+import { heldAgentCardStillApplies } from './agent-lane/proposal-object/still-applies.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -47,7 +49,9 @@ import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
+import type { HorizonBasisWrite } from './goal-target/goal-steady-write.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -101,6 +105,7 @@ export interface CommitMetadata {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
   /**
    * Draft graph to persist atomically with the turn insert via
    * append_turn_atomic(p_graph). Both the graph write and the turn row commit
@@ -158,10 +163,14 @@ export interface CommitMetadata {
    * mode `edit-graph.ts:2750-2755` exists to avoid).
    */
   readonly baseGraphForInvariants?: unknown;
+  /** In-process approval capability issued by applyGoalSteadyEdit, never a wire field. */
+  readonly horizonBasisWrite?: HorizonBasisWrite;
+  /** Explicit server read when the structural baseline can fall back to a client graph. null means absent. */
+  readonly storedGraphForHorizonBasis?: unknown;
   /**
    * ⭐ STABLE ENTITY REFS ONLY (`graph/entity-refs.ts`; DL CR B1 on #2357): the graph this write REPLACES, so the
    * allocator carries each entity's ref forward and never reissues a retired number. `null` = there is none (a first
-   * write). Read ONLY by the allocator — never by the invariant floor or the version policy, which keep
+   * write). Also used for basis preparation; the structural invariant floor and version policy keep
    * `baseGraphForInvariants`. When neither is given on a graph write, the commit reads the stored graph once for it.
    */
   readonly refBaseGraph?: unknown;
@@ -243,6 +252,8 @@ export interface CommitMetadata {
    * absent/unparseable. See graph-cas-conflict.ts.
    */
   readonly expectedGraphIdentityHash?: string | null;
+  /** Verbatim scenario revision captured with the turn-start server graph read. */
+  readonly expectedRevision?: number;
   /**
    * A3 graph CAS observe-mode: expected-base analysis-affecting hash (16-hex)
    * from the same server read as `expectedGraphIdentityHash`. Threaded
@@ -366,6 +377,8 @@ export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
   readonly persisted_row_id: string;
+  /** Scenario revision returned by the versioned atomic append, including replay. */
+  readonly revision?: number;
   readonly modelVersionReceipt: AtomicCommittedModelVersionReceipt | null;
   /**
    * True when CommitMetadata.graph was provided and the append RESOLVED. False
@@ -540,6 +553,8 @@ export function computeSurvivingPriorPendingsDetailed(
   consumedRefs: readonly string[],
   currentGraphHash: string | undefined,
   nowMs: number,
+  /** A held Agent card that still applies to the current graph by its own rule (`heldAgentCardStillApplies`). Absent: none. */
+  heldCardStillAppliesNow?: (pa: PendingAction) => boolean,
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
@@ -636,14 +651,17 @@ export function computeSurvivingPriorPendingsDetailed(
     const pa = clampAskWindows ? clampRecordedAskWindow(priorPa) : priorPa;
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
-    // 4. graph-hash invalidation — only when both hashes are known.
+    // 4. graph-hash invalidation — only when both hashes are known. A held Agent card whose OWN subject is unchanged is
+    // not invalidated by a model move (hiring post3009: approving two link strengths dropped the pending deadline card); it
+    // keeps its pin, which is its proposal's base, and its press re-checks the same rule.
     const preconditionHash = pa.preconditions.graph_hash;
     if (
       typeof preconditionHash === 'string' &&
       preconditionHash.length > 0 &&
       typeof currentGraphHash === 'string' &&
       currentGraphHash.length > 0 &&
-      preconditionHash !== currentGraphHash
+      preconditionHash !== currentGraphHash &&
+      heldCardStillAppliesNow?.(pa) !== true
     ) {
       hashInvalidatedCount += 1;
       continue;
@@ -1218,7 +1236,7 @@ async function refBaseFor(metadata: CommitMetadata, store: Pick<SessionStore, 'l
     return (await store.loadGraph(metadata.scenario_id)) ?? null;
   } catch (err) {
     log.warn({ event: 'v5.commit.ref_base_read_failed', scenario_id: metadata.scenario_id, err: err instanceof Error ? err.message : String(err) },
-      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6)');
+      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6); a write carrying a share_by_date carrier is refused');
     return undefined;
   }
 }
@@ -1264,18 +1282,24 @@ export async function commitDirectAnswer(
   // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
   // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
   const baseForWrite = await refBaseFor(metadata, store);
+  const storedBasisBase = metadata.storedGraphForHorizonBasis !== undefined ? metadata.storedGraphForHorizonBasis : baseForWrite;
   if (graphWasProvided(metadata.graph)) {
     const priorForScope = typeof store.readMostRecentPendingActions === 'function'
       ? await store.readMostRecentPendingActions(metadata.scenario_id, { validation: 'strict' })
       : metadata.priorPendingActions ?? [];
     assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
   }
+  if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, metadata.graph);
   const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
   }), baseForWrite).graph;
+  if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
+  if (graphWasProvided(metadata.graph)) {
+    prepareHorizonBasisForWrite(projectedGraphForStore, storedBasisBase, metadata.scenario_id, metadata.horizonBasisWrite);
+  }
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,
@@ -1374,12 +1398,20 @@ export async function commitDirectAnswer(
         CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
         !isPendingActionExpired(pa, nowMsForPendings),
     );
+  // The graph `effectiveGraphHash` names, for a held Agent card's own rule: the bytes this commit stores, or (a commit that
+  // writes none) the stored graph, read only when such a card's pin differs from it. Unreadable: no card is kept by it.
+  const heldCardGraph: unknown = writesGraph ? graphForStore
+    : (metadata.priorPendingActions ?? []).some((pa) => pa.action.kind === 'apply_proposed_change'
+      && typeof pa.preconditions.graph_hash === 'string' && pa.preconditions.graph_hash !== effectiveGraphHash)
+      ? await (async () => { try { return await store.loadGraph(metadata.scenario_id); } catch { return undefined; } })() : undefined;
+  const heldCardStillAppliesNow = (pa: PendingAction): boolean => heldCardGraph != null && heldAgentCardStillApplies(pa, heldCardGraph);
   const prelimCarryForward = computeSurvivingPriorPendingsDetailed(
     metadata.priorPendingActions ?? [],
     initialChipDerivedPending,
     metadata.consumedPendingRefs ?? [],
     effectiveGraphHash,
     nowMsForPendings,
+    heldCardStillAppliesNow,
   );
   const holdLiveAfterCommit =
     hasLiveConfirmationExpecting(initialChipDerivedPending) ||
@@ -1427,6 +1459,7 @@ export async function commitDirectAnswer(
     metadata.consumedPendingRefs ?? [],
     effectiveGraphHash,
     nowMsForPendings,
+    heldCardStillAppliesNow,
   );
   const survivingPrior = carryForward.survivors;
   // Adversarial round-3 concern 3 — consent-priority cap fill. The plain
@@ -1630,6 +1663,9 @@ export async function commitDirectAnswer(
     store,
     writesGraph,
     baseGraphForInvariants: metadata.baseGraphForInvariants,
+    // Keep a known-empty server read distinct from the structural ingress fallback at the door.
+    storedGraphForHorizonBasis: storedBasisBase ?? { nodes: [], edges: [] },
+    ...(metadata.horizonBasisWrite !== undefined ? { horizonBasisWrite: metadata.horizonBasisWrite } : {}),
     source: metadata.handler_id ?? undefined,
     write: {
       scenario_id: metadata.scenario_id,
@@ -1641,6 +1677,8 @@ export async function commitDirectAnswer(
       llm_calls_used: metadata.llm_calls_used,
       duration_ms: metadata.duration_ms,
       handler_facts: metadata.handler_facts,
+      ...(metadata.run_evaluated_revisions !== undefined
+        ? { run_evaluated_revisions: metadata.run_evaluated_revisions } : {}),
       graph: graphForStore,
       briefText: metadata.briefText,
       pending_actions: finalPendings,
@@ -1651,6 +1689,7 @@ export async function commitDirectAnswer(
       // expected-base hashes (undefined when the path is not instrumented).
       expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
       expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
+      ...(metadata.expectedRevision !== undefined ? { expectedRevision: metadata.expectedRevision } : {}),
       ...(atomicVersionPlan.kind === 'plan'
         ? { modelVersion: atomicVersionPlan.write }
         : {}),
@@ -2153,6 +2192,7 @@ export async function commitDirectAnswer(
   // applied state. Hand back the authoritative reread instead (or null).
   const replayGraph = replayReread === null ? null : replayReread.graph;
   return {
+    ...(appendOutcome.revision !== undefined ? { revision: appendOutcome.revision } : {}),
     persistedAnalysisGraphHash:
       replayReread === null
         ? persistedAnalysisGraphHash

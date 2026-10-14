@@ -75,7 +75,7 @@ export default async function route(app: FastifyInstance) {
   const EXPLAIN_TRADEOFF_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_EXPLAIN_TRADEOFF_RATE_LIMIT_RPM") ?? 30;
   const FEATURE_VERSION = "explain-tradeoff-1.0.0";
 
-  app.post("/assist/v1/explain/tradeoff", async (req, reply) => {
+  app.post("/assist/v1/explain/tradeoff", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

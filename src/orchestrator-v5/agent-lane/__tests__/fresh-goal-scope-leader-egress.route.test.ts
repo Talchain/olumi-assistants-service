@@ -15,13 +15,13 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { PendingAction } from '../../session/pending-action.js';
 import type { ScenarioAnalysisRead } from '../../../routes/scenario-graph-analysis-read.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
-import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+import { RUN_RESULT_READY_TEXT, runExplanationKeyForRecord } from '../run-explanation.js';
 
 // Real Fastify route, scripted tool results and in-memory persistence; no provider or network.
 const scripted = vi.hoisted(() => ({ results: [] as Record<string, unknown>[], prior: [] as PendingAction[],
   rows: [] as Record<string, unknown>[], concurrent: false, calls: 0, toolName: 'get_canonical_state',
   measured: false, measureCalls: 0, duringMeasure: null as null | (() => void), joinScopeRead: true,
-  concurrentText: 'Offshore partner leads.', hideAnswerOnce: false,
+  concurrentText: 'Offshore partner leads.', concurrentNarration: undefined as undefined | Record<string, unknown>, hideAnswerOnce: false,
   graphMode: 'ok', modelNames: false, retireOnAppend: false, durableNearTie: false, durableUnavailable: false,
   canonicalResult: false, scopeUnavailableOnce: false, retireAfterGraphRead: 0, graphReads: [] as ScenarioAnalysisRead[] }));
 vi.mock('../../handlers/decision-flip-dispatch.js', async original => ({
@@ -67,7 +67,8 @@ vi.mock('../../session/index.js', () => ({ getSessionStore: () => ({
     if (scripted.retireOnAppend && row.turn_id === TID) scripted.prior = [];
     scripted.rows.push({ ...row, assistant_message: scripted.concurrent ? scripted.concurrentText : row.assistantMessage,
       // The concurrent winner did not observe the losing request's fresh issue.
-      ...(scripted.concurrent ? { pending_actions: [] } : {}) });
+      ...(scripted.concurrent ? { pending_actions: [],
+        ...(scripted.concurrentNarration !== undefined ? { run_narration: scripted.concurrentNarration } : {}) } : {}) });
     return { id: 'answer-row', ...(scripted.concurrent ? { replayedPriorTurn: true } : {}) };
   }),
 }) }));
@@ -122,6 +123,13 @@ function withoutActionBar(raw: string, live: boolean): string {
  * OTHER byte must still equal the pristine pre-fix capture (the baselines are not re-recorded).
  */
 function withoutModelGap(raw: string, live = true): string {
+  // BYPASS1 (#3001): the reply's typed author was added to the live trace after these captures (the fixtures stay as
+  // captured). It is checked by identity, once, then removed exactly as written, so every other byte still compares.
+  const author = ',"reply_author":"host"';
+  if (live) {
+    expect(raw.split(author), 'the trace names the host as the author, once').toHaveLength(2);
+    raw = raw.replace(author, '');
+  }
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   // A replay re-sends the stored answer and carries no live signal, exactly as it carries no live guidance row.
   if (!live) { expect(parsed['model_gap']).toBeUndefined(); return raw; }
@@ -161,7 +169,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
     scripted.results = []; scripted.prior = []; scripted.rows = []; scripted.concurrent = false; scripted.calls = 0; scripted.toolName = 'get_canonical_state';
     scripted.measured = false; scripted.measureCalls = 0; scripted.duringMeasure = null; scripted.joinScopeRead = true;
-    scripted.concurrentText = 'Offshore partner leads.';
+    scripted.concurrentText = 'Offshore partner leads.'; scripted.concurrentNarration = undefined;
     scripted.hideAnswerOnce = false; scripted.graphMode = 'ok'; scripted.modelNames = false; scripted.retireOnAppend = false; scripted.durableNearTie = false; scripted.durableUnavailable = false;
     scripted.canonicalResult = false; scripted.scopeUnavailableOnce = false; scripted.retireAfterGraphRead = 0; scripted.graphReads = [];
     vi.resetModules();
@@ -345,10 +353,16 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     it(`P1-2 ${exit}: result-bearing replay restores the same canonical state/result pair after issue retirement`, async () => {
       scripted.canonicalResult = true; scripted.prior = [pending()];
       const chip = { action_type: 'run_analysis' };
+      // T1h: since migration 20261013230000 an answer row stores the narration it was sent with. A row without it is
+      // legacy, its Run unknown, and replays as {stale, ''} (Codex check on 1c4362de). These rows replay the CURRENT Run,
+      // so the stored receipt carries that Run's narration, as the route writes it.
+      const runKey = runExplanationKeyForRecord(SID, readState, { type: 'analysis_result', computed_against_hash: RESULT.graph_hash_at_run });
+      expect(runKey).toMatch(/^[0-9a-f]{16}$/);
+      const sent = { status: 'pending', run_key: runKey };
       if (exit === 'append-repair') {
-        scripted.concurrent = true; scripted.concurrentText = RUN_RESULT_READY_TEXT; scripted.retireAfterGraphRead = 2;
+        scripted.concurrent = true; scripted.concurrentText = RUN_RESULT_READY_TEXT; scripted.concurrentNarration = sent; scripted.retireAfterGraphRead = 2;
       } else {
-        await seedReplay(chip); scripted.hideAnswerOnce = exit === 'claim-wait'; scripted.retireAfterGraphRead = 1;
+        await seedReplay(chip); scripted.rows[0]!.run_narration = sent; scripted.hideAnswerOnce = exit === 'claim-wait'; scripted.retireAfterGraphRead = 1;
       }
       const { body } = await turn({ chip });
       expect(body._agent.replayed).toBe(true);
@@ -478,8 +492,8 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     // as the vocabulary owner now words it. The fixture itself stays as captured.
     const captured = JSON.parse(readFileSync(baselineUrl, 'utf8'));
     expect(captured.guidance.slot1.copy.why).toBe("There is no 'carry on as now' option to compare with.");
-    captured.guidance.slot1.copy.why = 'A baseline separates the effect of changing course from what would happen anyway.';
-    expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'A baseline separates the effect of changing course from what would happen anyway.'));
+    captured.guidance.slot1.copy.why = 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.';
+    expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.'));
     expect(withoutModelGap(bytes)).toBe(JSON.stringify(captured));
   });
   it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {

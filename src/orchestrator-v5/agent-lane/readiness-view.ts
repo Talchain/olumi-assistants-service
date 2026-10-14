@@ -169,11 +169,11 @@ export function treatedAsZeroLine(view: ReadinessView): string | null {
   // One line, whatever the label holds: a line break inside a quoted label would split the sentence in two.
   const roots = (view.treated_as_zero ?? []).map((label) => label.replace(/\s+/g, ' ').trim());
   if (roots.length === 1) {
-    return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is "${roots[0]}" today?`;
   }
   if (roots.length > 1) {
     const labels = `"${roots[0]}" and "${roots[1]}"${roots.length > 2 ? ` and ${roots.length - 2} more` : ''}`;
-    return `No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each today?`;
+    return `No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each of ${labels} today?`;
   }
   return null;
 }
@@ -202,4 +202,20 @@ export function readinessSentence(view: ReadinessView): string {
   // The refusal's own words may open by saying so already; never "can't … can't".
   const reason = withoutCantRunOpening(view.reason ?? '');
   return reason !== '' ? `The analysis can't run yet. ${reason}` : "The analysis can't run yet.";
+}
+
+/**
+ * ⭐ EBD (DL, 12 Oct): EACH ASK ONCE PER REPLY. Paul's first reply said the deadline question three times: the first
+ * analysis's blocked line, the build's parked question, then this line. A need the reply already says (`said`: the Agent's
+ * words and the lines owed before this one) is not said again. When every need was already said and the reply already says
+ * the analysis could not run (`refusalSaid`), this line is not said at all. Every other case is `readinessSentence`, unchanged.
+ */
+export function readinessSentenceOnce(view: ReadinessView, said: string, refusalSaid: boolean): string | null {
+  if (!view.checked || view.may_run !== false || view.needs_from_user.length === 0) return readinessSentence(view);
+  const unsaid = view.needs_from_user.filter((i) => !said.includes(i.message.trim()));
+  if (unsaid.length === view.needs_from_user.length) return readinessSentence(view);
+  if (unsaid.length > 0) return readinessSentence({ ...view, needs_from_user: unsaid });
+  if (refusalSaid) return null;
+  const { reason: _sameAsk, ...rest } = view;
+  return readinessSentence({ ...rest, needs_from_user: [] });
 }

@@ -182,3 +182,9 @@ describe('dispatchEditGraph — the lane hands back a turn it could not resolve,
     expect(result.commitPerformed).toBe(true);
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

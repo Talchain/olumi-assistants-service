@@ -14,7 +14,7 @@ import {
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
 import { goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
-import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroReplyLine, treatedAsZeroUnnamedMany } from '../root-line.js';
+import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany, treatedAsZeroReplyLine, missingRootUnnamedLine } from '../root-line.js';
 
 type Rec = Record<string, unknown>;
 const json = (p: string): Rec => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8')) as Rec;
@@ -48,7 +48,7 @@ const WITH_NON_LEVER_FLIP = { ...PLOT, flip_thresholds: [NON_LEVER_FLIP] };
 const TEST_LINK = { kind: 'test_without_link', from_id: 'pro_plan_price', to_id: 'mrr' } as const;
 const WHAT_WOULD_CHANGE = { kind: 'what_would_change' } as const;
 /** goal-chance-withheld.ts's own opening: the withhold said without its reason (its fail-closed reading). */
-const WITHHELD_OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+const WITHHELD_OPENING = 'This run doesn’t yet show each option’s chance of reaching £100,000.';
 
 describe('decisionReviewFor — one typed fact per item, on the bound Run', () => {
   it('a licensed Run: the default-0 factor (F2) and the most sensitive link (F5), with the link test and What would change', () => {
@@ -97,12 +97,13 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
       edge('carry_on', 'tech_leads'), edge('carry_on', 'developers'), edge('tech_leads', 'productivity'), edge('developers', 'productivity'),
       edge('productivity', 'goal'), edge('demand_shortfall', 'goal', true)] };
   })();
-  const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
+  const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
   it('F1: the unvalued risk root is said with its ask (the outcome metric M1 shape), and a data-gap warning naming it adds nothing', () => {
     const gap = { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Goal node 'goal' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'demand_shortfall' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)." };
     const turn = decisionReviewFor(SCENARIO, readOf({ graph: G2_GRAPH, enrichment: { inference_warnings: [gap] } }));
     expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ROOT_SENTENCE}`]);
-    expect(turn.reply.split('Demand shortfall')).toHaveLength(2);
+    expect(turn.reply.split(ROOT_SENTENCE)).toHaveLength(2);
+    expect(turn.reply.split('Demand shortfall')).toHaveLength(3); // The saved treatment and its ask both name the risk.
   });
 
   it('RED (Codex r2 P2): an unnamed risk root (F1) and an unnamed default-0 factor (F2) are counted as two, in one sentence', () => {
@@ -120,9 +121,9 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
       edges: [...(G2_GRAPH.edges as Rec[]), { from: 'supply_delay', to: 'goal', strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }] };
   };
   it.each([
-    ['one root, label ""', withRoots({ demand_shortfall: '' }), TREATED_AS_ZERO_UNNAMED_ONE],
-    ['one root, label of spaces', withRoots({ demand_shortfall: '   ' }), TREATED_AS_ZERO_UNNAMED_ONE],
-    ['two roots, the first quoted label blank', withRoots({ demand_shortfall: ' ' }, true), treatedAsZeroUnnamedMany(2)],
+    ['one root, label ""', withRoots({ demand_shortfall: '' }), missingRootUnnamedLine(1)],
+    ['one root, label of spaces', withRoots({ demand_shortfall: '   ' }), missingRootUnnamedLine(1)],
+    ['two roots, the first quoted label blank', withRoots({ demand_shortfall: ' ' }, true), missingRootUnnamedLine(2)],
   ])('RED (Codex r3 P2): a blank root label is never quoted as "" — the label-free form with the typed count (%s)', (_n, graph, line) => {
     expect(treatedAsZeroReplyLine(graph, COMPARATIVE)).toBe(line);
     const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings: [] } }));
@@ -138,20 +139,20 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
 
   it('CONTROL (F1): two named roots keep their labels', () => {
     expect(treatedAsZeroReplyLine(withRoots({}, true), COMPARATIVE)).toBe(
-      'No figures are set for "Demand shortfall" and "Supply delay" yet, so the analysis treats them as zero. How likely or how large is each today?');
+      'How likely or how large is "Demand shortfall" today? The numerical analysis is withheld until this risk has a supported value. How likely or how large is "Supply delay" today? The numerical analysis is withheld until this risk has a supported value.');
   });
 
   it('RED (Codex r2 P2): a goal-figure reason the editors would rewrite says the withhold in the reader\'s own opening', () => {
     const warning = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: ['mrr'], message: 'Not shown. ‘prop_abcdef12 cost’ is not evaluated yet.' };
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [warning] } }));
-    expect(turn.lines).toContain(`- ${WITHHELD_OPENING}`);
+    expect(turn.lines, JSON.stringify(turn.lines)).toContain(`- ${WITHHELD_OPENING}`);
     expect(turn.reply).not.toContain('prop_abcdef12');
   });
 
   it('CONTROL (F4): a goal-figure reason that reaches the user whole keeps its own words', () => {
     const warning = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: ['mrr'], message: 'Not shown. ‘Monthly cost’ is not evaluated yet.' };
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [warning] } }));
-    expect(turn.lines).toContain(`- ${WITHHELD_OPENING} ‘Monthly cost’ is not evaluated yet.`);
+    expect(turn.lines, JSON.stringify(turn.lines)).toContain(`- ${WITHHELD_OPENING} ‘Monthly cost’ is not evaluated yet.`);
   });
 
   it('CONTROL (F5): a fragile link between two real nodes that is not a link of the stored graph is not said, and offers no test', () => {
@@ -163,12 +164,14 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
   });
 
   it('F4 on the served withheld block: the typed reason’s own words; F7 stays silent for another withheld reason', () => {
-    const say = goalChanceWithheldForAgent(SERVED_0948.block)!.say;
+    // Bind the expected producer to the same stored graph as the review, including its held target words.
+    const say = goalChanceWithheldForAgent(SERVED_0948.block, STORED.graph)!.say;
+    expect(say).toBe(WITHHELD_OPENING);
     const turn = decisionReviewFor('9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002', {
       graph: STORED.graph, graphHash: String(SERVED_0948.block.computed_against_hash), analysisReady: COMPARATIVE,
       analysisState: { ...SERVED_0948.analysis_state, run_state: current }, analysisResult: SERVED_0948.block,
     });
-    expect(turn.lines).toContain(`- ${say}`);
+    expect(turn.lines, JSON.stringify(turn.lines)).toContain(`- ${say}`);
     expect(turn.steps.some((s) => s.kind === 'strengthen')).toBe(false);
   });
 

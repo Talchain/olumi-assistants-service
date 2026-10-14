@@ -28,8 +28,7 @@
 
 import { isSizedOnlyByOlumi, isAcceptedOlumiSize, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
-import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
-import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
+import { isPersonsOwnSetting, isPersonsOwnValue, isUserSizedWithoutOlumiMarks, isUserStatedStrength } from '../../cee/provenance/provenance-of.js';
 import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 
@@ -151,8 +150,14 @@ export interface PlaceholderPartsFinding {
  * whole carrier, because the literal alone cannot tell the two writers apart (DL CR on #2412 5921764485).
  */
 function usersOwn(carrier: unknown): boolean {
-  if (!isRec(carrier) || isAcceptedOlumiEstimate(carrier)) return false;
-  return earnsAuthorshipCredit(classifyValueSource(carrier.source)) || carrier.source === 'user_assumption';
+  // ONE PROVENANCE AUTHORITY: a starting value's owner is `provenanceOf`'s (the extraction type decides for the stamps
+  // that defer to it; Olumi's estimate the user accepted is never "theirs").
+  return isRec(carrier) && isPersonsOwnValue(carrier);
+}
+
+/** The same question of an option setting, or of a setting's own range (`provenanceOf` for the cell). */
+function usersOwnSetting(carrier: unknown): boolean {
+  return isRec(carrier) && isPersonsOwnSetting(carrier);
 }
 
 const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_stated']);
@@ -208,8 +213,9 @@ export function userStatedLinkUnitsOf(nodes: readonly Rec[], edges: readonly Rec
       const p = isRec(edge.provenance) ? edge.provenance : undefined;
       const effect = p !== undefined && isRec(p.natural_effect) ? p.natural_effect : undefined;
       // An estimate is not the user's figure; all touching user stamps still take part in the fail-closed check.
-      if (p === undefined || p.source === 'cee_hypothesis' || p.mean_projected === true
-        || (typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_'))) return false;
+      // ONE PROVENANCE AUTHORITY: only the person's size with no Olumi mark on it speaks for a unit (a narrower question
+      // than `linkProvenanceOf` human, answered by the authority).
+      if (p === undefined || !isUserSizedWithoutOlumiMarks(edge)) return false;
       const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
       if (effect === undefined || !finite(mean) || mean !== effect.strength_mean || !finite(effect.amount)
         || !finite(effect.per_source_change) || effect.per_source_change === 0) return false;
@@ -243,6 +249,8 @@ const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, st
  * natural effect speaks only while the edge's mean is the β it was written for (magnitude contract, R&C 5845818897).
  */
 function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefined>): boolean {
+  // Science 393023 LICENCE ruling 3 (P53x): a contradictory natural effect cannot size a projected mean.
+  if (linkSizing(edge) === 'placeholder') return false;
   const p = isRec(edge.provenance) ? edge.provenance : undefined;
   if (p === undefined || !SIZED_MAGNITUDES.has(p.magnitude)) return false;
   const effect = isRec(p.natural_effect) ? p.natural_effect : undefined;
@@ -260,11 +268,9 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
  * should reflect — so for R-c it counts as authored. Only R-c reads this; the goal-certainty rule keeps `sizedLinkTest`.
  */
 function userStatedStrength(edge: Rec): boolean {
-  const p = isRec(edge.provenance) ? edge.provenance : undefined;
-  // A user-confirmed strength remains authored even when it also carries a natural figure.
-  // A user stamp cannot turn an Olumi estimate or projected mean into their own strength.
-  return p?.source === 'user_specified'
-    && !(typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_')) && p.mean_projected !== true;
+  // A user-confirmed strength remains authored even when it also carries a natural figure. The rule (a narrower question
+  // than `linkProvenanceOf` — always a subset of its `human`) lives in the ONE provenance authority.
+  return isUserStatedStrength(edge);
 }
 
 /**
@@ -443,14 +449,14 @@ export function placeholderPartsFinding(
     // A range lifts it only as the user stated it: the stored `interventions[T].range` with the user's `source` (TEMPORAL
     // #2382's writer; AIQ 5914222384: a range with no author is refused). The wire's `intervention_ranges` carries no
     // author, so it never does on its own.
-    const theirs = isRec(setting) && (usersOwn(setting) || (isRec(setting.range) && usersOwn(setting.range)));
+    const theirs = isRec(setting) && (usersOwnSetting(setting) || (isRec(setting.range) && usersOwnSetting(setting.range)));
     if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point' };
   }
   return null;
 }
 
 /** The option sets the target at exactly today's level (the status quo's zero change). */
-function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
+export function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
   const today = isRec(target?.observed_state) ? target.observed_state : undefined;
   if (today === undefined) return false;
   const raw = isRec(v) ? v.raw_value : undefined;

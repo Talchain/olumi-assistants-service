@@ -1,0 +1,55 @@
+{
+  "scope": "Labels pre-existing evidence by exact last-modified commit. New FIX3 files record current HEAD plus working-source digests.",
+  "files": [
+    {
+      "file": "acceptance-evidence/impact-pct/timing.json",
+      "artifact_last_modified_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "artifact_sha256_now": "7c19f3701f353e6b4fc85e9757137873893b1082f71e350bc70b5be481968c03",
+      "measurement_source_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "measurement_reader_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+      "scope": "Original impact-pct source, not r2/FIX3"
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/mutant-summary.json",
+      "artifact_last_modified_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "artifact_sha256_now": "b8026807e040a7a5e4d129ffc45351e31466576c3f5b6b69b978a24b44703f2e",
+      "measurement_source_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "measurement_reader_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+      "scope": "Original impact-pct source, not r2/FIX3"
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/corpus-design-summary.json",
+      "artifact_last_modified_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "artifact_sha256_now": "94386f6a799192421514dc0a359ac740712e8bbcd0fa8efc63f68ec60c245fc1",
+      "measurement_source_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "measurement_reader_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+      "scope": "Original impact-pct source, not r2/FIX3"
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/corpus-design-summary.tsv",
+      "artifact_last_modified_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "artifact_sha256_now": "718c5bf82361b1af13d87dce81719fc531cc88e1bb324654c2bca0fda97ae18f",
+      "measurement_source_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "measurement_reader_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+      "scope": "Original impact-pct source, not r2/FIX3"
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/REPORT.md",
+      "artifact_last_modified_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "artifact_sha256_now": "c4c25c6d5e7e0eb4717d5b310dba015d756ef98364be24749820f05cc1540338",
+      "scope": "Historical original impact-pct report"
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/REPORT-FIX1.md",
+      "artifact_last_modified_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+      "artifact_sha256_now": "9366b44fb4c2113c509b4cdb8322cc0ad4cdcd2a924e5ffe6ae24c7978ccba2b",
+      "scope": "Historical FIX1 report with later author r2 additions; source/head identities stated per section"
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/corpus-labels.json",
+      "artifact_last_modified_git_sha": "a0a6ba7072c6ad7cd9da81893bbb125cb9f0c4ba",
+      "artifact_sha256_now": "6294cfbe132171bbdfdd89ad6e8d03c7f3e86fa86a7a38eded69fc36217e126d",
+      "scope": "Historical independent semantic fixture; not a runtime result"
+    }
+  ]
+}

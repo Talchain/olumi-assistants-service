@@ -7,6 +7,7 @@
  * model. The leader is withheld here, so the wire's ranking drop and shared gate run over the review: every item must
  * reach the user whole.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -24,7 +25,7 @@ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leade
 const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0003';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
-const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
+const ROOT_SENTENCE = 'How likely or how large is "Demand shortfall" today? The numerical analysis is withheld until this risk has a supported value.';
 const WITHHELD_SAY = goalChanceWithheldForAgent(SERVED.block)!.say;
 
 type Rec = Record<string, unknown>;
@@ -114,13 +115,13 @@ async function freshApp(): Promise<FastifyInstance> {
   app.post('/assist/v1/scenarios/:id/graph', async () => {
     graphReads += 1;
     const moved = graphReads > staleAfterReads;
-    return fixture === 'g2'
+    return withCanonicalAnalysisView(fixture === 'g2'
       ? { graph: graph(), graph_hash: HASH, analysis_ready: READY, analysis_state: state(moved ? 'complete_stale' : runKind), analysis_result: SERVED.block }
       : { graph: B5_STORED.graph, graph_hash: B5_STORED.graph_hash, analysis_ready: READY,
         // The served state's shape (0948Z: `usable_for_chips`/`usable_for_prose`), with a licensed leader.
         analysis_state: { ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: fixture === 'b5' ? '2026-10-05T03:48:55.163Z' : '2026-10-05T09:12:00.000Z' },
           leader_claim: fixture === 'b5' ? { permitted: true, separation: 'separated' } : { permitted: false, withheld_reason: 'separation_unavailable' } },
-        analysis_result: B5_BLOCK };
+        analysis_result: B5_BLOCK }, SCENARIO);
   });
   await app.register(agentV1TurnRoute);
   await app.ready();
@@ -174,7 +175,7 @@ describe('the "Review this decision" press on the live route', () => {
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       // S-B (Codex r1 P2-3 on #2751): the replay says what the live press says today: the typed "can't yet" with its exit.
-      expect(((await press(turnId)).json() as Body).assistant_text, `restart=${restart}`).toBe('I can’t review this decision yet: it needs a current analysis first.');
+      expect(((await press(turnId)).json() as Body).assistant_text, `restart=${restart}`).toBe('I can’t review this model yet: it needs a current analysis first.');
     }
   });
 
@@ -212,7 +213,7 @@ describe('the "Review this decision" press on the live route', () => {
     expect(graphReads).toBeGreaterThan(1);
     // S-B: the press is now re-derived on a read of its own first, so the replacement may be seen there (the typed "can't
     // yet") or at composition (the review's unavailable reply). Either way the replaced Run is never reviewed.
-    expect([RUN_EXPLANATION_UNAVAILABLE_TEXT, 'I can’t review this decision yet: it needs a current analysis first.']).toContain(body.assistant_text);
+    expect([RUN_EXPLANATION_UNAVAILABLE_TEXT, 'I can’t review this model yet: it needs a current analysis first.']).toContain(body.assistant_text);
   });
 
   it('RED (Codex P2): a replay after the Run is replaced offers today\'s presses only, also after a restart', async () => {
@@ -231,7 +232,7 @@ describe('the "Review this decision" press on the live route', () => {
   it('S-B: a Run that is no longer current → a typed "can\'t yet" with the Run as its exit, no model call', async () => {
     runKind = 'complete_stale';
     const body = (await press(randomUUID())).json() as Body;
-    expect(body.assistant_text).toBe('I can’t review this decision yet: it needs a current analysis first.');
+    expect(body.assistant_text).toBe('I can’t review this model yet: it needs a current analysis first.');
     expect(body.assistant_text).not.toContain(ROOT_SENTENCE);
     expect(chips(body)).toEqual([['agent-run-analysis', 'Run analysis']]);
     expect(modelCalls).not.toHaveBeenCalled();

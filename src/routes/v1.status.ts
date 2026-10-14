@@ -184,7 +184,7 @@ interface StatusResponse {
  * GET /v1/status - Service diagnostics endpoint
  */
 export async function statusRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/v1/status", async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get("/v1/status", { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const adapter = getAdapter();
     // Adapter-free projection: constructs no adapter and makes no network
     // call, so adding it costs this endpoint nothing.

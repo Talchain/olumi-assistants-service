@@ -17,7 +17,7 @@ async function propose(said: string, value: number, unit: string, edit: (g: Json
   const store = new ProposalStore();
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-446655440c01', authenticated_user_id: null, request_id: 'r', user_text: said } as never,
-    { assumptions: [{ factor_label: label, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
+    { assumptions: [{ user_stated: true, factor_label: label, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
   const op = r.proposal_id ? (store.get(r.proposal_id)!.operations[0] as Json).value : null;
   return { r, op };
 }

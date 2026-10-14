@@ -1,0 +1,11 @@
+{
+  "proof": [
+    {
+      "body": "3c2757824ea1e0ca6deca25fea4185f7c8ae11163cff31783b9a72c939e295ab",
+      "instructions": "a8a9845b846a3739da5e2ec4d0f5c084b7034548de36e2fbc85b9348db99b45e",
+      "tools": "356b3df46b8a70736d752521600b892f07efcd764516c752c73568260ea6b4f0",
+      "schema": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    }
+  ],
+  "assistant_text": "Here is where the model stands."
+}

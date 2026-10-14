@@ -14,11 +14,15 @@
  * mean controls; no double naming beside a typed row.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 import { buildRunDelta, withinBandLinkMovesForRunPair } from '../../coaching/build-run-delta.js';
 import { linksMovedWithinBand } from '../../coaching/run-input-changes.js';
 import { RERUN_NO_CHANGE_LINES, RERUN_FALLBACK_LINES, rerunExplanationPlan, rerunRecordForModel } from '../rerun-explanation.js';
+import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
+import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 
 const FROM = 'existing_customer_price_rise';
 const TO = 'customers_lost_from_price_rise';
@@ -172,14 +176,55 @@ describe('who changed it: the pair’s persisted record, never a guess (DL; c6 w
     expect(line).toContain(NAMED_NEUTRAL);
     expect(line).not.toContain('You changed');
   });
-  it.each(['olumi_estimate', 'olumi_accepted', 'placeholder'] as const)('Olumi-sized now (%s): the figure is said to be Olumi’s', (sizing) => {
+  // Science 393023 LICENCE ruling 3, re-derived: estimate/accepted/placeholder → estimate/accepted only;
+  // a recorded placeholder means nobody sized the link, so its in-band prior move supplies no estimate or band words.
+  it.each(['olumi_estimate', 'olumi_accepted'] as const)('CONTROL: Olumi-sized now (%s): the figure is said to be Olumi’s', (sizing) => {
     expect(plan(link({ sizing }), link({ mean: 0.6, sizing, authorship_digest: EDIT_DIGEST }), [receipt(0.4, 0.6)])).toContain(NAMED_OLUMI);
+  });
+  it('a recorded placeholder move is omitted, with no sized band or estimate attribution', () => {
+    expect(plan(link({ sizing: 'placeholder' }), link({ mean: 0.6, sizing: 'placeholder' }), [receipt(0.4, 0.6)])).toBe(RERUN_NO_CHANGE_LINES.unknown);
   });
   it('unmarked, or sizing not recorded: no author', () => {
     expect(plan(link({ sizing: 'unmarked' }), link({ mean: 0.6, sizing: 'unmarked' }))).toContain(NAMED_NEUTRAL);
     const { sizing: _a, ...noSizingPrior } = link({});
     const { sizing: _b, ...noSizingCurrent } = link({ mean: 0.6, authorship_digest: EDIT_DIGEST });
     expect(plan(noSizingPrior as Link, noSizingCurrent as Link, [receipt(0.4, 0.6)])).toContain(NAMED_NEUTRAL);
+  });
+});
+
+describe('LICENCE finding 2: the real Monthly churn level writer → the pair’s within-band words', () => {
+  it('ai_feature_availability → monthly_churn refits at 5% → 12%; its unsized prior never becomes an estimate sentence', async () => {
+    type Graph = { nodes: Record<string, unknown>[]; edges: Array<{ from: string; to: string; strength: { mean: number; std: number }; provenance?: Record<string, unknown> }> };
+    const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf8')) as Record<string, Graph>;
+    const set = async (graph: Graph, value: number): Promise<Graph> => {
+      const event = { kind: 'factor_value_edit', target_id: 'monthly_churn', value, unit: '% of Pro subscribers per month', field: 'value' } as const;
+      const result = await applyFactorValueEdit({ payload: { kind: 'system_event', scenario_id: '11111111-1111-4111-8111-111111111111',
+        turn_id: '77777777-7777-4777-8777-777777777777', stage: 'frame', event } as unknown as SystemEventTurnPayload,
+        event, requestId: `licence-r7-churn-${value}`, persistedGraph: graph, priorFacts: [] });
+      expect(result.kind).toBe('mutated');
+      if (result.kind !== 'mutated') throw new Error('level edit refused');
+      return result.mutatedGraph as unknown as Graph;
+    };
+    const at5 = await set(structuredClone(served.run1_step01!), 5);
+    const at12 = await set(at5, 12);
+    const recorded = (g: Graph): Link => {
+      const e = g.edges.find(e => e.from === 'ai_feature_availability' && e.to === 'monthly_churn')!;
+      expect(linkSizing(e)).toBe('placeholder');
+      return { from: e.from, to: e.to, ...e.strength, sizing: linkSizing(e), band: 'slight' };
+    };
+    const before = recorded(at5); const after = recorded(at12);
+    expect(before.mean).toBe(-0.0125); expect(after.mean).toBe(-0.03);
+    // Science 393023 LICENCE ruling 3, re-derived: "Olumi’s estimate … changed; it is still slight" → silence;
+    // the exact writer retains olumi_placeholder on this link. No natural effect was recorded in these Run carriers.
+    const facts = [fact(CURRENT_RUN, T2, 'h-2', snap(after, 'd'.repeat(64))), fact(PRIOR_RUN, T1, 'h-1', snap(before, 'c'.repeat(64)))];
+    const moves = withinBandLinkMovesForRunPair(facts, WIRE_DELTA);
+    expect(moves).toEqual([]);
+    const names: Record<string, string> = { ai_feature_availability: 'AI feature availability', monthly_churn: 'Monthly churn' };
+    const line = rerunExplanationPlan(WIRE_DELTA, id => names[id], [], true, Object.values(names), moves)!.codeLine;
+    expect(line).toBe(RERUN_NO_CHANGE_LINES.unknown);
+    expect(line).not.toContain('estimate'); expect(line).not.toContain('slight');
+    const otherPair = { ...WIRE_DELTA, endpoints: { prior: { run_id: 'other-run' }, current: { run_id: CURRENT_RUN } } };
+    expect(withinBandLinkMovesForRunPair(facts, otherPair)).toEqual([]);
   });
 });
 

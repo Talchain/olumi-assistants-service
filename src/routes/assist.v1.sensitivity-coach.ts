@@ -83,7 +83,7 @@ export default async function route(app: FastifyInstance) {
   const SENSITIVITY_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.sensitivityCoachFeatureVersion || "sensitivity-coach-1.0.0";
 
-  app.post("/assist/v1/sensitivity-coach", async (req, reply) => {
+  app.post("/assist/v1/sensitivity-coach", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

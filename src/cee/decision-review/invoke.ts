@@ -18,6 +18,7 @@
  *    translates to graceful degradation).
  */
 
+import type { LicensedRunFacts } from '../../orchestrator-v5/context/licensed-run-facts.js';
 import { getSystemPromptSnapshot } from '../../adapters/llm/prompt-loader.js';
 import type { SystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
 import {
@@ -152,9 +153,9 @@ export interface DecisionReviewInvokeInput {
   readonly isl_results: Record<string, unknown>;
   readonly deterministic_coaching: Record<string, unknown>;
   readonly winner: {
-    readonly id: string;
-    readonly label: string;
-    readonly win_probability: number;
+    readonly id?: string;
+    readonly label?: string;
+    readonly win_probability?: number;
     readonly outcome_mean?: number;
     /**
      * Trust-spine board #1 (CEE half). Set true when the leading option
@@ -191,6 +192,7 @@ export interface DecisionReviewInvokeInput {
 }
 
 export interface InvokeDecisionReviewOptions {
+  readonly licensedFacts?: LicensedRunFacts;
   readonly requestId: string;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
@@ -655,7 +657,12 @@ function flipDistance(entry: Record<string, unknown>): number {
 export function buildDecisionReviewUserMessage(
   input: DecisionReviewInvokeInput,
   margin: number | null,
+  licensedFacts?: LicensedRunFacts,
 ): string {
+  if (licensedFacts !== undefined) input = { ...input,
+    winner: { ...licensedFacts.winner,
+      ...(licensedFacts.constraintInfeasible && input.winner.constraint_infeasible ? { constraint_infeasible: true } : {}) },
+    runner_up: licensedFacts.runnerUp };
   const sections: string[] = [];
 
   sections.push('<BRIEF>');
@@ -728,12 +735,15 @@ export function buildDecisionReviewUserMessage(
 
   sections.push('<DECISION_CONTEXT>');
   sections.push(`winner: ${JSON.stringify(input.winner)}`);
-  if (input.runner_up !== null) {
-    sections.push(`runner_up: ${JSON.stringify(input.runner_up)}`);
-  } else {
-    sections.push('runner_up: null (single-option decision)');
+  if (licensedFacts !== undefined) sections.push(`analysis: ${JSON.stringify(licensedFacts.analysis)}`);
+  if (licensedFacts === undefined || licensedFacts.mayNameLeader) {
+    if (input.runner_up !== null) {
+      sections.push(`runner_up: ${JSON.stringify(input.runner_up)}`);
+    } else {
+      sections.push('runner_up: null (single-option decision)');
+    }
+    sections.push(`margin: ${JSON.stringify(margin)}`);
   }
-  sections.push(`margin: ${JSON.stringify(margin)}`);
   sections.push('</DECISION_CONTEXT>');
 
   // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder disclosure. Emitted
@@ -830,11 +840,11 @@ export async function invokeDecisionReview(
   }
 
   const margin =
-    input.runner_up !== null
+    input.runner_up !== null && typeof input.winner.win_probability === 'number'
       ? input.winner.win_probability - input.runner_up.win_probability
       : null;
 
-  const userMessage = buildDecisionReviewUserMessage(input, margin);
+  const userMessage = buildDecisionReviewUserMessage(input, margin, options.licensedFacts);
 
   // RIDER-B: thread an OPTIONAL per-call model override (A/B lever). Absent ⇒
   // EXACTLY `getAdapterWithResolution('decision_review')` (default path

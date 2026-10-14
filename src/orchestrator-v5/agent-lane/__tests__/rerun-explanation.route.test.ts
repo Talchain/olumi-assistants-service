@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * M2 RERUN-EXPLANATION through the LIVE route (CODEX CEE BUDDY preflight 5939219187: "rejected words must disappear from
  * wire/history/replay"). Request 2 of a result-first Run, with the selected Run's `current_read.run_delta` carrying the
@@ -8,13 +9,16 @@
  *   · CONTROL: a clean model sentence is sent after the code line;
  *   · the typed provisional view (C5b) with a movement claim is not shown; CONTROL: a clean view is (Codex pre-review P1).
  */
-import { sentencesOf } from '../reply/compose-reply.js';
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
+import { sentencesOf, WITHHOLD_FALLBACK_MARKER } from '../reply/compose-reply.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { rerunExplanationPlan } from '../rerun-explanation.js';
+import { rerunExplanationPlan, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -27,6 +31,9 @@ const GRAPH = { nodes: [
   { id: 'ai_reporting_sprint', kind: 'option', label: 'AI Reporting Sprint' },
   { id: 'sprint_capacity_for_ai_reporting', kind: 'factor', label: 'Sprint capacity for AI reporting' },
   { id: 'ai_reporting_module_availability', kind: 'factor', label: 'AI reporting module availability' },
+  { id: 'risk', kind: 'risk', label: 'Feature release slips' },
+  { id: 'mrr', kind: 'factor', label: 'MRR' },
+  { id: 'price', kind: 'factor', label: 'Pro plan price' },
 ], edges: [] };
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
 const RUN_DELTA = {
@@ -63,6 +70,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 
 let modelText = MOVED;
 let modelCalls = 0;
+let runDelta: Record<string, unknown> = RUN_DELTA;
 const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-01T09:48:47.190Z' } });
 
 type Body = { assistant_text: string; suggested_actions: { id: string }[]; _agent: { session_id: string; provisional_view?: unknown } };
@@ -70,7 +78,13 @@ type Body = { assistant_text: string; suggested_actions: { id: string }[]; _agen
 describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches the wire, the stored rows or a replay', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      if (body.tool_choice !== 'none') return new Response(JSON.stringify({ output: [
+        { type: 'message', content: [{ type: 'output_text', text: 'The model result is available.' }] },
+      ] }), { status: 200 });
       modelCalls += 1;
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelText }] }] }), { status: 200 });
     }));
@@ -81,8 +95,8 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
-      analysis_state: state(), analysis_result: SERVED.block, current_read: { run_delta: RUN_DELTA } }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
+      analysis_state: state(), analysis_result: SERVED.block, current_read: { run_delta: runDelta } }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -90,7 +104,7 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; modelCalls = 0; modelText = MOVED; });
+  beforeEach(() => { rows.length = 0; modelCalls = 0; modelText = MOVED; runDelta = RUN_DELTA; });
 
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
@@ -99,6 +113,33 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(chip, JSON.stringify(first.suggested_actions)).toBeDefined();
     return post({ turn_id: turnId, agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id } });
   };
+
+  it('Q4: Paul\'s two entering links are named by the real turn builder, stored and replayed', async () => {
+    runDelta = { ...RUN_DELTA, input_coverage: 'partial', input_changes: [
+      { entity_kind: 'link', entity_id: 'risk->mrr', field: 'presence', link: { from: 'risk', to: 'mrr' },
+        before: null, after: { raw: true }, change: 'added' },
+      { entity_kind: 'link', entity_id: 'price->risk', field: 'presence', link: { from: 'price', to: 'risk' },
+        before: null, after: { raw: true }, change: 'added' },
+    ] };
+    modelText = WHY;
+    const first = (await runTurn(randomUUID())).json() as Body;
+    const id = randomUUID();
+    const response = await explainTurn(id, first);
+    expect(response.statusCode).toBe(200);
+    const explained = response.json() as Body;
+    const entered = ['The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis.',
+      'The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.'];
+    for (const line of entered) {
+      expect(explained.assistant_text).toContain(line);
+      expect(JSON.stringify(rows)).toContain(line);
+    }
+    expect(explained.assistant_text).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
+    expect(explained.assistant_text).not.toContain('Nothing else changed.');
+    expect(modelCalls).toBe(1);
+    const replay = (await explainTurn(id, first)).json() as Body;
+    expect(replay.assistant_text).toBe(explained.assistant_text);
+    expect(modelCalls, 'replay serves the recorded explanation').toBe(1);
+  });
 
   it('RED: the model claims "rose" with no prior figures → the wire says RC\'s fallback; no stored row holds "rose"; a replay re-serves the fallback', async () => {
     const first = (await runTurn(randomUUID())).json() as Body;
@@ -128,15 +169,24 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
    * line's own caveats behind "Show more". The host composed it, so it ships whole.
    */
   // Re-pinned for S-A (lane COPY-SHAPE, 7 Oct): the ONE composer shapes over the FINAL text, so "the host composed it" no
-  // longer decides the shape; the code line still leads and every line is kept once.
-  it('IDENTICAL RECONSTRUCTION: the narrator repeats Olumi\'s code line, the host restores it → one composer: the code line leads, every line kept once', async () => {
+  // longer decides the shape; the withheld finding leads, and every original line is kept once in detail.
+  it('IDENTICAL RECONSTRUCTION: the narrator repeats Olumi\'s code line, the host restores it → one composer: the withheld finding leads, every line kept once', async () => {
     modelText = `${FALLBACK}\n\n${WHY}\n- Both options are compared on the same goal.\n- The comparison is provisional.\nAsk me what would change it.`;
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body & { _answer_shape?: unknown; blocks?: { type?: string }[] };
     expect(explained.assistant_text, 'the control: the host rebuilt the narrator\'s text (now through the one composer)').toContain(WHY);
     expect((explained.blocks ?? []).some((b) => b.type === 'analysis_result'), 'the control: an analysis-bearing reply').toBe(true);
-    const shape = explained._answer_shape as { headline: string; bullets: string[]; detail: string } | undefined;
-    if (shape !== undefined) expect(FALLBACK.startsWith(shape.headline), 'the code line leads the face').toBe(true);
+    const shape = explained._answer_shape as AnswerShape | undefined;
+    expect(shape, explained.assistant_text).toBeDefined();
+    const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
+    expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
+    expect(WITHHOLD_FALLBACK_MARKER).toBe('Not shown yet; why is under More detail');
+    expect(shape!.headline).toBe(WITHHOLD_FALLBACK_MARKER);
+    expect([shape!.headline, ...shape!.bullets].join('\n')).not.toContain(finding);
+    expect(shape!.detail.split(finding)).toHaveLength(2);
+    expect(shape!.detail).toContain(FALLBACK);
+    expect(explained.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
+    expect(explained.assistant_text.split(finding)).toHaveLength(2);
     for (const line of modelText.split('\n').filter((l) => l.trim() !== '')) {
       for (const sentence of sentencesOf(line.replace(/^\s*-\s+/, '').trim())) expect(explained.assistant_text.split(sentence).length, sentence).toBe(2);
     }

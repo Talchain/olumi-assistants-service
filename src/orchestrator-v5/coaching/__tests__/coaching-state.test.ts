@@ -17,6 +17,7 @@ import {
 } from '../coaching-state.js';
 import type { FreshnessDerivation } from '../../context/freshness.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
+import { edgeAuthorshipIn } from '../edge-strength-authorship.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -343,7 +344,7 @@ describe('deriveCoachingState — projection not inference', () => {
     expect(serialised).not.toContain('secretFactor');
   });
 
-  it('defaulted_or_unknown_value fires only from a structured edge.defaulted === true', () => {
+  it('the unmarked legacy default still raises the defaulted-value signal', () => {
     const withDefault = base({
       freshness: FRESH,
       persistedGraph: { nodes: [], edges: [{ from: 'a', to: 'b', defaulted: true }] },
@@ -357,6 +358,24 @@ describe('deriveCoachingState — projection not inference', () => {
       persistedGraph: { nodes: [], edges: [{ from: 'a', to: 'b', defaulted: false }] },
     });
     expect(signalOf(noDefault, 'defaulted_or_unknown_value')).toBeUndefined();
+  });
+
+  it('LICENCE: Price → Revenue is unsized with a projected user-drawn mean; the real user size is the control', () => {
+    const edge = { from: 'price', to: 'revenue', strength: { mean: 0.5, std: 0.125 },
+      provenance: { source: 'user_specified', mean_projected: true } };
+    const graph = { nodes: [], edges: [edge] };
+    // Science 393023 LICENCE ruling 3, re-derived: no signal / not_olumi_assumed → unsized signal / assumed numbers;
+    // the producer projected the mean; source records drawing, not sizing, this exact link.
+    expect(signalOf(base({ freshness: FRESH, persistedGraph: graph }), 'defaulted_or_unknown_value')?.reason_code).toBe('edge_strength_defaulted');
+    expect(edgeAuthorshipIn(graph)('price', 'revenue')).toBe('olumi_assumed');
+    expect(edgeAuthorshipIn(graph)('other', 'revenue')).toBe('not_tested');
+    const user = { ...edge, defaulted: true, provenance: { source: 'user_specified' } };
+    const userGraph = { nodes: [], edges: [user] };
+    expect(signalOf(base({ freshness: FRESH, persistedGraph: userGraph }), 'defaulted_or_unknown_value')).toBeUndefined();
+    expect(edgeAuthorshipIn(userGraph)('price', 'revenue')).toBe('not_olumi_assumed');
+    const reviewed = { ...edge, provenance: { ...edge.provenance, reviewed_by_user: { intent: 'confirm' } } };
+    expect(signalOf(base({ freshness: FRESH, persistedGraph: { nodes: [], edges: [reviewed] } }), 'defaulted_or_unknown_value')).toBeUndefined();
+    expect(edgeAuthorshipIn({ edges: [reviewed] })('price', 'revenue')).toBe('not_olumi_assumed');
   });
 
   it('R11: a defaulted strength the user CONFIRMED is not an unseen default — no signal (it keeps `defaulted` for credit only)', () => {

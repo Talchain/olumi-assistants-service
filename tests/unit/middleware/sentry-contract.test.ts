@@ -1,3 +1,4 @@
+import { timingIt } from '../../helpers/scaling-ratio.js';
 /**
  * Sentry reporting contract (system S-H, observability) — CEE half.
  *
@@ -272,7 +273,7 @@ describe('query-stripping regex scales linearly (regex budget)', () => {
   // sample read 8.65x on a CI runner (7 Oct, #2748): linear ~ 4x, quadratic ~ 16x, bar stays < 8x.
   const SMALL = 25_000;
   const LARGE = 100_000;
-  it.each([
+  timingIt.each([
     ['no query', (n: number) => 'GET https://plot.invalid/' + 'a'.repeat(n)],
     ['one long query', (n: number) => 'GET https://plot.invalid/x?' + 'b'.repeat(n)],
     ['many short queries', (n: number) => '?a '.repeat(Math.ceil(n / 3)).slice(0, n)],

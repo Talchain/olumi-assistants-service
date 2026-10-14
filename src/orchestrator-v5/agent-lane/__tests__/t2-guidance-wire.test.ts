@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from './licence-test-graphs.js';
 /**
  * ⭐ T2 — THE GUIDANCE ROW ON THE WIRE (M1; AI HARNESS lease 5940322790, DL 5940323402). On RC's banked served D1 Run
  * (`m1-s1-served-graphs.json`), a typed turn carries root `guidance.slot1` = RC-STRENGTHEN-ITEM S1, with `item_ref`
@@ -14,8 +15,12 @@ import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
 import { guidanceHistoryOf, type AnswerGuidance } from '../turn-context/guidance-history.js';
 import { entryKey } from '../guidance/index.js';
 
-const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
-const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D1_SERVED = served.cases.find((c) => c.id === 'D1-sprint-run')!;
+const D1 = { ...D1_SERVED, graph: legacyDoorGraph(D1_SERVED.graph) };
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D3_SERVED = served.cases.find((c) => c.id === 'D3-cost-run')!;
+const D3 = { ...D3_SERVED, graph: legacyDoorGraph(D3_SERVED.graph) };
 const CURRENT = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T11:52:22.669Z' } };
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
 const AI = { from: 'sprint_capacity_for_ai_reporting', to: 'ai_reporting_module_availability' };
@@ -171,37 +176,39 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     expect(b.assistant_text.trim()).not.toBe('');
     expect(b.guidance).toEqual({ slot1: S1_ROW });
     // DL 7 Oct: Paul's 'pills are static' ask supersedes the PANEL-T4 hold
-    expect(b.suggested_actions).toEqual([{ ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' }, NEXT_STEP_CHIPS[0], NEXT_STEP_CHIPS[1]]);
+    // R3-3: "Give your estimate" asks for the S1 row's own link, by its labels (the wire row above is unchanged).
+    expect(b.suggested_actions).toEqual([{ ...NEXT_STEP_CHIPS[2], label: 'Give your estimate',
+      message: 'How strongly does ‘Sprint capacity for AI reporting’ affect ‘AI reporting module availability’?' }, NEXT_STEP_CHIPS[0], NEXT_STEP_CHIPS[1]]);
   });
   it('NEGATIVE: a method press with no specific control ("Run a pre-mortem") → no row (the method runs; no other is offered)', async () => {
     const b = await press('agent-next-pre-mortem');
     expect(b.guidance).toBeUndefined();
   });
-  it('NEGATIVE: the Strengthen press (its held card is the decision point) → no row', async () => {
+  // Science 393023 LICENCE ruling 3 (DL verdict 6049287136 P0), re-derived: the S1 target is a placeholder, so the press
+  // ASKS for its size (ask_only) and holds NO card. The size question is the step: no row, and nothing waits for a yes.
+  // (The "no row beside a waiting proposal" rule keeps its coverage in contextual-next-step-pills.test.ts / offeredNow.)
+  it('NEGATIVE: the Strengthen press (its size question is the decision point) → no row, no card held', async () => {
     const b = await press('agent-next-strengthen');
-    expect(b.suggested_actions.some((a) => a.id.startsWith('agent-approve'))).toBe(true);
+    expect(b.suggested_actions.some((a) => a.id.startsWith('agent-approve'))).toBe(false);
+    expect(b.assistant_text).not.toMatch(/Olumi[’']s estimate/);
+    expect(modelCalls).toBe(0);
     expect(b.guidance).toBeUndefined();
   });
-  it('NEGATIVE: a typed turn while the Strengthen card still waits for its yes → no row; the waiting card is the step', async () => {
-    const held = await press('agent-next-strengthen');
-    expect(held.suggested_actions.some((a) => a.id.startsWith('agent-approve-proposal:'))).toBe(true);
+  it('a typed turn after the Strengthen size question: nothing is held from the press, so no approval is offered', async () => {
+    await press('agent-next-strengthen');
+    expect(rows.get([...rows.keys()].find((k) => k.startsWith(`${SCENARIO}:`))!)?.pending_actions ?? []).toEqual([]);
     const b = await turn({ message: 'Where does this leave me?' });
-    // The route's own rule agrees: no next steps beside a proposal that would still execute (`offeredNow`).
-    expect(b.suggested_actions.map((a) => a.id)).not.toContain('agent-next-strengthen');
-    expect(b.guidance).toBeUndefined();
+    expect(b.suggested_actions.map((a) => a.id).filter((id) => id.startsWith('agent-approve-proposal:'))).toEqual([]);
   });
-  it('NEGATIVE: TWO proposals still waiting for their yes → no row (Codex pre-review P1: the one-proposal chip rule missed it)', async () => {
+  it('two Strengthen presses on two placeholders hold NOTHING (each is a size question)', async () => {
     const first = await press('agent-next-strengthen');
-    // The first link is now sized (as after its Apply), so the next press holds a card on the OTHER placeholder.
     graph = { ...D1.graph, edges: D1.graph.edges.map((e) => (e.from === AI.from && e.to === AI.to
       ? { ...e, provenance: { ...e.provenance, magnitude: 'olumi_accepted' } } : e)) };
     const second = await press('agent-next-strengthen');
     const held = (b: Body) => b.suggested_actions.map((a) => a.id).filter((id) => id.startsWith('agent-approve-proposal:'));
-    expect(held(first)).toHaveLength(1);
-    expect(held(second)).toHaveLength(1);
-    expect(held(second)).not.toEqual(held(first));
-    const b = await turn({ message: 'Where does this leave me?' });
-    expect(b.guidance).toBeUndefined();
+    expect(held(first)).toEqual([]);
+    expect(held(second)).toEqual([]);
+    expect(second.assistant_text).not.toBe(first.assistant_text);
   });
   it('NEGATIVE: a replay of the same turn_id carries no row (never on the answer row; PANEL restores from its transcript)', async () => {
     const turn_id = randomUUID();
@@ -223,10 +230,14 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SCENARIO}:`))![1];
     expect(saved.assistant_message).toBe(b.assistant_text);
     expect(saved.agent_guidance).toEqual({ version: 1, entries: { [key]: {
-      status: 'offered', state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
+      status: 'offered', variant_id: 'S1', slot: 1, state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
     } } });
     expect(JSON.stringify(saved.agent_guidance)).not.toContain(AI.from);
-    expect((await turn({ message: 'What next?' })).guidance).toEqual(b.guidance); // offered is not settled
+    // E6 (DL 12 Oct, Paul's test): SHOWN counts. On the unchanged state the same row (policy AND item) is not said again.
+    // Batch R round 2 (independent check P1): another Strengthen item may follow; only the shown item cools.
+    const next = (await turn({ message: 'What next?' })).guidance as { slot1?: { policy_id: string; item?: string; state_key_hash: string } } | undefined;
+    const first = (b.guidance as { slot1: { policy_id: string; item?: string; state_key_hash: string } }).slot1;
+    expect(next?.slot1 === undefined || !(next.slot1.policy_id === first.policy_id && next.slot1.item === first.item), JSON.stringify(next)).toBe(true);
   });
   it('records a pressed event ONLY for the S1 item the successful held card actually targets', async () => {
     await turn({ message: 'Where does this leave me?' });
@@ -262,4 +273,11 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     expect((next.guidance as { slot1?: { item?: string } } | undefined)?.slot1?.item).not.toBe(`${AI.from}->${AI.to}`);
     expect(store.readGuidanceHistory).toHaveBeenCalledWith(SCENARIO);
   });
+});
+
+it('Science 393023: as-served D1 and D3 guidance names each new S1 link by ID', () => {
+  for (const [c, from, to] of [[D1_SERVED, 'enterprise_prospect_signing_likelihood', 'quarterly_revenue'], [D3_SERVED, 'gcp_workload_share', 'monthly_cloud_savings']] as const) {
+    const g = turnGuidanceFor(inputs({ state: { graph: structuredClone(c.graph), analysisState: CURRENT, optionParticipation: PARTICIPATION } }));
+    expect(g?.slot1).toMatchObject({ policy_id: 'RC-STRENGTHEN-ITEM', variant: 'S1', item_ref: { kind: 'link', from_id: from, to_id: to } });
+  }
 });

@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":4.955078125,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'class 3' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 17 skipped (19)
+   Start at  18:42:40
+   Duration  3.85s (transform 2.71s, setup 109ms, import 3.60s, tests 28ms, environment 0ms)
+

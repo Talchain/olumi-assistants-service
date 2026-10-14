@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
 /**
  * Ghost-selection honesty through the real TurnExecutor.
  *
@@ -252,13 +253,12 @@ vi.mock('../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => RUN_ANALYSIS_FACT,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => PERSISTED_GRAPH,
     loadGraphAndBriefText: async () => {
       if (harness.graphReadMode === 'degraded') {
         throw new Error('simulated canonical graph read failure');
       }
-      return {
+      return { revision: 7,
         graph: PERSISTED_GRAPH,
         briefText: 'Hire locally or use an offshore partner?',
       };
@@ -827,7 +827,10 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     ]);
   });
 
+
   it('preserves a committed selected-mutation receipt when the canonical read is degraded', async () => {
+    // A2: legacy graph-only recovery; CAS ON cannot recover a revision from this failed combined double.
+    __setUseAppendV6ForTest(false);
     harness.graphReadMode = 'degraded';
     const adapter = failingAdapter();
     const result = await run(
@@ -866,3 +869,5 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     expect(withGhostSelection.response.assistant_text).not.toBe(COULD_NOT_CHECK_TEXT);
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

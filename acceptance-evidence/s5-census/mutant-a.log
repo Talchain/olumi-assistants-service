@@ -1,0 +1,35 @@
+Load gate exit: 0
+{"load":18.68017578125,"threshold":25}
+node_modules/.bin/vitest run tests/contract/goal-record-census.guard.test.ts --config vitest.required.config.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ tests/contract/goal-record-census.guard.test.ts (3 tests | 1 failed) 9ms
+     × allows no new references and requires paid-down entries to shrink in the same PR 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/contract/goal-record-census.guard.test.ts > S5 goal-record census ratchet > allows no new references and requires paid-down entries to shrink in the same PR
+AssertionError: expected 'new goal reference: goal_threshold_ra…' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ new goal reference: goal_threshold_raw in src/version.ts — read the goal through the one record (S5), or justify and regenerate
+
+ ❯ tests/contract/goal-record-census.guard.test.ts:14:62
+     12|
+     13|   it('allows no new references and requires paid-down entries to shrin…
+     14|     expect(baselineDifferences(census, baseline).join('\n')).toBe('');
+       |                                                              ^
+     15|   });
+     16|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  01:02:42
+   Duration  1.48s (transform 128ms, setup 151ms, import 1.17s, tests 9ms, environment 0ms)
+

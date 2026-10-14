@@ -1,0 +1,1141 @@
+{
+  "D1": {
+    "capture": {
+      "graph_source": "/Users/paulslee/olumi-work/acceptance-pd/output/acceptance-successor-20261005/final/g1-b501/draft-1/wire/turn-002-1791253563628.json",
+      "graph_carrier": "draft_graph",
+      "source_sha256": "5ee7ee32563064b610a067e75f737019668f39b1b3e99a3a1eb5bc69d693c186",
+      "note": "Unmodified served graph node/edge bytes. D1 uses the served draft_graph projection; booking uses the post-Run conversation graph read."
+    },
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_monthly_recurring_revenue",
+          "ref": "D1",
+          "kind": "decision",
+          "label": "Decision: monthly recurring revenue",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "monthly_recurring_revenue",
+          "ref": "G1",
+          "kind": "goal",
+          "label": "monthly recurring revenue",
+          "provenance": "from_brief",
+          "unit_reading": {
+            "unit": "GBP",
+            "source": "user_stated",
+            "source_quote": "Goal: reach at least \u00a3126,000 monthly recurring revenue within 9 months"
+          },
+          "goal_direction": ">=",
+          "goal_threshold": 0.252,
+          "observed_state": {
+            "cap": 500000,
+            "unit": "\u00a3/month",
+            "value": 0.24,
+            "source": "brief_extraction",
+            "baseline": 0.24,
+            "raw_value": 120000
+          },
+          "threshold_source": "brief_extraction",
+          "goal_threshold_cap": 500000,
+          "goal_threshold_raw": 126000,
+          "goal_horizon_months": 9,
+          "goal_threshold_unit": "\u00a3/month",
+          "goal_threshold_frame": "level",
+          "goal_threshold_cap_provenance": "stated_effect_fit"
+        },
+        {
+          "id": "raise_prices_10",
+          "ref": "O1",
+          "kind": "option",
+          "label": "Raise prices 10%",
+          "provenance": "from_brief",
+          "interventions": {
+            "price_rise": {
+              "unit": "%",
+              "value": 0.1,
+              "source": "brief_extraction",
+              "raw_value": 10,
+              "target_match": {
+                "node_id": "price_rise",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            }
+          }
+        },
+        {
+          "id": "launch_starter_tier",
+          "ref": "O2",
+          "kind": "option",
+          "label": "Launch starter tier",
+          "provenance": "from_brief",
+          "interventions": {
+            "starter_subscribers": {
+              "unit": "subscribers",
+              "value": 0.15,
+              "source": "brief_extraction",
+              "raw_value": 150,
+              "target_match": {
+                "node_id": "starter_subscribers",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            },
+            "starter_monthly_price": {
+              "unit": "\u00a3 per subscriber per month",
+              "value": 0.245,
+              "source": "brief_extraction",
+              "raw_value": 49,
+              "target_match": {
+                "node_id": "starter_monthly_price",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            },
+            "starter_support_cost_per_subscriber": {
+              "unit": "\u00a3 per subscriber per month",
+              "value": 0.12,
+              "source": "brief_extraction",
+              "raw_value": 6,
+              "target_match": {
+                "node_id": "starter_support_cost_per_subscriber",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            }
+          }
+        },
+        {
+          "id": "keep_pricing_as_it_is",
+          "ref": "O3",
+          "kind": "option",
+          "label": "Keep pricing as it is",
+          "provenance": "from_brief",
+          "is_baseline": true
+        },
+        {
+          "id": "price_rise",
+          "ref": "F1",
+          "kind": "factor",
+          "label": "Price rise",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "cap": 100,
+            "unit": "%",
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "declared_scale": "unit_interval"
+          }
+        },
+        {
+          "id": "starter_subscribers",
+          "ref": "F2",
+          "kind": "factor",
+          "label": "Starter subscribers",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "cap": 1000,
+            "unit": "subscribers",
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "declared_scale": "unit_interval"
+          }
+        },
+        {
+          "id": "starter_monthly_price",
+          "ref": "F3",
+          "kind": "factor",
+          "label": "Starter monthly price",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "cap": 200,
+            "unit": "\u00a3 per subscriber per month",
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "declared_scale": "unit_interval"
+          }
+        },
+        {
+          "id": "starter_support_cost_per_subscriber",
+          "ref": "F4",
+          "kind": "factor",
+          "label": "Starter support cost per subscriber",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "cap": 50,
+            "unit": "\u00a3 per subscriber per month",
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "declared_scale": "unit_interval"
+          }
+        },
+        {
+          "id": "mrr_lost_to_price_rise_churn",
+          "ref": "R1",
+          "kind": "risk",
+          "label": "MRR lost to price-rise churn",
+          "provenance": "ai_inferred",
+          "scale_frame": 500000
+        },
+        {
+          "id": "mrr_lost_to_starter_support_strain",
+          "ref": "R2",
+          "kind": "risk",
+          "label": "MRR lost to starter support strain",
+          "provenance": "ai_inferred",
+          "scale_frame": 50000
+        },
+        {
+          "id": "customers_lost_from_price_rise",
+          "ref": "OC1",
+          "kind": "outcome",
+          "label": "Customers lost from price rise",
+          "provenance": "from_brief",
+          "scale_frame": 1000
+        },
+        {
+          "id": "starter_tier_mrr",
+          "ref": "OC2",
+          "kind": "outcome",
+          "label": "Starter tier MRR",
+          "provenance": "ai_inferred",
+          "scale_frame": 200000
+        },
+        {
+          "id": "starter_tier_support_cost",
+          "ref": "OC3",
+          "kind": "outcome",
+          "label": "Starter tier support cost",
+          "provenance": "ai_inferred",
+          "scale_frame": 50000
+        }
+      ],
+      "edges": [
+        {
+          "to": "raise_prices_10",
+          "from": "decision_monthly_recurring_revenue",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "launch_starter_tier",
+          "from": "decision_monthly_recurring_revenue",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "keep_pricing_as_it_is",
+          "from": "decision_monthly_recurring_revenue",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "price_rise",
+          "from": "raise_prices_10",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "starter_subscribers",
+          "from": "launch_starter_tier",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "starter_monthly_price",
+          "from": "launch_starter_tier",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "starter_support_cost_per_subscriber",
+          "from": "launch_starter_tier",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "price_rise",
+          "from": "keep_pricing_as_it_is",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "starter_subscribers",
+          "from": "keep_pricing_as_it_is",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "starter_monthly_price",
+          "from": "keep_pricing_as_it_is",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "starter_support_cost_per_subscriber",
+          "from": "keep_pricing_as_it_is",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "monthly_recurring_revenue",
+          "from": "price_rise",
+          "strength": {
+            "std": 0.12,
+            "mean": 0.24
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "user_stated",
+            "source_quote": "Facts: each 1% price rise adds \u00a31,200 a month to monthly recurring revenue before churn.",
+            "natural_effect": {
+              "amount": 1200,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": 0.24,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "%"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "customers_lost_from_price_rise",
+          "from": "price_rise",
+          "strength": {
+            "std": 0.1,
+            "mean": 0.2
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "user_stated",
+            "source_quote": "Each 1% price rise loses about 2 customers, between 1 and 4.",
+            "natural_effect": {
+              "amount": 2,
+              "amount_unit": "customers",
+              "strength_mean": 0.2,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "%"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "mrr_lost_to_price_rise_churn",
+          "from": "customers_lost_from_price_rise",
+          "strength": {
+            "std": 0.30000000000000004,
+            "mean": 0.6000000000000001
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": 300,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": 0.6000000000000001,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "customers"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "monthly_recurring_revenue",
+          "from": "mrr_lost_to_price_rise_churn",
+          "strength": {
+            "std": 0.5,
+            "mean": -1
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "definitional": true,
+            "natural_effect": {
+              "amount": -1,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": -1,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "\u00a3/month"
+            }
+          },
+          "effect_direction": "negative",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "starter_tier_mrr",
+          "from": "starter_subscribers",
+          "strength": {
+            "std": 0.1225,
+            "mean": 0.245
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": 49,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": 0.245,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "subscribers"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "starter_tier_mrr",
+          "from": "starter_monthly_price",
+          "strength": {
+            "std": 0.075,
+            "mean": 0.15
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 150,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": 0.15,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "\u00a3 per subscriber per month"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "monthly_recurring_revenue",
+          "from": "starter_tier_mrr",
+          "strength": {
+            "std": 0.03,
+            "mean": 0.06
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "starter_tier_support_cost",
+          "from": "starter_subscribers",
+          "strength": {
+            "std": 0.06,
+            "mean": 0.12
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 6,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": 0.12,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "subscribers"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "starter_tier_support_cost",
+          "from": "starter_support_cost_per_subscriber",
+          "strength": {
+            "std": 0.075,
+            "mean": 0.15
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 150,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": 0.15,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "\u00a3 per subscriber per month"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "mrr_lost_to_starter_support_strain",
+          "from": "starter_tier_support_cost",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "monthly_recurring_revenue",
+          "from": "mrr_lost_to_starter_support_strain",
+          "strength": {
+            "std": 0.049999999999999996,
+            "mean": -0.09999999999999999
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "definitional": true,
+            "natural_effect": {
+              "amount": -1,
+              "amount_unit": "\u00a3/month",
+              "strength_mean": -0.09999999999999999,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "\u00a3/month"
+            }
+          },
+          "effect_direction": "negative",
+          "exists_probability": 0.8
+        }
+      ],
+      "node_count": 14,
+      "edge_count": 22
+    }
+  },
+  "booking": {
+    "capture": {
+      "graph_source": "/Users/paulslee/olumi-work/acceptance-pd/output/acceptance-20261006/item3-journey/wire/read-after-run1-1791316564263.json",
+      "graph_carrier": "j.graph",
+      "source_sha256": "a3fa4f3103f3b09f9a7221db5a4e9b96e09d035395c599fc518e06057c1a5648",
+      "note": "Unmodified served graph node/edge bytes. D1 uses the served draft_graph projection; booking uses the post-Run conversation graph read."
+    },
+    "graph": {
+      "edges": [
+        {
+          "to": "second_receptionist",
+          "from": "should_we_hire_a_second_receptionist_introduce_an_online_booking_system_or_extend_our_evening_openin",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "online_booking_system",
+          "from": "should_we_hire_a_second_receptionist_introduce_an_online_booking_system_or_extend_our_evening_openin",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "extended_evening_hours",
+          "from": "should_we_hire_a_second_receptionist_introduce_an_online_booking_system_or_extend_our_evening_openin",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "continue_current_operations",
+          "from": "should_we_hire_a_second_receptionist_introduce_an_online_booking_system_or_extend_our_evening_openin",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "receptionist_headcount",
+          "from": "second_receptionist",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "annual_incremental_operating_cost",
+          "from": "second_receptionist",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "online_booking_availability",
+          "from": "online_booking_system",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "annual_incremental_operating_cost",
+          "from": "online_booking_system",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "additional_evening_opening_hours",
+          "from": "extended_evening_hours",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "annual_incremental_operating_cost",
+          "from": "extended_evening_hours",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "receptionist_headcount",
+          "from": "continue_current_operations",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "annual_incremental_operating_cost",
+          "from": "continue_current_operations",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "online_booking_availability",
+          "from": "continue_current_operations",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "additional_evening_opening_hours",
+          "from": "continue_current_operations",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "monthly_booked_appointments",
+          "from": "receptionist_headcount",
+          "strength": {
+            "std": 0.15,
+            "mean": 0.3
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 120,
+              "amount_unit": "appointments/month",
+              "strength_mean": 0.3,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "receptionists"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "monthly_booked_appointments",
+          "from": "online_booking_availability",
+          "strength": {
+            "std": 0.0175,
+            "mean": 0.035
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 70,
+              "amount_unit": "appointments/month",
+              "strength_mean": 0.035,
+              "per_source_change": 1,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "switch"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "monthly_booked_appointments",
+          "from": "additional_evening_opening_hours",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.25
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 100,
+              "amount_unit": "appointments/month",
+              "strength_mean": 0.25,
+              "per_source_change": 6,
+              "strength_mean_frame": "edge_strength",
+              "per_source_change_unit": "hours/week"
+            }
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "online_booking_rollout_disruption",
+          "from": "online_booking_availability",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "monthly_booked_appointments",
+          "from": "online_booking_rollout_disruption",
+          "strength": {
+            "std": 0.125,
+            "mean": -0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "effect_direction": "negative",
+          "exists_probability": 0.8
+        }
+      ],
+      "nodes": [
+        {
+          "id": "should_we_hire_a_second_receptionist_introduce_an_online_booking_system_or_extend_our_evening_openin",
+          "ref": "D1",
+          "kind": "decision",
+          "label": "Should we hire a second receptionist, introduce an online booking system, or\u2026",
+          "provenance": "from_brief",
+          "description": "Should we hire a second receptionist, introduce an online booking system, or extend our evening opening hours?"
+        },
+        {
+          "id": "monthly_booked_appointments",
+          "ref": "G1",
+          "kind": "goal",
+          "label": "Monthly booked appointments",
+          "provenance": "from_brief",
+          "goal_direction": ">=",
+          "goal_threshold": 0.8,
+          "observed_state": {
+            "cap": 2000,
+            "unit": "appointments/month",
+            "value": 0.7,
+            "source": "brief_extraction",
+            "baseline": 0.7,
+            "raw_value": 1400
+          },
+          "threshold_source": "brief_extraction",
+          "goal_threshold_cap": 2000,
+          "goal_threshold_raw": 1600,
+          "goal_threshold_unit": "appointments/month",
+          "goal_threshold_frame": "level",
+          "goal_threshold_cap_provenance": "target_derived_headroom"
+        },
+        {
+          "id": "second_receptionist",
+          "ref": "O1",
+          "kind": "option",
+          "label": "Second Receptionist",
+          "provenance": "from_brief",
+          "interventions": {
+            "receptionist_headcount": {
+              "unit": "receptionists",
+              "value": 0.4,
+              "source": "cee_hypothesis",
+              "raw_value": 2,
+              "target_match": {
+                "node_id": "receptionist_headcount",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            },
+            "annual_incremental_operating_cost": {
+              "unit": "\u00a3/year",
+              "value": 0.24,
+              "source": "brief_extraction",
+              "raw_value": 24000,
+              "target_match": {
+                "node_id": "annual_incremental_operating_cost",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            }
+          }
+        },
+        {
+          "id": "online_booking_system",
+          "ref": "O2",
+          "kind": "option",
+          "label": "Online Booking System",
+          "provenance": "from_brief",
+          "interventions": {
+            "online_booking_availability": {
+              "value": 1,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "online_booking_availability",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            },
+            "annual_incremental_operating_cost": {
+              "unit": "\u00a3/year",
+              "value": 0.036,
+              "source": "cee_hypothesis",
+              "raw_value": 3600,
+              "target_match": {
+                "node_id": "annual_incremental_operating_cost",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            }
+          }
+        },
+        {
+          "id": "extended_evening_hours",
+          "ref": "O3",
+          "kind": "option",
+          "label": "Extended Evening Hours",
+          "provenance": "from_brief",
+          "interventions": {
+            "additional_evening_opening_hours": {
+              "unit": "hours/week",
+              "value": 0.2,
+              "source": "cee_hypothesis",
+              "raw_value": 6,
+              "target_match": {
+                "node_id": "additional_evening_opening_hours",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            },
+            "annual_incremental_operating_cost": {
+              "unit": "\u00a3/year",
+              "value": 0.18,
+              "source": "cee_hypothesis",
+              "raw_value": 18000,
+              "target_match": {
+                "node_id": "annual_incremental_operating_cost",
+                "confidence": "high",
+                "match_type": "exact_id"
+              }
+            }
+          }
+        },
+        {
+          "id": "continue_current_operations",
+          "ref": "O4",
+          "kind": "option",
+          "label": "Continue Current Operations",
+          "provenance": "ai_inferred",
+          "is_baseline": true
+        },
+        {
+          "id": "receptionist_headcount",
+          "ref": "F1",
+          "kind": "factor",
+          "label": "Receptionist headcount",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "scale_frame": 5,
+          "observed_state": {
+            "unit": "receptionists",
+            "value": 0.2,
+            "source": "cee_inference",
+            "raw_value": 1,
+            "extractionType": "inferred"
+          }
+        },
+        {
+          "id": "online_booking_availability",
+          "ref": "F2",
+          "kind": "factor",
+          "label": "Online booking availability",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "unit": "0-1",
+            "value": 0,
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          }
+        },
+        {
+          "id": "additional_evening_opening_hours",
+          "ref": "F3",
+          "kind": "factor",
+          "label": "Additional evening opening hours",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "cap": 30,
+            "unit": "hours/week",
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "declared_scale": "unit_interval"
+          }
+        },
+        {
+          "id": "annual_incremental_operating_cost",
+          "ref": "F4",
+          "kind": "factor",
+          "label": "Annual incremental operating cost",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "observed_state": {
+            "cap": 100000,
+            "unit": "\u00a3/year",
+            "value": 0,
+            "source": "cee_inference",
+            "raw_value": 0,
+            "declared_scale": "unit_interval"
+          }
+        },
+        {
+          "id": "online_booking_rollout_disruption",
+          "ref": "R1",
+          "kind": "risk",
+          "label": "Online booking rollout disruption",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "ref_high_water": {
+        "D": 1,
+        "F": 4,
+        "G": 1,
+        "O": 4,
+        "R": 1
+      },
+      "goal_constraints": [
+        {
+          "unit": "\u00a3/year",
+          "label": "Annual incremental operating cost",
+          "value": 40000,
+          "node_id": "annual_incremental_operating_cost",
+          "operator": "<=",
+          "provenance": "explicit",
+          "value_frame": "level",
+          "constraint_id": "agent-lane:annual_incremental_operating_cost:<="
+        }
+      ]
+    }
+  }
+}

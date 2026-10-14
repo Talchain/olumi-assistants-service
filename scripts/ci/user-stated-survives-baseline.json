@@ -1,0 +1,83 @@
+{
+  "failing_count": 13,
+  "failing_ids": [
+    "compound-A",
+    "compound-B",
+    "B3-A",
+    "arm-mechanism-2842/B3-d1.json",
+    "arm-mechanism-2842/B3-d2.json",
+    "arm-mechanism-2842/sealedR-d2.json",
+    "arm-mechanism/sealedR-d2.json",
+    "arm-mechanism/sealedR-d3.json",
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json",
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json",
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d1.json",
+    "p44-lab-two-risks-20261008/heldout3-d1.json",
+    "p44-lab-two-risks-20261008/sealed-d1.json"
+  ],
+  "loss_counts": {
+    "compound-A": 4,
+    "compound-B": 4,
+    "B3-A": 2,
+    "arm-mechanism-2842/B3-d1.json": 2,
+    "arm-mechanism-2842/B3-d2.json": 2,
+    "arm-mechanism-2842/sealedR-d2.json": 1,
+    "arm-mechanism/sealedR-d2.json": 1,
+    "arm-mechanism/sealedR-d3.json": 1,
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json": 1,
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json": 1,
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d1.json": 1,
+    "p44-lab-two-risks-20261008/heldout3-d1.json": 1,
+    "p44-lab-two-risks-20261008/sealed-d1.json": 1
+  },
+  "residual_ids": {
+    "compound-A": [
+      "all_reliability.engineers_on_reliability_work",
+      "all_prototype.engineers_on_prototype",
+      "three_and_three_split.engineers_on_reliability_work",
+      "three_and_three_split.engineers_on_prototype"
+    ],
+    "compound-B": [
+      "all_reliability.engineers_on_reliability_work",
+      "all_prototype.engineers_on_prototype",
+      "three_three_split.engineers_on_reliability_work",
+      "three_three_split.engineers_on_prototype"
+    ],
+    "B3-A": [
+      "event_option_1.event_context_6",
+      "event_option_2.event_context_7"
+    ],
+    "arm-mechanism-2842/B3-d1.json": [
+      "event_option_1.senior_engineers_hired",
+      "event_option_2.junior_engineers_hired"
+    ],
+    "arm-mechanism-2842/B3-d2.json": [
+      "event_option_1.senior_engineers_hired",
+      "event_option_2.junior_engineers_hired"
+    ],
+    "arm-mechanism-2842/sealedR-d2.json": [
+      "launch_starter_tier.starter_monthly_price"
+    ],
+    "arm-mechanism/sealedR-d2.json": [
+      "launch_starter_tier.starter_monthly_price"
+    ],
+    "arm-mechanism/sealedR-d3.json": [
+      "launch_starter_tier.starter_monthly_price"
+    ],
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json": [
+      "event_option_2.event_context_7"
+    ],
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json": [
+      "event_option_2.event_context_8"
+    ],
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d1.json": [
+      "launch_starter_tier.starter_tier_monthly_price"
+    ],
+    "p44-lab-two-risks-20261008/heldout3-d1.json": [
+      "event_option_3.event_context_7"
+    ],
+    "p44-lab-two-risks-20261008/sealed-d1.json": [
+      "launch_starter_tier.starter_tier_monthly_price"
+    ]
+  }
+}

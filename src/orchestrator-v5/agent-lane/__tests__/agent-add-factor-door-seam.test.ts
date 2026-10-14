@@ -89,7 +89,6 @@ const store = {
   readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
   invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
-  storeDraftGraph: vi.fn(async (sid: string, g: unknown) => { graphOf.set(sid, g); }),
   loadGraph: vi.fn(async (sid: string) => graphOf.get(sid) ?? null),
   loadGraphAndBriefText: vi.fn(async (sid: string) => ({ graph: graphOf.get(sid) ?? null, briefText: null })),
   hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
@@ -296,9 +295,10 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const g = graphNow();
     const node = (id: string) => g.nodes.find((x) => x.id === id)!;
     // R11 × #2235: two figures, so the pairing was CONFIRMED on the card — the node keeps how it became the user's.
+    // The typed door verified each figure, so it writes the attestation beside the stamp (`explicit`, DL 12 Oct).
     const confirmedPairing = { reviewed_by_user: { intent: 'confirm_pairing', quote: FIG_MSG } };
-    expect(node(senior)['observed_state']).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, ...confirmedPairing });
-    expect(node(junior)['observed_state']).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, ...confirmedPairing });
+    expect(node(senior)['observed_state']).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, extractionType: 'explicit', ...confirmedPairing });
+    expect(node(junior)['observed_state']).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, extractionType: 'explicit', ...confirmedPairing });
     // …and it survives the save and a reload: a JSONB round trip, then the persisted-graph parse.
     const { GraphV3 } = await import('../../../schemas/cee-v3.js');
     const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(g))) as unknown as G;
@@ -367,18 +367,164 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
   }, 120_000);
 
-  it('(k) RED (F4): figures the user typed in an EARLIER message are not this message\'s words → refused and said, nothing held, byte-identical', async () => {
+  it('W14 earlier human figures keep their source through approval and reload', async () => {
     graphOf.set(SCENARIO, seedGraph());
     await turn({ message: FIG_MSG });
     const before = bytes();
-    let out: Record<string, unknown> = {};
-    const t2 = await propose(factorArgs(), 'Add those two to the model.', (o) => { out = o; });
-    expect(callOf(t2), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect(String(JSON.stringify(out)), JSON.stringify(out)).toContain('in this message');
-    expect(approveChipOf(t2)).toBeUndefined();
+    const t2 = await propose(factorArgs(), 'Add those two to the model.');
+    expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
+    const held = await heldOnLatestRow();
+    expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis: string }[]).every(m => m.basis === 'confirmed_by_approval')).toBe(true);
+    expect(approveChipOf(t2)).toBeDefined();
     expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
+    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
+      { quote: FIG_MSG, observed_state: { source: USER_SOURCE, raw_value: 120000 } },
+      { quote: FIG_MSG, observed_state: { source: USER_SOURCE, raw_value: 65000 } },
+    ]);
+    const approve = approveChipOf(t2)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as unknown as G;
+    expect(reloaded.nodes.filter(n => n.label.endsWith('engineer salary')).map(n => n.observed_state))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ source: USER_SOURCE, raw_value: 120000 }), expect.objectContaining({ source: USER_SOURCE, raw_value: 65000 })]));
   }, 120_000);
+
+  it.each(['verified', 'unknown', 'model'])('A2h deadline phrase on real route (%s)', async origin => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    const words = '30 April 2028';
+    if (origin !== 'model') await turn({ message: `Our deadline is ${words}.` });
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_goal_deadline', { deadline_words: words, rationale: '' }),
+      body => { output = toolOutputIn(body); return say('Check the deadline card.'); }];
+    const result = await turn({ message: 'Prepare the deadline.', ...(origin === 'unknown' ? { agent_session_id: randomUUID() } : {}) });
+    const call = result._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
+    expect(call, JSON.stringify(output)).toMatchObject(origin !== 'verified' ? { ok: false, mutated: false, refusal: 'origin_unknown' } : { ok: true });
+    if (origin === 'verified') {
+      const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
+      const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
+      expect(proposal?.provenance.authored_by).toBe('user_stated');
+      expect(proposal?.public_label).toContain(`Your words: “${words}”.`);
+    } else {
+      expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
+        detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });
+      expect(await heldOnLatestRow()).toEqual([]);
+      expect(approveChipOf(result)).toBeUndefined();
+    }
+    expect(bytes()).toBe(before);
+  });
+
+  it('A2h multiline verified figure retains its subject across a line break', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await turn({ message: 'Senior engineer salary\ncosts £120k a year each.' });
+    const result = await propose([factorArgs()[0]], 'Add that salary.');
+    expect(callOf(result)).toMatchObject({ ok: true });
+    const held = await heldOnLatestRow();
+    expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
+      { basis: 'written_about', observed_state: { source: USER_SOURCE, raw_value: 120000 } },
+    ]);
+  });
+
+  it('A2h cold-session salaries keep unknown origin even though the AI sees the figures', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await turn({ message: FIG_MSG });
+    const before = bytes();
+    let saw = false, output: Record<string, unknown> = {};
+    script = [body => { saw = (body.input as { role?: string }[]).filter(i => i.role === 'user').some(i => JSON.stringify(i).includes(FIG_MSG)); return fnCall('propose_new_factor', { factors: factorArgs(), rationale: '' }); },
+      body => { output = toolOutputIn(body); return say('Please confirm the source.'); }];
+    const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
+    expect(saw).toBe(true);
+    expect(callOf(result)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(JSON.stringify(output)).toContain('origin stays unknown');
+    expect(await heldOnLatestRow()).toHaveLength(0);
+    expect(bytes()).toBe(before);
+  });
+
+  it.each([false, true])('A2h hiring times preserve source across the real route (cold=%s)', async cold => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+    const words = 'A Tech lead would take at least 3 months to get in the door.';
+    await turn({ message: words });
+    let saw = false, output: Record<string, unknown> = {};
+    script = [body => { saw = (body.input as { role?: string }[]).filter(i => i.role === 'user').some(i => JSON.stringify(i).includes(words)); return fnCall('propose_hiring_times', {
+      options: [{ option_id: 'event_option_1', starts: [{ quote: 'at least 3 months' }] }] }); },
+      body => { output = toolOutputIn(body); return say('Check the source.'); }];
+    const result = await turn({ message: 'Use those hiring times.', ...(cold ? { agent_session_id: randomUUID() } : {}) });
+    expect(saw).toBe(true);
+    const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
+    expect(call, JSON.stringify(output)).toMatchObject(cold ? { ok: false, refusal: 'origin_unknown' } : { ok: true });
+    if (cold) expect(JSON.stringify(output)).toContain('origin stays unknown');
+    else {
+      expect(JSON.stringify(result)).toContain('at least 3 months');
+      expect(JSON.stringify(result)).toContain('you said');
+    }
+  });
+
+  it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+
+    if (source === 'restored') await turn({ message: 'We discussed the recruitment process.' });
+    if (source === 'capped') for (let i = 0; i < 40; i++) await turn({ message: `Recruitment discussion ${i}.` });
+    const before = bytes();
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: 'in 6 months', months: 6 }] }] }),
+      body => { output = toolOutputIn(body); return say(String(output.detail)); }];
+    const session = source === 'restored' ? { agent_session_id: randomUUID() } : {};
+    const result = await turn({ message: 'Use the previously quoted hiring time.', ...session });
+    expect(result._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(output).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(bytes()).toBe(before);
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote: '', months: 6 }] }] }),
+      body => { output = toolOutputIn(body); return say(String(output.public_label)); }];
+    const own = await turn({ message: 'Show a new Olumi timing estimate for review.', ...session });
+    expect(own._agent.tool_calls.find(c => c.name === 'propose_hiring_times')).toMatchObject({ ok: true });
+    const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
+    const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
+    expect(proposal.provenance.authored_by).toBe('model_proposed');
+    expect(proposal.operations[0].value.options[0].parts[0].statement).toEqual({ quote: 'in 6 months', form: 'about', source: 'model_proposed' });
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it.each([['at least 6 months', 'lower', 6], ['within 1 month', 'upper', 1]])('A2i real route bound conflict: %s', async (phrase, bound, value) => {
+    const { admitCandidateModel } = await import('../admit-model.js');
+    const { withEventShareDate } = await import('../../goal-target/event-by-date-model.js');
+    const admitted = admitCandidateModel({ goal: { kind: 'event_by_date', deliverable: 'next feature launch', metric: 'next feature launch', operator: '>=',
+      unit: '% of next feature launch', value: null, target_stated: false, frame: 'level', baseline_known: false, baseline_value: null, horizon_months: null, provenance: 'inferred' },
+      options: [{ label: 'Hire a Tech lead', provenance: 'explicit', added_capacity: { monthly_share_pct: 12, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Hire two developers', provenance: 'explicit', added_capacity: { monthly_share_pct: 20, lead_months_low: 2, lead_months_high: 4 } },
+        { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, added_capacity: null }],
+      factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [] } as never, {}, 'We need to decide whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline.');
+    graphOf.set(SCENARIO, withEventShareDate({ nodes: admitted.nodes, edges: admitted.edges }, '2028-04-12', '2026-10-12'));
+
+    const quote = `A Tech lead would take ${phrase}, but that is uncertain`;
+    const before = bytes();
+    let output: Record<string, any> = {};
+    script = [() => fnCall('propose_hiring_times', { options: [{ option_id: 'event_option_1', starts: [{ quote }] }] }),
+      body => { output = toolOutputIn(body); return say('The timing can be treated as exact.'); }];
+    const result = await turn({ message: quote });
+    const detail = `You gave ‘${quote}’. That gives a ${bound} bound on the start, not an exact start. Olumi's previous timing range is incompatible with that bound. We need a compatible modelling estimate before using this timing in the calculation.`;
+    expect(output).toEqual({ ok: false, mutated: false, refusal: 'hiring_bound_conflict', calculation_supported: false,
+      statement: { quote, source: 'user_stated', bound, value }, detail });
+    expect(result.assistant_text).toBe(detail);
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(bytes()).toBe(before);
+  });
 
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
   // unscoped matcher asked only whether the figure is somewhere in the message, so a swap and the £400k limit passed.
@@ -407,6 +553,21 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes(), 'nothing is written before the approval').toBe(before);
     expect(newFactors()).toEqual([]);
   };
+
+  it.each([
+    ['third-party', 'Our supplier claims senior engineers cost £120k a year each and juniors £65k a year each.'],
+    ['target', 'We aim for senior engineer salaries of £120k a year each and junior salaries of £65k a year each.'],
+    ['limit', 'Senior engineer salaries must stay under £120k a year each and junior salaries under £65k a year each.'],
+  ])('S7 human control: typed %s figures acquire no credit before approval', async (_role, message) => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(factorArgs(), message, (o) => { out = o; });
+    await expectConfirmCard(t1, out, [['Senior engineer salary', 120000], ['Junior engineer salary', 65000]], before);
+    await turn({ message: 'No, those are not our current salaries.' });
+    expect(bytes()).toBe(before);
+    expect(newFactors()).toEqual([]);
+  }, 120_000);
 
   it.each([
     ['the seeded model', FIG_MSG, 'seed'],
@@ -480,22 +641,22 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis?: string }[])[0]!.basis).toBe('written_about');
     nextScenario();
     graphOf.set(SCENARIO, journeyE());
+    const before = bytes();
     const t2 = await propose(one(120000, 'Junior engineer salary'), 'Senior engineers cost £120k a year each.');
-    expect(callOf(t2), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'today_not_set' }));
+    expect(callOf(t2)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t2)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
   }, 120_000);
 
-  it('(b) RED: a figure the user did NOT write → refused and said; NOTHING held (all-or-nothing, the written one too); byte-identical', async () => {
+  it('W14 real path: an absent salary in incomplete source stays unknown, with no proposal or write', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
-    let out: Record<string, unknown> = {};
-    const t1 = await propose(factorArgs(), 'Senior engineers cost £120k a year each.', (o) => { out = o; });
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect(JSON.stringify(out['today_not_set']), JSON.stringify(out)).toContain('Junior engineer salary');
-    expect(String(JSON.stringify(out)), JSON.stringify(out)).toContain('do not state 65000');
+    const t1 = await propose(factorArgs(), 'Senior engineers cost £120k a year each.');
+    expect(callOf(t1)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(approveChipOf(t1)).toBeUndefined();
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
   }, 120_000);
 
   it('(c) RED: the model moves before the approval → refused, nothing written; and the DOOR refuses a stale base with no row', async () => {
@@ -575,8 +736,18 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(before);
   }, 120_000);
 
+  it('W14 an absent signed today quantity in incomplete source stays unknown, with no proposal or write', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    const t1 = await propose([{ label: 'Net contribution', unit: 'GBP/year', today: { value: -120000 }, affects: 'Annual salary spend', direction: 'positive' }], 'Consider net contribution.');
+    expect(callOf(t1)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
   it.each([
-    ['a negative figure', -120000],
+    ['a missing figure', null],
     ['a non-number', 'a lot'],
   ])('(f) RED: %s → refused, nothing held, byte-identical', async (_what, value) => {
     graphOf.set(SCENARIO, seedGraph());
@@ -632,6 +803,223 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const t1 = await propose(factorArgs([{ label: 'Annual salary spend', affects: 'Delivery capacity' }]), FIG_MSG, (o) => { out = o; });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'factor_exists' }));
     expect(String(out['detail']), JSON.stringify(out)).toContain('propose_assumptions');
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  /**
+   * ⭐ RECOVERY BATCH B (B1, factor → goal: ONE rule). Paul's hiring test, 11 Oct (`third-party-review/test1-hiring-transcript.txt`
+   * l.210–218): he chose capacity and typed "I was defining it as a capacity. Let's go with 25%." The served answer was
+   * "the factor update was refused … the available update cannot connect a new factor directly to the goal", because this door
+   * refused the goal as a target while the drafter had itself linked three factors straight to ‘productivity’ (the goal), and
+   * `propose_new_option` takes the goal. The model below is that drafted shape: the hiring levers → ‘productivity’ directly.
+   */
+  const HIRING_MSG = "I was defining it as a capacity. Let's go with 25%.";
+  const hiringGraph = (): G => {
+    const e = (from: string, to: string, mean = 0.5, dir: 'positive' | 'negative' = 'positive') =>
+      ({ from, to, strength: { mean: dir === 'negative' ? -mean : mean, std: 0.1 }, exists_probability: 1, effect_direction: dir });
+    return {
+      nodes: [
+        { id: 'dec_hire', kind: 'decision', label: 'Hire a Tech lead or two developers' },
+        { id: 'goal_productivity', kind: 'goal', label: 'productivity' },
+        { id: 'fac_leads', kind: 'factor', label: 'Additional Tech leads hired', category: 'controllable', observed_state: { value: 0, raw_value: 0, unit: 'people', cap: 5 } },
+        { id: 'fac_devs', kind: 'factor', label: 'Additional developers hired', category: 'controllable', observed_state: { value: 0, raw_value: 0, unit: 'people', cap: 5 } },
+        { id: 'fac_quality', kind: 'factor', label: 'Code-quality degradation', category: 'external' },
+        { id: 'risk_onboarding', kind: 'risk', label: 'Onboarding capacity strain' },
+        { id: 'opt_lead', kind: 'option', label: 'Hire a Tech lead', interventions: { fac_leads: { value: 0.2, raw_value: 1, unit: 'people' } } },
+        { id: 'opt_devs', kind: 'option', label: 'Hire two developers', interventions: { fac_devs: { value: 0.4, raw_value: 2, unit: 'people' } } },
+      ],
+      edges: [e('dec_hire', 'opt_lead', 1), e('dec_hire', 'opt_devs', 1), e('opt_lead', 'fac_leads', 1), e('opt_devs', 'fac_devs', 1),
+        e('fac_leads', 'goal_productivity'), e('fac_devs', 'goal_productivity'), e('fac_devs', 'fac_quality'),
+        e('fac_quality', 'goal_productivity', 0.5, 'negative'), e('fac_devs', 'risk_onboarding'), e('risk_onboarding', 'goal_productivity', 0.3, 'negative')],
+    };
+  };
+  const capacityArgs = (affects: string) => [{ label: 'Non-development time', unit: '%', today: { value: 25 }, affects, direction: 'negative' }];
+
+  it('(q) RED (Batch B, Paul\'s hiring words): a new factor linked to the GOAL is held → approved → committed with ONE placeholder link new factor → goal and the user\'s 25%', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(capacityArgs('productivity'), HIRING_MSG, (o) => { out = o; });
+    expect(callOf(t1), `${JSON.stringify(t1._agent.tool_calls)} ${JSON.stringify(out)}`).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const held = await heldOnLatestRow();
+    expect(held, 'exactly ONE live hold').toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    expect(ops.map((o) => o.op), JSON.stringify(ops)).toEqual(['add_node', 'add_edge']);
+    const id = ops[0]!.path;
+    expect(ops[1]!.path).toBe(`${id}::goal_productivity`);
+    expect(bytes(), 'nothing is written before the approval').toBe(before);
+
+    const approve = approveChipOf(t1)!;
+    expect(approve, 'the approve chip is offered').toBeDefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow();
+    const node = g.nodes.find((x) => x.id === id)!;
+    expect(node).toMatchObject({ kind: 'factor', label: 'Non-development time', category: 'external' });
+    expect((node['observed_state'] as Record<string, unknown>)['raw_value']).toBe(25);
+    expect((node['observed_state'] as Record<string, unknown>)['source']).toBe(USER_SOURCE);
+    const { hypothesisEdgeValue } = await import('../../routing/add-option-transaction.js');
+    const outEdges = g.edges.filter((x) => x.from === id);
+    expect(outEdges, JSON.stringify(outEdges)).toHaveLength(1);
+    expect(outEdges[0]).toMatchObject(hypothesisEdgeValue(id, 'goal_productivity', 'negative'));
+    expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
+  }, 180_000);
+
+  it('(q‴) Batch B: what Paul is shown — the ONE-call composed card names the factor, his 25 % and that it affects productivity', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    script = [() => fnCall('propose_new_factor', { factors: capacityArgs('productivity'), rationale: 'The user chose 25%.', whole_request: true })];
+    const t1 = await turn({ message: HIRING_MSG });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, and affects productivity \(lowers it\)\./);
+    expect(t1.assistant_text, t1.assistant_text).not.toMatch(/cannot connect|refused|nothing was prepared/i);
+    expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
+  }, 120_000);
+
+  it.each([
+    ['an option', 'Hire two developers', 'is an option'],
+    ['a risk', 'Onboarding capacity strain', 'is a risk'],
+    ['the decision', 'Hire a Tech lead or two developers', 'is a decision'],
+  ])('(q′) CONTRAST (Batch B): on the same hiring model a link INTO %s is still refused — nothing held, byte-identical', async (_what, target, said) => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(capacityArgs(target), HIRING_MSG, (o) => { out = o; });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_not_allowed' }));
+    expect(String(out['detail']), JSON.stringify(out)).toContain(said);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it('(q″) CONTRAST (Batch B): a lever the options set is still refused as a target on the hiring model', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const before = bytes();
+    const t1 = await propose(capacityArgs('Additional developers hired'), HIRING_MSG);
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_is_a_lever' }));
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  /**
+   * ⭐ RECOVERY BATCH B (SYS3 TRACE L6): Paul's stated range was never stored. His turn 11 (live run 2026-10-11T222932Z,
+   * transcript l.164) gave "between 20% and 30%"; the Agent said the range "is not currently captured" (no tool could carry
+   * it). Rule (DL GO, 12 Oct): the range is stored AS A RANGE beside the figure he chose (25 %), in the schemas 0.66
+   * `InterventionRangeSchema` shape on `observed_state.range`, only when both ends are in ONE sentence he wrote and his figure
+   * lies inside; a range with no chosen figure is still asked; no midpoint is ever invented.
+   */
+  const RANGE_MSG = "If we think of our development team's monthly capacity, currently they spend between 20% and 30% of their time on non-development tasks (e.g., meetings, admin, and other distractions that are not writing code).";
+  const rangedArgs = (over: Record<string, unknown> = {}) => [{ label: 'Non-development time', unit: '%', today: { value: 25, range_low: 20, range_high: 30, ...over },
+    affects: 'productivity', direction: 'negative' }];
+  /** Paul's turn 11 first (the Agent answers without a tool, as served), so his range is in the conversation. */
+  const sayRangeFirst = async (): Promise<void> => {
+    script = [() => say('That is a useful capacity input.')];
+    await turn({ message: RANGE_MSG });
+  };
+
+  it('A2 retained quantity record keeps the human figure and range when later tool args omit the range', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    await propose(rangedArgs(), HIRING_MSG);
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const again = await propose(rangedArgs({ range_low: undefined, range_high: undefined }), 'Add that factor.', o => { out = o; });
+    expect(callOf(again)).toMatchObject({ ok: true, mutated: false });
+    expect(out.factors).toMatchObject([{ current_value: { value: 25, stated_by: 'user', range: { low: 20, high: 30, quote: RANGE_MSG } } }]);
+    expect(bytes()).toBe(before);
+    const approve = approveChipOf(again)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(bytes())) as unknown as G;
+    expect(reloaded.nodes.find(n => n.label === 'Non-development time')?.observed_state).toMatchObject({ raw_value: 25, source: USER_SOURCE,
+      range: { low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG } });
+  }, 120_000);
+
+  it('A2 a retained quantity with unknown origin is never relabelled as an Olumi estimate', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await propose(factorArgs(), 'Prepare salary estimates.');
+    const row = latestRow(SCENARIO)!;
+    for (const pending of row.pending_actions as { action: { inline_patch: Record<string, unknown> } }[]) {
+      const members = pending.action.inline_patch[GM_HELD_USER_TODAY] as { observed_state: Record<string, unknown> }[] | undefined;
+      for (const member of members ?? []) { delete member.observed_state.source; delete member.observed_state.extractionType; }
+    }
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const again = await propose(factorArgs(), 'Add those figures.', o => { out = o; });
+    expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(JSON.stringify(out.today_not_set)).toContain('origin stays unknown');
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it('(r) RED (L6, Paul\'s words): "between 20% and 30%" then "Let\'s go with 25%." → committed: 25 % as his figure AND his 20–30 % range beside it, as a range, with his sentence', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(rangedArgs(), HIRING_MSG, (o) => { out = o; });
+    expect(callOf(t1), `${JSON.stringify(t1._agent.tool_calls)} ${JSON.stringify(out)}`).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const node = graphNow().nodes.find((x) => x.label === 'Non-development time')!;
+    const os = node['observed_state'] as Record<string, unknown>;
+    expect(os['raw_value'], 'his chosen figure, as his').toBe(25);
+    expect(os['source']).toBe(USER_SOURCE);
+    expect(os['range'], JSON.stringify(os)).toEqual({ low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG });
+    // It survives the save and a reload: a JSONB round trip, then the persisted-graph parse.
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as unknown as G;
+    expect((reloaded.nodes.find((x) => x.id === node.id)!['observed_state'] as Record<string, unknown>)['range']).toEqual(os['range']);
+  }, 180_000);
+
+  /**
+   * ⭐ RECOVERY BATCH E (DL, 12 Oct; score run 4 hiring step 13, B5/U5 BLOCKING): approving the factor that holds Paul's own
+   * 20–30 % range said "Capacity used for non-development tasks (0 to 100). Those ranges are not yours." while the read
+   * after (02-13) held his range {20, 30, user_override, his sentence}. A factor holding a range the user stated is never in
+   * `ranges_added_for_analysis`. CONTRAST: the same approval with no range keeps Olumi's range note, word for word.
+   */
+  it('(r‴) RED (run 4 hiring step 13): approving the factor that holds his 20–30 % range never says the range is not his', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    const t1 = await propose(rangedArgs(), HIRING_MSG);
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const os = graphNow().nodes.find((x) => x.label === 'Non-development time')!['observed_state'] as Record<string, unknown>;
+    expect(os['range'], 'his range is what the model holds').toEqual({ low: 20, high: 30, meaning: 'min_max', source: USER_SOURCE, source_quote: RANGE_MSG });
+    expect(t2.assistant_text, t2.assistant_text).toContain('Its value today is 25 %');
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Non-development time \(0 to \d+\)|not yours/);
+  }, 180_000);
+
+  it('(r‴) CONTRAST: the same approval with no range keeps Olumi\'s own range note', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    const t1 = await propose(capacityArgs('productivity'), HIRING_MSG);
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect(t2.assistant_text, t2.assistant_text).toContain('Non-development time (0 to 100). Those ranges are not yours. Tell me the right ones and I will replace them.');
+  }, 180_000);
+
+  it('(r′) Paul is shown his range on the card, in his words, beside the figure he chose', async () => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    script = [() => fnCall('propose_new_factor', { factors: rangedArgs(), rationale: 'The user chose 25% within 20-30%.', whole_request: true })];
+    const t1 = await turn({ message: HIRING_MSG });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, within your range of 20 ?% to 30 ?% \(“[^”]*between 20% and 30%[^”]*”\), and affects productivity \(lowers it\)\./);
+  }, 120_000);
+
+  it.each([
+    ['the ends were never written by him', { range_low: 15, range_high: 35 }, true],
+    ['his chosen figure lies outside the range', { value: 25, range_low: 26, range_high: 30 }, true],
+    ['only one end is given', { range_high: undefined }, true],
+    ['a range with NO chosen figure: Olumi\'s midpoint 25 is not his (he only wrote the range)', {}, false],
+  ])('(r″) refused, nothing held, byte-identical: %s', async (_what, over, saidTwentyFive) => {
+    graphOf.set(SCENARIO, hiringGraph());
+    await sayRangeFirst();
+    const before = bytes();
+    const t1 = await propose(rangedArgs(over), saidTwentyFive ? HIRING_MSG : 'Use my range for it.');
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: saidTwentyFive ? 'today_not_set' : 'origin_unknown' }));
+    expect(approveChipOf(t1)).toBeUndefined();
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
   }, 120_000);

@@ -27,6 +27,8 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
+import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
 
 /**
  * The SERVED node (CEE 9417228, OpenAI lane): an estimated baseline, framed and
@@ -109,11 +111,19 @@ describe('an AI estimate is marked as Olumi’s on the canvas (extractionType: i
     expect(n.observed_state).toMatchObject({ source: 'cee_inference', extractionType: 'inferred', raw_value: 12 });
   });
 
-  it('CONTROL: a baseline the user STATED never carries "inferred"', async () => {
+  it('CONTROL: a baseline the user STATED never carries "inferred" (S7 disposition `unverified_human_claim`: kept visible as the user\'s, never Olumi\'s)', async () => {
+    // "We have two tech leads today" states a HEADCOUNT of tech leads; the factor's unit is FTE (`unsupported_unit_conversion`: no
+    // verified conversion), and the candidate carries no `baseline_evidence.quote`. So the receipt gate does not credit it as
+    // `brief_extraction`; it is the user's UNVERIFIED claim (`cee_inference` + `user_material_unverified`), never Olumi's estimate.
     for (const g of [admitCandidateModel(candidate()), await registered()]) {
       const os = byId(g, 'stated_tech_leads').observed_state ?? {};
-      expect(os.source).toBe('brief_extraction');
-      expect(os.extractionType).not.toBe('inferred');
+      expect(os).toMatchObject({ raw_value: 2, source: 'cee_inference', user_material_unverified: true });
+      expect(os.source).not.toBe('brief_extraction');
+      // The wire carries the unverified-user-material FLAG; the readers (not `n.provenance`, not a source-derived guess) say what it
+      // is: displayed "not confirmed from your brief", never "Olumi's estimate", and authorship stays UNKNOWN (never yours, never AI).
+      expect(nodeProvenanceDisplay(os.extractionType, os)).toBe('unverified_brief');
+      expect(nodeProvenanceDisplay(os.extractionType, os)).not.toBe('ai_inferred');
+      expect(valueAuthorshipOf(os)).toBe('unknown');
       expect(byId(g, 'stated_tech_leads').extractionType).not.toBe('inferred');
     }
   });

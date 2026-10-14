@@ -52,6 +52,8 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return {
     ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
     loadPersistedGraphStrict: vi.fn(),
     loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
     loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
@@ -95,7 +97,7 @@ const GRAPH = {
     { id: 'goal_mrr', kind: 'goal', label: 'Reach £250,000 MRR' },
     { id: 'fac_churn', kind: 'factor', label: 'Customer Churn Rate' },
   ],
-  edges: [{ from: 'dec_mrr', to: 'goal_mrr' }],
+  edges: [{ from: 'dec_mrr', to: 'goal_mrr', strength: { mean: 0.4, std: 0.15 }, exists_probability: 0.8, effect_direction: 'positive' }],
 };
 
 /** The rulebook refuses on budget — the only turn shape that reaches the tool. */

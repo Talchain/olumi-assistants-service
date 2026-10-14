@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 TurnExecutor (Phase 1 — tool-use routing spine).
@@ -91,12 +92,16 @@ import {
 import {
   buildTurnContext,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
   GraphStaleWriteError,
   type CanonicalGraphReadState,
   type SelectionHonesty,
 } from './build-turn-context.js';
 import { TurnFenceRejectedError } from './session/turn-fence.js';
+import { ModelWriteOwnershipRefused } from './ownership/door-ownership.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
+import { readRevisionConflictDetails } from './graph-revision-conflict.js';
+import { useAppendV6 } from './append-v6-flag.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -308,6 +313,7 @@ import { appendLapseNotice, threadHoldsThroughMutatingCommit } from './handlers/
 import { PatchOperationsArraySchema } from '../orchestrator/patch-validation.js';
 import { productHoldRecord } from './agent-lane/proposal-object/record.js';
 import { amendHeldOperations, parseProposalEdits } from './agent-lane/proposal-object/amend.js';
+import { PLAIN_APPROVAL_SUPERSEDED } from './agent-lane/proposal-object/reply.js';
 import {
   buildReadinessRepairOffer,
   withReadinessApplyControl,
@@ -1335,7 +1341,10 @@ export async function runTurnExecutor(
   // that was re-resolved still yields a correct expected base (present) or a
   // legitimately-null expected (proven-absent first write) — never a stale null
   // from `context.persistedGraph` (which stays null on a degraded read).
-  let resolvedCanonicalGraphForCommit: { readonly graph: unknown | null } | undefined;
+  let resolvedCanonicalGraphForCommit: {
+    readonly graph: unknown | null;
+    readonly revision?: number;
+  } | undefined;
   // ── ROADMAP 2.301 secondary fix — HOISTED conflict capture ─────────────
   // The diagnosis (diagnosis-commit-path-2026-08-03.md §4) measured the
   // walk's 500-vs-409 split: 23 commit catch sites, and exactly ONE (the
@@ -1355,6 +1364,7 @@ export async function runTurnExecutor(
   // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
   // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
   let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
+  let lastCommitOwnershipError: ModelWriteOwnershipRefused | null = null;
   // True only after a commit persisted the zero-resolved projection. The
   // finaliser then preserves any legitimate commit-layer adjustment (for
   // example a held-change lapse notice) instead of re-projecting different
@@ -1782,6 +1792,7 @@ export async function runTurnExecutor(
     // conflict thrown by THIS append before rethrowing to the call site's
     // own catch ladder.
     lastCommitConflictError = null;
+    lastCommitOwnershipError = null;
     zeroResolvedSelectionGuardAppliedAtCommit = false;
     zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
     const projectionStateBeforeCommit = {
@@ -1818,6 +1829,10 @@ export async function runTurnExecutor(
       const commitMeta = zeroSelectionProjection.applied
         ? { ...meta, pending_actions: [] }
         : meta;
+      const { expectedRevision: _callSiteExpectedRevision, ...commitMetaWithoutRevision } = commitMeta;
+      const expectedRevision = resolvedCanonicalGraphForCommit
+        ? resolvedCanonicalGraphForCommit.revision
+        : context.persistedRevision;
       result = await commitDirectAnswer(
         zeroSelectionProjection.response,
         {
@@ -1839,7 +1854,10 @@ export async function runTurnExecutor(
           // meta) to exclude the proposal they just consumed / rejected, so it
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
-          ...commitMeta,
+          ...commitMetaWithoutRevision,
+          // A degraded-read recovery supplies graph and revision together;
+          // otherwise retain the original turn snapshot's revision.
+          ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           // ⭐⭐ GATE 1 — deliberately AFTER `...commitMeta`, unlike the two
           // injections above it. Those are DEFAULTS a call site may override;
           // this is a GUARANTEE. All ~36 executor commit sites funnel through
@@ -1886,6 +1904,7 @@ export async function runTurnExecutor(
       ) {
         lastCommitConflictError = error;
       }
+      if (error instanceof ModelWriteOwnershipRefused) lastCommitOwnershipError = error;
       throw error;
     }
     pendingLifecycleForRun = result.pendingLifecycle;
@@ -2261,6 +2280,7 @@ export async function runTurnExecutor(
   let contextPackPromptCanonical: CanonicalAnalysisState | null = null;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
+  let currentScenarioRevisionForTurn: number | undefined;
   // The RAW graph object the freshness hash was computed from. Canonical state,
   // served readiness, and Run-chip admission all derive from this SAME graph
   // authority — the persisted/canonical
@@ -2305,6 +2325,7 @@ export async function runTurnExecutor(
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
               currentGraph: canonicalReadinessGraphForRun,
+              currentScenarioRevision: currentScenarioRevisionForTurn,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -2350,6 +2371,7 @@ export async function runTurnExecutor(
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
               currentGraph: canonicalReadinessGraphForRun,
+              currentScenarioRevision: currentScenarioRevisionForTurn,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -2573,7 +2595,10 @@ export async function runTurnExecutor(
   let graphLookupStatsForLog: GraphLookupStats | undefined;
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
-  let graphStateForTurn: GraphStateIngress | null = options.graphState ?? null;
+  let graphStateForTurn: GraphStateIngress | null = options.graphState == null ? null : structuredClone(options.graphState);
+  const storedBasisReadAvailable = context.persistedGraphRead?.status === 'ok_present' || context.persistedGraphRead?.status === 'ok_absent';
+  prepareHorizonBasisForWrite(graphStateForTurn,
+    storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
   // V5 finaliser contract: hoisted to outer scope so `finalizeRun` can
   // surface it on `TurnExecutorRunResult.analysisReady` for the response
   // finaliser. Declared here, populated below at the existing
@@ -2637,6 +2662,8 @@ export async function runTurnExecutor(
   // invariant exists to forbid.
   let analysisElectionOfferChip: SuggestedAction | undefined;
   let functionalAnswerText: string | undefined;
+  // Set only by the deterministic card-binding refusal; its required copy must survive final egress.
+  let plainApprovalBindingSuperseded = false;
 
   // ROADMAP 1.132 (F1) — the SINGLE capture chokepoint for direct-answer
   // composes in this executor. Every direct-answer compose in the turn body goes
@@ -2678,6 +2705,7 @@ export async function runTurnExecutor(
    * source that is not request-supplied.
    */
   let handlerFactsForCommit: readonly HandlerFact[] = [];
+  let runEvaluatedRevisionForCommit: HandlerOutcome['__run_evaluated_revision'];
   /**
    * THE POST-DISPATCH FACT WINDOW, HOISTED SO `finalizeRun` CAN READ THE
    * BINDING RATHER THAN RETYPE THE LITERAL.
@@ -2826,7 +2854,7 @@ export async function runTurnExecutor(
     // request graph as provisional; degraded/malformed/missing reads fail weak.
     const contextGraphSelection = selectContextGraphSnapshot({
       canonicalRead: context.persistedGraphRead,
-      requestGraph: options.graphState,
+      requestGraph: graphStateForTurn,
     });
     const contextGraphForReasoning = contextGraphSelection.graph;
     // Persisted analysis is licensed only beside a valid persisted canonical
@@ -2928,6 +2956,8 @@ export async function runTurnExecutor(
     // the same representation. Provisional graphs are already validated at the
     // request boundary. Absent/unavailable selections yield no hash/readiness;
     // they never reconstruct authority from request or transcript state.
+    currentScenarioRevisionForTurn = contextGraphSelection.status === 'canonical'
+      ? context.persistedRevision : undefined;
     const selectedGraphForFreshness: unknown =
       contextGraphSelection.status === 'canonical' && contextGraphForReasoning !== null
         ? canonicaliseForAnalysis(contextGraphForReasoning)
@@ -2985,6 +3015,7 @@ export async function runTurnExecutor(
       // append never sets the restore marker.
       {
         currentGraph: canonicalReadinessGraphForRun,
+        currentScenarioRevision: currentScenarioRevisionForTurn,
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
@@ -3001,6 +3032,7 @@ export async function runTurnExecutor(
       currentGraphOptionIdsForTurn,
       {
         currentGraph: canonicalReadinessGraphForRun,
+        currentScenarioRevision: currentScenarioRevisionForTurn,
         priorFactsReadOk: scenarioAnalysisFactsReadOk,
         // Same marker, same turn, same read — see the routing derivation above.
         ...(context.analysis_invalidated_at === undefined
@@ -3055,6 +3087,7 @@ export async function runTurnExecutor(
     const hotWindowFallback = buildAnalysisFromPriorFacts(
       context.prior_facts,
       optionLabelSource,
+      contextGraphForReasoning,
     );
     if (hotWindowFallback) {
       analysisSummary = hotWindowFallback;
@@ -3069,6 +3102,7 @@ export async function runTurnExecutor(
     const durableFallback = buildAnalysisFromPriorFacts(
       scenarioAnalysisFacts,
       optionLabelSource,
+      contextGraphForReasoning,
     );
     if (durableFallback) {
       promptAnalysisSummary = durableFallback;
@@ -3434,6 +3468,7 @@ export async function runTurnExecutor(
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
+        currentScenarioRevision: currentScenarioRevisionForTurn,
         analysisInvalidatedAt: context.analysis_invalidated_at,
         priorFactsWithTurn: context.prior_facts_with_turn,
         legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -3910,6 +3945,8 @@ export async function runTurnExecutor(
           readonly consumedPendingRefs?: readonly string[];
         },
       ): Promise<TurnExecutorRunResult> => {
+        plainApprovalBindingSuperseded = decisionStatus === 'superseded'
+          && overrides?.assistantText === PLAIN_APPROVAL_SUPERSEDED;
         const recoveryAssistantText =
           overrides?.assistantText ??
           (decisionStatus === 'superseded'
@@ -4195,6 +4232,7 @@ export async function runTurnExecutor(
           // This is also the canonical frame returned by finalisation; wire,
           // Run admission and diagnostics therefore read one record.
           currentAnalysisGraphHashForTurn = postApplyHash;
+          currentScenarioRevisionForTurn = committed.persistedGraph != null ? committed.revision : undefined;
           canonicalReadinessGraphForRun = committed.persistedGraph;
           // Invalidate the pre-repair memo, then reuse the already-approved
           // per-turn canonical assembly seam. Adding another direct selector
@@ -4204,6 +4242,9 @@ export async function runTurnExecutor(
           freshness = {
             freshness: canonicalStateForRun.freshness,
             reason: canonicalStateForRun.freshness_reason,
+            selected_fact_row_id: canonicalStateForRun.selected_fact_row_id,
+            run_revision: canonicalStateForRun.run_revision,
+            basis: canonicalStateForRun.basis,
             selected_fact_index: canonicalStateForRun.selected_fact_index,
             computed_at: canonicalStateForRun.computed_at,
             graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
@@ -4532,12 +4573,16 @@ export async function runTurnExecutor(
           // Same canonical-state reuse as the readiness-repair sibling: one
           // record for wire, Run admission and diagnostics.
           currentAnalysisGraphHashForTurn = postApplyHash;
+          currentScenarioRevisionForTurn = committed.persistedGraph != null ? committed.revision : undefined;
           canonicalReadinessGraphForRun = committed.persistedGraph;
           nonExecuteCanonicalMemo = undefined;
           canonicalStateForRun = canonicalStateForNonExecute()!;
           freshness = {
             freshness: canonicalStateForRun.freshness,
             reason: canonicalStateForRun.freshness_reason,
+            selected_fact_row_id: canonicalStateForRun.selected_fact_row_id,
+            run_revision: canonicalStateForRun.run_revision,
+            basis: canonicalStateForRun.basis,
             selected_fact_index: canonicalStateForRun.selected_fact_index,
             computed_at: canonicalStateForRun.computed_at,
             graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
@@ -4614,6 +4659,8 @@ export async function runTurnExecutor(
         // hash a CANONICALISED graph — a raw recompute avoids false
         // supersessions while staying fail-closed.)
         const gmBaseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        const proposalEdits = parseProposalEdits((payload.chip?.parameters as Record<string, unknown> | undefined)?.['proposal_edits']);
+        const plainBindingRecovery = proposalEdits?.fields.length === 0 ? { assistantText: PLAIN_APPROVAL_SUPERSEDED } : undefined;
         let gmBaseHash: string | null = null;
         try {
           gmBaseHash = computeAnalysisAffectingGraphHash(
@@ -4629,7 +4676,7 @@ export async function runTurnExecutor(
           pinnedHash.length === 0 ||
           gmBaseHash !== pinnedHash
         ) {
-          return commitProposedChangeRecovery('superseded', 'gm_held_execute_superseded');
+          return commitProposedChangeRecovery('superseded', 'gm_held_execute_superseded', plainBindingRecovery);
         }
         /**
          * ⭐ S-D APPROVE-WITH-EDITS (lane EDIT-PANEL; design §6). The user's values for THIS stored revision ride the
@@ -4637,24 +4684,26 @@ export async function runTurnExecutor(
          * hold this turn read under its pin — so the batch that lands is exactly the stored hold plus this request's
          * edits, never another panel's (Codex P0). Anything that does not bind applies nothing.
          */
-        const proposalEdits = parseProposalEdits((payload.chip?.parameters as Record<string, unknown> | undefined)?.['proposal_edits']);
         let heldOperations = read.operations;
         if (proposalEdits !== undefined) {
           if (proposalEdits === null || proposalEdits.proposal_id !== heldPending.chip_id) {
             return commitProposedChangeRecovery('invalid', 'gm_held_edits_malformed');
           }
           if (proposalEdits.revision !== heldPending.id || proposalEdits.graph_hash !== pinnedHash) {
-            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
+            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded', plainBindingRecovery);
           }
           const editRecord = productHoldRecord(heldPending, gmBaseGraph);
           // What the panel showed (labels included), re-derived from the stored hold on the stored model, must be unchanged.
           if (editRecord !== undefined && editRecord.digest !== proposalEdits.digest) {
-            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
+            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded', plainBindingRecovery);
           }
-          const amended = editRecord === undefined ? undefined : amendHeldOperations(editRecord, proposalEdits.fields);
-          const reparsed = amended?.ok === true ? PatchOperationsArraySchema.safeParse(amended.operations) : undefined;
-          if (reparsed === undefined || !reparsed.success) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
-          heldOperations = reparsed.data;
+          if (editRecord === undefined) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
+          if (proposalEdits.fields.length > 0) {
+            const amended = amendHeldOperations(editRecord, proposalEdits.fields);
+            const reparsed = amended.ok ? PatchOperationsArraySchema.safeParse(amended.operations) : undefined;
+            if (reparsed === undefined || !reparsed.success) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
+            heldOperations = reparsed.data;
+          }
         }
         const outcome = executeGmHeldResume({
           operations: heldOperations,
@@ -4709,7 +4758,7 @@ export async function runTurnExecutor(
             'invalid',
             `gm_held_execute_${outcome.status}`,
             {
-              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              assistantText: outcome.userReason ?? GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
               consumedPendingRefs: [heldPending.chip_id],
             },
           );
@@ -4822,7 +4871,7 @@ export async function runTurnExecutor(
           const postApplyHash = ((): string | null => {
             try {
               return computeAnalysisAffectingGraphHash(
-                outcome.mutatedGraph as GraphStateIngress | null | undefined,
+                committed.persistedGraph as GraphStateIngress | null | undefined,
               );
             } catch {
               return null;
@@ -4832,12 +4881,13 @@ export async function runTurnExecutor(
             context.prior_facts,
             postApplyHash,
             config.cee.optionIdentityFreshnessGuard
-              ? extractGraphOptionIds(outcome.mutatedGraph)
+              ? extractGraphOptionIds(committed.persistedGraph)
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
             {
-              currentGraph: outcome.mutatedGraph,
+              currentGraph: committed.persistedGraph,
+              currentScenarioRevision: committed.persistedGraph != null ? committed.revision : undefined,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -4923,6 +4973,7 @@ export async function runTurnExecutor(
         const appliedFacts: ExecutedGmOutcome['fact'][] = [];
         const consumedRefs: string[] = [];
         const declinedLabels: string[] = [];
+        const declinedReasons: string[] = [];
         /**
          * P0 (2026-08-16) — chips of holds that were ATTEMPTED and declined.
          *
@@ -4980,6 +5031,7 @@ export async function runTurnExecutor(
               'GM held-execute (all) — one confirmed hold declined (fail-closed); the others are unaffected',
             );
             declinedLabels.push(resolveProposalRenderCopy(holds[i]!.action).label);
+            if (outcome.userReason !== undefined) declinedReasons.push(outcome.userReason);
             // Attempted and refused — the chip is spent (see the declaration).
             attemptedDeclinedRefs.push(holds[i]!.chip_id);
             continue;
@@ -5020,7 +5072,7 @@ export async function runTurnExecutor(
             'invalid',
             'consent_all_all_declined',
             {
-              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              assistantText: declinedReasons.length > 0 ? [...new Set(declinedReasons)].join('\n\n') : GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
               consumedPendingRefs: attemptedDeclinedRefs,
             },
           );
@@ -5042,6 +5094,7 @@ export async function runTurnExecutor(
             declinedLabels.length === 1 ? 'that one' : 'those'
           }.`;
         }
+        if (declinedReasons.length > 0) receiptText += `\n\n${[...new Set(declinedReasons)].join('\n\n')}`;
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: receiptText,
@@ -5104,7 +5157,7 @@ export async function runTurnExecutor(
           const postApplyHash = ((): string | null => {
             try {
               return computeAnalysisAffectingGraphHash(
-                lastExecuted!.mutatedGraph as GraphStateIngress | null | undefined,
+                committed.persistedGraph as GraphStateIngress | null | undefined,
               );
             } catch {
               return null;
@@ -5114,12 +5167,13 @@ export async function runTurnExecutor(
             context.prior_facts,
             postApplyHash,
             config.cee.optionIdentityFreshnessGuard
-              ? extractGraphOptionIds(lastExecuted.mutatedGraph)
+              ? extractGraphOptionIds(committed.persistedGraph)
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
             {
-              currentGraph: lastExecuted.mutatedGraph,
+              currentGraph: committed.persistedGraph,
+              currentScenarioRevision: committed.persistedGraph != null ? committed.revision : undefined,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -12347,6 +12401,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('execute');
         handlerIdForCommit = proposedHandlerId;
         handlerFactsForCommit = handlerOutcome.handler_facts;
+        runEvaluatedRevisionForCommit = handlerOutcome.__run_evaluated_revision;
         // P0 V5 golden-path repair (follow-up): record graph-mutation
         // observation for turn_outcome.graph_mutated. Any non-null
         // `mutated_graph` on the handler outcome counts — handler-id
@@ -12988,6 +13043,12 @@ export async function runTurnExecutor(
               // turn-start reread and remains only as the fallback for a
               // handler that produced no snapshot.
               runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
+              // CURRENCY, DELIBERATELY THE SAME SNAPSHOT. The review fires in this request, right after its OWN Run, and
+              // `__run_graph_snapshot` is run-analysis's own fresh scenario read (the freshest existing read). The turn-start
+              // `currentAnalysisGraphHashForTurn` can only be OLDER than it and would falsely stale a healthy edit -> Run ->
+              // review. A graph edited after this point is marked stale at read time (`deriveAnalysisFreshness`), and the
+              // gate fires for any caller that supplies a newer graph (pinned by the edit-after-Run row). No new read.
+              currentGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a
@@ -13194,6 +13255,8 @@ export async function runTurnExecutor(
       // onto the ingress shape so the comparison is apples-to-apples
       // with how `graph_hash_at_run` was originally computed.
       let currentGraphForPostHandlerFreshness = canonicalReadinessGraphForRun;
+      const currentRevisionForPostHandlerFreshness = handlerOutcome.mutated_graph === undefined
+        ? currentScenarioRevisionForTurn : undefined;
       const hashForPostHandlerFreshness = ((): string | null => {
         if (handlerOutcome.mutated_graph === undefined) {
           return currentAnalysisGraphHashForTurn;
@@ -13208,6 +13271,8 @@ export async function runTurnExecutor(
             ? { goal_constraints: mutated.goal_constraints }
             : {}),
         };
+        prepareHorizonBasisForWrite(mutated, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
+        prepareHorizonBasisForWrite(merged, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
         currentGraphForPostHandlerFreshness = merged;
         // M5 readiness authority: on a mutation the freshness hash reflects the
         // post-mutation graph, so canonical readiness must too. Use the handler's
@@ -13250,6 +13315,7 @@ export async function runTurnExecutor(
         // read degraded, where 'none' would again be an unsupported claim.
         {
           currentGraph: currentGraphForPostHandlerFreshness,
+          currentScenarioRevision: currentRevisionForPostHandlerFreshness,
           analysisInvalidatedAt: context.analysis_invalidated_at,
           priorFactsWithTurn: context.prior_facts_with_turn,
           legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -13358,6 +13424,7 @@ export async function runTurnExecutor(
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
         currentGraph: currentGraphForPostHandlerFreshness,
+        currentScenarioRevision: currentRevisionForPostHandlerFreshness,
         analysisInvalidatedAt: context.analysis_invalidated_at,
         priorFactsWithTurn: context.prior_facts_with_turn,
         legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
@@ -14532,13 +14599,20 @@ export async function runTurnExecutor(
         let hasServerModel: boolean;
         let readUnknown = false;
         let degradedRereadGraph: unknown | null | undefined;
+        let canonicalRevision = context.persistedRevision;
         if (canonicalRead.status === 'ok_present') {
           hasServerModel = graphHasNodes(canonicalRead.graph);
         } else if (canonicalRead.status === 'ok_absent') {
           hasServerModel = false;
         } else {
           try {
-            degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            if (useAppendV6()) {
+              const recoveryBase = await loadPersistedScenarioStateStrict(context.session_id);
+              degradedRereadGraph = recoveryBase.graph;
+              canonicalRevision = recoveryBase.revision;
+            } else {
+              degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            }
             hasServerModel = graphHasNodes(degradedRereadGraph);
             log.warn(
               {
@@ -14573,6 +14647,7 @@ export async function runTurnExecutor(
         // expected base is needed).
         if (!readUnknown) {
           resolvedCanonicalGraphForCommit = {
+            revision: canonicalRevision,
             graph:
               canonicalRead.status === 'ok_present'
                 ? canonicalRead.graph
@@ -14632,6 +14707,10 @@ export async function runTurnExecutor(
           // rows D / F on a DEGRADED read — reuse the strict reread already
           // performed above (single round trip, no TOCTOU vs `hasServerModel`).
           persistedBase = degradedRereadGraph;
+        } else if (useAppendV6()) {
+          // Merge onto the exact snapshot whose revision commitTurn submits.
+          // A later graph read paired with canonicalRevision would mix identities.
+          persistedBase = resolvedCanonicalGraphForCommit!.graph;
         } else {
           // rows D / F — today's behaviour: strict-read the persisted graph. A
           // degraded/unavailable read FAILS CLOSED here (→ STATE_COMMIT_FAILED;
@@ -14835,10 +14914,10 @@ export async function runTurnExecutor(
       // `graphStateForTurn` is the request graphState when present, else
       // the persisted-graph fallback loaded by buildTurnContext — the
       // same authority every other per-turn graph consumer uses.
-      const graphForProposalHash =
-        handlerOutcome?.mutated_graph !== undefined
+      const graphForProposalHash = handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph
           : graphStateForTurn;
+      prepareHorizonBasisForWrite(graphForProposalHash, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
       let commitStartedAt = 0;
       if (timingsEnabled) {
         commitStartedAt = Date.now();
@@ -15180,6 +15259,10 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
+        ...(runEvaluatedRevisionForCommit !== undefined && handlerFactsForCommit.some(f =>
+          f.fact_type === 'run_analysis' && f.result.run_id === runEvaluatedRevisionForCommit?.run_id)
+          ? { run_evaluated_revisions: { [runEvaluatedRevisionForCommit.run_id]: runEvaluatedRevisionForCommit.revision } }
+          : {}),
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
@@ -15403,6 +15486,7 @@ export async function runTurnExecutor(
             recovery_action: 'refresh_and_reconfirm',
             conflict_category: error.conflict_category,
             expected_base_graph_hash: error.expected_base_graph_hash ?? null,
+            ...readRevisionConflictDetails(error),
           } satisfies GraphConflictFailureDetails,
           recoveryCtx(),
         );
@@ -15802,6 +15886,8 @@ export async function runTurnExecutor(
     if (!response) return;
     const assistantText = response.assistant_text;
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    // P53's server-authored refusal says exactly what this approval wrote. Preserve only that validated response.
+    if (plainApprovalBindingSuperseded && assistantText === PLAIN_APPROVAL_SUPERSEDED) return;
     const guarded = applyEgressForbiddenPhraseGuard(assistantText);
     if (!guarded.rewritten) return;
     emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
@@ -16465,6 +16551,8 @@ export async function runTurnExecutor(
   }
 
   function finalizeRun(): TurnExecutorRunResult {
+    // Preserve a door refusal across existing commit-failure catches for HTTP/SSE mapping.
+    if (lastCommitOwnershipError) throw lastCommitOwnershipError;
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
     // is subject to them exactly as the A2 branch's envelope is. Fires ONLY
@@ -16532,6 +16620,7 @@ export async function runTurnExecutor(
             recovery_action: 'refresh_and_reconfirm',
             conflict_category: conflict.conflict_category,
             expected_base_graph_hash: conflict.expected_base_graph_hash ?? null,
+            ...readRevisionConflictDetails(conflict),
           } satisfies GraphConflictFailureDetails,
           recoveryCtx(),
         );

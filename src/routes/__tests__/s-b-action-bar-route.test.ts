@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ⭐ S-B THROUGH THE REAL ROUTES (lane ACTION-BAR-CEE; github-a2 contract amendments 1–11 + v1.1; ACTION-SYSTEM-DRAFT §E).
  * The real Agent turn route and the real scenario-graph (reload) route, the real session store over a fake database
@@ -27,6 +28,8 @@ import type { PendingAction } from '../../orchestrator-v5/session/pending-action
 import { estimateGraph, estimateLicence } from '../../orchestrator-v5/agent-lane/actions/__tests__/estimate-fixture.js';
 import { resolveDskClaimProvenance } from '../../orchestrator-v5/compose/dsk-claim-record.js';
 import { actionFactsOf, estimatePointsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
+import { assembleGuidanceSignals } from '../../orchestrator-v5/agent-lane/turn-context/guidance-signals.js';
+import { olumiEstimatesFeedingResult, sayOlumiEstimates } from '../../orchestrator-v5/agent-lane/olumi-estimates-feeding-result.js';
 
 const { port, source, identity, logs } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -62,6 +65,7 @@ const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
 const AT = '2026-10-07T12:00:00.000Z';
 const READY = { status: 'ready', may_run: true };
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
+const PROSPECT = { from: 'enterprise_prospect_signing_likelihood', to: 'quarterly_revenue' };
 const FIXTURES = new URL('../../orchestrator-v5/agent-lane/actions/__tests__/fixtures/', import.meta.url);
 const hashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as never)!;
 
@@ -82,6 +86,20 @@ function setState(state: State, graph: unknown = state === 'licensed' ? D3.graph
       analysis_result: result, current_read: { analysis_ready: ready, result }, analysis_constraint_verdict_state: null,
       ...(state === 'licensed' ? {} : { analysis_option_participation: PARTICIPATION }) };
   port.readExistingScenario.mockResolvedValue({ userId: OWNER, graph: source.graph, briefText: 'Which sprint plan?', analysisInvalidatedAt: null });
+}
+
+// The existing pre-mortem door can hold a SIZED link; Strengthen's S1 picker only selects placeholders.
+// This is a synthetic, independently sized control on a clone, never a re-recording of the served fixture.
+function setSizedPremortemState(graph: unknown = D1.graph): void {
+  const g = structuredClone(graph) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  const edge = g.edges.find(e => e.from === PROSPECT.from && e.to === PROSPECT.to)!;
+  edge.strength = { mean: 0.5, std: 0.1 };
+  edge.provenance = { ...(edge.provenance as Record<string, unknown>), magnitude: 'olumi_estimate' };
+  delete edge.defaulted;
+  setState('licensed', g);
+  const result = { ...(source.analysis.analysis_result as Record<string, unknown>), leading_option_id: 'ai_reporting_module_sprint' };
+  source.analysis = { ...source.analysis, analysis_result: result,
+    current_read: { ...(source.analysis.current_read as Record<string, unknown>), result } };
 }
 
 let serial = 0;
@@ -148,6 +166,7 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
   }));
   app = Fastify({ logger: false });
+  await installOwnershipHarness(app, () => ({ mode: 'verified', userId: identity.userId }));
   await scenarioGraphRoute(app); await app.register(agentV1TurnRoute); await app.ready();
 });
 afterEach(async () => {
@@ -216,7 +235,7 @@ describe('every press reaches its typed path, never the free Agent turn', () => 
     const payload = { kind: 'message', scenario_id: scenario, turn_id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1', message: 'pressed', source: 'chip', chip: { id: 'agent-next-review-decision' } };
     const first = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
     const again = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
-    expect(first.assistant_text).toBe('I can’t review this decision yet: it needs a current analysis first.');
+    expect(first.assistant_text).toBe('I can’t review this model yet: it needs a current analysis first.');
     expect(again.assistant_text).toBe(first.assistant_text);
     expect(again.suggested_actions.map((a) => a.id)).toEqual(['agent-run-analysis']);
   });
@@ -255,19 +274,48 @@ describe('a press is re-derived on the current state (amendment 6)', () => {
 });
 
 describe('the same offer pressed twice prepares ONE card (amendment 6)', () => {
-  it('RED: Strengthen twice under the same offer_key → one held proposal; the second press re-offers it with no tool call', async () => {
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: Strengthen twice held one placeholder card -> Strengthen twice asks for the same unsized link, with zero proposals or model calls.
+  it('Strengthen twice under the same offer_key → the placeholder size ask, zero held proposals and zero model calls', async () => {
     setState('withheld');
     const bar = (await turn({ message: 'Where are we?' })).action_bar!;
     const offer = offersOf(bar).find((o) => o.action_id === 'strengthen')!;
+    const edge = (source.graph as typeof D1.graph).edges.find(e => e.from === PROSPECT.from && e.to === PROSPECT.to)!;
+    expect(edge).toMatchObject({ ...PROSPECT, strength: { mean: 0.5, std: 0.125 }, defaulted: true });
+    modelCalls = 0;
+    const first = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
+    const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
+    expect(first.assistant_text).toBe('The comparison rests on a link nobody has sized yet.\n\nHow much does "Quarterly revenue" change when "Enterprise prospect signing likelihood" goes up by one percentage point?');
+    expect(second.assistant_text).toBe(first.assistant_text);
+    for (const b of [first, second]) {
+      expect(b._agent?.tool_calls ?? []).toEqual([]);
+      expect(b.suggested_actions.some(a => a.id.startsWith('agent-approve-proposal:'))).toBe(false);
+      expect(b._action).toMatchObject({ action_id: 'strengthen', offer_key: offer.offer_key, outcome: 'ran' });
+    }
+    expect(agentProposals.outstanding(scenario, OWNER)).toEqual([]);
+    expect((table[0]!.pending_actions as PendingAction[]).some(pa => pa.action.kind === 'apply_proposed_change')).toBe(false);
+    expect(modelCalls).toBe(0);
+  });
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: Strengthen supplied the held card for offer_key dedupe -> a pre-mortem on a SIZED prospect -> revenue link preserves one held card and the same-key re-offer claim.
+  it('RED: Pre-mortem twice under the same offer_key → one sized-link proposal; the second press re-offers it with no tool or model call', async () => {
+    setSizedPremortemState();
+    const bar = (await turn({ message: 'Where are we?' })).action_bar!;
+    const offer = offersOf(bar).find((o) => o.action_id === 'pre_mortem')!;
     const first = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     expect(first._agent?.tool_calls?.map((c) => c.name)).toEqual(['propose_link_strengths']);
     const approve = first.suggested_actions.find((a) => a.id.startsWith('agent-approve-proposal:'))!;
+    expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([
+      expect.objectContaining({ op: 'set_link_strength', path: `${PROSPECT.from}::${PROSPECT.to}` }),
+    ]);
+    const callsBeforeSecond = modelCalls;
     const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     expect(second._agent?.tool_calls ?? []).toEqual([]);
     // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
-    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal', `agent-decline-proposal:${approve.id.slice('agent-approve-proposal:'.length)}`]);
+    // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: Strengthen's held card had three controls -> pre-mortem preserves their order and adds its existing Talk it through exit.
+    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal',
+      `agent-decline-proposal:${approve.id.slice('agent-approve-proposal:'.length)}`, 'agent-talk-it-through']);
     expect(agentProposals.outstanding(scenario, OWNER).length).toBe(1);
-    expect(second._action).toMatchObject({ outcome: 'ran', reason: 'already_waiting' });
+    expect(second._action).toMatchObject({ action_id: 'pre_mortem', offer_key: offer.offer_key, outcome: 'ran', reason: 'already_waiting' });
+    expect(modelCalls).toBe(callsBeforeSecond);
   });
 });
 
@@ -334,7 +382,9 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     expect(b._action?.science).toBeUndefined();
     expect(b.assistant_text.startsWith('Checked: Narrow framing, Anchoring.')).toBe(true);
     expect(b.assistant_text).toContain("Narrow framing: where the pattern could bite: ‘Phased GCP migration’, ‘Switch to GCP’. One test: press ‘More options’.");
-    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘Migration preparation effort’. One test: press ‘Anchoring’.");
+    // ONE PROVENANCE AUTHORITY: the served 'GCP workload share' (absent-type cee_inference) is Olumi's starting figure on every
+    // reader now (the disclosure already counted it), so it is the first figure Anchoring names (591cc1a0: 'Migration preparation effort').
+    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘GCP workload share’. One test: press ‘Anchoring’.");
     const claim = resolveDskClaimProvenance('DSK-B-001')!;
     expect(b.assistant_text).toContain(`Decision-science claim: ${claim.claim_title} · ${claim.evidence_strength} evidence`);
     expect(b.assistant_text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
@@ -355,7 +405,14 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
       expect(bar.revision.graph_hash, name).toBe(hashOf(source.graph));
       const file = new URL(`action-bar-v1-${name}.json`, FIXTURES);
       if (process.env.CAPTURE_ACTION_BAR_FIXTURES === '1') writeFileSync(file, `${JSON.stringify(bar, null, 2)}\n`);
-      expect(bar, name).toEqual(JSON.parse(readFileSync(file, 'utf8')));
+      const expected = JSON.parse(readFileSync(file, 'utf8'));
+      // Science 393023 LICENCE (a)/(b), 7 Oct: licensed D3 no Strengthen → enabled Strengthen for workload/savings; every other field stays pinned.
+      if (name === 'licensed-run') expected.standard.splice(2, 0, {
+        action_id: 'strengthen', label: 'Strengthen', icon: 'ShieldCheck', group: 'review',
+        press_id: 'agent-next-strengthen', user_line: 'What would most strengthen this model?', enabled: true,
+        why_now: 'A link on your goal’s path has no size yet.', offer_key: '82c52ea28c022f3b',
+      });
+      expect(bar, name).toEqual(expected);
     }
   });
 });
@@ -387,11 +444,15 @@ describe('S-B slice 2a through the real routes', () => {
     g.nodes = g.nodes.filter(n => n.kind !== 'goal'); setState('pre_run', g);
     expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['frame_brief']);
   });
-  it('a durable pending approval yields on live and reload; a stale Run also yields, a current Run restores priority', async () => {
-    setState('withheld', paulGraph());
-    const card = await press('agent-next-strengthen');
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: a Strengthen placeholder card made standing gaps yield -> an existing pre-mortem SIZED-link card preserves durable pending-approval yielding on live and reload.
+  it('a durable pre-mortem approval yields on live and reload; a stale Run also yields, a current Run restores priority', async () => {
+    setSizedPremortemState(paulGraph());
+    const card = await press('agent-next-pre-mortem');
     const latest = table[0]!.pending_actions as PendingAction[];
     expect(latest.some(pa => pa.action.kind === 'apply_proposed_change'), 'the answer row carries its approval').toBe(true);
+    expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([
+      expect.objectContaining({ op: 'set_link_strength', path: `${PROSPECT.from}::${PROSPECT.to}` }),
+    ]);
     expect(card.action_bar!.priority.map(o => o.action_id)).not.toContain('set_deadline');
     expect(card.action_bar!.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
     coldStore();
@@ -406,11 +467,17 @@ describe('S-B slice 2a through the real routes', () => {
     setState('withheld', paulGraph());
     expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
   });
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: a Strengthen placeholder card exercised a dropped approval carrier -> a pre-mortem SIZED-link proposal preserves the persisted-carrier check instead of vacuously passing on an ask-only press.
   it('the live bar reads the PERSISTED approval carrier, like the reload (Codex r1 P1-1 on #2766)', async () => {
-    setState('withheld', paulGraph());
+    setSizedPremortemState(paulGraph());
     // The persistence floor (or a concurrent decline) leaves no approval on the row this turn writes.
     port.append.mockImplementation((w: SessionTurnWrite) => realStore.append({ ...w, pending_actions: [] }));
-    const card = await press('agent-next-strengthen');
+    const card = await press('agent-next-pre-mortem');
+    expect(card._agent?.tool_calls?.map(c => c.name)).toEqual(['propose_link_strengths']);
+    expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([
+      expect.objectContaining({ op: 'set_link_strength', path: `${PROSPECT.from}::${PROSPECT.to}` }),
+    ]);
+    expect(table[0]!.pending_actions).toEqual([]);
     expect(card.action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
     coldStore();
     expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(card.action_bar));
@@ -461,17 +528,16 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     const points = estimatePointsOf(actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
       analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY }));
     expect(points.map(p => p.factor_id)).toEqual(['far', 'near', 'znear']);
+    const signals = assembleGuidanceSignals({ request: 'turn', offeredSpecific: [], graph: source.graph,
+      analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result,
+      identityEvaluations: [], guidance: {}, explicitRequest: null, leaderLicensed: false });
+    const expectedCensus = olumiEstimatesFeedingResult({ goalPathFactors: signals['model.goal_path_factors'],
+      goalPathLinks: signals['model.goal_path_links'], driverIds: [] });
     const expected = id === 'bias_anchoring' ? [
       "A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
       ...[['Far', '25%'], ['Near', '15%'], ['Extra', '10%']].map(([label, figure]) => `- Olumi put ‘${label}’ at ${figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
       'Which of these would you check first?',
-    ].join('\n') : [
-      "Olumi's estimates that this result rests on:",
-      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
-    ].join('\n');
+    ].join('\n') : sayOlumiEstimates(expectedCensus).join('\n');
     expect(b.assistant_text).toBe(expected);
     expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
     expect(b.suggested_actions).toEqual([]);
@@ -516,3 +582,5 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     expect(offersOf(b.action_bar!).some(o => o.action_id === 'bias_anchoring' || o.action_id === 'check_estimates')).toBe(false);
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({ looksLikeJwt: () => true, verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity }));

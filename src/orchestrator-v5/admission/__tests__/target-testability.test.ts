@@ -1,3 +1,4 @@
+// Science 393023 LICENCE (a)/(b), 7 Oct: goal_path_unsized → goal_path_placeholder; endpoint questions stay pinned.
 /**
  * ⭐ DECISION-REPRESENTATION row 4 — "not target-testable" is said BEFORE any Run, on the one carrier (PTL A #77
  * 5912737934; AIQ words #77 5912882031 + rules #75 5913502854; R3 P1–P6 #77 5912916965; P0 PARTNER row 9 5913561360).
@@ -17,7 +18,6 @@ import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
 import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
-import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { olumiGuessedGoalLink, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Json = Record<string, any>;
@@ -55,7 +55,7 @@ describe('the verdict (0 LLM)', () => {
   it('Paul: no today\'s level (a) AND his goal is reached only through links nobody sized (c)', () => {
     expect(targetTestabilityOf(FIX.paul)).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [
       { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
-      { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings', link_to: 'securing funding',
+      { precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Investment firm meetings', link_to: 'securing funding',
         link: { from: 'investment_firm_meetings', to: 'securing_funding' }, links: [
         { from: 'investment_firm_meetings', to: 'securing_funding' },
         { from: 'angel_investor_meetings', to: 'securing_funding' },
@@ -81,7 +81,7 @@ describe('the verdict (0 LLM)', () => {
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
     const v = targetTestabilityOf(withToday(FIX.paul));
-    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_placeholder']);
   });
 
   it('CONTROL: £0 today AND every link into the goal sized IN £ by the user → testable', () => {
@@ -178,12 +178,11 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
       expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(guardAnalysisParticipation(g, { goalNodeId: 'mrr' }).graph));
     }
   });
-  it('RED: m1 as served → not testable, (c), naming the price', () => {
+  it('§(i): m1 as served keeps its churn placeholder; the converting price estimate clears (c)', () => {
     const v = targetTestabilityOf(M1);
-    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
       link: { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' }, links: [
       { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' },
-      { from: 'pro_plan_price', to: 'monthly_churn_rate' },
     ] }]);
     // RE-PINNED, RT-10 B′ R2: the verdict no longer caps the mode — m1 is admitted as it is without its target.
     expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(M1)).permitted_analysis_mode);
@@ -376,12 +375,20 @@ describe('row 3: a size construction credits to the user is no Olumi guess, even
  * ⭐ L4 / DL ruling 5929790081 (i) AT THE GOAL TARGET READER (CODEX CR #2446 5930402198): Olumi's estimate the user
  * ACCEPTED sizes a link for goal figures, so R3's m1 is testable once the user approves Olumi's sizes, with Olumi's origin
  * kept. Controls: unapproved Olumi sizes and a reviewed legacy placeholder still cap it, and the user's own size lifts it.
- * The accepted state is built by the writer's own rule (`sizedByApproval`) plus the review the writer records.
+ * Batch A ruling 6: the accepted fixture starts from genuinely sized estimates plus the review approval records.
  */
 describe('L4 (i): an ACCEPTED Olumi size licenses the goal target; unapproved Olumi sizes still cap it', () => {
   const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
   const review = { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' };
-  const accepted = (g: Json): Json => { const c = structuredClone(g); for (const e of c.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...sizedByApproval(e.provenance, e), reviewed_by_user: review }; return c; };
+  // Batch A ruling 6: start with genuine estimates; approval never sizes a placeholder.
+  const accepted = (g: Json): Json => {
+    const c = structuredClone(g);
+    for (const e of c.edges) if (olumiSized(e) && e.provenance) {
+      const { mean_projected: _projection, ...origin } = e.provenance;
+      e.provenance = { ...origin, magnitude: 'olumi_estimate', reviewed_by_user: review };
+    }
+    return c;
+  };
 
   it('PRECONDITION: m1 rests on Olumi’s unapproved size → not testable (P5)', () => {
     const v = targetTestabilityOf(M1);

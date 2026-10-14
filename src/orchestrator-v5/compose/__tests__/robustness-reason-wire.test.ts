@@ -1,5 +1,6 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 import assert from 'node:assert/strict';
-import { test, expect } from 'vitest';
+import { test, expect, it } from 'vitest';
 import { performance } from 'node:perf_hooks';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { readMayNameLeadingOptionFromResult } from '../../../orchestrator/context/constraint-feasibility.js';
@@ -201,7 +202,7 @@ for (const trailing of ['', ' ', '  ', '\t', '\r', '\u00a0', '\u2028', '\ufeff']
 const SPACES = ' '.repeat(20_000);
 for (const tail of ['x', ':)']) {
   for (const surface of ['reason', 'robustness-card', 'exact-copy'] as const) {
-    test(`timing no-separator ${surface} 20k spaces tail=${tail}`, () => {
+    it(`timing no-separator ${surface} 20k spaces tail=${tail}`, () => {
       const reason = `most-supported option${SPACES}${tail}`;
       const after = `the result${SPACES}${tail}`;
       const input = witness(surface === 'robustness-card' ? 'The checks are ready.' : reason, surface === 'exact-copy');
@@ -212,7 +213,7 @@ for (const tail of ['x', ':)']) {
       const { response } = enforce(input, false, null);
       const elapsed = performance.now() - start;
       console.info(`R2_TIMING ${surface} spaces tail=${tail}: ${elapsed.toFixed(2)} ms`);
-      assert.ok(elapsed < 50, `elapsed ${elapsed.toFixed(2)} ms`);
+      if (timingGated) { assert.ok(elapsed < 50, `elapsed ${elapsed.toFixed(2)} ms`); }
       expect(robustness(response).display_verdict_reason).toBe(surface === 'robustness-card' ? 'The checks are ready.' : after);
       if (surface !== 'reason') expect(bodyText(response)).toBe(after);
       expect(findLeaderClaims(response).length).toBe(0);
@@ -221,13 +222,13 @@ for (const tail of ['x', ':)']) {
 }
 
 for (const tail of ['x', ':)']) {
-  test(`timing 10k comma-space clauses tail=${tail}`, () => {
+  it(`timing 10k comma-space clauses tail=${tail}`, () => {
     const input = witness(`most-supported option${', '.repeat(10_000)}${tail}`, true);
     const start = performance.now();
     const { response } = enforce(input, false, null);
     const elapsed = performance.now() - start;
     console.info(`R2_TIMING comma-space tail=${tail}: ${elapsed.toFixed(2)} ms`);
-    assert.ok(elapsed < 50, `elapsed ${elapsed.toFixed(2)} ms`);
+    if (timingGated) { assert.ok(elapsed < 50, `elapsed ${elapsed.toFixed(2)} ms`); }
     expect(robustness(response).display_verdict_reason).toBe(NEUTRAL);
     expect(bodyText(response)).toBe(NEUTRAL);
     expect(findLeaderClaims(response).length).toBe(0);
@@ -235,14 +236,14 @@ for (const tail of ['x', ':)']) {
 }
 
 for (const collapsed of [false, true]) {
-  test(`timing assistant_text linear whitespace collapsed=${collapsed}`, () => {
+  it(`timing assistant_text linear whitespace collapsed=${collapsed}`, () => {
     const input = witness('The checks are ready.');
     input.assistant_text = `${collapsed ? 'Hire Marketing Manager leads. ' : ''}Hire Marketing Manager leads${SPACES}x`;
     const start = performance.now();
     const { response } = enforce(input, false);
     const elapsed = performance.now() - start;
     console.info(`R2_TIMING assistant collapsed=${collapsed}: ${elapsed.toFixed(2)} ms`);
-    assert.ok(elapsed < 50, `elapsed ${elapsed.toFixed(2)} ms`);
+    if (timingGated) { assert.ok(elapsed < 50, `elapsed ${elapsed.toFixed(2)} ms`); }
     expect(response.assistant_text).toBe(NEUTRAL);
     expect(findLeaderClaims(response).length).toBe(0);
   });

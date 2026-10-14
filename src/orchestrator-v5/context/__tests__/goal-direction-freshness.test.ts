@@ -62,7 +62,8 @@ describe('RT-10 — the direction a Run sent is part of its currentness', () => 
 
   it('R1: a Run that sent NO direction reads stale (goal_direction_changed) on an unchanged graph and hash', () => {
     const verdict = derive(churnGraph(), fact({ goal: snapshotGoal() }));
-    expect(verdict).toEqual({ freshness: 'stale', reason: 'goal_direction_changed', selected_fact_index: 0,
+    expect(verdict).toEqual({ selected_fact_row_id: null, run_revision: { value: null, source: 'legacy_unknown' },
+      basis: 'analysis_graph_hash_interim', freshness: 'stale', reason: 'goal_direction_changed', selected_fact_index: 0,
       graph_hash_at_run: HASH, current_graph_hash: HASH, computed_at: AT });
     expect(compareRunGoalUnitSnapshot(fact({ goal: snapshotGoal() }), churnGraph())).toBe('direction_changed');
   });

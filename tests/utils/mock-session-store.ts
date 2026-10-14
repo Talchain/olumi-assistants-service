@@ -121,6 +121,9 @@ export function createMockSessionStore(
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readRecentAppliedMutationFactsFor: async () => [],
+    readStatedObjectionFactsFor: async () => [],
+    // B restated goal: an empty ledger. The revised-draft gates read it as "no record of the construction" and refuse.
+    readCommittedTurnLedger: async () => ({ write_turn_ids: [], user_message_turn_ids: [], first_user_message: null, complete: true }),
     // Consistent with the empty fact reads above: this scenario has no
     // analysis. The read SUCCEEDS and reports none — which is the honest
     // default and NOT the same as the read failing. A default that threw would
@@ -143,9 +146,10 @@ export function createMockSessionStore(
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId) => ({
+      graph: await store.loadGraph(scenarioId), briefText: null, revision: 7,
+    }),
     // T1(d)'s optional snapshot reads still participate in the exhaustive
     // Required<SessionStore> alarm. The default scenario exists (above), is
     // unowned and has no graph/brief/restore marker; the empty fact reads

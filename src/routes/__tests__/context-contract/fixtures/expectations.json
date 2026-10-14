@@ -1,0 +1,9 @@
+{
+  "goal_id": "mrr",
+  "option_id": "raise_price_to_59",
+  "chance_display": "about 80%",
+  "driver_sentence": "It rests most on Olumi\u2019s own estimate of how strongly \u2018Pro price\u2019 affects \u2018Monthly Pro churn\u2019: if that effect is stronger than Olumi assumed, the chance falls. Is that estimate right?",
+  "probability": 0.7955,
+  "synthetic_scenario_revision": 4402,
+  "synthetic_run_revision": 4402
+}

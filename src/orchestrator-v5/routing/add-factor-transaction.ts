@@ -15,10 +15,11 @@
  *   · then ONE `add_edge` per factor, new factor → its target, Olumi's PLACEHOLDER (`hypothesisEdgeValue`: default
  *     strength, `defaulted`, `cee_hypothesis`) — never `user_specified`: nobody sized the link.
  *
- * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to an outcome or a non-lever factor (one no option sets:
- * observable or external) — the add-option new-factor rule (`isAffectsTarget`) without risks or the goal, and NEVER the
- * goal (no validator admits factor → goal), an option, a decision, a risk or a lever the options set
- * (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing built.
+ * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to the goal, an outcome or a non-lever factor (one no option
+ * sets: observable or external) — the add-option new-factor rule (`isAffectsTarget`) less risks — and NEVER an option, a
+ * decision, a risk or a lever the options set (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing
+ * built. (Recovery Batch B, B1: the goal was refused here while the drafter wrote factor → goal itself and the add-option
+ * door took it; Paul's hiring test, 11 Oct, was refused "a new factor directly to the goal".)
  *
  * THE USER'S FIGURE rides the hold, not the ops: a CEE-written member (`GM_HELD_USER_TODAY_KEY`) the confirm stamps into
  * each factor's `add_node` after the re-referee and before the apply (`stampNewUserTodayLevels`), exactly where the
@@ -27,10 +28,13 @@
 import { z } from 'zod';
 
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
+import { provenanceOf } from '../../cee/provenance/provenance-of.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
-import { hypothesisEdgeValue, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
+import { StoredInterventionRange } from '../intervention-range.js';
+import { rangePointEstimate } from '../../utils/amount-range.js';
+import { hypothesisEdgeValue, isAffectsTarget, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
 
 /** At most this many new factors in ONE change (the ruling: 1..3). */
 export const MAX_FACTORS_PER_ADD = 3;
@@ -80,13 +84,19 @@ export type AddFactorBuildResult =
 const CANONICAL_ID_RE = /^[a-z0-9_:-]+$/;
 const fail = (reason: AddFactorSkipReason): AddFactorBuildResult => ({ matched: false, reason });
 
-/** What a new factor may drive: an outcome or a non-lever factor (one no option sets). Never the goal, an option, decision, risk or lever. */
+/**
+ * What a new factor may drive: the goal, an outcome or a non-lever factor (one no option sets). Never an option, decision,
+ * risk or lever.
+ *
+ * ⭐ ONE RULE (Recovery Batch B, B1): DERIVED from the add-option new-factor rule (`isAffectsTarget`), never restated, so
+ * the two doors that add a factor cannot disagree on a target again. The served drafter writes factor → goal itself
+ * (`build-model.ts`: "straight to the goal metric"; `admit-model.ts` keeps it, its factor → goal repair having been removed
+ * by ruling) and the analysis runs it. The one difference is kept and named: a risk, which this door has never taken
+ * (Canonical #72's door rule; not in Batch B's scope).
+ */
 export function isNewFactorTarget(node: { kind: string; category?: string } | undefined): boolean {
-  if (node === undefined) return false;
-  // Canonical (#72, the door's review): NOT the goal. factor → goal is in neither validator allow-list (v3-validator,
-  // graph-validator ALLOWED_EDGES) and no served path has run it; an outcome or a non-lever factor is.
-  if (node.kind === 'outcome') return true;
-  return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
+  if (node === undefined || node.kind === 'risk') return false;
+  return isAffectsTarget(node);
 }
 
 /** Build the atomic add-factor batch against the current graph, or a classified refusal. A refusal builds nothing. */
@@ -182,8 +192,8 @@ export const USER_TODAY_SOURCE = USER_EDIT_SOURCE;
  * the change adds two factors or more, so Olumi's PAIRING was shown on the approval card with their own words (`quote`)
  * and their approval made it theirs. The hold is the durable record (the receipt schema is strict).
  */
-export type UserTodayBasis = 'written_about' | 'confirmed_by_approval';
-export const USER_TODAY_BASES: readonly UserTodayBasis[] = ['written_about', 'confirmed_by_approval'];
+export type UserTodayBasis = 'written_about' | 'confirmed_by_approval' | 'olumi_estimate';
+export const USER_TODAY_BASES: readonly UserTodayBasis[] = ['written_about', 'confirmed_by_approval', 'olumi_estimate'];
 /** The longest quote a hold carries (the card shows at most `FIGURE_QUOTE_MAX` plus its ellipses). */
 export const USER_TODAY_QUOTE_MAX = 400;
 
@@ -195,6 +205,11 @@ export interface UserTodayLevel {
   readonly quote?: string;
 }
 
+// Validate this writer's exact held-record stamps. Display authorship belongs to provenanceOf.
+const olumiTodayStamp = z.object({ source: z.literal('cee_inference'), extractionType: z.literal('inferred') }).passthrough();
+const userTodayStamp = z.object({ source: z.literal(USER_TODAY_SOURCE), extractionType: z.literal('explicit').optional() }).passthrough();
+const isOlumiToday = (os: unknown): boolean => olumiTodayStamp.safeParse(os).success;
+
 /**
  * Whether `os` is exactly the ONE framing rule's output (`framedObservedState`, the stated-baseline shape
  * `isStatedTodayObservedState` pins) re-stamped as the user's: `{ value: raw / cap, raw_value, cap, declared_scale,
@@ -202,10 +217,90 @@ export interface UserTodayLevel {
  */
 export function isUserTodayObservedState(os: unknown): boolean {
   if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
-  const o = os as Record<string, unknown>;
-  if (o.source !== USER_TODAY_SOURCE) return false;
+  const { range, ...o } = os as Record<string, unknown>;
+  if (o.source !== USER_TODAY_SOURCE && !isOlumiToday(o)) return false;
+  if (!isOlumiToday(o) && !userTodayStamp.safeParse(o).success) return false;
+  // Recovery Batch B (L6): a range rides only beside the user's own figure, and only as `isStatedLevelRange` admits it.
+  if (range !== undefined && !isStatedLevelRange(range, o)) return false;
   // The shape rule is the stated-baseline one, verbatim: only the source differs.
-  return isStatedTodayObservedState({ ...o, source: 'brief_extraction' });
+  // Signed raw quantities are retained without inventing a zero-based frame. Readiness still owns convertibility.
+  const shape = { ...o, source: 'brief_extraction', extractionType: 'explicit' };
+  if (typeof o.value === 'number' && Number.isFinite(o.value) && o.value < 0 && o.cap === undefined) {
+    return isStatedTodayObservedState({ ...shape, value: 0 });
+  }
+  return isStatedTodayObservedState(shape);
+}
+
+/**
+ * ⭐ RECOVERY BATCH B (SYS3 TRACE L6) — A LEVEL THE USER STATED AS A RANGE IS STORED AS A RANGE.
+ *
+ * Paul, 11 Oct: "currently they spend between 20% and 30% of their time on non-development tasks", then "Let's go with
+ * 25%." The range was never stored: no door could carry it. It now rides `observed_state.range` beside the figure the
+ * user CHOSE, in the existing schemas 0.66 `InterventionRangeSchema` shape (`intervention-range.ts`): `{low, high,
+ * meaning, source, source_quote}`, in the figure's own (raw) units, with its own author — never a new store.
+ *
+ *   · the user's own range: `source` is the user's literal (`USER_TODAY_SOURCE`) and `source_quote` the ONE sentence of
+ *     theirs that states both ends (the door checks that sentence; this rule requires that one is carried);
+ *   · `meaning: 'min_max'`: the ends as the user wrote them ("between 20% and 30%"), read as bounds and nothing more —
+ *     never `likely_range`, which claims the middle half of what is likely (the contract's meanings are likely_range,
+ *     min_max, at_most, at_least). Nothing samples a level range, so the analysis is unchanged (the wire copy drops it:
+ *     `withoutStatedLevelRanges`);
+ *   · it CONTAINS the user's chosen figure (`low ≤ figure ≤ high`); never a midpoint: the figure beside it is the one the
+ *     user wrote, or there is no range.
+ */
+export function isStatedLevelRange(range: unknown, os: Readonly<Record<string, unknown>>): boolean {
+  if (!isUserStatedRange(range)) return false;
+  const r = StoredInterventionRange.parse(range);
+  const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+  return typeof figure === 'number' && Number.isFinite(figure) && r.low <= figure && figure <= r.high;
+}
+
+/**
+ * The author half of {@link isStatedLevelRange}: a stored range the user stated, attested and quoted, asked of the one
+ * provenance authority (C), never a brief's type-less stamp. Recovery Batch E (run 4 hiring step 13): a factor holding one
+ * is never reported as a range Olumi chose (`ranges_added_for_analysis`).
+ */
+export function isUserStatedRange(range: unknown): boolean {
+  const parsed = StoredInterventionRange.safeParse(range);
+  if (!parsed.success) return false;
+  const r = parsed.data;
+  const author = provenanceOf({ value: r });
+  return r.meaning === 'min_max' && author.origin === 'human' && author.role === 'verified' && author.stampOnly !== true
+    && typeof r.source_quote === 'string' && r.source_quote.trim() !== '' && r.source_quote.length <= USER_TODAY_QUOTE_MAX;
+}
+
+/**
+ * Row5 RULING (DL 12 Oct 13:1xZ): the point beside a stored level range. `stated_figure`: the user's own figure inside
+ * their own range (L6). `midpoint`: Olumi's point from a range someone stated (`rangePointEstimate`, the ONE point rule),
+ * never the user's figure. Otherwise none.
+ */
+export function levelRangePointBasis(os: Readonly<Record<string, unknown>>): 'stated_figure' | 'midpoint' | undefined {
+  const parsed = StoredInterventionRange.safeParse(os.range);
+  if (!parsed.success) return undefined;
+  // Unverified user material can carry an inference stamp; origin belongs to the provenance authority.
+  if (provenanceOf({ value: os }).origin === 'human' && isStatedLevelRange(os.range, os)) return 'stated_figure';
+  const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+  const olumis = os.source === 'cee_inference' && os.user_material_unverified !== true;
+  return olumis && figure === rangePointEstimate({ min: parsed.data.low, max: parsed.data.high }) ? 'midpoint' : undefined;
+}
+
+/**
+ * The ANALYSIS wire copy without any stated level range (Batch B, L6): the range changes no compute, so the request PLoT
+ * receives is byte-identical with or without it. Identity when no node carries one; the stored graph is never touched.
+ */
+export function withoutStatedLevelRanges<G>(graph: G): G {
+  if (graph === null || typeof graph !== 'object') return graph;
+  const nodes = 'nodes' in graph ? graph.nodes : undefined;
+  if (!Array.isArray(nodes)) return graph;
+  const carries = (n: unknown): boolean => n !== null && typeof n === 'object'
+    && (n as { observed_state?: unknown }).observed_state !== null && typeof (n as { observed_state?: unknown }).observed_state === 'object'
+    && Object.hasOwn((n as { observed_state: object }).observed_state, 'range');
+  if (!nodes.some(carries)) return graph;
+  return { ...graph, nodes: nodes.map((n) => {
+    if (!carries(n)) return n;
+    const { range: _range, ...os } = (n as { observed_state: Record<string, unknown> }).observed_state;
+    return { ...(n as object), observed_state: os };
+  }) } as G;
 }
 
 /**
@@ -223,6 +318,7 @@ export function readUserTodayMember(raw: unknown): readonly UserTodayLevel[] | u
     if (basis !== undefined && !(USER_TODAY_BASES as readonly unknown[]).includes(basis)) return undefined;
     if (quote !== undefined && (typeof quote !== 'string' || quote.trim() === '' || quote.length > USER_TODAY_QUOTE_MAX)) return undefined;
     if (basis === 'confirmed_by_approval' && quote === undefined) return undefined;
+    if (isOlumiToday(os) !== (basis === 'olumi_estimate')) return undefined;
     out.push({
       factor_id: id,
       observed_state: { ...(os as Record<string, unknown>) },
@@ -247,7 +343,7 @@ export function stampNewUserTodayLevels<T extends PatchOperation>(
   if (new Set(levels.map((l) => l.factor_id)).size !== levels.length) return { ok: false };
   const out = [...operations];
   for (const l of levels) {
-    if (!isUserTodayObservedState(l.observed_state)) return { ok: false };
+    if (!isUserTodayObservedState(l.observed_state) || isOlumiToday(l.observed_state) !== (l.basis === 'olumi_estimate')) return { ok: false };
     const at = out.flatMap((o, i) => (o.op === 'add_node' && o.path === l.factor_id ? [i] : []));
     if (at.length !== 1) return { ok: false };
     const value = out[at[0]!]!.value;

@@ -1,3 +1,4 @@
+import { preserveRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
@@ -62,7 +63,8 @@ import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/
  * NO PROSE — EXCEPT THE RUN'S OWN DELIVERED RECORD (amended 6 Oct, DL ruling #87, SD-1 Slice R). No `assistant_text`,
  * no chips, and no coaching or review cards COMPOSED HERE. The one exception is `current_read.delivered_record`: the
  * Phase 3 blocks the selected Run's turn already DELIVERED, recorded as that Run's `run_delivery` fact (schemas 0.79),
- * served verbatim or not at all (serve-or-omit under this read's own licence; never re-worded, never re-composed). The
+ * served verbatim or not at all under the leader licence, after removing an unlicensed legacy DOMINANT_DRIVER
+ * measured tail using the saved Run's own evidence. No coaching is re-composed. The
  * original rule, for everything else:
  * No `assistant_text`, no coaching, no review cards, no chips. The
  * V5 leader-claim wire gate enforces over `WIRE_ENFORCED_PROSE_FIELDS =
@@ -111,6 +113,8 @@ import {
   deriveDecisionContextGraphHash,
   loadScenarioAnalysisFactsForRead,
 } from '../orchestrator-v5/build-turn-context.js';
+import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import { attachComputedAt } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
@@ -150,18 +154,20 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import type { FactorEnrichmentT } from '../schemas/enrichment.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
+import { readStoredOptionParticipation, runOptionSetForCopy, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom, type ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { readRunRecordingMarker, type RunRecordingMarker } from '../orchestrator-v5/run-recording.js';
-import { deliveredRecordWithinLicence } from './delivered-record-licence.js';
+import { deliveredRecordWithinLicence, deliveredRecordWithThresholdLicence } from './delivered-record-licence.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
+import { projectCanonicalAnalysisView, type CanonicalAnalysisView } from './canonical-analysis-view.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
+  readonly canonical_analysis_view: CanonicalAnalysisView;
   /** Missing secondary captures for this persisted Run; omitted on the successful path. */
   readonly run_recording?: RunRecordingMarker;
   /** Internal opt-in for the Agent review press; never forwarded by the graph route. */
@@ -220,6 +226,8 @@ export interface ScenarioAnalysisRead {
    * ABSENT when the fact records none (an older Run): a consumer then may not infer a cause from the node.
    */
   readonly analysis_option_participation?: StoredOptionParticipation;
+  /** The SAME selected fact's complete option roster. The display block intentionally omits input_snapshot. */
+  readonly analysis_run_option_set?: RecordedRunOptionSet;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
    * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
@@ -252,12 +260,15 @@ export function identityRunUseWire(facts: readonly unknown[]): IdentityRunUseWir
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
+  canonical_analysis_view: projectCanonicalAnalysisView({}),
   current_read: projectCurrentRead({ analysisState: null }),
   analysis_state: null,
   analysis_result: null,
 });
 
 export interface ReadScenarioAnalysisParams {
+  /** From the same scenario SELECT as graph; no revision-at-Run is inferred. */
+  readonly revision?: number;
   /** Read the selected Run's stored questions internally, without widening transport enrichment. */
   readonly includeFactorEnrichments?: true;
   /** An open scope issue restricts claims without rewriting the saved Run or its freshness. */
@@ -282,12 +293,15 @@ export interface ReadScenarioAnalysisParams {
 export async function readScenarioAnalysis(
   params: ReadScenarioAnalysisParams,
 ): Promise<ScenarioAnalysisRead> {
+  const notAnswered = (): ScenarioAnalysisRead => ({
+    ...NOT_ANSWERED, canonical_analysis_view: projectCanonicalAnalysisView({ revision: params.revision }),
+  });
   try {
     // A scenario with no graph has nothing for a hash to anchor to, so the
     // freshness derivation could only ever return `unknown /
     // current_graph_hash_unavailable`. Saying "not answered" is the same
     // information without spending a store read on it.
-    if (params.graph === null || params.graph === undefined) return NOT_ANSWERED;
+    if (params.graph === null || params.graph === undefined) return notAnswered();
 
     // ⭐ CS-AN-2 — THE FRESHNESS HASH IS THE CANONICAL ONE, THE HASH THE RUN
     // STAMPED. `loadScenarioSnapshotForRunAnalysis` hands run_analysis
@@ -371,7 +385,13 @@ export async function readScenarioAnalysis(
     // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
     const currentnessRead = readScenarioAnalysisClaimSafetyFact(factSet, params.scenarioId);
-    const facts = durableAuthority ? factSet.facts : hotWindow.facts;
+    const storedFacts = durableAuthority ? factSet.facts : hotWindow.facts;
+    // The raw stored envelope is still available here. Gate once before any selector or projection.
+    const facts = storedFacts.map(fact => {
+      if (fact.fact_type !== 'run_analysis') return fact;
+      const result = withReadTimeHorizonGate(fact.result, params.graph, fact.result.enrichment);
+      return result === fact.result ? fact : preserveRunAnalysisOccurrence(fact, { ...fact, result });
+    });
     const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
@@ -379,6 +399,7 @@ export async function readScenarioAnalysis(
       priorFactsWithTurn,
       legacyEditFacts: legacyEditFactsForFreshness(factSet),
       currentGraph: params.graph,
+      currentScenarioRevision: params.revision,
     });
 
     // The result block first, so the verdict's `leader_claim` can be composed
@@ -446,6 +467,7 @@ export async function readScenarioAnalysis(
           priorFacts: facts,
           currentGraphHash,
           currentGraph: params.graph,
+          currentScenarioRevision: params.revision,
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
@@ -458,6 +480,7 @@ export async function readScenarioAnalysis(
           runFactBinding: {
             scenarioId: params.scenarioId,
             selectedResult: historical.fact.result,
+            selectedFact: historical.fact,
           },
         }),
         // ⚠ NOT hardcoded `false`. The entitlement is read from the SELECTED
@@ -559,16 +582,19 @@ export async function readScenarioAnalysis(
     ).response;
     const boundResult = builtResult === null ? null
       : ((licensed.blocks as unknown[] | undefined)?.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as typeof builtResult | undefined) ?? null;
+    const horizonHeld = (boundResult as { enrichment?: { inference_warnings?: readonly { code?: unknown }[] } } | null)
+      ?.enrichment?.inference_warnings?.some(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED) === true;
     const runDelta = licensed.run_delta as typeof builtRunDelta;
     // ⭐ 0.79 SD-1 Slice R (DL ruling #87, option A): what the selected Run's turn DELIVERED (its Phase 3 blocks and
     // `analysis_ready` options), so a reload or a second device says what the Run's turn said. The agent lane records it
     // as a `run_delivery` fact after its final egress; the NEWEST one for this Run is read. Served only for the same
     // delivered fact as `run_delta` (no newer Run withholding), only while the Run is current, only while bound to THIS
-    // fact (its run_id and the graph it ran against), and only if this read's own licence leaves every block unchanged.
-    // SERVE OR OMIT: a failed read, a corrupt row or a re-licensed block omits it; the read never ships a re-worded copy.
+    // fact (its run_id and the graph it ran against). Correct only an unlicensed legacy measured-threshold tail;
+    // the leader gate still serves or omits, with no leader rewriting. A failed read or corrupt row omits it.
     const deliveredRecord = await (async () => {
       // A selected `fact` is already a FRESH Run (`selected` above); `current_read` re-gates on `complete_current`.
-      if (fact === null || boundResult === null || newerClaimWithholds) return undefined;
+      // Delivered cards can contain stored chance prose. They are serve-or-omit, so cannot outlive the horizon licence.
+      if (fact === null || boundResult === null || newerClaimWithholds || horizonHeld) return undefined;
       const runId = fact.result.run_id;
       if (runId === undefined || store.readNewestRunDeliveryFor === undefined) return undefined;
       let delivery: Awaited<ReturnType<NonNullable<typeof store.readNewestRunDeliveryFor>>>;
@@ -586,8 +612,9 @@ export async function readScenarioAnalysis(
         );
         return undefined;
       }
-      const rec = delivery?.result.record;
-      if (rec === undefined || rec.run_id !== runId || rec.graph_hash !== fact.result.graph_hash_at_run) return undefined;
+      const savedRec = delivery?.result.record;
+      if (savedRec === undefined || savedRec.run_id !== runId || savedRec.graph_hash !== fact.result.graph_hash_at_run) return undefined;
+      const rec = deliveredRecordWithThresholdLicence(savedRec, fact.result.enrichment ?? {});
       const gated = enforceLeaderLicenceAtFinalEgress<Record<string, unknown>>(
         { blocks: rec.phase3_blocks as unknown[] },
         {
@@ -634,6 +661,11 @@ export async function readScenarioAnalysis(
       graphHash,
     ) as AnalysisReadyPayload;
     return {
+      canonical_analysis_view: projectCanonicalAnalysisView({
+        revision: params.revision, graph: params.graph,
+        runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
+        derivation, analysisState, analysisReady, currentResult: boundResult,
+      }),
       ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
@@ -676,13 +708,18 @@ export async function readScenarioAnalysis(
             // The ONE reader both legs use (the Agent turn reads this same key through it too, DL 5887273384): only an
             // array the published contract accepts is carried, `[]` included; anything else is not recorded.
             ...(() => {
+              // Exact stored 0/1 decisions are target claims too; they cannot bypass the result's current horizon gate.
+              if (horizonHeld) return {};
               const certainty = readStoredGoalCertainty(fact.result.goal_certainty);
               return certainty === undefined ? {} : { analysis_goal_certainty: certainty };
             })(),
             // 52f8cd: the Olumi options the selected Run left out, and why — the ONE reader both legs use.
             ...(() => {
               const participation = readStoredOptionParticipation((fact.result as { option_participation?: unknown }).option_participation);
-              return participation === undefined ? {} : { analysis_option_participation: participation };
+              return {
+                ...(participation === undefined ? {} : { analysis_option_participation: participation }),
+                analysis_run_option_set: runOptionSetForCopy(fact.result, participation, params.graph),
+              };
             })(),
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
@@ -701,6 +738,6 @@ export async function readScenarioAnalysis(
       },
       'Scenario graph read — analysis composition failed; graph still served without it',
     );
-    return NOT_ANSWERED;
+    return notAnswered();
   }
 }

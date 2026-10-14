@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../../tests/helpers/scaling-ratio.js';
 import { describe, expect, it } from 'vitest';
 import { composeReplyShape, sentenceMultiset, type FaceObligation } from '../compose-reply.js';
 import { LINK_RELATION, namedUnsizedLinks, QUOTED_LABEL, THROUGH_RELATION, UNSIZED_CAUSE } from '../named-unsized-links.js';
@@ -110,7 +111,8 @@ describe('D-03: the one composer moves narrator restatements by directed link id
   });
 });
 
-describe('timing: all new bounded regexes, 5k → 20k, ratio < 8×', () => {
+describe('timing: all new bounded regexes, 5k → 40k, ratio < 22×', () => {
+  // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
   const rows: [string, (s: string) => unknown, (n: number) => string][] = [
     ['cause', s => UNSIZED_CAUSE.test(s), n => 'x'.repeat(n)],
     ['quoted labels', s => [...s.matchAll(QUOTED_LABEL)], n => '‘'.repeat(n)],
@@ -118,13 +120,13 @@ describe('timing: all new bounded regexes, 5k → 20k, ratio < 8×', () => {
     ['through relation', s => THROUGH_RELATION.test(s), n => ' '.repeat(n)],
     ['word boundary', s => namedUnsizedLinks(s, new Set(['support→loss']), graph), n => 'Support cost'.repeat(Math.ceil(n / 12))],
   ];
-  it.each(rows)('%s', (name, test, make) => {
+  timingIt.each(rows)('%s', (name, test, make) => {
     const batch = (s: string, calls: number): number => {
       const start = performance.now();
       for (let i = 0; i < calls; i++) test(s);
       return performance.now() - start;
     };
-    const small = make(5_000), large = make(20_000);
+    const small = make(5_000), large = make(40_000);
     batch(large, 10);
     const calls = Math.min(50_000, Math.max(1, Math.ceil(40 / Math.max(batch(large, 10) / 10, 0.001))));
     let tSmall = Infinity, tLarge = Infinity;
@@ -132,8 +134,8 @@ describe('timing: all new bounded regexes, 5k → 20k, ratio < 8×', () => {
       tSmall = Math.min(tSmall, batch(small, calls));
       tLarge = Math.min(tLarge, batch(large, calls));
     }
-    console.info(`TIMING ${name}: 5k ${tSmall.toFixed(3)}ms → 20k ${tLarge.toFixed(3)}ms; ratio ${(tLarge / tSmall).toFixed(3)}×; ${calls} calls`);
-    expect(tLarge / Math.max(tSmall, 0.05)).toBeLessThan(8);
+    console.info(`TIMING ${name}: 5k ${tSmall.toFixed(3)}ms → 40k ${tLarge.toFixed(3)}ms; ratio ${(tLarge / tSmall).toFixed(3)}×; ${calls} calls`);
+    expect(tLarge / Math.max(tSmall, 0.05)).toBeLessThan(22);
   });
 });
 

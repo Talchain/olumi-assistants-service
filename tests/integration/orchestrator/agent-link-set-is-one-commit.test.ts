@@ -1,3 +1,4 @@
+import type { AgentToolContext } from '../../../src/orchestrator-v5/agent-lane/runtime/agent-tools.js';
 /**
  * ⭐ A SET OF LINK STRENGTHS IS ONE APPROVAL AND ONE COMMIT, END TO END (DL #72 5871594233; seam Canonical 5871633483,
  * DL 5871661097; rows Canonical's five).
@@ -20,6 +21,8 @@ import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { edgeStrengthProvenance, earnsAuthorshipCredit } from '../../../src/cee/graph-readiness/obligation-provenance.js';
+import { linkSizing } from '../../../src/cee/magnitude/link-sizing.js';
 
 const SCENARIO_ID = '64c5eccc-0000-4000-8000-000000000001';
 
@@ -101,6 +104,8 @@ const L = {
 } as const;
 type Key = keyof typeof L;
 const STRONG: Key[] = ['capacityQuality', 'workloadHours', 'qualityHours', 'hoursFocus'];
+/** A link as the door names it in `left_out_unknown_origin`. */
+const pairName = (k: Key): string => `"${L[k][0]}" \u2192 "${L[k][1]}"`;
 const MODERATE: Key[] = ['capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'];
 const setOf = (keys: readonly Key[]) => keys.map((k) => ({
   from_label: L[k][0], to_label: L[k][1], strength: STRONG.includes(k) ? 'strong' : 'moderate' }));
@@ -121,22 +126,32 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   });
 
   let doorCalls = 0;
-  const agent = (userTurnText: string, store = new ProposalStore()) => {
+  const agent = (userTurnText: string, store = new ProposalStore(), interaction: Partial<AgentToolContext> = {}) => {
     const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
     doorCalls = 0;
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-agent'); },
     });
-    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText } };
+    // ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it:
+    // user when it quotes the user; olumi, with Olumi's own basis, when it does not.
+    const realPropose = caps.proposeLinkStrengths!.bind(caps);
+    caps.proposeLinkStrengths = (c, a) => realPropose(c, { ...a, links: Array.isArray(a.links)
+      ? a.links.map((l) => typeof (l as { from_words?: unknown }).from_words === 'string' ? { origin: 'user', ...l }
+        : { origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model', ...l }) : a.links } as never);
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText, ...interaction } };
   };
 
-  it('RED (Paul\'s delegated set: "I\'m aligned with these. Please make these updates."): ONE proposal, ONE commit, each link Olumi\'s estimate — never his', async () => {
+  it('RED (Paul\'s delegated set: "I\'m aligned with these. Please make these updates."): ONE proposal, ONE commit, every placeholder sized as Olumi\'s accepted estimate (D1)', async () => {
     const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
     const p = await caps.proposeLinkStrengths!(ctx, { links: setOf([...STRONG, ...MODERATE]) as never, rationale: 'the user agreed to Olumi\'s recommended strengths' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     // His own link already sits in "strong": an estimate never replaces it, and it is said, not written.
     expect(p.already, JSON.stringify(p)).toEqual([expect.stringContaining('"Human assistant capacity" → "Delegation quality" is already strong, as the user set it')]);
-    expect(String(p.public_label)).toMatch(/^Record these 7 link strengths/);
+    // D1 (DL ruling 12 Oct, Batch D, amending Batch A ruling 1/5 · L4 (c)): a placeholder has no current band, so the
+    // three 0.5 defaults Olumi called "strong" are no longer reviews ("Record 4 link strengths and 3 reviews"): all seven
+    // are Olumi's first estimates. The count still follows what is stored (A′ (b), AIE text contract #94 6115788987).
+    expect(String(p.public_label)).toMatch(/^Record these 7 link strengths: /);
+    expect(String(p.public_label)).not.toContain('kept as it is');
     expect(String(p.public_label)).not.toContain('your estimate');
     const before = JSON.stringify(edge('capacityQuality'));
     const agreed = ['workloadHours', 'qualityHours', 'hoursFocus', 'capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'] as const;
@@ -145,10 +160,12 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size, 'seven links, ONE commit').toBe(1);
     expect(doorCalls, 'ONE door call').toBe(1);
-    // ⛔ R3 DEFECT 1 (DL GO, 1 Oct): Olumi's 0.5 placeholders already sit in "strong" [0.4, 0.7), so approving strong KEEPS
-    // them at 0.5 (σ too) and only sizes + reviews them (was: re-set to the 0.55 midpoint, staling the Run for nothing).
+    // D1: Olumi's 0.5 placeholders read "strong" [0.4, 0.7) only because of their default, so approving strong SIZES them
+    // at the band's 0.55 midpoint (Batch A ruling 1 kept them at 0.5 as a review, and the link stayed unsized). R3 DEFECT 1
+    // still holds for a SIZED link: the next test holds Olumi's sized estimate byte-equal on the same approval.
     for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) {
-      expect(edge(k).strength, k).toEqual(was[k]!.strength);
+      expect(was[k]!.strength.mean, `${k}: precondition, its 0.5 default`).toBe(0.5);
+      expect(edge(k).strength.mean, k).toBe(0.55);
     }
     // 0.5 is not "moderate" [0.2, 0.4): those links MOVE, to the band's midpoint.
     for (const k of ['capacityOverhead', 'aiUseQuality'] as const) expect(edge(k).strength.mean, k).toBe(0.3);
@@ -163,18 +180,13 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       // the agreement recorded as `reviewed_by_user` with Olumi's band.
       const { natural_effect: _n, ...kept } = was[k]!.provenance ?? {};
       const { reviewed_by_user: review, ...rest } = (e.provenance ?? {}) as Record<string, unknown>;
-      // L4 (DL 5929790081): approval SIZES a link nobody sized — Olumi's default becomes Olumi's estimate, accepted.
+      // Batch A rulings 4–5: only a newly adopted different mean sizes a placeholder (D1: every one here is).
       // Authorship (`source`, `reasoning`, display) is still kept byte for byte.
       const unsized = (kept as Record<string, unknown>).magnitude === undefined || (kept as Record<string, unknown>).magnitude === 'olumi_placeholder';
-      expect(rest, k).toEqual(unsized ? { ...kept, magnitude: 'olumi_estimate' } : kept);
-      // A link KEPT in its band (strong) records the review alone — Olumi's band is never applied or stored as the user's
-      // (DEFECT 1); a link MOVED by Olumi's band (moderate) records that band, as the adoption always has.
-      if ((STRONG as readonly string[]).includes(k)) {
-        expect(review, k).toMatchObject({ intent: 'confirm' });
-        expect(review as Record<string, unknown>, k).not.toHaveProperty('band');
-      } else {
-        expect(review, k).toMatchObject({ intent: 'confirm', band: 'moderate' });
-      }
+      expect(unsized, `${k}: precondition, a placeholder`).toBe(true);
+      expect(rest, k).toEqual({ ...kept, magnitude: 'olumi_estimate' });
+      // Every link records Olumi's band it was sized at, as the adoption always has — never stored as the user's.
+      expect(review, k).toMatchObject({ intent: 'confirm', band: (STRONG as readonly string[]).includes(k) ? 'strong' : 'moderate' });
       expect(e.provenance_display, k).toEqual(was[k]!.display);
       expect(e.defaulted, k).toBe(true);
     }
@@ -186,10 +198,12 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js');
     const { withoutAgentDirections } = await import('../../../src/orchestrator-v5/agent-lane/write-outcome.js');
     for (const k of agreed) {
+      // D1: no placeholder stays unsized on Olumi's band; each is stored as Olumi's accepted estimate and says so.
       expect(linkSizing(edge(k)), k).toBe('olumi_accepted');
       expect(String(out.follow_up), k).toContain(acceptedOlumiEstimateSentence(`"${L[k][0]}"`, `"${L[k][1]}"`));
     }
-    expect(String(out.follow_up).match(/You accepted Olumi's estimate/g)).toHaveLength(agreed.length);
+    expect(String(out.follow_up).match(/You accepted Olumi's estimate/g)).toHaveLength(7);
+    expect(String(out.follow_up)).not.toMatch(/still unsized|review/i);
     expect(String(out.follow_up)).not.toContain('your estimate');
     expect(withoutAgentDirections(String(out.follow_up)).dropped).toEqual([]);
   });
@@ -199,7 +213,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
    * names (μ 0.6, σ 0.3, `olumi_estimate` + its `natural_effect`, band strong) was re-set to the band's midpoint (0.55,
    * σ 0.275, `natural_effect` dropped): a no-change approval moved the figure and staled the Run. Approving the band a
    * sized estimate already sits in is a REVIEW: the figure, its spread and Olumi's sizing note are held byte-equal, and
-   * only the review is recorded. (A PLACEHOLDER is still sized to the band on approval — the row above, L4.)
+   * only the review is recorded. (A placeholder is not sized, so it has no band to sit in: D1 sizes it, test above.)
    */
   it('RED (R3 DEFECT 1): a SIZED Olumi estimate already in the named band is held byte-equal — the approval records only the review', async () => {
     const e = edge('workloadHours') as Edge & Record<string, unknown>;
@@ -254,6 +268,11 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     e.effect_direction = 'positive';
     return JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
   };
+  // The inspector/review card grounds this shorthand; model argument labels do not.
+  const workloadReview = () => ({
+    grounded_selection: { element_ids: [], unresolved: 'none' as const },
+    grounded_links: [{ from: edge('workloadHours').from, to: edge('workloadHours').to }],
+  });
   const NAMED = 'Keep Delegable routine workload strong';
   const named = [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1], strength: 'strong', from_words: NAMED }];
   const expectHeldByteEqual = (before: Record<string, unknown>, hashBefore: string) => {
@@ -271,7 +290,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   it('RED (#2473 P1, chat words): the user NAMES the band a sized estimate already sits in — approval holds it byte-equal', async () => {
     const before = sizedEstimate();
     const hashBefore = currentHash();
-    const { caps, ctx } = agent(NAMED);
+    const { caps, ctx } = agent(NAMED, undefined, workloadReview());
     const p = await caps.proposeLinkStrengths!(ctx, { links: named as never, rationale: 'the user named the band it already sits in' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     // M1 Accept receipt (Codex pre-review P2): naming the band is review, so the kept figure stays Olumi's — never "yours".
@@ -291,7 +310,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { proposalPendingAction, rehydrateProposals } = await import('../../../src/orchestrator-v5/agent-lane/durable-proposal.js');
     const before = sizedEstimate();
     const hashBefore = currentHash();
-    const first = agent(NAMED);
+    const first = agent(NAMED, undefined, workloadReview());
     const p = await first.caps.proposeLinkStrengths!(first.ctx, { links: named as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const offered = first.store.get(String(p.proposal_id))!;
@@ -340,7 +359,7 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   it('CONTROL (#2473): a named band that MOVES the link still writes it — the user\'s band, its spread', async () => {
     sizedEstimate();
     const words = 'Make Delegable routine workload very strong';
-    const { caps, ctx } = agent(words);
+    const { caps, ctx } = agent(words, undefined, workloadReview());
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ ...named[0], strength: 'very strong', from_words: words }] as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
@@ -353,8 +372,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
 
   it('R11 × P1-a (Canonical 5874263009, DL 5874274221): the band the user agreed to is their settled view — the magnitude contract never re-sizes it', async () => {
     const { frameDefaultedLinks } = await import('../../../src/cee/magnitude/frame-defaulted-links.js');
+    // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on this test clone keeps R11's actual re-sizing control.
     // A magnitude-contract placeholder, as a served draft stamps it.
     const e = edge('capacityOverhead');
+    e.strength.std = 0.1;
     e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_placeholder' };
     const id = 'human_assistant_capacity::assistant_coordination_overhead';
     // CONTROL: before the approval, a level move on "Human assistant capacity" re-sizes this placeholder (the value writer's own step).
@@ -365,6 +386,15 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(edge('capacityOverhead').strength.mean).toBe(0.3);
     expect((edge('capacityOverhead').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'moderate' });
     expect(frameDefaultedLinks(persisted, 'human_assistant_capacity').sized, 'the agreed band is never re-sized').not.toContain(id);
+  });
+
+  it('Science 393023: a served door default with no size change has no false re-sizing receipt', async () => {
+    const { frameDefaultedLinks } = await import('../../../src/cee/magnitude/frame-defaulted-links.js');
+    const e = edge('capacityOverhead');
+    e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_placeholder' };
+    const before = JSON.stringify(e);
+    expect(frameDefaultedLinks(persisted, 'human_assistant_capacity').sized).not.toContain('human_assistant_capacity::assistant_coordination_overhead');
+    expect(JSON.stringify(e)).toBe(before);
   });
 
   it('RED (B3, review): a link the user REVIEWED after the proposal (a canvas confirm writes only that stamp) is not changed — 0 rows', async () => {
@@ -414,46 +444,232 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     .censusConfidenceParameters(persisted).material_parameters_user_stated;
   const PAUL_STRONG = 'human capacity, delegable workload, delegation quality, and delegated hours effects to strong';
 
-  it('RED (B1, Paul\'s own words "…to strong; all other listed effects to moderate."): naming the band a placeholder sits in is REVIEW — kept, never credited; "all other" names no link', async () => {
+  it('RED (B1 × D1, Paul\'s own words "…to strong; all other listed effects to moderate."): the band he names for a placeholder is HIS (D1: no current band to keep); a sized link stays a review; "all other" names no link', async () => {
     placeholderBase();
     const census0 = await userStated();
     expect(census0, 'the gate starts shut').toBe(0);
+    const { censusConfidenceParameters } = await import('../../../src/orchestrator-v5/admission/analysis-admission.js');
+    const confidenceUserStated = (): number => censusConfidenceParameters(persisted).confidence_parameters_user_stated;
+    const confidence0 = confidenceUserStated();
     const { caps, ctx } = agent(`set ${PAUL_STRONG}; all other listed effects to moderate.`);
+    // ⭐ T2A5 (AIE 6157593360): INPUT CHANGED, old `from_words` PAUL_STRONG → new `set ${PAUL_STRONG}`: the quote is his
+    // COMPLETE statement (a substring is not a receipt). Every expectation below is unchanged.
     const links = [
-      ...STRONG.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong', from_words: PAUL_STRONG })),
+      ...STRONG.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong', from_words: `set ${PAUL_STRONG}` })),
       ...MODERATE.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'moderate', from_words: 'all other listed effects to moderate' })),
     ];
-    const strongBefore = STRONG.map((k) => ({ mean: edge(k).strength.mean, source: edge(k).provenance?.source, defaulted: edge(k).defaulted }));
+    // His own link, put back unmarked (`placeholderBase`), is not a placeholder: naming its band stays a REVIEW (#2257).
+    // The other three are 0.5 placeholders: D1 (DL 12 Oct, Batch D) — a placeholder has no current band, so the band he
+    // named SIZES each as his estimate (was Batch A ruling 1: "kept as it is", a review, and they stayed unsized).
+    const NAMED_PLACEHOLDERS = ['workloadHours', 'qualityHours', 'hoursFocus'] as const;
+    for (const k of NAMED_PLACEHOLDERS) expect(linkSizing(edge(k)), `${k}: precondition`).toBe('placeholder');
+    expect(linkSizing(edge('capacityQuality')), 'precondition: not a placeholder').not.toBe('placeholder');
+    const reviewedBefore = { mean: edge('capacityQuality').strength.mean, source: edge('capacityQuality').provenance?.source, defaulted: edge('capacityQuality').defaulted };
+    const before = Object.fromEntries(MODERATE.map((k) => [k, { mean: edge(k).strength.mean, source: edge(k).provenance?.source }]));
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: 'the user named the bands' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    expect(String(p.public_label)).not.toContain('your estimate');
-    expect(String(p.public_label)).toContain('reviewed by you, kept as it is');
+    for (const k of NAMED_PLACEHOLDERS) expect(String(p.public_label), k).toContain(`"${L[k][0]}" \u2192 "${L[k][1]}" as strong, your estimate`);
+    expect(String(p.public_label)).not.toContain('kept as it is');
     expect(String(p.public_label), 'band words only (AIQ 5923931082)').not.toMatch(/\d\.\d|0–1|scale/);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    // The in-band "strong" picks are REVIEW (#2257): figure, source and default flag unchanged; the review is recorded.
-    expect(STRONG.map((k) => ({ mean: edge(k).strength.mean, source: edge(k).provenance?.source, defaulted: edge(k).defaulted }))).toEqual(strongBefore);
-    for (const k of STRONG) expect((edge(k).provenance as Record<string, unknown>).reviewed_by_user, k).toMatchObject({ intent: 'confirm', band: 'strong' });
-    for (const k of MODERATE) {
-      expect(Math.abs(edge(k).strength.mean), k).toBe(0.3);
-      expect(edge(k).provenance?.source, k).toBe('cee_hypothesis');
-      expect(edge(k).defaulted, k).toBe(true);
+    // The in-band pick on a link that is not a placeholder is REVIEW (#2257): figure, source and default flag unchanged.
+    expect({ mean: edge('capacityQuality').strength.mean, source: edge('capacityQuality').provenance?.source, defaulted: edge('capacityQuality').defaulted }).toEqual(reviewedBefore);
+    expect((edge('capacityQuality').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'strong' });
+    for (const k of NAMED_PLACEHOLDERS) {
+      expect(edge(k).strength.mean, k).toBe(0.55);
+      expect(linkSizing(edge(k)), k).toBe('user');
     }
-    expect(await userStated(), 'no confirm and no unnamed band licenses a leader').toBe(0);
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): "all other listed effects to moderate" names no link, so its band's
+    // origin is UNKNOWN: old Olumi's estimate written at 0.3 → new left out and said (`left_out_unknown_origin`), each link
+    // unchanged. His three named links are still his (unchanged below).
+    expect((p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin).toEqual(MODERATE.map(pairName));
+    // ⭐ #3002 (DL; Codex CHECK-3002-783a55b8 item 3): the HOST names the four left-out links on the card AND in the receipt, by the
+    // model's own labels for their ids, never relying on the Agent saying it.
+    // ⛔ EXPECTATION CHANGED (AIE packet 2b19ae59): the AIE's exact plural sentence replaces the host's draft.
+    const omitted = `Left out of this change set: ${MODERATE.map(pairName).join('; ')}, because the proposed bands' sources are unverified. Their current relationships and sources are kept.`;
+    expect(String(p.public_label)).toContain(omitted);
+    expect(String(out.follow_up)).toContain(omitted);
+    for (const k of MODERATE) {
+      expect(edge(k).strength.mean, k).toBe(before[k]!.mean);
+      expect(edge(k).provenance?.source, k).toBe(before[k]!.source);
+    }
+    // Credited by identity: exactly his three named placeholders (no confirm, no unnamed band); two of them are material.
+    expect(confidenceUserStated(), 'only the three placeholders he named are his').toBe(confidence0 + NAMED_PLACEHOLDERS.length);
+    expect(await userStated(), 'the leader gate opens on his own words alone').toBeGreaterThan(0);
+  });
+
+  // ⭐ T2A3 (DL): "<X> effects" credits links LEAVING the listed X, in THIS message, and nothing wider.
+  const pluralRun = async (words: string, keys: readonly Key[], quote?: string) => {
+    placeholderBase();
+    const { censusConfidenceParameters } = await import('../../../src/orchestrator-v5/admission/analysis-admission.js');
+    const confidence0 = censusConfidenceParameters(persisted).confidence_parameters_user_stated;
+    const { caps, ctx, store } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: keys.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong',
+      ...(quote === undefined ? {} : { from_words: quote }) })) as never, rationale: words });
+    // #3002 r2: a link whose band's origin is UNKNOWN is left out and said; with none left, the set is refused, nothing written.
+    const leftOut = (p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin ?? [];
+    if (p.ok !== true) {
+      expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+      return { authors: {} as Record<string, string>, leftOut, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
+    }
+    const authors = Object.fromEntries(store.get(String(p.proposal_id))!.operations.map((op) => [op.path, (op.value as { author: string }).author]));
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    return { authors, leftOut, credited: censusConfidenceParameters(persisted).confidence_parameters_user_stated - confidence0 };
+  };
+  const pathOf = (k: Key): string => `${L[k][2]}::${L[k][3]}`;
+  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
+  // EXPECTATION CHANGED: unquoted, old capacityQuality user_stated → new model_proposed; the quoted run keeps the old outcome.
+  // ⭐ T2A5 (AIE 6157593360): EXPECTATION CHANGED for the unquoted run, old (T2A3) model_proposed → new origin unknown: his
+  // own words, not quoted by the AI, are never relabelled Olumi's estimate, and nothing is prepared.
+  it('T2A3 plural: the singular "X\u2019s effect on Y", NOT quoted, keeps an unknown origin: nothing prepared', async () => {
+    placeholderBase();
+    const words = 'set human capacity\u2019s effect on delegation quality to strong';
+    const { caps, ctx } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: ['capacityQuality', 'capacityOverhead'].map((k) => ({ from_label: L[k as Key][0], to_label: L[k as Key][1], strength: 'strong' })) as never, rationale: words });
+    // ⛔ EXPECTATION CHANGED (#3002 r2): the copied link is left out and said (UNKNOWN), never relabelled; old whole-set refusal →
+    // new: the other link, declared Olumi's with its basis and not read in the conversation, is still offered as Olumi's.
+    expect((p as { left_out_unknown_origin?: string[] }).left_out_unknown_origin).toEqual([pairName('capacityQuality')]);
+    expect(JSON.stringify((p as { links?: unknown }).links ?? [])).not.toContain(L.capacityQuality[1]);
+    expect(linkSizing(edge('capacityQuality'))).not.toBe('user');
+  });
+  it.each([['set human capacity\u2019s effect on delegation quality to strong', 'user_stated']] as const)('T2A3 plural: the singular "X\u2019s effect on Y" credits only X → Y, never X\u2019s other link (from_words %s)', async (quote, want) => {
+    const { authors, leftOut } = await pluralRun('set human capacity\u2019s effect on delegation quality to strong', ['capacityQuality', 'capacityOverhead'], quote);
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): the other link's quote does not verify, so it is UNKNOWN: old
+    // model_proposed → new left out and said. X → Y is still credited.
+    expect(authors).toEqual({ [pathOf('capacityQuality')]: want });
+    expect(leftOut).toEqual([pairName('capacityOverhead')]);
+    expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
+  });
+  it('T2A3 plural: a second entity named beside the plural ("… effects on delegation quality") gives no blanket credit', async () => {
+    // The AI quoting the whole message (the adverse case since the T2A3 ruling): the host's veto keeps it Olumi's.
+    const { authors, leftOut } = await pluralRun('set human capacity effects on delegation quality to strong', ['capacityQuality', 'capacityOverhead'],
+      'set human capacity effects on delegation quality to strong');
+    // ⛔ EXPECTATION CHANGED (#3002 r2): old model_proposed → new UNKNOWN, left out and said; never the user's.
+    expect(authors[pathOf('capacityOverhead')]).toBeUndefined();
+    expect(leftOut).toContain(pairName('capacityOverhead'));
+    expect(linkSizing(edge('capacityOverhead'))).not.toBe('user');
+  });
+  it('T2A3 plural: "Olumi says … effects are strong" credits none of the listed links', async () => {
+    const { authors, leftOut, credited } = await pluralRun(`Olumi says ${PAUL_STRONG}`, STRONG, `Olumi says ${PAUL_STRONG}`);
+    // ⛔ EXPECTATION CHANGED (#3002 r2): the quote does not verify for any link, so every band is UNKNOWN: old model_proposed →
+    // new refused, nothing written.
+    expect(authors).toEqual({});
+    expect(leftOut).toEqual(STRONG.map(pairName));
+    expect(credited, 'nothing is the user\u2019s').toBe(0);
+    for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) expect(linkSizing(edge(k)), k).not.toBe('user');
   });
 
   it('CONTROL: a band the user names for a link, in words naming it, that MOVES it is theirs — and is credited', async () => {
     placeholderBase();
     const said = 'The effect of human assistant capacity on delegation quality is very strong.';
     const { caps, ctx } = agent(said);
+    // ⭐ T2A5 (AIE 6157593360): INPUT CHANGED, old `from_words` "human assistant capacity on delegation quality is very strong"
+    // → new: his complete sentence. Every expectation below is unchanged.
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: L.capacityQuality[0], to_label: L.capacityQuality[1], strength: 'very strong',
-      from_words: 'human assistant capacity on delegation quality is very strong' }] as never, rationale: said });
+      from_words: said }] as never, rationale: said });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     expect(String(p.public_label)).toContain('your estimate');
     expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
     expect(edge('capacityQuality').strength.mean).toBe(0.85);
     expect(edge('capacityQuality').provenance?.source).toBe('user_specified');
     expect(await userStated()).toBe(1);
+  });
+
+  const projectedPriceRevenue = () => {
+    const e = edge('capacityQuality');
+    e.strength = { mean: 0.5, std: 0.125 };
+    e.effect_direction = 'positive';
+    e.provenance = { source: 'user_specified', mean_projected: true } as never;
+    delete e.defaulted;
+    const nodes = (persisted as { nodes: { id: string; label: string }[] }).nodes;
+    nodes.find(n => n.id === e.from)!.label = 'Price';
+    nodes.find(n => n.id === e.to)!.label = 'Revenue';
+    expect(linkSizing(e), 'identity: the drawn Price → Revenue prior is not user-sized').toBe('placeholder');
+    return JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
+  };
+
+  it('RED (R7 finding 3 × D1, plural approval door): Price → Revenue same-band words SIZE the drawn placeholder as the user\'s band, never keep its 0.5 projection', async () => {
+    const before = projectedPriceRevenue();
+    const hashBefore = currentHash();
+    const words = 'Price is strong.';
+    // The user has the drawn link selected (DGAI `selected_elements` → the host-resolved `grounded_links`).
+    const drawn = edge('capacityQuality');
+    const { caps, ctx, store } = agent(words, undefined, { grounded_selection: { element_ids: [], unresolved: 'none' },
+      grounded_links: [{ from: drawn.from, to: drawn.to }] });
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
+      strength: 'strong', from_words: words }], rationale: words });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const proposal = store.get(String(p.proposal_id))!;
+    expect(proposal.scenario_id).toBe(SCENARIO_ID);
+    expect(proposal.operations).toEqual([expect.objectContaining({ op: 'set_link_strength', path: `${edge('capacityQuality').from}::${edge('capacityQuality').to}`,
+      value: expect.objectContaining({ magnitude: 0.55, intent: 'set', band: 'strong', author: 'user_stated' }) })]);
+    // Science 393023 LICENCE ruling 3: the projected μ=0.5 is nobody's size (never the user's for being drawn by them).
+    // D1 (DL 12 Oct, Batch D): so it has no current band either, and the band the user named in their own words sizes it
+    // as theirs, at the band's midpoint (was: a review keeping 0.5/0.125 unsized). Olumi's band on the same link stays a
+    // review, with no credit: the NEGATIVE (D1) test.
+    const out = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size, 'one approval, one commit').toBe(1);
+    expect(doorCalls).toBe(1);
+    const after = edge('capacityQuality') as Edge & Record<string, unknown>;
+    expect(before.strength).toStrictEqual({ mean: 0.5, std: 0.125 });
+    expect(after.strength.mean).toBe(0.55);
+    expect(after.provenance).not.toHaveProperty('mean_projected');
+    expect(linkSizing(after)).toBe('user');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(after))).toBe(true);
+    expect(currentHash(), 'a size moves the analysis identity').not.toBe(hashBefore);
+    expect(String(out.follow_up)).toContain('as strong, your estimate');
+  });
+
+  it('T2A2: Price is strong. without a current drawn/reviewed link cannot borrow the stored drawing provenance', async () => {
+    projectedPriceRevenue();
+    const before = JSON.stringify(edge('capacityQuality'));
+    const words = 'Price is strong.';
+    const { caps, ctx, store } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
+      strength: 'strong', from_words: words }], rationale: words });
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): the quote binds one named end only, so it does not verify: old Olumi's
+    // review (model_proposed, kept as it is) → new UNKNOWN, refused, nothing prepared or written. Still never the user's.
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(p, 'nothing prepared').not.toHaveProperty('proposal_id'); void store;
+    expect(JSON.stringify(edge('capacityQuality'))).toBe(before);
+    expect(linkSizing(edge('capacityQuality'))).toBe('placeholder');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge('capacityQuality')))).toBe(false);
+  });
+
+  it('RED (R7 class reader): the adopted-strength door does not refuse projected Price → Revenue as the user’s own; genuine user-sized control refuses', async () => {
+    projectedPriceRevenue();
+    const link = edge('capacityQuality');
+    const request = (turnId: string) => ({ scenario_id: SCENARIO_ID, base_graph_hash: currentHash(),
+      turn_id: turnId, links: [], levels: [],
+      link_strengths: [{ from: link.from, to: link.to, magnitude: 0.3, band: 'moderate' as const, intent: 'set' as const,
+        author: 'model_proposed' as const, expected: { mean: 0.5, effect_direction: 'positive' as const } }] });
+    // Science 393023 LICENCE ruling 3, re-derived:
+    // source=user_specified + mean_projected used to trigger link_became_users_own; canonical sizing says placeholder,
+    // so the real approved-strength writer may apply the offered band, still without user credit.
+    const out = await commitOptionLevelsInProcess(request('33333333-3333-4333-8333-3333333333a7'), 'r7-projected-adoption');
+    expect(out.status, JSON.stringify(out)).toBe('committed');
+    expect(rows.size).toBe(1);
+    expect(edge('capacityQuality').strength.mean).toBe(0.3);
+    expect((edge('capacityQuality').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'moderate' });
+    expect(linkSizing(edge('capacityQuality')), 'the projected structural origin remains fail-closed, never user-sized').toBe('placeholder');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge('capacityQuality')))).toBe(false);
+
+    persisted = servedGraph();
+    rows.clear();
+    const userLink = edge('capacityQuality');
+    userLink.strength = { mean: 0.5, std: 0.125 };
+    userLink.effect_direction = 'positive';
+    userLink.provenance = { source: 'user_specified' };
+    delete userLink.defaulted;
+    expect(linkSizing(userLink), 'CONTROL: source=user_specified without projection is user-sized').toBe('user');
+    const before = JSON.stringify(persisted);
+    const refused = await commitOptionLevelsInProcess(request('33333333-3333-4333-8333-3333333333b7'), 'r7-user-adoption-control');
+    expect(refused).toMatchObject({ status: 'refused', reason: 'link_became_users_own' });
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
   });
 
   it('RED (B2): an agreement holding band words ("the strong and moderate calls look right") credits no link', async () => {
@@ -463,9 +679,9 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const links = [...STRONG, ...MODERATE].map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: STRONG.includes(k) ? 'strong' : 'moderate',
       from_words: 'the strong and moderate calls look right' }));
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: said });
-    expect(p.ok, JSON.stringify(p)).toBe(true);
-    expect(String(p.public_label)).not.toContain('your estimate');
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): the quote names no link, so every band is UNKNOWN: old Olumi's estimates
+    // applied → new refused, nothing written. Still no link is the user's.
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     for (const k of [...STRONG, ...MODERATE]) expect(edge(k).provenance?.source, k).not.toBe('user_specified');
     expect(await userStated()).toBe(0);
   });
@@ -547,6 +763,130 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(rows.size).toBe(1);
     expect(JSON.stringify(persisted)).toBe(after);
+  });
+
+  /**
+   * ⭐ D1: A PLACEHOLDER HAS NO CURRENT BAND (DL ruling 12 Oct, recovery Batch D, amending Batch A ruling 1/5 · L4 (c) for
+   * this case only). Served run 3 (2026-10-12T153555Z, hiring, CEE 3fdf0f38): the Agent proposed "strong" for the decisive
+   * link "Tech leads hired" → "Leadership capacity". Its 0.5 default sits in "strong", so the chip said "(kept as it is)",
+   * the approval recorded a review only, the link stayed a placeholder and every hiring chance stayed withheld
+   * (`decisive-link/DIAGNOSIS.md` §1). The fixture is that served pre-approval read, the served user words and the served
+   * three bands; the approval runs through the real door.
+   */
+  it('RED (D1, served run-3 hiring): Olumi\'s band for the decisive placeholder SIZES it as Olumi\'s accepted estimate, never "kept as it is", never its 0.5', async () => {
+    const HIRING = JSON.parse(readFileSync(new URL('../../fixtures/batch-d/served-hiring-run3-20261012T153555Z.json', import.meta.url), 'utf8')) as {
+      before: { graph: { nodes: { id: string; label: string }[] } }; served_user_message: string; served_chip_detail: string;
+      served_ops: { from_id: string; to_id: string; band: string }[]; decisive_link_after_served_approval: Edge };
+    persisted = structuredClone(HIRING.before.graph);
+    const label = (id: string): string => HIRING.before.graph.nodes.find((n) => n.id === id)!.label;
+    const decisive = () => edgeOf('tech_leads_hired', 'leadership_capacity');
+    expect(linkSizing(decisive()), 'precondition: the decisive link is a placeholder').toBe('placeholder');
+    expect(decisive().strength.mean, 'precondition: its default sits in "strong"').toBe(0.5);
+    const hashBefore = currentHash();
+    const { caps, ctx } = agent(HIRING.served_user_message);
+    const p = await caps.proposeLinkStrengths!(ctx, { rationale: 'served run 3', links: HIRING.served_ops.map((o) =>
+      ({ from_label: label(o.from_id), to_label: label(o.to_id), strength: o.band })) as never });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    // RED on staging 9bac9729: byte-equal to the served chip ("… (kept as it is)", review only).
+    expect(String(p.public_label)).not.toBe(HIRING.served_chip_detail);
+    expect(String(p.public_label)).toBe('Record these 3 link strengths: '
+      + '"Tech leads hired" \u2192 "Leadership capacity" as strong, an estimate from Olumi that has not yet been applied; '
+      + '"Developers hired" \u2192 "Code quality degradation" as slight, an estimate from Olumi that has not yet been applied; '
+      + '"Code quality degradation" \u2192 "productivity" as moderate, an estimate from Olumi that has not yet been applied');
+    expect((p as unknown as { links: Record<string, unknown>[] }).links[0]).toMatchObject({ from: 'Tech leads hired', to: 'Leadership capacity',
+      becomes: { band: 'strong' }, whose: 'Olumi\u2019s first estimate for a link nobody had sized', keeps_current_strength: false,
+      sizing_after_approval: 'olumi_accepted' });
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size, 'one approval, one commit').toBe(1);
+    // Bound by identity: the decisive link, stored as Olumi's accepted estimate at the band's midpoint.
+    expect(linkSizing(decisive()), 'was placeholder after the served approval').toBe('olumi_accepted');
+    expect(linkSizing(HIRING.decisive_link_after_served_approval), 'control: the served approval left it a placeholder').toBe('placeholder');
+    expect(decisive().strength.mean).toBe(0.55);
+    expect(decisive().provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', band: 'strong' } });
+    expect(decisive().provenance).not.toHaveProperty('mean_projected');
+    expect(currentHash(), 'a new size moves the analysis identity, so the Run is stale and a new Run is needed').not.toBe(hashBefore);
+    const { acceptedOlumiEstimateSentence } = await import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js');
+    expect(String(out.follow_up)).toContain(acceptedOlumiEstimateSentence('"Tech leads hired"', '"Leadership capacity"'));
+    expect(String(out.follow_up)).not.toMatch(/still unsized|kept as it is|your estimate/);
+    // Nothing ever stamps a placeholder's default as an estimate: every link this approval sized moved off its default.
+    const was = (HIRING.before.graph as unknown as { edges: Edge[] }).edges;
+    const sized = (persisted as { edges: Edge[] }).edges.filter((e) => linkSizing(was.find((w) => w.from === e.from && w.to === e.to)) === 'placeholder'
+      && linkSizing(e) !== 'placeholder');
+    expect(sized.map((e) => `${e.from}->${e.to}`).sort()).toEqual(HIRING.served_ops.map((o) => `${o.from_id}->${o.to_id}`).sort());
+    for (const e of sized) expect(e.strength.mean, `${e.from}->${e.to}`).not.toBe(was.find((w) => w.from === e.from && w.to === e.to)!.strength.mean);
+  });
+
+  it('⭐ #3002 CONTROL (served hiring, staging 34a5cdf6, 14 Oct turn 04): the AI\u2019s six bands, declared Olumi\u2019s, are still Olumi\u2019s card, and approving saves each as olumi_estimate', async () => {
+    const H = JSON.parse(readFileSync(new URL('../../fixtures/t2a5/served-hiring-post3008-turn04.json', import.meta.url), 'utf8')) as {
+      user_messages: string[]; served_chip_detail: string; links: { from_label: string; to_label: string; strength: string }[];
+      graph: { nodes: { id: string; label: string }[]; edges: Edge[] };
+      served_after: { from: string; to: string; strength: { mean: number; std: number }; provenance_magnitude: string; reviewed_band: string }[] };
+    // The stored graph read just before the served approval.
+    persisted = structuredClone(H.graph);
+    const idOf = (label: string): string => H.graph.nodes.find((n) => n.label === label)!.id;
+    const said = H.user_messages.at(-1)!;
+    const { caps, ctx } = agent(said, undefined, { user_text: H.user_messages.join('\n'), verified_user_messages: H.user_messages });
+    const p = await caps.proposeLinkStrengths!(ctx, { rationale: said, links: H.links as never });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    // The card the user approved on staging, byte-equal: nothing left out, every band Olumi's first estimate.
+    expect(String(p.public_label)).toBe(H.served_chip_detail);
+    expect(p).not.toHaveProperty('left_out_unknown_origin');
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size, 'one approval, one commit').toBe(1);
+    // Each link stored exactly as the served approval stored it: Olumi's estimate, reviewed at its band, its figure and spread.
+    expect(H.served_after.map((a) => `${a.from}->${a.to}`)).toEqual(H.links.map((l) => `${idOf(l.from_label)}->${idOf(l.to_label)}`));
+    for (const a of H.served_after) {
+      const e = edgeOf(a.from, a.to);
+      expect(e.provenance, `${a.from}->${a.to}`).toMatchObject({ magnitude: a.provenance_magnitude, reviewed_by_user: { intent: 'confirm', band: a.reviewed_band } });
+      expect(a.provenance_magnitude).toBe('olumi_estimate');
+      expect(e.strength, `${a.from}->${a.to}`).toMatchObject(a.strength);
+      expect(linkSizing(e), `${a.from}->${a.to}`).toBe('olumi_accepted');
+    }
+  });
+
+  it('NEGATIVE (D1): where the approval cannot size a placeholder, Olumi\'s band stays a review: a link the user drew, and a default already AT the midpoint', async () => {
+    projectedPriceRevenue();
+    const midpointDefault = edge('workloadHours');
+    midpointDefault.strength = { mean: 0.55, std: 0.125 };
+    midpointDefault.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true } as never;
+    const before = JSON.parse(JSON.stringify(persisted)) as { edges: Edge[] };
+    const hashBefore = currentHash();
+    const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue', strength: 'strong' },
+      ...setOf(['workloadHours'])] as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(String(p.public_label)).toMatch(/^Record 2 reviews: /);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    for (const k of ['capacityQuality', 'workloadHours'] as const) {
+      const was = before.edges.find((e) => e.from === edge(k).from && e.to === edge(k).to)!;
+      expect(edge(k).strength, k).toStrictEqual(was.strength);
+      expect(linkSizing(edge(k)), k).toBe('placeholder');
+      const { reviewed_by_user: review, ...kept } = edge(k).provenance as Record<string, unknown>;
+      expect(review, k).toMatchObject({ intent: 'confirm' });
+      expect(kept, k).toStrictEqual(was.provenance);
+      expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge(k))), k).toBe(false);
+    }
+    expect(currentHash(), 'a review keeps the analysis identity').toBe(hashBefore);
+  });
+
+  it('NEGATIVE (D1): a plain confirm of a placeholder (no band, the canvas\'s confirm) is a review and stays unsized; its 0.5 is never an estimate', async () => {
+    const { applyEdgeStrengthEdit } = await import('../../../src/orchestrator-v5/system-events/edge-strength-edit.js');
+    const g = servedGraph() as { edges: Edge[] };
+    const e0 = g.edges.find((x) => x.from === 'delegation_quality' && x.to === 'routine_work_hours_delegated')!;
+    expect(linkSizing(e0), 'precondition: a placeholder').toBe('placeholder');
+    const event = { kind: 'edge_strength_edit', from: 'delegation_quality', to: 'routine_work_hours_delegated', intent: 'confirm_current',
+      direction_intent: 'preserve', magnitude: 0.5, expected: { mean: 0.5, effect_direction: 'positive' } };
+    const res = await applyEdgeStrengthEdit({ payload: { kind: 'system_event', turn_id: 't', scenario_id: SCENARIO_ID, stage: 'frame', event } as never,
+      event: event as never, requestId: 'r', persistedGraph: g, lastRunIdentityUse: null });
+    expect(res.kind, JSON.stringify(res)).toBe('mutated');
+    const e = ((res as { mutatedGraph: { edges: Edge[] } }).mutatedGraph.edges).find((x) => x.from === 'delegation_quality' && x.to === 'routine_work_hours_delegated')!;
+    expect(e.strength).toStrictEqual(e0.strength);
+    expect(linkSizing(e)).toBe('placeholder');
+    expect(e.provenance?.magnitude).not.toBe('olumi_estimate');
+    expect((e.provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm' });
   });
 
   it('an estimate never replaces a strength the user set: a different band on his own link refuses the whole set, naming it', async () => {

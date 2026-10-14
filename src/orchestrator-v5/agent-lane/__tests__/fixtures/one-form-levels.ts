@@ -71,7 +71,7 @@ export function asServedBeforeOneForm<G>(graph: G, served: unknown): G {
 function capturedProjectedMean(edge: unknown): edge is Dict {
   if (!isDict(edge) || !isDict(edge.strength) || !isDict(edge.provenance)) return false;
   return edge.defaulted === true && typeof edge.strength.mean === 'number' && Math.abs(edge.strength.mean) === 0.5 && edge.strength.std === 0.125
-    && edge.provenance.source === 'cee_hypothesis' && edge.provenance.magnitude === undefined;
+    && edge.provenance.source === 'cee_hypothesis' && (edge.provenance.magnitude === undefined || (edge.provenance.magnitude === 'olumi_placeholder' && edge.provenance.mean_projected === true && edge.provenance.natural_effect === undefined));
 }
 
 /**
@@ -97,6 +97,12 @@ export function asServedBeforeProjectedMeans<G>(graph: G): G {
   const out = structuredClone(graph);
   if (!isDict(out) || !Array.isArray(out.edges)) return out;
   for (const edge of out.edges) {
+    // Science 393023 LICENCE (a): subtract only the new door tag before the unchanged served digest check.
+    if (isDict(edge) && isDict(edge.provenance) && isDict(edge.strength)
+      && edge.provenance.magnitude === 'olumi_placeholder' && edge.provenance.mean_projected === true
+      && Math.abs(Number(edge.strength.mean)) === 0.5 && edge.strength.std === 0.125 && edge.provenance.natural_effect === undefined) {
+      delete edge.provenance.magnitude;
+    }
     if (capturedProjectedMean(edge) && isDict(edge.provenance) && edge.provenance.mean_projected === true) {
       delete edge.provenance.mean_projected;
     }

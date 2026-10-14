@@ -1,0 +1,5 @@
+{
+ "_source": "The AIE's status-quo lines, byte for byte: recovery/codex/AIE-D4-FUTURE-VALUE-CALENDAR-AND-STATUS-QUO-RULINGS-20261014.json (sha256 fc17c200c8b67deed2b3a8be418f1c6691f4226400dbf8228b4a02256a64c168; #94 6163023819), keys status_quo.exact_LEVEL_line and status_quo.exact_generic_line, extracted programmatically. Placeholders: <goal>, <reference>, <comparator>, <target>.",
+ "exact_LEVEL_line": "This Run cannot give a chance for carrying on as now: it uses ‘<goal>’ as its unchanged reference, by assumption. The model’s held reference value is <reference>; the target for this Run is <comparator> <target>. Review the evidence for how ‘<goal>’ could change over this Run’s goal period without an intervention, including any forecast or uncertainty already retained in the model.",
+ "exact_generic_line": "This Run cannot give a chance for carrying on as now: it uses ‘<goal>’ as its unchanged reference, by assumption. Review the evidence for how ‘<goal>’ could change over this Run’s goal period without an intervention, including any forecast or uncertainty already retained in the model."
+}

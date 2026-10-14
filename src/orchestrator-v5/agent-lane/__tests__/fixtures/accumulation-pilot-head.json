@@ -1,0 +1,503 @@
+{
+  "B1": {
+    "brief": "Our goal is to reach £20k MRR within 12 months while keeping monthly churn under 8%. Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+    "draft": {
+      "goal": {
+        "kind": null,
+        "deliverable": null,
+        "metric": "MRR",
+        "operator": ">=",
+        "target_stated": true,
+        "value": 20000,
+        "unit": "£/month",
+        "horizon_months": 12,
+        "provenance": "explicit",
+        "frame": "level",
+        "baseline_known": false,
+        "baseline_value": null,
+        "baseline_provenance": "explicit",
+        "scope": {
+          "modelled": "the Pro plan only",
+          "alternative": "all plans together",
+          "stated_in_brief": false
+        }
+      },
+      "constraints": [
+        {
+          "metric": "Monthly churn",
+          "operator": "<",
+          "value": 8,
+          "unit": "%",
+          "provenance": "explicit",
+          "frame": "level"
+        }
+      ],
+      "options": [
+        {
+          "label": "Keep Pro at £49",
+          "provenance": "inferred",
+          "changes": [],
+          "interventions": [],
+          "added_capacity": null,
+          "is_status_quo": true
+        },
+        {
+          "label": "Raise Pro to £59",
+          "provenance": "explicit",
+          "changes": [],
+          "interventions": [
+            {
+              "factor_label": "Pro plan price",
+              "value": 59,
+              "value_kind": "absolute",
+              "unit": "£/month",
+              "provenance": "explicit",
+              "stated_evidence": {
+                "quote": "Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+                "start": 85,
+                "end": 182,
+                "amount_start": 134,
+                "option_quote": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release",
+                "option_start": 95,
+                "option_end": 181
+              }
+            }
+          ],
+          "added_capacity": null,
+          "is_status_quo": null
+        },
+        {
+          "label": "Raise Pro to £54",
+          "provenance": "ai_proposed",
+          "changes": [],
+          "interventions": [
+            {
+              "factor_label": "Pro plan price",
+              "value": 54,
+              "value_kind": "absolute",
+              "unit": "£/month",
+              "provenance": "ai_proposed",
+              "stated_evidence": null
+            }
+          ],
+          "added_capacity": null,
+          "is_status_quo": null
+        }
+      ],
+      "factors": [
+        {
+          "label": "Pro plan price",
+          "role": "controllable",
+          "baseline_known": true,
+          "baseline_value": 49,
+          "unit": "£/month",
+          "provenance": "explicit",
+          "plausible_max": 200
+        },
+        {
+          "label": "Pro subscribers today",
+          "role": "observable",
+          "baseline_known": false,
+          "baseline_value": 150,
+          "unit": "subscribers",
+          "provenance": "ai_proposed",
+          "plausible_max": 2000
+        },
+        {
+          "label": "Monthly churn",
+          "role": "observable",
+          "baseline_known": false,
+          "baseline_value": 5,
+          "unit": "%",
+          "provenance": "ai_proposed",
+          "plausible_max": 100
+        },
+        {
+          "label": "New Pro subscribers per month",
+          "role": "observable",
+          "baseline_known": false,
+          "baseline_value": 25,
+          "unit": "subscribers/month",
+          "provenance": "ai_proposed",
+          "plausible_max": 500
+        }
+      ],
+      "risks": [
+        {
+          "label": "Price-driven Pro churn",
+          "provenance": "inferred",
+          "unit": null,
+          "plausible_max": null
+        }
+      ],
+      "outcomes": [
+        {
+          "label": "Pro subscribers at month 12",
+          "provenance": "ai_proposed",
+          "unit": "subscribers",
+          "plausible_max": 2000
+        }
+      ],
+      "links": [
+        {
+          "from": "Pro plan price",
+          "to": "Monthly churn",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": 1.5,
+          "effect_per_source_change": 10,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "A £10 monthly price increase is provisionally assumed to add 1.5 churn percentage points."
+        },
+        {
+          "from": "Pro plan price",
+          "to": "Price-driven Pro churn",
+          "direction": "positive",
+          "provenance": "inferred",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "Price-driven Pro churn",
+          "to": "MRR",
+          "direction": "negative",
+          "provenance": "inferred",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "Pro subscribers today",
+          "to": "Pro subscribers at month 12",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "Monthly churn",
+          "to": "Pro subscribers at month 12",
+          "direction": "negative",
+          "provenance": "ai_proposed",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "New Pro subscribers per month",
+          "to": "Pro subscribers at month 12",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "Pro subscribers at month 12",
+          "to": "MRR",
+          "direction": "positive",
+          "provenance": "inferred",
+          "effect_amount": 49,
+          "effect_per_source_change": 1,
+          "effect_provenance": "inferred",
+          "definitional": null,
+          "basis": "At the current Pro price, each paying Pro subscriber contributes £49 of monthly recurring revenue."
+        },
+        {
+          "from": "Pro plan price",
+          "to": "MRR",
+          "direction": "positive",
+          "provenance": "inferred",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        }
+      ],
+      "identities": [
+        {
+          "outcome": "Pro subscribers at month 12",
+          "operation": "accumulation",
+          "factors": [
+            "Pro subscribers today",
+            "Monthly churn",
+            "New Pro subscribers per month"
+          ],
+          "provenance": "ai_proposed"
+        },
+        {
+          "outcome": "MRR",
+          "operation": "product",
+          "factors": [
+            "Pro plan price",
+            "Pro subscribers at month 12"
+          ],
+          "provenance": "inferred"
+        }
+      ],
+      "unknowns": [
+        "Is the £20k MRR goal intended to cover the Pro plan only or all plans? The model provisionally measures Pro-plan MRR only.",
+        "What is current total MRR? It is required to assess the starting position but has not been estimated.",
+        "How many paying Pro subscribers are there today? The provisional starting estimate is 150.",
+        "What is current monthly Pro churn? The provisional starting estimate is 5%.",
+        "How many new Pro subscribers are added per month at the current price? The provisional starting estimate is 25.",
+        "What churn change would a £10 Pro price increase actually cause? The model provisionally assumes 1.5 percentage points."
+      ],
+      "decision_question": "Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+    }
+  },
+  "ACC": {
+    "brief": "We have 250 Pro subscribers paying £49 a month. We add about 20 new Pro subscribers a month and lose about 3% of them each month. Our goal is to reach £20k MRR within 12 months. Should we raise the Pro price to £59 a month?",
+    "draft": {
+      "goal": {
+        "kind": null,
+        "deliverable": null,
+        "metric": "MRR",
+        "operator": ">=",
+        "target_stated": true,
+        "value": 20000,
+        "unit": "£/month",
+        "horizon_months": 12,
+        "provenance": "explicit",
+        "frame": "level",
+        "baseline_known": true,
+        "baseline_value": 12250,
+        "baseline_provenance": "explicit",
+        "scope": {
+          "modelled": "the Pro plan only",
+          "alternative": "all plans together",
+          "stated_in_brief": false
+        }
+      },
+      "constraints": [],
+      "options": [
+        {
+          "label": "Keep Pro price at £49",
+          "provenance": "inferred",
+          "changes": [],
+          "interventions": [],
+          "added_capacity": null,
+          "is_status_quo": true
+        },
+        {
+          "label": "Raise Pro price to £59",
+          "provenance": "explicit",
+          "changes": [],
+          "interventions": [
+            {
+              "factor_label": "Pro price",
+              "value": 59,
+              "value_kind": "absolute",
+              "unit": "£ per subscriber per month",
+              "provenance": "explicit",
+              "stated_evidence": {
+                "quote": "Should we raise the Pro price to £59 a month?",
+                "start": 178,
+                "end": 223,
+                "amount_start": 211,
+                "option_quote": "Should we raise the Pro price to £59 a month?",
+                "option_start": 178,
+                "option_end": 223
+              }
+            }
+          ],
+          "added_capacity": null,
+          "is_status_quo": null
+        },
+        {
+          "label": "Raise Pro price to £54",
+          "provenance": "ai_proposed",
+          "changes": [],
+          "interventions": [
+            {
+              "factor_label": "Pro price",
+              "value": 54,
+              "value_kind": "absolute",
+              "unit": "£ per subscriber per month",
+              "provenance": "ai_proposed",
+              "stated_evidence": null
+            }
+          ],
+          "added_capacity": null,
+          "is_status_quo": null
+        }
+      ],
+      "factors": [
+        {
+          "label": "Pro subscribers today",
+          "role": "observable",
+          "baseline_known": true,
+          "baseline_value": 250,
+          "unit": "subscribers",
+          "provenance": "explicit",
+          "plausible_max": 2000
+        },
+        {
+          "label": "Monthly new Pro subscribers",
+          "role": "controllable",
+          "baseline_known": true,
+          "baseline_value": 20,
+          "unit": "subscribers per month",
+          "provenance": "explicit",
+          "plausible_max": 500
+        },
+        {
+          "label": "Monthly Pro subscriber churn",
+          "role": "observable",
+          "baseline_known": true,
+          "baseline_value": 3,
+          "unit": "%",
+          "provenance": "explicit",
+          "plausible_max": 100
+        },
+        {
+          "label": "Pro price",
+          "role": "controllable",
+          "baseline_known": true,
+          "baseline_value": 49,
+          "unit": "£ per subscriber per month",
+          "provenance": "explicit",
+          "plausible_max": 200
+        }
+      ],
+      "risks": [
+        {
+          "label": "Price-driven churn",
+          "provenance": "ai_proposed",
+          "unit": null,
+          "plausible_max": null
+        }
+      ],
+      "outcomes": [
+        {
+          "label": "Pro subscribers at month 12",
+          "provenance": "inferred",
+          "unit": "subscribers",
+          "plausible_max": 2000
+        }
+      ],
+      "links": [
+        {
+          "from": "Pro subscribers today",
+          "to": "Pro subscribers at month 12",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": 0.69,
+          "effect_per_source_change": 1,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "At 3% monthly churn, roughly 69% of today's subscribers remain after 12 months."
+        },
+        {
+          "from": "Monthly new Pro subscribers",
+          "to": "Pro subscribers at month 12",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": 10.2,
+          "effect_per_source_change": 1,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "One extra subscriber added each month contributes about 10.2 subscribers at month 12 after monthly churn."
+        },
+        {
+          "from": "Monthly Pro subscriber churn",
+          "to": "Pro subscribers at month 12",
+          "direction": "negative",
+          "provenance": "ai_proposed",
+          "effect_amount": -225,
+          "effect_per_source_change": 1,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "Around the current subscriber path, a one-point rise in monthly churn materially reduces the month-12 subscriber stock."
+        },
+        {
+          "from": "Pro price",
+          "to": "Monthly Pro subscriber churn",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": 0.5,
+          "effect_per_source_change": 10,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "A £10 monthly price increase is provisionally assumed to add 0.5 percentage points of monthly churn."
+        },
+        {
+          "from": "Pro price",
+          "to": "Price-driven churn",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "Price-driven churn",
+          "to": "MRR",
+          "direction": "negative",
+          "provenance": "ai_proposed",
+          "effect_amount": null,
+          "effect_per_source_change": null,
+          "effect_provenance": null,
+          "definitional": null,
+          "basis": null
+        },
+        {
+          "from": "Pro subscribers at month 12",
+          "to": "MRR",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": 49,
+          "effect_per_source_change": 1,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "At the current Pro price, each month-12 subscriber contributes £49 of monthly recurring revenue."
+        },
+        {
+          "from": "Pro price",
+          "to": "MRR",
+          "direction": "positive",
+          "provenance": "ai_proposed",
+          "effect_amount": 377.5,
+          "effect_per_source_change": 1,
+          "effect_provenance": "ai_proposed",
+          "definitional": null,
+          "basis": "At the provisional month-12 subscriber estimate, each £1 monthly price increase changes MRR by about £377.50."
+        }
+      ],
+      "identities": [
+        {
+          "outcome": "Pro subscribers at month 12",
+          "operation": "accumulation",
+          "factors": [
+            "Pro subscribers today",
+            "Monthly Pro subscriber churn",
+            "Monthly new Pro subscribers"
+          ],
+          "provenance": "inferred"
+        }
+      ],
+      "unknowns": [
+        "What monthly churn increase, if any, do you expect from raising the Pro price from £49 to £59? The provisional model assumes an increase of 0.5 percentage points for each £10 increase.",
+        "Does “MRR” mean Pro-plan MRR only, as modelled here, or total MRR across all plans?",
+        "Will the monthly new-Pro-subscriber rate of about 20 remain unchanged after a price increase?"
+      ],
+      "decision_question": "Should we raise the Pro price to £59 a month?"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * S2l THROUGH THE ROUTE: what the model is sent when the user presses Explain on the SERVED Wave B9 unseen b9-1 Run
  * (guest, staging, CEE df15c8c1; `waveB9-unseen1-df15c8c-readback-pre-challenge.json`, the graph read verbatim). Its screen
@@ -5,6 +6,7 @@
  * and the Challenge said "Without sized profit effects, the model cannot test your £24,000 target." Harness copied from
  * decision-sensitivity-screen-gate.route.test.ts (real route, fixed narrator, no provider contacted).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -48,6 +50,8 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
   const sent: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }] }), { status: 200 });
     }));
@@ -60,10 +64,10 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [result], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_state: READ.analysis_state,
       analysis_ready: READ.analysis_ready, analysis_result: result,
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -73,7 +77,7 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
   /** Run, then press the real Explain control; returns the model bodies the Explain turn sent. */
   const runThenExplain = async (): Promise<string[]> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);

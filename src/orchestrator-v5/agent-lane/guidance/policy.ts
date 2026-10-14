@@ -30,7 +30,7 @@ export const POLICY = {
       "Otherwise by row order: RC-WIDEN, RC-WHAT-CHANGES, RC-STRENGTHEN-ITEM, RC-PREMORTEM."
     ],
     "method_turn_rule": "On a 'method' turn, offer no other method. Offer only that method's own follow-up actions.",
-    "cooldown_default": "A row (or item) with guidance status pressed, dismissed or completed is not offered while its current state_key_hash equals the recorded one. user.explicit_request bypasses this.",
+    "cooldown_default": "A row (or item) with guidance status offered, pressed, dismissed or completed is not offered while its current state_key_hash equals the recorded one: a row is said once per state (E6, DL 12 Oct, Paul's test). user.explicit_request bypasses this.",
     "state_key_persistence": "On disk (coaching_state, CEE #2459 agent_guidance envelope) an entry is {status, state_key_hash, turn_id}. state_key_hash = computeResponseHash(fields) (CEE utils/response-hash.ts; identical to #2459 stateKeyHash): sha256(JSON.stringify(canonical(fields))) first 12 hex, canonical = object keys sorted, ARRAY ORDER KEPT. Never persist raw values (coaching_state is content-free).",
     "cold_reload": "Guidance must round-trip through coaching_state: a pressed or dismissed row stays hidden after a cold reload with an unchanged state_key (#2388 two-load lesson).",
     "cooldown_scope": "Variant rows (RC-WIDEN): pick the first variant that holds, THEN apply cooldown to that pick; a row in cooldown does NOT fall through to its later variants (case A-WIDEN-SAME-KEY-HIDDEN: W1 dismissed, W2 also holds, RC-WIDEN stays hidden). Item rows (RC-STRENGTHEN-ITEM): cooldown is per item, so a cooled item falls through to the next candidate in pick order, and across variants (S1, then S2, S3L, S3V).",
@@ -152,9 +152,9 @@ export const POLICY = {
         "W1": "Finding another route could give you a way to reach the goal within your limit.",
         "W2": "Alternatives expose trade-offs that a single proposed route leaves untested.",
         "W3": "A different mechanism can reveal possibilities that variations on one lever miss.",
-        "W4": "A baseline separates the effect of changing course from what would happen anyway.",
+        "W4": "Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.",
         "W5": "Combining complementary strengths may offer a useful route when the comparison is close.",
-        "W6": "Risks drive how far each option could fall short; one risk leaves most of that unexamined.",
+        "W6": "Considering other plausible risks can reveal ways each option could fall short.",
         "W7": "Missing drivers can hide dependencies that change how your routes affect the goal.",
         "W2Z": "Concrete routes let you test how different actions could move the goal."
       },
@@ -1110,7 +1110,7 @@ export const POLICY = {
         },
         {
           "id": "RX-NO-CONTRARY-SAME",
-          "rule": "if change_labels is non-empty (changes are recorded): no claim that nothing or no input changed, the WHOLE class: /\\b(nothing('s| has| had)? changed|nothing (was|has been|had been) changed|nothing in (your|the) model('s| has| had)? changed|same inputs?|inputs?( values)? (were|was|are|is|stayed|remained|have stayed|have remained) (unchanged|the same)|unchanged inputs?|(no|none of the) inputs? (were |was |have been |has been )?changed|no changes? (were|was|have been|has been) made|(didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\\b/i (on the label-masked reply, shared.label_masking). 'Nothing else changed.' is the honest control and passes.",
+          "rule": "When changes_unsaid (skipped rows, incomplete input coverage, or no row record), ONE shared predicate rejects narrator sentences combining negation with change/input terms, including singular, plural and fronted forms. Sameness (unchanged, same, as they/it were/was) also negates change, including the rest/everything else. Honest uncertainty (cannot/can't confirm, cannot/can't say what/whether, isn't sure whether) qualifies only its own clause, never a later assertion. Use bounded quantifiers and a linear whitespace-skipping lexer; compare 2k and 20k whitespace-heavy drafts with a scaling-ratio gate. Run on the label-masked narrator; a label that itself asserts the forbidden class cannot license it. Composition always retains the code-owned coverage disclosure and logs each rejected sentence's event, policy id and index without its text. When changes_unsaid is false, preserve the existing no-change check if change_labels is non-empty, including the licensed 'Nothing else changed.' control; a complete empty record keeps existing behaviour.",
           "source": "MG 5939414835; class widened per CODEX CEE BUDDY 5940259670 (seven forms passed the two-phrase ban); MG 5940298428 ('No changes were made.')"
         },
         {

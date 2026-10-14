@@ -1,0 +1,6 @@
+{
+  "mutation": "remove hasLicensedPoint gate from reason_not_recorded fallback",
+  "original_sha256": "3a79d0279a5761eac4462bbaeb3fbdcfdd27eacfbd1f533a768b2311da125484",
+  "restored_sha256": "3a79d0279a5761eac4462bbaeb3fbdcfdd27eacfbd1f533a768b2311da125484",
+  "source_restored": true
+}

@@ -1,33 +1,9 @@
-/**
- * COLLAB U-S0 — OWNER routes (seam pinned by contracts.ts:83).
- *
- *   POST /collab/v1/rounds                        → mint a round + participants
- *   POST /collab/v1/rounds/:round_id/close        → close it; reveal becomes possible
- *   GET  /collab/v1/rounds/:round_id/preview      → roster + targets, NO beliefs
- *   GET  /collab/v1/rounds/:round_id/reveal       → post-close, everyone's answers
- *   GET  /collab/v1/rounds/:round_id/disagreement → post-close, WHERE and HOW they differ
- *
- * Reachable from the browser via the `/bff/collab/*` edge function, which
- * rewrites to this prefix — see `route-support.ts`.
- *
- * ── AUTH: THE UNCONDITIONAL-JWT PATTERN, COPIED DELIBERATELY ──────────────
- * User identity is verified HERE, ALWAYS, from `Authorization: Bearer <supabase
- * access token>`, and is DELIBERATELY INDEPENDENT of `CEE_REQUIRE_USER_JWT`.
- * That flag gates the turn path, whose identity is otherwise a claimed header.
- * Opening a round names real people and pins a version of someone's model; it
- * must never be writable on a claimed identity. There is no configuration in
- * which these endpoints trust a header.
- *
- * The `aud` guard inside `verifySupabaseUserJwt` is load-bearing: the project's
- * `anon` and `service_role` API keys are themselves HS256 JWTs on the SAME
- * secret, and only the `authenticated` audience separates a real user token
- * from them. `extractJwtSub` is decode-only and must never be used here.
- *
- * ⚠ A PARTICIPANT TOKEN GRANTS NOTHING ON THESE ROUTES. It is not consulted at
- * all: the only credential these handlers read is the owner's verified JWT.
- */
+/** Collab owner routes: scenario/round ids are declared at registration.
+ * The central hook verifies JWTs independently of CEE_REQUIRE_USER_JWT and
+ * applies scenario ownership. Participant tokens grant nothing on these routes.
+ * Services retain guest-mint, round-status and owner-panellist scientific restrictions. */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import { assembleDisagreementView } from '../collab/disagreement-read-model.js';
 import { mintParticipantToken } from '../collab/participant-tokens.js';
@@ -41,7 +17,6 @@ import {
   sendRefusal,
 } from '../collab/route-support.js';
 import type { CollabStore, PacketTarget } from '../collab/types.js';
-import { verifySupabaseUserJwt } from '../utils/supabase-user-jwt.js';
 import { emit, TelemetryEvents } from '../utils/telemetry.js';
 
 interface RoundParams {
@@ -64,41 +39,6 @@ function asRecord(x: unknown): Record<string, unknown> {
  * Verify the owner's Supabase access token. ALWAYS-ON. Sends the 401 and
  * returns null on failure — callers must return immediately.
  */
-async function requireOwnerUser(
-  req: FastifyRequest,
-  reply: FastifyReply,
-): Promise<string | null> {
-  const header = req.headers.authorization;
-  const token =
-    typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
-      ? header.slice(7).trim()
-      : '';
-  if (token === '') {
-    sendRefusal(
-      reply,
-      req,
-      401,
-      'sign_in_required',
-      'Opening or closing a round is owner-only: sign in and retry.',
-    );
-    return null;
-  }
-  const result = await verifySupabaseUserJwt(token);
-  if (!result.ok) {
-    sendRefusal(
-      reply,
-      req,
-      401,
-      result.reason,
-      result.reason === 'expired_token'
-        ? 'Your session has expired. Sign in again and retry.'
-        : 'That token could not be verified.',
-    );
-    return null;
-  }
-  return result.userId;
-}
-
 /** Parse the owner-supplied target manifest. Strict: no value-bearing fields. */
 function parseTargets(raw: unknown): PacketTarget[] {
   if (!Array.isArray(raw)) return [];
@@ -128,10 +68,30 @@ export default async function route(
   const resolveStore = (): CollabStore =>
     deps?.store ?? resolveInjectedStore(app) ?? getCollabStore();
 
+  // Retain the checked round binding for this request, including canonical scenario id.
+  const roundReads = new WeakMap<FastifyRequest, NonNullable<Awaited<ReturnType<CollabStore['getRound']>>>>();
+  const deriveRound = async (req: FastifyRequest) => {
+    const round = await resolveStore().getRound(roundIdOf(req));
+    if (round) roundReads.set(req, { ...round });
+    return round?.scenario_id;
+  };
+  const rewriteRound = (req: FastifyRequest, scenarioId: string) => {
+    const round = roundReads.get(req);
+    if (round) roundReads.set(req, { ...round, scenario_id: scenarioId });
+  };
+  const checkedRoundStore = (req: FastifyRequest): CollabStore => {
+    const store = resolveStore();
+    return new Proxy(store, { get(target, key) {
+      if (key === 'getRound') return async (id: string) => { const round = roundReads.get(req); return round?.round_id === id ? round : target.getRound(id); };
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  };
+
   // ── MINT ─────────────────────────────────────────────────────────────────
   for (const path of collabPaths('/rounds')) {
-    app.post(path, async (req, reply) => {
-      const userId = await requireOwnerUser(req, reply);
+    app.post(path, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+      const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
 
       const body = asRecord(req.body);
@@ -195,10 +155,10 @@ export default async function route(
 
   // ── CLOSE ────────────────────────────────────────────────────────────────
   for (const path of collabPaths('/rounds/:round_id/close')) {
-    app.post(path, async (req, reply) => {
-      const userId = await requireOwnerUser(req, reply);
+    app.post(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+      const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         await closeRound(store, {
           round_id: roundIdOf(req),
@@ -217,10 +177,10 @@ export default async function route(
 
   // ── PREVIEW (pre-close: roster only, deliberately no beliefs) ────────────
   for (const path of collabPaths('/rounds/:round_id/preview')) {
-    app.get(path, async (req, reply) => {
-      const userId = await requireOwnerUser(req, reply);
+    app.get(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+      const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         const preview = await ownerPreview(store, {
           round_id: roundIdOf(req),
@@ -235,10 +195,10 @@ export default async function route(
 
   // ── REVEAL (owner view; refuses while the round is open, like everyone) ──
   for (const path of collabPaths('/rounds/:round_id/reveal')) {
-    app.get(path, async (req, reply) => {
-      const userId = await requireOwnerUser(req, reply);
+    app.get(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+      const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         const view = await assembleRevealView(store, {
           round_id: roundIdOf(req),
@@ -258,10 +218,10 @@ export default async function route(
   // second open-round check here that could drift and let this endpoint become
   // an early peek at a blind round.
   for (const path of collabPaths('/rounds/:round_id/disagreement')) {
-    app.get(path, async (req, reply) => {
-      const userId = await requireOwnerUser(req, reply);
+    app.get(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+      const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         const view = await assembleDisagreementView(store, {
           round_id: roundIdOf(req),

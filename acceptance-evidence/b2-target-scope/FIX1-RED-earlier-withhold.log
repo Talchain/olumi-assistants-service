@@ -1,0 +1,95 @@
+Load gate exit: 0
+{"load":8.84814453125,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+{"level":"info","time":1791478247024,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247031,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247043,"pid":49401,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","scaffolded_option_ids":["current_price"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":3}
+{"level":"info","time":1791478247046,"pid":49401,"hostname":"Mac.net","event":"run_analysis.level_limit_baseline_carried","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","node_ids":["monthly_churn_rate"],"msg":"run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)"}
+{"level":"info","time":1791478247047,"pid":49401,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","node_ids":["pro_plan_price","current_paying_subscribers"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1791478247050,"pid":49401,"hostname":"Mac.net","event":"run_analysis.user_links_held_at_one","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","msg":"run_analysis held links at existence 1.0: a user range, a validated definition or route-once (wire copy only; ids only)"}
+{"level":"info","time":1791478247060,"pid":49401,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1791478247065,"pid":49401,"hostname":"Mac.net","event":"run_analysis.limit_p_withheld_for_placeholder_moved_options","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","withheld":[{"constraint_id":"agent-lane:monthly_churn_rate:<=","option_ids":["59_price","current_price"]}],"msg":"run_analysis: a limit's P is withheld for the options that move its target through an unsized Olumi link"}
+{"level":"info","time":1791478247071,"pid":49401,"hostname":"Mac.net","event":"run_analysis.goal_figures_withheld_for_placeholder_paths","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","withheld":[{"option_id":"59_price","links":1}],"msg":"run_analysis: goal figures withheld for the options an unsized Olumi link moves"}
+{"level":"info","time":1791478247083,"pid":49401,"hostname":"Mac.net","event":"v5.run_analysis.constraint_unevaluated","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","constraint_ids":["agent-lane:monthly_churn_rate:<="],"codes":[]}
+{"level":"info","time":1791478247087,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247118,"pid":49401,"hostname":"Mac.net","event":"cee.leader_licence.shadow","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","run_id":"7bc81a0d3a9ddc727d1e91ddb1a1c886f5f3c4a23a7821b7be2b096ac55c6f0a","verdict":"withheld","leader_option_id":null,"reason":"goal_figures_withheld","caveats":[],"admission_mode":"comparative_leader","claim_reason":"goal_path_unsized","failed_closed":false,"disagreements":[],"msg":"A2 L1 leader-licence shadow verdict (no behaviour change)"}
+{"level":"info","time":1791478247131,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247136,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247139,"pid":49401,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","scaffolded_option_ids":["current_price"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":3}
+{"level":"info","time":1791478247140,"pid":49401,"hostname":"Mac.net","event":"run_analysis.level_limit_baseline_carried","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","node_ids":["monthly_churn_rate"],"msg":"run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)"}
+{"level":"info","time":1791478247141,"pid":49401,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","node_ids":["pro_plan_price","current_paying_subscribers"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1791478247143,"pid":49401,"hostname":"Mac.net","event":"run_analysis.user_links_held_at_one","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","msg":"run_analysis held links at existence 1.0: a user range, a validated definition or route-once (wire copy only; ids only)"}
+{"level":"info","time":1791478247146,"pid":49401,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1791478247147,"pid":49401,"hostname":"Mac.net","event":"run_analysis.limit_p_withheld_for_placeholder_moved_options","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","withheld":[{"constraint_id":"agent-lane:monthly_churn_rate:<=","option_ids":["59_price","current_price"]}],"msg":"run_analysis: a limit's P is withheld for the options that move its target through an unsized Olumi link"}
+{"level":"info","time":1791478247150,"pid":49401,"hostname":"Mac.net","event":"v5.run_analysis.constraint_unevaluated","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","constraint_ids":["agent-lane:monthly_churn_rate:<="],"codes":[]}
+{"level":"info","time":1791478247153,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247156,"pid":49401,"hostname":"Mac.net","event":"cee.nonlinear_identity.leader_withheld","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","leading_option_id":"59_price","outcome_node_id":"mrr","unproven_against_count":1,"msg":"run_analysis: leader withheld — its sign on a multiplied goal is not proven"}
+{"level":"info","time":1791478247172,"pid":49401,"hostname":"Mac.net","event":"cee.leader_licence.shadow","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","run_id":"00877b4882323dbf0db060b61799683a890407ee2c0f13cca04e0bf661e84535","verdict":"withheld","leader_option_id":null,"reason":"constraint_withheld","caveats":[],"admission_mode":"comparative_leader","claim_reason":"constraint_verdict_withheld","failed_closed":false,"disagreements":[{"site":"stored_leader","live":true,"verdict":false}],"msg":"A2 L1 leader-licence shadow verdict (no behaviour change)"}
+{"level":"info","time":1791478247197,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247199,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247201,"pid":49401,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","scaffolded_option_ids":["current_price"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":3}
+{"level":"info","time":1791478247202,"pid":49401,"hostname":"Mac.net","event":"run_analysis.level_limit_baseline_carried","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","node_ids":["monthly_churn_rate"],"msg":"run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)"}
+{"level":"info","time":1791478247202,"pid":49401,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","node_ids":["pro_plan_price","current_paying_subscribers"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1791478247203,"pid":49401,"hostname":"Mac.net","event":"run_analysis.user_links_held_at_one","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","msg":"run_analysis held links at existence 1.0: a user range, a validated definition or route-once (wire copy only; ids only)"}
+{"level":"info","time":1791478247206,"pid":49401,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1791478247208,"pid":49401,"hostname":"Mac.net","event":"run_analysis.limit_p_withheld_for_placeholder_moved_options","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","withheld":[{"constraint_id":"agent-lane:monthly_churn_rate:<=","option_ids":["59_price","current_price"]}],"msg":"run_analysis: a limit's P is withheld for the options that move its target through an unsized Olumi link"}
+{"level":"info","time":1791478247216,"pid":49401,"hostname":"Mac.net","event":"run_analysis.goal_figures_withheld_target_not_testable","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","msg":"run_analysis: goal figures withheld: the goal's target can't be tested yet"}
+{"level":"info","time":1791478247218,"pid":49401,"hostname":"Mac.net","event":"v5.run_analysis.constraint_unevaluated","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","constraint_ids":["agent-lane:monthly_churn_rate:<="],"codes":[]}
+{"level":"info","time":1791478247220,"pid":49401,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478247224,"pid":49401,"hostname":"Mac.net","event":"cee.leader_licence.shadow","request_id":"req-tt-run","scenario_id":"c8108752-0000-4000-8000-000000002371","run_id":"7bc81a0d3a9ddc727d1e91ddb1a1c886f5f3c4a23a7821b7be2b096ac55c6f0a","verdict":"withheld","leader_option_id":null,"reason":"goal_figures_withheld","caveats":[],"admission_mode":"comparative_leader","claim_reason":"constraint_verdict_withheld","failed_closed":false,"disagreements":[],"msg":"A2 L1 leader-licence shadow verdict (no behaviour change)"}
+ ❯ src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts (17 tests | 1 failed) 299ms
+     × the served graph withholds the affected price option; the clean baseline keeps its zero 116ms
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (17 tests | 1 failed) 126ms
+     × B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances
+AssertionError: expected undefined to deeply equal [ 'starter' ]
+
+- Expected:
+[
+  "starter",
+]
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:58:46
+     56|     expect(chances(afterTarget)).toEqual(['raise', 'keep']);
+     57|     // The earlier placeholder warning does not erase Starter's own ta…
+     58|     expect(warning(afterTarget)?.option_ids).toEqual(['starter']);
+       |                                              ^
+     59|     expect(Object.keys(warning(afterTarget)?.per_option ?? {})).toEqua…
+     60|     const ranged = withGoalChanceRange(afterTarget, g, { goalId: 'goal…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts > m1 after the identity card's Yes: target failures belong to their affected options > the served graph withholds the affected price option; the clean baseline keeps its zero
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts:95:15
+     93|     const w = warningsOf(result).filter((x) => x.code === GOAL_FIGURES…
+     94|     // Both reasons remain on the affected price option; neither may s…
+     95|     expect(w).toHaveLength(1);
+       |               ^
+     96|     expect(w[0].option_ids).toEqual(['59_price']);
+     97|     expect(Object.keys(w[0].per_option)).toEqual(['59_price']);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 32 passed (34)
+   Start at  17:50:40
+   Duration  8.30s (transform 4.57s, setup 217ms, import 7.36s, tests 425ms, environment 0ms)
+

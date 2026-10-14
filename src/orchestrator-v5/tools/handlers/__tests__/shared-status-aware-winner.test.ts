@@ -130,24 +130,24 @@ describe('shared status-aware winner — site 2: projectAnalysis (context pack)'
 
 describe('shared status-aware winner — site 3: decision-review enricher', () => {
   it('null leader — picks the highest RECOMMENDABLE option, not the failed top', () => {
-    const input = buildInvokeInputForTests('brief', reproEnvelope() as unknown as Record<string, unknown>, null);
+    const input = buildInvokeInputForTests('brief', reproEnvelope() as unknown as Record<string, unknown>, null, undefined, true);
     expect(input).not.toBeNull();
     expect(input!.winner.id).toBe('A');
     expect(input!.runner_up?.id).toBe('C');
   });
 
   it('declared recommendable leader is honoured', () => {
-    const input = buildInvokeInputForTests('brief', reproEnvelope() as unknown as Record<string, unknown>, 'A');
+    const input = buildInvokeInputForTests('brief', reproEnvelope() as unknown as Record<string, unknown>, 'A', undefined, true);
     expect(input!.winner.id).toBe('A');
   });
 
   it('a FAILED option declared as leader is never crowned (honest no_winner)', () => {
-    const input = buildInvokeInputForTests('brief', reproEnvelope() as unknown as Record<string, unknown>, 'B');
+    const input = buildInvokeInputForTests('brief', reproEnvelope() as unknown as Record<string, unknown>, 'B', undefined, true);
     expect(input).toBeNull();
   });
 
   it('GOLDEN — all-computed set is unchanged: highest win_probability wins', () => {
-    const input = buildInvokeInputForTests('brief', allComputedEnvelope() as unknown as Record<string, unknown>, null);
+    const input = buildInvokeInputForTests('brief', allComputedEnvelope() as unknown as Record<string, unknown>, null, undefined, true);
     expect(input!.winner.id).toBe('B');
     expect(input!.runner_up?.id).toBe('A');
   });

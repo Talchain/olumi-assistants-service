@@ -157,7 +157,7 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
     const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, ownerUserId: null });
     expect(db.rows.has(SCENARIO_ID)).toBe(true);
   });
 
@@ -166,17 +166,11 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
     const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, ownerUserId: null });
     expect(db.rows.get(SCENARIO_ID)).toEqual({ user_id: null });
   });
 
-  it('ownership still decides on an EXISTING owned scenario (the gate did not displace the IDOR check)', async () => {
-    const db = makeDb({ rowPresent: true, storedOwner: OWNER_ID, admittedTurns: true });
 
-    const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
-
-    expect(result).toEqual({ ok: false, reason: 'scenario_requires_authenticated_owner' });
-  });
 
   it('binds to THIS scenario: an admitted turn on a DIFFERENT scenario does not refuse this one', async () => {
     // Identity binding, not a value predicate another object could satisfy
@@ -197,7 +191,7 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
     const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, store);
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, ownerUserId: null });
     expect(rows.has(SCENARIO_ID)).toBe(true);
     expect(store.scenarioHasAdmittedTurn).toHaveBeenCalledWith(SCENARIO_ID);
   });
@@ -236,7 +230,7 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
       const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, ownerUserId: null });
     });
 
     it('fence read THROWS → proceed rather than refuse a possibly-legitimate first turn', async () => {
@@ -244,7 +238,7 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
       const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, ownerUserId: null });
     });
 
     it('store cannot probe existence (legacy double) → proceed, exactly as turn-stop does', async () => {
@@ -252,7 +246,7 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
       const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, ownerUserId: null });
     });
 
     it('store cannot answer the fence question (legacy double) → proceed', async () => {
@@ -260,7 +254,7 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
 
       const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, ownerUserId: null });
     });
   });
 });

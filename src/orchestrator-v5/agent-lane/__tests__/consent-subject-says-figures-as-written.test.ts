@@ -18,7 +18,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
+import { sayFigure, sayFigureExactly, sayFigureRead } from '../say-figure.js';
+import { readMoneyTotal } from '../same-unit.js';
+import { totalUnitOfPerUnitPrice } from '../../../cee/provenance/stated-amounts.js';
 import { composeProposalReply } from '../proposal-reply.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -173,20 +175,26 @@ describe('⭐ a count is said as a whole number, whatever the stored quotient', 
   const served = breakEvenFor(F8)!;
 
   it('RED (served run 3 shape): "about 1,469" and "about 248", never 1,469.388 or 248.388', () => {
+    const moneyUnit = readMoneyTotal(totalUnitOfPerUnitPrice(served.unit), '');
+    expect(moneyUnit, 'the arithmetic producer reads this as a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(49, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£49 a month');
     const v0 = 72_000 / 49;
     const keep = Math.ceil(72_000 / 59 - 1e-9);
     const be = { ...served, baseline_volume: v0, baseline_volume_by: 'olumi' as const, baseline_goal: 72_000,
       options: [{ option: 'Raise Pro to £59', option_id: 'raise_pro_to_59', price: 59, price_by: 'user' as const, keep_at_least: keep }] };
     const { target: _t, ...noTarget } = be;
     const said = breakEvenLine(noTarget);
-    expect(said).toContain('at £49/month and about 1,469 Pro paying subscribers (Olumi’s estimate), MRR is £72,000/month today.');
-    expect(said).toContain('At £59/month, MRR stays at least that while 1,221 or more of about 1,469 stay (a loss of at most about 248).');
+    expect(said).toContain('at £49 a month and about 1,469 Pro paying subscribers (Olumi’s estimate), MRR is £72,000 a month today.');
+    expect(said).toContain('At £59 a month, MRR stays at least that while 1,221 or more of about 1,469 stay (a loss of at most about 248).');
     expect(said).not.toMatch(/\d\.\d{3}/);
   });
 
   it('CONTROL (served F8, whole counts): said exactly as before', () => {
+    const moneyUnit = readMoneyTotal(totalUnitOfPerUnitPrice(served.unit), '');
+    expect(moneyUnit, 'the arithmetic producer reads this as a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(49, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£49 a month');
     const said = breakEvenLine(served);
-    expect(said).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
-    expect(said).toContain('At £59/month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
+    expect(said).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
+    expect(said).toContain('At £59 a month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
   });
 });

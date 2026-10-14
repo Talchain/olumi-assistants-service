@@ -59,6 +59,14 @@ function draft(edit: (c: Json) => void = () => {}): CandidateModel {
 }
 
 async function build(model: CandidateModel): Promise<{ graph: { nodes: Json[]; edges: Json[] }; out: Json }> {
+  const receipts: Record<string, string> = { 'Pro plan price': 'Our Pro price is £49 per subscriber per month.', 'Paying subscribers': 'We have 1,500 paying subscribers.' };
+  model = { ...model, factors: model.factors.map((f) => {
+    const quote = receipts[f.label];
+    return quote && f.baseline_known && f.provenance === 'explicit'
+      && ((f.label === 'Pro plan price' && f.baseline_value === 49) || (f.label === 'Paying subscribers' && f.baseline_value === 1500))
+      ? { ...f, baseline_evidence: { quote } } : f;
+  }) };
+  const brief = `${Object.values(receipts).join(' ')}\n\n${BRIEF}`;
   expect(strict(model), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(model) })) as unknown as CallStructuredModel;
@@ -66,7 +74,7 @@ async function build(model: CandidateModel): Promise<{ graph: { nodes: Json[]; e
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('afa332b2-0000-4000-8000-000000000001', BRIEF, d, call) as Json;
+  const out = await buildModelFromBrief('afa332b2-0000-4000-8000-000000000001', brief, d, call) as Json;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { graph: graph as { nodes: Json[]; edges: Json[] }, out };
 }

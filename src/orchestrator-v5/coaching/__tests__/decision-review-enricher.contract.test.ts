@@ -126,7 +126,7 @@ const BRIEF = "Should we engage an offshore partner or hire locally to deliver Q
 
 describe('decision-review-enricher — Tier 3 contract', () => {
   it('contract: every adapter-owned field is present and correctly shaped (prompt v11)', () => {
-    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner');
+    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner', undefined, true);
     expect(input).not.toBeNull();
     if (!input) throw new Error('unreachable');
 
@@ -220,7 +220,7 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     // decision-review-enricher.adapter-v1.test.ts. makePopulatedEnrichment()
     // has no m1_coaching field, so this test exercises the fallback path
     // and asserts no fabrication.
-    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner', undefined, true)!;
     const dc = input.deterministic_coaching;
     expect(dc.headline_type).toBe('neutral');
     expect(dc.readiness).toBe('unknown');
@@ -229,7 +229,7 @@ describe('decision-review-enricher — Tier 3 contract', () => {
   });
 
   it('_meta observability: input_shape_version, counts, margin, robustness_level', () => {
-    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner', undefined, true)!;
     const meta = input._meta;
     expect(meta).toBeDefined();
     if (!meta) throw new Error('unreachable');
@@ -250,8 +250,8 @@ describe('decision-review-enricher — Tier 3 contract', () => {
   });
 
   it('_meta is adapter-only: NEVER appears in the assembled user message', () => {
-    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner')!;
-    const margin = input.runner_up !== null
+    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner', undefined, true)!;
+    const margin = input.runner_up !== null && typeof input.winner.win_probability === 'number'
       ? input.winner.win_probability - input.runner_up.win_probability
       : null;
     const userMessage = buildDecisionReviewUserMessage(input, margin);
@@ -314,7 +314,7 @@ describe('decision-review-enricher — edge cases', () => {
     ];
     (enrichment.results as Array<Record<string, unknown>>)[1].factor_sensitivity = [];
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     expect(input.flip_threshold_data?.length).toBe(1);
     expect((input.flip_threshold_data?.[0] as Record<string, unknown>).factor_id).toBe('fac_ramp');
   });
@@ -327,14 +327,14 @@ describe('decision-review-enricher — edge cases', () => {
       { factor_id: 'fac_anonymous', elasticity: 0.5, confidence: 0.8 },
     ];
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     const fs = input.isl_results.factor_sensitivity as Array<Record<string, unknown>>;
     expect(fs[0].factor_id).toBe('fac_anonymous');
     expect(fs[0].factor_label).toBe('fac_anonymous');
   });
 
   it('missing graph-node unit yields unit field omitted (not invented)', () => {
-    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner', undefined, true)!;
     const seniority = input.flip_threshold_data!.find(
       (r) => (r as Record<string, unknown>).factor_id === 'fac_seniority',
     ) as Record<string, unknown>;
@@ -346,7 +346,7 @@ describe('decision-review-enricher — edge cases', () => {
   it('empty fragile_edges array yields [] with no error', () => {
     const enrichment = makePopulatedEnrichment();
     (enrichment.robustness as Record<string, unknown>).fragile_edges = [];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     expect(input.isl_results.fragile_edges).toEqual([]);
     expect(input._meta?.fragile_edge_count).toBe(0);
   });
@@ -354,7 +354,7 @@ describe('decision-review-enricher — edge cases', () => {
   it('flat outcome_mean and nested outcome.mean both normalise correctly', () => {
     // Already covered by the contract test above (opt_partner flat,
     // opt_hire nested) — this is the explicit assertion form.
-    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner', undefined, true)!;
     const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
     const partner = oc.find((r) => r.option_id === 'opt_partner') as Record<string, unknown>;
     const hire = oc.find((r) => r.option_id === 'opt_hire') as Record<string, unknown>;
@@ -367,7 +367,7 @@ describe('decision-review-enricher — edge cases', () => {
     (enrichment.factor_sensitivity as Array<Record<string, unknown>>) = [
       { factor_id: 'fac_x', factor_label: 'X', elasticity: 0.5 }, // no confidence
     ];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     const fs = input.isl_results.factor_sensitivity as Array<Record<string, unknown>>;
     expect(fs[0].confidence).toBeNull();
   });
@@ -376,7 +376,7 @@ describe('decision-review-enricher — edge cases', () => {
     const enrichment = makePopulatedEnrichment();
     enrichment.graph = 'not-an-object'; // pathological shape
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner');
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true);
     expect(input).not.toBeNull();
     if (!input) throw new Error('unreachable');
     // Without a graph, factor labels fall back to factor_id and units go null.
@@ -399,7 +399,7 @@ describe('decision-review-enricher — edge cases', () => {
     ];
     (enrichment.results as Array<Record<string, unknown>>)[1].factor_sensitivity = [];
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     const byId = Object.fromEntries(
       input.flip_threshold_data!.map((r) => [(r as Record<string, unknown>).factor_id as string, r]),
     );
@@ -411,7 +411,7 @@ describe('decision-review-enricher — edge cases', () => {
   it('runner_up: null margin survives when only one option has results', () => {
     const enrichment = makePopulatedEnrichment();
     enrichment.results = [(enrichment.results as Array<Record<string, unknown>>)[0]];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     expect(input.runner_up).toBeNull();
     expect(input._meta?.margin).toBeNull();
   });
@@ -458,7 +458,7 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
     const fxOc = enrichment.option_comparison as Array<Record<string, unknown>>;
     expect(fxOc).toHaveLength(4);
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_hire_local');
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_hire_local', undefined, true);
     expect(input).not.toBeNull();
     if (!input) throw new Error('unreachable');
 
@@ -496,7 +496,7 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
     const enrichment = makePopulatedEnrichment();
     expect(enrichment.option_comparison).toBeUndefined();
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
     expect(oc).toHaveLength(2);
     expect(oc.map((r) => r.option_id).sort()).toEqual(['opt_hire', 'opt_partner']);
@@ -521,7 +521,7 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
       },
     ];
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
     // 2 entries, not 4 — the legacy `results` copies must NOT be pooled in.
     expect(oc).toHaveLength(2);
@@ -534,7 +534,7 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
   it('current shape present but EMPTY: falls back to legacy results', () => {
     const enrichment = makePopulatedEnrichment();
     enrichment.option_comparison = [];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
     expect(oc).toHaveLength(2);
   });
@@ -550,7 +550,7 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
         { option_id: 'opt_hire', label: 'Hire Two Senior Engineers Locally', win_probability: 0.25, rank: 2 },
       ],
     };
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     expect(input.isl_results.option_comparison).toEqual([]);
   });
 });
@@ -582,7 +582,7 @@ describe('decision-review-enricher — winner-source precedence (current-first, 
   }
 
   it('both sources carry the leader with CONFLICTING numbers: winner comes from the CURRENT envelope', () => {
-    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), 'opt_partner', undefined, true)!;
     expect(input).not.toBeNull();
     // Winner numbers/label from option_comparison (current), NOT legacy results.
     expect(input.winner.label).toBe('Engage Offshore Partner');
@@ -603,7 +603,7 @@ describe('decision-review-enricher — winner-source precedence (current-first, 
     enrichment.option_comparison = [
       { option_id: 'opt_hire', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.28, outcome: { mean: 950_000 } },
     ];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true)!;
     expect(input).not.toBeNull();
     // Leader rescued from the legacy source (walk-until-match unchanged).
     expect(input.winner.label).toBe('Engage Offshore Partner (stale)');
@@ -611,7 +611,7 @@ describe('decision-review-enricher — winner-source precedence (current-first, 
   });
 
   it('null leader: the argmax is taken from the CURRENT source first', () => {
-    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), null)!;
+    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), null, undefined, true)!;
     expect(input).not.toBeNull();
     expect(input.winner.win_probability).toBe(0.72);
     expect(input.winner.label).toBe('Engage Offshore Partner');

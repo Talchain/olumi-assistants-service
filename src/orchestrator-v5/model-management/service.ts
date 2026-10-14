@@ -38,11 +38,14 @@
  * Identity: the Group A primitives are REUSED, never re-implemented —
  * `computeGraphIdentityHash` supplies the content identity envelope the
  * RPC persists verbatim; comparison delegates to compare.ts (which reuses
- * the sanctioned analysis-affecting hash). The service never throws: every
- * outcome is a typed ModelManagementResult.
+ * the sanctioned analysis-affecting hash). Storage outcomes remain typed ModelManagementResult values; door ownership
+ * and structural refusal classes reach the existing HTTP boundary unchanged.
  */
 
 import { config } from '../../config/index.js';
+import { commitModelChange, PreconditionRiskLinkWriteError } from '../persist-graph-write.js';
+import { PersistedGraphInvariantError } from '../persisted-graph-invariants.js';
+import { ModelWriteOwnershipRefused } from '../ownership/door-ownership.js';
 import {
   computeGraphIdentityHash,
   computeVersionAnalysisAffectingHashRecord,
@@ -61,6 +64,7 @@ import {
 } from './store-adapter.js';
 import {
   CAS_CONFLICT_KIND,
+  VersionRevisionConflictError,
   SIGN_IN_REQUIRED_MESSAGE,
   type AtomicRestoreVersionOutcome,
   type ModelManagementResult,
@@ -74,6 +78,7 @@ import {
 import { journeyRpcVersionEventSink, notifyVersionEventSink } from './version-event-sink.js';
 
 export interface SaveVersionRequest {
+  readonly expected_revision: number;
   readonly scenario_id: string;
   /** The graph to snapshot (wire/persisted shape; hashed CEE-side). */
   readonly graph: unknown;
@@ -92,14 +97,10 @@ export interface SaveVersionRequest {
   readonly event_id?: string;
 }
 
-export interface RestoreVersionRequest {
-  readonly scenario_id: string;
-  readonly version_id: string;
-  readonly label?: string;
-  readonly expected_graph_identity_hash?: string;
-}
-
 export interface AtomicRestoreVersionRequest {
+  /** Server-read head for the existing identity-bound return-leg admission. Not a wire field. */
+  readonly restore_head?: ModelVersionRecord | null;
+  readonly expected_revision: number;
   readonly scenario_id: string;
   readonly version_id: string;
   readonly mutation_id: string;
@@ -161,7 +162,8 @@ export class ModelManagementService {
     }
 
     return this.runWrite('model_version_created', request.scenario_id, () =>
-      this.store.saveVersion({
+      commitModelChange({ operation: 'SAVE_VERSION', store: this.store, write: {
+        expected_revision: request.expected_revision,
         scenario_id: request.scenario_id,
         graph: request.graph,
         graph_identity_hash: identity.value,
@@ -181,23 +183,7 @@ export class ModelManagementService {
             }
           : {}),
         ...(request.event_id !== undefined ? { event_id: request.event_id } : {}),
-      }),
-    );
-  }
-
-  async restoreVersion(
-    request: RestoreVersionRequest,
-  ): Promise<ModelManagementResult<VersionWriteOutcome>> {
-    if (!this.isEnabled()) return { status: 'disabled' };
-    return this.runWrite('model_version_restored', request.scenario_id, () =>
-      this.store.restoreVersion({
-        scenario_id: request.scenario_id,
-        version_id: request.version_id,
-        ...(request.label !== undefined ? { label: request.label } : {}),
-        ...(request.expected_graph_identity_hash !== undefined
-          ? { expected_graph_identity_hash: request.expected_graph_identity_hash }
-          : {}),
-      }),
+      } }),
     );
   }
 
@@ -250,7 +236,9 @@ export class ModelManagementService {
     }
 
     return this.runWrite('model_version_restored', request.scenario_id, () =>
-      this.store.restoreVersionAtomic!({
+      commitModelChange({ operation: 'RESTORE_VERSION', store: this.store,
+        restoreHead: request.restore_head, write: {
+        expected_revision: request.expected_revision,
         scenario_id: request.scenario_id,
         version_id: request.version_id,
         mutation_id: request.mutation_id,
@@ -270,7 +258,7 @@ export class ModelManagementService {
         authored_by: request.authored_by ?? null,
         source_turn_id: request.source_turn_id ?? null,
         ...(request.label !== undefined ? { label: request.label } : {}),
-      } satisfies AtomicRestoreVersionWrite),
+      } satisfies AtomicRestoreVersionWrite }),
     );
   }
 
@@ -474,13 +462,30 @@ export class ModelManagementService {
       }
       return { status: 'ok', value: outcome };
     } catch (err) {
+      // These refusals previously occurred in the route before the service call.
+      // Preserve their classes for the existing ownership hook / structural 422 mapper.
+      if (err instanceof ModelWriteOwnershipRefused || err instanceof PersistedGraphInvariantError
+        || err instanceof PreconditionRiskLinkWriteError) throw err;
       return mapThrownError(err);
     }
   }
 }
 
-/** Fail-closed typed mapping — the service never rethrows. */
+/** Typed mapping for adapter failures; door refusals retain their classes above. */
 function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
+  if (err instanceof VersionRevisionConflictError) {
+    return {
+      status: 'conflict',
+      conflict: {
+        kind: 'revision_conflict',
+        expected_graph_identity_hash: null,
+        // Preserve the existing result contract locally; routes own wire copy.
+        message: 'The scenario changed while I was saving, so nothing was saved. Try again.',
+        expected: err.expected,
+        ...(err.current !== null ? { current: err.current } : {}),
+      },
+    };
+  }
   if (err instanceof ModelVersionDiffInputError) {
     return {
       status: 'error',

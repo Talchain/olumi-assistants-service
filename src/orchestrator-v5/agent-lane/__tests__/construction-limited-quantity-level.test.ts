@@ -65,6 +65,14 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 type Graph = { nodes: Array<Record<string, unknown> & { id: string; kind: string; observed_state?: Record<string, unknown> }> };
 
 async function construct(brief: string, ...drafts: ReturnType<typeof journeyC>[]) {
+  const receipts = new Set<string>();
+  for (const d of drafts) for (const f of d.factors as CandidateModel['factors']) {
+    if (!f.baseline_known || f.provenance !== 'explicit') continue;
+    const quote = f.label === 'Pro plan price' ? 'Our Pro price is £49 a month.' : 'Our monthly churn rate is 3%.';
+    f.baseline_evidence = { quote };
+    receipts.add(quote);
+  }
+  brief = `${[...receipts].join(' ')}\n\n${brief}`;
   for (const d of drafts) expect(strict(d), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown;
   const inputs: string[] = [];

@@ -21,6 +21,8 @@ import {
   requiredNestedMemberNames,
 } from "../schemas/required-nested-merge.js";
 import type { PatchOperation } from "./types.js";
+import { preconditionRiskLinkViolations } from './graph-structure-validator.js';
+import { hasReliesOnRiskWrite } from '../orchestrator-v5/graph-management/field-safety.js';
 
 // ============================================================================
 // Error
@@ -32,6 +34,7 @@ export type PatchApplyErrorCode =
   | 'NODE_ALREADY_EXISTS'
   | 'EDGE_ALREADY_EXISTS'
   | 'INVALID_OPERATION'
+  | 'PRECONDITION_RISK_LINKED'
   /** F1 (#87 6006627551): the write would move the strength of a link holding the user's own figure (`user-figure-held.ts`). */
   | 'USER_FIGURE_HELD';
 
@@ -61,6 +64,11 @@ export function applyPatchOperations(
   graph: GraphV3T,
   operations: PatchOperation[],
 ): GraphV3T {
+  // A server-approved Add owns the initial stamp. No update writer may
+  // manufacture, rebind or remove it, even outside the model/referee doors.
+  if (hasReliesOnRiskWrite(operations.filter((op) => op.op === 'update_node'))) {
+    throw new PatchApplyError('INVALID_OPERATION', "A precondition risk's option link is managed by its Add approval; I haven't changed it.");
+  }
   // Deep clone to guarantee purity — structuredClone handles nested objects
   // (observed_state, strength, provenance) that spread would share by reference
   const candidate: GraphV3T = structuredClone({ nodes: graph.nodes, edges: graph.edges }) as GraphV3T;
@@ -93,6 +101,13 @@ export function applyPatchOperations(
     }
   }
 
+  // Enforce the central precondition rule after the WHOLE atomic batch: an
+  // explicit removal can repair a bad stored link, but no writer can persist
+  // an incident link by bypassing edit_graph's optional structural preflight.
+  const preconditionViolation = preconditionRiskLinkViolations(candidate)[0];
+  if (preconditionViolation !== undefined) {
+    throw new PatchApplyError('PRECONDITION_RISK_LINKED', preconditionViolation.detail);
+  }
   return candidate;
 }
 

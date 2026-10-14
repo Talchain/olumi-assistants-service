@@ -35,6 +35,7 @@ import {
   CONFIGURE_OPTION_GENERIC_CHIP,
 } from '../configure-option-chip-text.js';
 import { readIdentityAsk } from '../coaching/identity-not-evaluated-ask.js';
+import { SHARE_BY_DATE_OWNERSHIP_GUIDANCE } from '../tools/handlers/d1-shared/errors.js';
 
 /**
  * How many outstanding questions the refusal lists inline. Six is the witnessed
@@ -528,7 +529,12 @@ export function composeHandlerFailureBody(
     }
 
     case 'precondition_unmet_at_execute': {
-      const guidance = readUserGuidance(details);
+      // Select known authored copy by its typed reason. The generic details
+      // sanitiser caps untrusted text at 100 characters, which would remove
+      // this refusal's recovery action and its no-write assurance.
+      const guidance = details.reason_code === 'SHARE_BY_DATE_SERVER_OWNED'
+        ? SHARE_BY_DATE_OWNERSHIP_GUIDANCE
+        : readUserGuidance(details);
       return {
         body: {
           assistant_text:

@@ -4,8 +4,8 @@
  * the one question that unlocks it — and the Agent is licensed to say the shares as model findings in the goal's own
  * direction, never as a chance of reaching the target.
  *
- * Served before (red team #87 5999041843, rt10b Run 2): "This run doesn't show how often each option reaches the goal's
- * target." then "What is the most that 'monthly cancellations' can be?" — for the target the user had just set.
+ * Served before (red team #87 5999041843, rt10b Run 2): a generic withheld opening, then
+ * "What is the most that 'monthly cancellations' can be?" — for the target the user had just set.
  *
  * Fixture: the red team's post-edit graph and the REAL PLoT body for its own payload (minimise, 2473ace). Science asked
  * for a plural and a singular goal label: both bound by their exact words.
@@ -28,6 +28,8 @@ const F = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtur
   graph_with_target: Json; plot_body_minimise: Json;
 };
 
+// Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+// effect that converts into goal units." These local sizes have no readable converting downstream route, so all six still fail.
 const PLURAL_TAIL = "I can't yet say how likely any option is to keep monthly cancellations at or below 400 cancellations / month: "
   + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 3 more. '
   + "What's today's level of monthly cancellations?";
@@ -77,11 +79,14 @@ describe('B′ — the target tail and the target-only licence', () => {
     expect(goalChanceWithheldForAgent(block)?.say).toBe(SINGULAR_TAIL);
   });
 
-  it('the licence lets the shares be said in the goal\'s own direction, always "in this model", never as a target chance or a recommendation', () => {
+  // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q3, rulings 1ad7f7b2…): both notes no longer license a share of runs or a leader as a
+  // Run-result finding (that inherited permission contradicted P13); a separately permitted share is comparative reasoning only.
+  it('both target-only notes: no share or leader in a Run result reply, never a ranking for the withheld chance, never a recommendation', () => {
     for (const note of [TARGET_ONLY_NOTE, TARGET_ONLY_OUTCOME_KEPT_NOTE]) {
-      expect(note).toMatch(/where lower is better, the option that came out lowest/);
-      expect(note).toMatch(/always said as ‘in this model’/);
-      expect(note).toMatch(/never\s+as a\s+chance of reaching the target and never as a recommendation/);
+      expect(note).not.toMatch(/where lower is better, the option that came out lowest/);
+      expect(note).toContain('In a Run result reply, do not report relative shares of model runs or name an option leader from them.');
+      expect(note).toContain('Never substitute a relative ranking for an unavailable goal chance.');
+      expect(note).toContain('it is neither a goal chance nor a recommendation.');
     }
   });
 
@@ -91,6 +96,17 @@ describe('B′ — the target tail and the target-only licence', () => {
     expect(tailOf(g)).toBe("I can't yet say how likely any option is to keep monthly cancellations below 400 cancellations / month: "
       + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 3 more. '
       + "Olumi also can't yet test a '< 400 cancellations / month' target. What's today's level of monthly cancellations?");
+  });
+
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: a %s still contributes its own failing link', kind => {
+    const g = structuredClone(F.graph_with_target);
+    const e = g.edges.find((x: Json) => x.from === 'courier_on_time_delivery_rate' && x.to === 'late_delivery_cancellations');
+    if (kind === 'placeholder') { e.provenance.magnitude = 'olumi_placeholder'; e.strength.defaulted = true; }
+    else delete e.provenance.natural_effect;
+    const v = targetTestabilityOf(g);
+    expect(v.kind === 'not_testable' && v.failures.find(f => f.case === 'c')?.links)
+      .toContainEqual({ from: e.from, to: e.to });
+    expect(targetWarning(runOn(g)).say).toContain('and 3 more.');
   });
 
   it('(b) ALONE: the gap is named and nothing is asked', () => {

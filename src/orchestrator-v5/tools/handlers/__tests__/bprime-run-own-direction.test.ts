@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * RT-10 B′ follow-through, DL e8 condition 1: the shares and the leader come from ISL AT THE RUN'S OWN DIRECTION
  * (minimise → "came out lowest"), with a maximise contrast, and a stale-shares mutant goes RED.
@@ -24,7 +25,7 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
-import { notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
+import { convertingOlumiEstimate, scoredGoalIdOf, notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 
@@ -34,6 +35,9 @@ const F = JSON.parse(readFileSync(new URL('./fixtures/bprime-rt10b.json', import
 };
 const SCENARIO = '078e521e-907b-4444-96c9-b9a49472b766';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+// Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE
+// with a natural effect that converts into goal units." Their downstream conversion frames are unreadable, so these two still fail.
+
 
 /** What ISL answers for each direction CEE can send. */
 const BODY_FOR = { minimise: F.plot_body_minimise, none: F.plot_body_at_least };
@@ -52,7 +56,9 @@ const reduceLabel = (graph: Json): Json => {
   return g;
 };
 
-async function runOn(graph: Json): Promise<{ sent: Json; result: Json }> {
+async function runOn(graph: Json, asServed = false): Promise<{ sent: Json; result: Json }> {
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+  graph = asServed ? structuredClone(graph) : legacyDoorGraph(graph);
   const store = {
     readMostRecentPendingActions: async () => [],
     loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: 'Monthly cancellations should come down.' })),
@@ -154,6 +160,24 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(warning.message.length).toBeLessThanOrEqual(400);
   });
 
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: %s keeps both upstream links in the target requirement', (kind) => {
+    const graph = clone(F.graph_with_target);
+    const estimates = graph.edges.filter((edge: Json) => edge.provenance?.magnitude === 'olumi_estimate');
+    expect(estimates).toHaveLength(2);
+    expect(estimates.every((edge: Json) => !convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph)))).toBe(true);
+    for (const edge of estimates) {
+      if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
+      else delete edge.provenance.natural_effect;
+      expect(convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph))).toBe(false);
+    }
+    const verdict = targetTestabilityOf(graph);
+    expect(verdict.kind).toBe('not_testable');
+    if (verdict.kind !== 'not_testable') throw new Error('the refused-conversion precondition is absent');
+    expect(verdict.failures.find((failure) => failure.case === 'c')?.links).toHaveLength(6);
+    expect(notTargetTestableSentence(graph, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 3 more.');
+    expect(untestableTargetTail(graph, verdict)).toContain("What's today's level of monthly cancellations?");
+  });
+
   it('MAXIMISE CONTRAST ("at least 400"): the shares are the at-least body\'s, and the lead never says "came out lowest"', async () => {
     const { result } = await runOn(atLeast());
     expect(resultShares(result)).toEqual(sharesById(F.plot_body_at_least.option_comparison));
@@ -175,4 +199,10 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(withoutTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
     expect(withTarget.result.summary).not.toMatch(/lowest reduce|came out lowest/i);
   });
+});
+
+it('Science 393023: as-served rt10b leader → withheld on the untagged door path', async () => {
+  const { result } = await runOn(F.graph_with_target, true);
+  expect(result.leading_option_id).toBeNull();
+  expect(result.enrichment.inference_warnings.some((w: Json) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')).toBe(true);
 });

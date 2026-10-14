@@ -158,8 +158,10 @@ describe('whole evidence reread deadlines at the real writer members', () => {
         committedVersion: { version: VERSION.version_number, version_id: VERSION.version_id,
           mutation_id: VERSION.mutation_id, source_turn_id: VERSION.source_turn_id },
         analysisReady: ready,
-        freshness: deriveAnalysisFreshness([RUN], HASH, undefined, { priorFactsReadOk: true,
+        freshness: { ...deriveAnalysisFreshness([RUN], HASH, undefined, { priorFactsReadOk: true,
           analysisInvalidatedAt: null, currentGraph: GRAPH, priorFactsWithTurn: [WITH_TURN] }),
+          selected_fact_row_id: FACT_ROW, run_revision: { value: null, source: 'legacy_unknown' },
+          basis: 'analysis_graph_hash_interim' },
         graph: parsed,
       };
       expect(JSON.stringify(reply)).toBe(JSON.stringify(expected));

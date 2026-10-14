@@ -1,3 +1,4 @@
+// Science 393023 LICENCE (a)/(b), 7 Oct: goal_path_unsized → goal_path_placeholder; endpoint questions stay pinned.
 /**
  * RT-10 B′ (Science d5, #2606 words defect): case (c) names the FAILING link by its own two ends, never "{lever} to
  * {goal}". P5 fails on the first link into the goal not sized in its unit, else on the first Olumi-guessed link
@@ -33,7 +34,7 @@ describe('B′ (c) names the failing link by its own two ends', () => {
     const v = targetTestabilityOf(g);
     expect(v.kind).toBe('not_testable');
     if (v.kind !== 'not_testable') return;
-    expect(v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Starter monthly price', link_to: 'Starter-tier monthly recurring revenue',
+    expect(v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Starter monthly price', link_to: 'Starter-tier monthly recurring revenue',
       link: { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' }, links: [
         { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' },
         { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' },
@@ -70,11 +71,23 @@ describe('B′ (c) names the failing link by its own two ends', () => {
     expect(notTargetTestableSentence(g, v)).toMatch(/ Roughly how much does Starter-tier monthly recurring revenue change, in £\/month, when Starter monthly price rises by £1 \/ subscriber \/ month\?$/);
   });
 
-  it('CONTRAST: as stored, the failing link IS into the goal, so the goal is its far end and AIQ\'s question (in the goal\'s unit) stays', () => {
+  it('CONTRAST: as stored, the converting estimate is licensed and the remaining upstream placeholder owns the question', () => {
+    // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+    // effect that converts into goal units." The £1,200 Existing-price increase → MRR estimate is therefore not asked.
     const v = targetTestabilityOf(D3);
-    expect(v.kind === 'not_testable' && v.failures[0]).toMatchObject({ lever: 'Existing-price increase', link_to: 'monthly recurring revenue' });
+    expect(v.kind === 'not_testable' && v.failures[0]).toMatchObject({ lever: 'Starter monthly price', link_to: 'Starter-tier monthly recurring revenue' });
     expect(notTargetTestableSentence(D3, v)).toBe("Olumi can compare your options, but can't yet test them against your target (at least £150,000 / month), "
-      + 'because it needs a size for the links from Existing-price increase to monthly recurring revenue, from Starter monthly price to Starter-tier monthly recurring revenue and from Starter subscribers to Starter-tier monthly recurring revenue. '
-      + 'Roughly how much monthly recurring revenue in £/month does a change in Existing-price increase bring?');
+      + 'because it needs a size for the links from Starter monthly price to Starter-tier monthly recurring revenue and from Starter subscribers to Starter-tier monthly recurring revenue. '
+      + 'Roughly how much does Starter-tier monthly recurring revenue change, in £/month, when Starter monthly price rises by £1 / subscriber / month?');
+  });
+
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: a %s into the goal still owns the failing-link question', kind => {
+    const g = structuredClone(D3);
+    const e = g.edges.find((x: Json) => x.from === 'existing_price_increase' && x.to === 'monthly_recurring_revenue');
+    if (kind === 'placeholder') { e.provenance.magnitude = 'olumi_placeholder'; e.strength.defaulted = true; }
+    else delete e.provenance.natural_effect;
+    const v = targetTestabilityOf(g);
+    expect(v.kind === 'not_testable' && v.failures[0]).toMatchObject({ lever: 'Existing-price increase', link_to: 'monthly recurring revenue' });
+    expect(notTargetTestableSentence(g, v)).toContain('Roughly how much monthly recurring revenue in £/month does a change in Existing-price increase bring?');
   });
 });

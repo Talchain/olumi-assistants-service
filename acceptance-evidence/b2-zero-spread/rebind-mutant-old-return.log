@@ -1,0 +1,29 @@
+Load gate exit: 0
+{"load":3.21875,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/b2-zero-spread.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'no licensed point means no scoring-threshold' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts (17 tests | 1 failed | 16 skipped) 10ms
+     × no licensed point means no scoring-threshold or estimated-link claim, even with one threshold candidate 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > no licensed point means no scoring-threshold or estimated-link claim, even with one threshold candidate
+AssertionError: expected null not to be null
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:212:25
+    210|     const explicitSent = { field: 'goal_threshold' as const, frame: 'd…
+    211|     const licence = goalChanceLicenceOf(producerEnvelope(), READ.graph…
+    212|     expect(licence).not.toBeNull();
+       |                         ^
+    213|     expect(licence).not.toHaveProperty('sent_threshold');
+    214|     expect(licence).not.toHaveProperty('olumi_estimate_link_count');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 16 skipped (17)
+   Start at  22:00:37
+   Duration  2.34s (transform 1.57s, setup 103ms, import 2.11s, tests 10ms, environment 0ms)
+

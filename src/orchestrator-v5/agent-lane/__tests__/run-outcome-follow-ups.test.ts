@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ #2233's FOLLOW-UPS (DL verdict 5868852006, "next PR"; AIQ 5868909577), on the same seam (`run-outcome.ts`):
  *   1. `analysis_snapshot_diverged` is recoverable, but it still went to the model, which could blame readiness, and its
@@ -10,6 +11,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
+import { sentencesOf } from '../reply/compose-reply.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { breakEvenFor, breakEvenLine, withBreakEvenAnswer } from '../break-even.js';
 
 const SCENARIO = '8103c8ce-1111-4222-8333-944455556666';
@@ -43,8 +46,10 @@ describe('⛔ #2233 follow-ups: a moved model, the Agent’s own Run, and the ar
   let mode: Mode = 'moved';
   let loop = false;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       modelCalls += 1;
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       // The Agent's own loop: it first calls run_analysis, then answers.
       if (loop && modelCalls === 1) {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
@@ -71,14 +76,14 @@ describe('⛔ #2233 follow-ups: a moved model, the Agent’s own Run, and the ar
   const turn = async (payload: Record<string, unknown>) => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, ...payload } });
     expect(r.statusCode).toBe(200);
-    return r.json() as { assistant_text: string; suggested_actions: { id: string; label: string; message: string; action_type?: string }[] };
+    return r.json() as { assistant_text: string; _answer_shape: AnswerShape; suggested_actions: { id: string; label: string; message: string; action_type?: string }[] };
   };
   const runButton = () => turn({ message: 'Run analysis.', source: 'chip_click', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
 
-  it('RED (1): a model that moved while the Run was prepared is said in CEE’s words, with its Retry, and no model call', async () => {
+  it('RED (1): a model that moved while the Run was prepared is said in CEE’s words, with its Retry, after the loop reads the refusal', async () => {
     const b = await runButton();
     expect(b.assistant_text.startsWith(MOVED_WORDS), b.assistant_text).toBe(true);
-    expect(modelCalls).toBe(0);
+    expect(modelCalls).toBe(2);
     expect(b.suggested_actions).toContainEqual(expect.objectContaining({ id: RETRY_CHIP.id, action_type: 'run_analysis' }));
     expect(b.suggested_actions.map((a) => a.id)).not.toContain('agent-suggest-what-it-needs');
   });
@@ -94,10 +99,14 @@ describe('⛔ #2233 follow-ups: a moved model, the Agent’s own Run, and the ar
   it('RED (3, AIQ): after the identity ask on the Run button, the arithmetic opens "If MRR is …", with no lead-in', async () => {
     mode = 'identity';
     const b = await runButton();
-    expect(b.assistant_text.startsWith(IDENTITY_WORDS), b.assistant_text).toBe(true);
+    expect(b._answer_shape.headline).toBe(IDENTITY_WORDS.replace(' Which is right?', ''));
+    expect(b._answer_shape.bullets).toEqual(['Which is right?']);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape));
+    for (const sentence of sentencesOf(IDENTITY_WORDS)) expect(b.assistant_text.split(sentence)).toHaveLength(2);
     expect(breakEvenFor(F8), 'precondition: this graph carries the arithmetic').not.toBeNull();
     const paras = b.assistant_text.split('\n\n');
-    const arithmetic = paras.find((p) => p.includes('Pro plan price × Pro paying subscribers') && p !== IDENTITY_WORDS);
+    const arithmetic = paras.find((p) => p.startsWith('If MRR is'));
+    expect(b._answer_shape.detail).toBe(breakEvenLine(breakEvenFor(F8)!, { afterIdentityAsk: true }));
     expect(arithmetic, b.assistant_text).toBeDefined();
     expect(arithmetic!.startsWith('If MRR is'), arithmetic).toBe(true);
     expect(b.assistant_text).not.toContain('The arithmetic still answers part of this');

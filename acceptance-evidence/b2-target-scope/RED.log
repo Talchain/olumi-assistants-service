@@ -1,0 +1,146 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (6 tests | 5 failed) 53ms
+     × B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances 34ms
+     × without an earlier withhold, only Starter is withheld and explained; no reason is invented for Keep 3ms
+     × class 1: an upstream unsized link feeding operand A also affects an option moving operand B 2ms
+     × class 2: a evaluation marking the goal baseline derived from inputs withholds everyone fed by its unsized input 7ms
+     × class 2: a warning marking the goal baseline derived from inputs withholds everyone fed by its unsized input 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances
+AssertionError: expected { option_comparison: [ …(3) ], …(1) } to be { option_comparison: [ …(3) ], …(1) } // Object.is equality
+
+- Expected
++ Received
+
+@@ -7,20 +7,50 @@
+          "starter",
+        ],
+        "severity": "warning",
+        "win_shares_withheld": true,
+      },
++     {
++       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
++       "first_ask": {
++         "from": "middle",
++         "kind": "link",
++         "to": "goal",
++       },
++       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £800), because it needs a size for the links from middle to Goal, from a to middle and from u to a. Roughly how much Goal in £ does a change in middle bring?",
++       "node_ids": [
++         "goal",
++       ],
++       "option_ids": [
++         "raise",
++         "keep",
++       ],
++       "per_option": {
++         "keep": {
++           "message": "Not shown. It needs nothing more of its own; it waits until the other options can be tested against your target, so all are shown on the same footing.",
++         },
++         "raise": {
++           "message": "Not shown. It needs nothing more of its own; it waits until the other options can be tested against your target, so all are shown on the same footing.",
++         },
++       },
++       "say": "I can't yet say how likely any option is to keep Goal at or above £800: I need a size for the links from middle to Goal, from a to middle and from u to a. Roughly how much Goal in £ does a change in middle bring?",
++       "severity": "warning",
++       "withheld_claims": [
++         "goal_probability",
++         "joint_probability",
++         "outcome",
++         "downside",
+        ],
++     },
++   ],
+    "option_comparison": [
+      {
+        "option_id": "raise",
+-       "probability_of_goal": 0.7,
+      },
+      {
+        "option_id": "starter",
+      },
+      {
+        "option_id": "keep",
+-       "probability_of_goal": 0.6,
+      },
+    ],
+  }
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:55:25
+     53|     });
+     54|     const afterTarget = withholdGoalFiguresForUntestableTarget(afterS,…
+     55|     expect(afterTarget).toBe(afterS);
+       |                         ^
+     56|     expect(chances(afterTarget)).toEqual(['raise', 'keep']);
+     57|     expect(warning(afterTarget)).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > without an earlier withhold, only Starter is withheld and explained; no reason is invented for Keep
+AssertionError: expected [] to deeply equal [ 'raise', 'keep' ]
+
+- Expected
++ Received
+
+- [
+-   "raise",
+-   "keep",
+- ]
++ []
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:74:26
+     72|     const g = graph(), body = envelope(), v = failures(g);
+     73|     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal'…
+     74|     expect(chances(out)).toEqual(['raise', 'keep']);
+       |                          ^
+     75|     expect(warning(out)?.option_ids).toEqual(['starter']);
+     76|     expect(Object.keys(warning(out)?.per_option ?? {})).toEqual(['star…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 1: an upstream unsized link feeding operand A also affects an option moving operand B
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:92:79
+     90|     expect(v.failures.flatMap(f => f.links ?? [])).toEqual([link]);
+     91|     const paths = optionPathsOf(g, ids, undefined, 'goal');
+     92|     expect(scopedFailuresFor(v.failures, paths.get('raise') ?? [], id …
+       |                                                                               ^
+     93|     expect(scopedFailuresFor(v.failures, paths.get('keep') ?? [], id =…
+     94|     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 2: a evaluation marking the goal baseline derived from inputs withholds everyone fed by its unsized input
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 2: a warning marking the goal baseline derived from inputs withholds everyone fed by its unsized input
+AssertionError: expected 'Not shown. It needs nothing more of i…' to contain 'from u to a'
+
+Expected: "from u to a"
+Received: "Not shown. It needs nothing more of its own; it waits until the other options can be tested against your target, so all are shown on the same footing."
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:108:51
+    106|     expect(chances(out)).toEqual([]);
+    107|     expect(warning(out)?.option_ids).toEqual(ids);
+    108|     expect(warning(out)?.per_option.keep.message).toContain('from u to…
+       |                                                   ^
+    109|     expect(v.failures.every(f => f.case === 'c')).toBe(true);
+    110|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed (6)
+   Start at  16:28:33
+   Duration  5.50s (transform 3.51s, setup 502ms, import 4.46s, tests 53ms, environment 0ms)
+

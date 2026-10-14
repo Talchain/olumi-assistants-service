@@ -17,6 +17,7 @@ import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
  */
 
 import { createHash } from 'node:crypto';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -97,6 +98,7 @@ export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_de
  *     encoding_map,
  *     nonlinear_identity (C46 carrier, as stored),
  *     scale_frame, goal_threshold_frame, goal_direction, quantity_frame, analysis_participation,
+ *     goal_target_basis (CEE-local; only when present and well-formed — Batch C gap 2),
  *     interventions: per-factor { value, value_type, encoding_map,
  *                                  target_match: { node_id } },
  *     unresolved_targets: sorted distinct admission gaps from the canonical
@@ -353,7 +355,16 @@ interface NodeProjection {
 
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  // Hash stored basis bytes as written, without interpreting validity. Its bound meaning also affects freshness.
+  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '',
+    ...(r.horizon_basis !== undefined ? Object.fromEntries([
+      ['horizon_basis', r.horizon_basis],
+      ['horizon_basis_goal_meaning', [
+        typeof r.label === 'string' ? r.label.trim().toLowerCase().replace(/\s+/g, ' ') : null,
+        r.goal_threshold_unit ?? null, r.goal_horizon_months ?? null,
+      ]],
+    ]) : {}),
+  };
   const scope = goalScopeAnalysisMeaning(r.goal_scope);
   if (scope !== undefined) out.goal_scope = scope;
 
@@ -363,6 +374,17 @@ function projectNode(raw: unknown): NodeProjection {
   for (const key of VOCABULARY.node.fields) {
     if (key !== 'id' && r[key] !== undefined) out[key] = r[key];
   }
+
+  // RC3 a′ is CEE-local until the shared vocabulary catches up. This identity changes readiness and Run inclusion,
+  // so removing/rebinding it must invalidate the old analysis; absent/malformed stamps preserve legacy hashes.
+  const reliesOn = NodeV3.shape.relies_on.safeParse(r.relies_on);
+  if (reliesOn.success && reliesOn.data !== undefined) out.relies_on = reliesOn.data;
+
+  // Recovery Batch C (gap 2): the goal's stated target basis (reference, denominator, period, effect timing) decides which
+  // goal chance may be said, so a change to it alone must stale a stored Run. CEE-local like `relies_on`: it enters ONLY
+  // when present and well-formed, so every graph without one hashes byte-identically to before.
+  const targetBasis = NodeV3.shape.goal_target_basis.safeParse(r.goal_target_basis);
+  if (targetBasis.success && targetBasis.data !== undefined) out.goal_target_basis = targetBasis.data;
 
   const observed = projectObservedState(r.observed_state);
   if (observed !== undefined && Object.keys(observed).length > 0) {
@@ -423,6 +445,7 @@ function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
       const ne = pickDefined((p.natural_effect as Record<string, unknown>), VOCABULARY.edge.provenance_natural_effect_fields);
       if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
     }
+    if (Object.hasOwn(p, 'share_by_date')) provenance.share_by_date = p.share_by_date;
     if (Object.keys(provenance).length > 0) out.provenance = provenance;
   }
 

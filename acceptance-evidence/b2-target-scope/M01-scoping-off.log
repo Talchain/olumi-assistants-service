@@ -1,0 +1,71 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 29ms
+     × B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances 27ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances
+AssertionError: expected { option_comparison: [ …(3) ], …(1) } to be { option_comparison: [ …(3) ], …(1) } // Object.is equality
+
+- Expected
++ Received
+
+@@ -7,20 +7,37 @@
+          "starter",
+        ],
+        "severity": "warning",
+        "win_shares_withheld": true,
+      },
++     {
++       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
++       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £800), because it needs a size for the links from middle to Goal, from a to middle and from u to a. Roughly how much Goal in £ does a change in middle bring?",
++       "node_ids": [
++         "goal",
++       ],
++       "option_ids": [
++         "raise",
++         "keep",
+        ],
++       "say": "",
++       "severity": "warning",
++       "withheld_claims": [
++         "goal_probability",
++         "joint_probability",
++         "outcome",
++         "downside",
++       ],
++     },
++   ],
+    "option_comparison": [
+      {
+        "option_id": "raise",
+-       "probability_of_goal": 0.7,
+      },
+      {
+        "option_id": "starter",
+      },
+      {
+        "option_id": "keep",
+-       "probability_of_goal": 0.6,
+      },
+    ],
+  }
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:56:25
+     54|     });
+     55|     const afterTarget = withholdGoalFiguresForUntestableTarget(afterS,…
+     56|     expect(afterTarget).toBe(afterS);
+       |                         ^
+     57|     expect(chances(afterTarget)).toEqual(['raise', 'keep']);
+     58|     expect(warning(afterTarget)).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:45:08
+   Duration  7.62s (transform 5.49s, setup 200ms, import 7.14s, tests 29ms, environment 0ms)
+

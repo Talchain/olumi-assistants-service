@@ -9,6 +9,7 @@ import {
   PREMORTEM_PRESS_ID, TALK_IT_THROUGH_CHIP, cardCallFor,
   methodTurnForReadback, planMethodTurn, planPickChipId, type RunMethodTurn,
 } from '../method-turn.js';
+import { withApprovedMethodWords } from './helpers/approved-method-words.js';
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[]; goal_constraints?: unknown };
 type Capture = {
@@ -35,9 +36,25 @@ const requireRun = (turn: ReturnType<typeof turnFor>): RunMethodTurn => {
   return turn;
 };
 
+/**
+ * ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092): an absent-type `cee_inference` is Olumi's estimate on every reader.
+ * 591cc1a0's F1 alone read it 'unknown', and these captures' empty-path contracts were recorded on that reading. They are
+ * held on the same captures with those figures' stamp replaced by one the authority does not recognise (origin
+ * UNESTABLISHED, still stamped) — the class every reader now reads 'unknown'. The as-captured behaviour is its own row.
+ */
+const UNRECOGNISED = 'unrecognised_stamp';
+const unestablished = (c: Capture): Capture => {
+  const copy = JSON.parse(JSON.stringify(c)) as Capture;
+  for (const n of (copy.graph as { nodes: { observed_state?: Record<string, unknown> }[] }).nodes) {
+    const os = n.observed_state;
+    if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = UNRECOGNISED;
+  }
+  return copy;
+};
+
 describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
-  it('RED at base: captured draw 1 keeps the original licensed decision byte for byte', () => {
-    const c = captures.draw1;
+  it('RED at base: captured draw 1 keeps the original licensed decision byte for byte (absent-type cee_inference unestablished)', () => {
+    const c = unestablished(captures.draw1);
     const signals = signalsOf(c);
     assert.equal(signals['run.leader_licensed'], true);
     assert.equal(signals['run.leader_option_id'], 'launch_starter_tier');
@@ -55,7 +72,7 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
     ]);
     // Original W9 licensed-leader contract is an explicit control, including its existing card.
     const base = JSON.parse(readFileSync(new URL('./fixtures/w9c/r2-base-controls.json', import.meta.url), 'utf8')).draw1;
-    assert.equal(JSON.stringify(out), JSON.stringify(base.turn));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(base.turn)));
     assert.equal(cardCallFor(out.context.supplied_items[0], c.graph)?.tool, 'propose_link_strengths');
     assert.equal(out.context.dsk, null);
     assert.equal(out.context.not_cited, 'no_identified_plan');
@@ -64,8 +81,29 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
     assert.equal(JSON.stringify(c), before);
   });
 
-  it('CONTROL: captured draw 2 uses story-only own levers', () => {
-    const c = captures.draw2;
+  it('ONE PROVENANCE AUTHORITY: draw 1 as captured — Olumi\'s Starter-tier estimate grounds the licensed leader\'s plan', () => {
+    // DL ruling (AIE 6119326092): an absent-type `cee_inference` is Olumi's estimate on every reader. 591cc1a0's F1 read it
+    // 'unknown', so the leader's path looked empty and the press fell back to the whole decision.
+    const c = captures.draw1;
+    assert.equal(signalsOf(c)['model.goal_path_factors'].find(f => f.factor_id === 'starter_tier_subscribers')?.value_authorship, 'olumi_estimate');
+    const out = requireRun(turnFor(c));
+    assert.deepEqual(out.context.plan, { option_id: 'launch_starter_tier', label: 'Launch starter tier', basis: 'licensed_leader' });
+    assert.deepEqual(out.context.supplied_items.map(i => [i.id, i.kind, i.card]), [['starter_tier_subscribers', 'factor', 'propose_assumptions']]);
+    assert.equal(out.check_inputs.plan_label, 'Launch starter tier');
+    assert.ok(out.directive.includes('The plan to stress-test is \u2018Launch starter tier\u2019.'));
+    // Draw 2 as captured: the decision story now also offers Olumi's two estimates on own-option paths for stress-testing.
+    const out2 = requireRun(turnFor(captures.draw2));
+    assert.equal(out2.context.plan, null);
+    assert.deepEqual(out2.context.supplied_items.map(i => i.id), [
+      'price_change_from_today', 'starter_tier_availability',
+      'monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue',
+      'starter_subscribers', 'price_driven_customer_losses',
+      'monthly_recurring_revenue_lost_to_price_driven_churn',
+    ]);
+  });
+
+  it('CONTROL: captured draw 2 uses story-only own levers (absent-type cee_inference unestablished)', () => {
+    const c = unestablished(captures.draw2);
     assert.equal(signalsOf(c)['run.leader_licensed'], false);
     const out = requireRun(turnFor(c));
     assert.equal(out.context.plan, null);

@@ -426,7 +426,9 @@ export function applyStructuralAddEdge(
     return refuse(
       payload,
       err instanceof PatchApplyError ? err.code : 'apply_failed',
-      `I couldn't add that connection to the saved model, so nothing changed. Reload it and try again.`,
+      err instanceof PatchApplyError && err.code === 'PRECONDITION_RISK_LINKED'
+        ? err.message
+        : `I couldn't add that connection to the saved model, so nothing changed. Reload it and try again.`,
     );
   }
 

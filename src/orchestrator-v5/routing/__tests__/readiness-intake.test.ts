@@ -146,8 +146,7 @@ describe('composeReadinessIntakeResponse — populated canvas (NOT the fresh pat
 
   it('unreachable controllable factor remains open even when both options are individually ready', () => {
     const graph = readyGraph();
-    // No level on f2, deliberately: the producer's unreachable-controllable ask already owns this factor, and #2164's
-    // level rule skips a factor that is already factor-blocked, so the open item stays the mapping ask.
+    // No level on f2: the canonical current-level ask owns this unknown root.
     graph.nodes.push({
       id: 'f2',
       kind: 'factor',
@@ -155,10 +154,12 @@ describe('composeReadinessIntakeResponse — populated canvas (NOT the fresh pat
       category: 'controllable',
     });
     graph.edges.push(edge('f2', 'goal_1'));
-    const { outcome, response } = composeReadinessIntakeResponse(graph, 'analyse');
+    const { outcome, response, assessment } = composeReadinessIntakeResponse(graph, 'analyse');
     expect(outcome).toBe('readiness_open');
     expect(response.assistant_text).toContain(READINESS_OPEN_MARKER);
-    expect(response.assistant_text).toContain('unresolved mapping');
+    const canonicalAsk = assessment?.blockingIssues.find(issue => issue.code === 'MISSING_FACTOR_LEVEL' && issue.factor_id === 'f2')?.message;
+    expect(canonicalAsk).toBeDefined();
+    expect(response.assistant_text).toBe(`Here's what's still open before this can run cleanly: ${canonicalAsk}`);
     expect(response.assistant_text).not.toContain('missing effect value');
   });
 });

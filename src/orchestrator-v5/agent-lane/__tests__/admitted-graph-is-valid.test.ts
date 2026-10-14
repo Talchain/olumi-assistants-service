@@ -24,7 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { GraphV3, NodeV3 } from '../../../schemas/cee-v3.js';
 
 const d = new URL('./fixtures/', import.meta.url);
 const admitted = () => admitCandidateModel(
@@ -42,7 +42,7 @@ describe('the admitted graph satisfies the write path’s own validator', () => 
 
   it('node provenance is the display enum, never the edge object', () => {
     for (const n of admitted().nodes) {
-      expect(['from_brief', 'ai_inferred', 'user_set', undefined]).toContain(n.provenance);
+      expect([...NodeV3.shape.provenance.unwrap().options, undefined]).toContain(n.provenance);
     }
   });
 

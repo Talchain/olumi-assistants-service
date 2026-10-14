@@ -1,0 +1,346 @@
+{
+  "sourceReview": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/status/evidence/impact-pct/review-2828-r3-independent.md",
+  "sourceSha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+  "countNote": "Exact 14 N + 12 F reader rows from r3; expectations apply the DL ruling, retaining historical expectations separately.",
+  "readerRows": [
+    {
+      "id": "N1",
+      "input": "Within 6 months the hit to MRR is probably 10%.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N2",
+      "input": "The revenue loss is probably 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N3",
+      "input": "Churn is probably 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N4",
+      "input": "Revenue will drop, maybe 10%, within 6 months.",
+      "label": "AMBIGUOUS",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N5",
+      "input": "The new supplier boosts our odds 10% within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N6",
+      "input": "Hiring a second supplier improves our odds 10% within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N7",
+      "input": "Expect maybe a 12% markdown on stock within 3 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N8",
+      "input": "I guess 15% of pipeline slips within 3 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N9",
+      "input": "The odds are that we lose 10% of revenue within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N10",
+      "input": "Perhaps 20% of deals will be lost, within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N11",
+      "input": "A competitor price cut is likely, around 15%, within 3 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N12",
+      "input": "There's a likelihood of a 10% shrinkage within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N13",
+      "input": "The cost overrun would be maybe 20% over the next year.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "N14",
+      "input": "The discount is probably 15% within 3 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "historicalExpected": null
+    },
+    {
+      "id": "F1",
+      "input": "There's roughly a 25% chance of that within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "historicalExpected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      }
+    },
+    {
+      "id": "F2",
+      "input": "I'd say about 40% that it happens within the next year.",
+      "label": "LIKELIHOOD",
+      "expected": null,
+      "historicalExpected": {
+        "pLow": 0.4,
+        "pHigh": 0.4,
+        "months": 12
+      },
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only"
+    },
+    {
+      "id": "F3",
+      "input": "The odds of the supplier failing are about 1 in 4 within a year.",
+      "label": "LIKELIHOOD",
+      "expected": null,
+      "historicalExpected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 12
+      },
+      "refusalReason": "Accepted fail closed: unchanged one-in-N cue rules."
+    },
+    {
+      "id": "F4",
+      "input": "Perhaps 15% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": null,
+      "historicalExpected": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6
+      },
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only"
+    },
+    {
+      "id": "F5",
+      "input": "We think the chance is about 30% over the next 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "historicalExpected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      }
+    },
+    {
+      "id": "F6",
+      "input": "The supplier could go bust; I'd estimate 20% in the next year.",
+      "label": "LIKELIHOOD",
+      "expected": null,
+      "historicalExpected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only"
+    },
+    {
+      "id": "F7",
+      "input": "Key supplier fails: 20–30% chance in the next 12 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "historicalExpected": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 12
+      }
+    },
+    {
+      "id": "F8",
+      "input": "It's maybe a 1 in 5 chance within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "historicalExpected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      }
+    },
+    {
+      "id": "F9",
+      "input": "Probability of losing the anchor client: 35% within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.35,
+        "pHigh": 0.35,
+        "months": 12
+      },
+      "historicalExpected": {
+        "pLow": 0.35,
+        "pHigh": 0.35,
+        "months": 12
+      }
+    },
+    {
+      "id": "F10",
+      "input": "There is a 30 percent chance the migration slips within 6 months, costing us 10% of ARR.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "historicalExpected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      }
+    },
+    {
+      "id": "F11",
+      "input": "Odds of a strike are 30% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "historicalExpected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      }
+    },
+    {
+      "id": "F12",
+      "input": "A data breach has a 5% chance within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.05,
+        "pHigh": 0.05,
+        "months": 12
+      },
+      "historicalExpected": {
+        "pLow": 0.05,
+        "pHigh": 0.05,
+        "months": 12
+      }
+    }
+  ],
+  "draftRows": [
+    {
+      "id": "D1",
+      "input": "If the supplier fails a release slip is 30% likely within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": null,
+      "knownResidual": "r3 P2-c: single-fragment other-event binding is outside FIX4 class lease."
+    },
+    {
+      "id": "D2",
+      "input": "Supplier fails, there's a 30% chance within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": {
+        "riskLabel": "Supplier fails",
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      }
+    },
+    {
+      "id": "D3",
+      "input": "Key supplier fails: 20–30% chance in the next 12 months.",
+      "riskLabels": [
+        "Key supplier fails"
+      ],
+      "expected": {
+        "riskLabel": "Key supplier fails",
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 12
+      }
+    },
+    {
+      "id": "D4",
+      "input": "Release slips; Supplier fails, maybe 30% within 6 months.",
+      "riskLabels": [
+        "Release slips",
+        "Supplier fails"
+      ],
+      "expected": null,
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only"
+    },
+    {
+      "id": "D5",
+      "input": "Data breach, we think 5% within a year.",
+      "riskLabels": [
+        "Data breach"
+      ],
+      "expected": null,
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only"
+    },
+    {
+      "id": "D6",
+      "input": "Supplier fails, probably a 10% dip in MRR within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": null
+    },
+    {
+      "id": "D7",
+      "input": "If the supplier fails, there is a 30% chance of a delay within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": null
+    }
+  ],
+  "noWindowRows": []
+}

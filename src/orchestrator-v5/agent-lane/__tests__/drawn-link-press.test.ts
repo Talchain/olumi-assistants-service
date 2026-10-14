@@ -1,6 +1,8 @@
+import { narrateWriteOutcome } from '../write-outcome.js';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { OrchestratorTurnPayloadSchema, type SystemEventTurnPayload } from '@talchain/schemas/boundary';
+import { GraphStaleWriteError } from '../../session/store.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
@@ -23,7 +25,9 @@ const pair = { from: 'f-budget', to: 'g-revenue' };
 const ctx: AgentToolContext = { scenario_id: SID, authenticated_user_id: null, request_id: 'drawn', user_turn_text: '', drawn_link: { ...pair, press_id: PRESS } };
 const args = { from_label: 'f-budget', to_label: 'g-revenue', direction: 'negative' as const, strength: 'strong' as const, rationale: 'Capacity affects the outcome.', reason: 'Extra cost reduces the funds available.' };
 
-function world(followUp = true, wrongStamp = false, beforeFollowUp?: (g: GraphV3T) => void) {
+function world(followUp = true, wrongStamp = false, beforeFollowUp?: (g: GraphV3T) => void, framingRace = false) {
+  let revision = 7;
+  const snapshots: Array<{ graph: GraphV3T; revision: number }> = [];
   let graph = buildD1Fixture();
   graph.edges = graph.edges.filter(e => e.from !== pair.from || e.to !== pair.to);
   const proposals = new ProposalStore();
@@ -32,10 +36,20 @@ function world(followUp = true, wrongStamp = false, beforeFollowUp?: (g: GraphV3
   const rows: { id: string; write: SessionTurnWrite }[] = [];
   const store = createMockSessionStore({
     loadGraph: async () => structuredClone(graph),
-    loadGraphAndBriefText: async () => ({ graph: structuredClone(graph), briefText: null }),
+    loadGraphAndBriefText: async () => {
+      const snapshot = { graph: structuredClone(graph), revision };
+      snapshots.push(snapshot);
+      if (framingRace && snapshots.length === 1) revision += 1; // framing changes after A/r8 was captured; a reread sees r9
+      return { ...snapshot, briefText: null };
+    },
     readExistingScenario: async () => ({ userId: null, graph: structuredClone(graph), briefText: null, analysisInvalidatedAt: null }),
     readAnalysisInvalidatedAt: async () => null,
-    append: async w => { const id = `drawn-row-${rows.length}`; rows.push({ id, write: JSON.parse(JSON.stringify(w)) }); if (w.graph !== undefined) graph = JSON.parse(JSON.stringify(w.graph)); return { id }; },
+    append: async w => {
+      if (w.expectedRevision !== revision) throw new GraphStaleWriteError('revision conflict', {
+        conflict_category: 'revision_conflict', cause: { code: 'OLRV1', details: JSON.stringify({ expected: w.expectedRevision, current: revision }) },
+  });
+      revision += 1;
+      const id = `drawn-row-${rows.length}`; rows.push({ id, write: JSON.parse(JSON.stringify(w)) }); if (w.graph !== undefined) graph = JSON.parse(JSON.stringify(w.graph)); return { id }; },
     readRecent: async () => rows.map(({ id, write }) => makeSessionTurnRow({ id, scenario_id: write.scenario_id, turn_id: write.turn_id, request_hash: write.request_hash })),
     readFactsWithTurnFor: async ids => rows.filter(row => ids.includes(row.id)).flatMap(({ id, write }) => write.handler_facts.map(fact => ({ turn_id: id, fact_created_at: '2026-10-07T00:00:00.000Z', fact }))),
   });
@@ -47,7 +61,16 @@ function world(followUp = true, wrongStamp = false, beforeFollowUp?: (g: GraphV3
     const out = applyStructuralAddEdge({ payload, event: payload.event, requestId: 'drawn', persistedGraph: graph });
     if (out.kind !== 'mutated') throw new Error(JSON.stringify(out));
     graph = JSON.parse(JSON.stringify(out.mutatedGraph));
-    return { status: 200, json: { assistant_text: 'Connected.', graph_hash: computeAnalysisAffectingGraphHash(graph) } };
+    revision += 1; // first structural save
+    return { status: 200, json: { assistant_text: 'Connected.', graph_hash: computeAnalysisAffectingGraphHash(graph),
+      model_version_receipt: { schema: 'model_version_mutation_receipt.v1', scenario_id: SID, mutation_id: SID,
+        version_id: SID, sequence: 1, graph: structuredClone(graph), full_hash: 'a'.repeat(64),
+        hash_algorithm: 'sha256', identity_projection_version: 'identity.v1', identity_normaliser_version: '1',
+        graph_schema_version: 'graph_v3', analysis_affecting_hash: 'b'.repeat(64), actor: { kind: 'unknown' },
+        creation: { kind: 'committed_mutation' }, source_turn_id: payload.turn_id, lineage: { kind: 'unknown' },
+        undo_version_id: null, event_id: 'first-link-save' },
+    } };
+
   };
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     commits.push(input);
@@ -63,7 +86,7 @@ function world(followUp = true, wrongStamp = false, beforeFollowUp?: (g: GraphV3
     if (wrongStamp) graph.edges.find(e => e.from === pair.from && e.to === pair.to)!.provenance!.source = 'user_specified';
     return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
-  return { graph: () => structuredClone(graph), edge: () => graph.edges.find(e => e.from === pair.from && e.to === pair.to), events, commits, proposals,
+  return { snapshots, revision: () => revision, graph: () => structuredClone(graph), edge: () => graph.edges.find(e => e.from === pair.from && e.to === pair.to), events, commits, proposals,
     caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels }) };
 }
 
@@ -112,6 +135,21 @@ describe('drawn pair, held proposal, approval and exact stored authorship', () =
     expect(w.edge()).toMatchObject({ ...pair, effect_direction: 'negative', strength: { mean: -0.55, std: edgeBandStd('strong') }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', band: 'strong' } } });
     expect(linkSizing(w.edge())).toBe('olumi_accepted');
     expect(String(r.follow_up)).toContain('Olumi');
+  });
+  it('framing bump during the second save retains the link receipt and states partial success', async () => {
+    const w = world(true, false, undefined, true);
+      const p = await w.caps.proposeModelChange(ctx, args);
+    const result = await w.caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(result).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed',
+      receipts: [expect.objectContaining({ version: 1, version_id: SID })] });
+    expect(result.detail).toBe('The link was saved, but the scenario changed before its accepted estimate detail could be saved. Check the saved link and try accepting its estimate again.');
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe(result.detail);
+    expect(JSON.stringify(result)).not.toContain('nothing was saved');
+    expect(w.edge()).toBeDefined();
+    expect(w.edge()!.provenance?.reviewed_by_user).toBeUndefined();
+    expect(w.snapshots.map(snapshot => snapshot.revision)).toEqual([8]);
+    expect(w.snapshots[0]!.graph.edges.find(edge => edge.from === pair.from && edge.to === pair.to)).toBeDefined();
+    expect(w.revision()).toBe(9);
   });
   it('ordinary typed band still commits through plain structural_add_edge as user_specified', async () => {
     const w = world(); const p = await w.caps.proposeModelChange({ ...ctx, drawn_link: undefined, user_turn_text: 'strong' }, args);

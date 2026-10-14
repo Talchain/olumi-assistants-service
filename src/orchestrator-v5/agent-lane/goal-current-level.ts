@@ -53,13 +53,14 @@
  *     on a `scale_frame`; the apply below retires it exactly as the target writer does, so the user's own sizes into the
  *     goal are re-derived onto the level's frame, never left on a frame the goal no longer has.
  */
+import { isEventShareForecast } from '../goal-target/event-by-date-model.js';
 import { goalKindOf } from '../goal-target/goal-kind.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel, admitStatedGoalLevelOnScale, isChangeOwnPercent } from './admit-model.js';
 import { readPercentUnit } from './same-unit.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
-import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
+import { retireNormalisingGoalFrameWithSetAside, rederiveGoalInLinksWithSetAside, setAsideEstimateDisclosure } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
 import { figureTheUserWrote, sameWord, wordsOf } from './stated-by-user.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
@@ -70,7 +71,7 @@ import { ratePeriodOf, unitComparisonKey } from '../tools/handlers/d1-shared/eva
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
@@ -83,6 +84,7 @@ import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWith
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -211,7 +213,7 @@ export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: st
     return matches.length === 1 && matches[0]!.kind === 'factor' ? matches[0]! : undefined;
   });
   if (parts.length < 2 || parts.some((p) => p === undefined)) return null;
-  const whose = (p: (typeof nodes)[number]): string => classifyValueSource(p.observed_state?.source);
+  const whose = (p: (typeof nodes)[number]): string => valueClassOf(p.observed_state);
   const estimated = parts.filter((p) => OLUMIS.has(whose(p!)));
   if (estimated.length !== 1) return null;
   const part = estimated[0]!;
@@ -605,7 +607,7 @@ export function levelUnitForChangeGoal(
     if (e.to !== goal.id) return false;
     const p = rec(e.provenance) ? e.provenance : {};
     const natural = rec(p.natural_effect) ? p.natural_effect : undefined;
-    return p.magnitude === 'user_stated' || p.definitional === true || (natural !== undefined && readPercentUnit(natural.amount_unit) !== null);
+    return hasUserStatedSize(e) || p.definitional === true || (natural !== undefined && readPercentUnit(natural.amount_unit) !== null);
   });
   const rows = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(rec) : []).filter((r) => r.node_id === goal.id);
   const level = rec(goal.observed_state) && typeof goal.observed_state.raw_value === 'number';
@@ -739,6 +741,10 @@ export async function proposeGoalCurrentLevel(
 
   // ⛔ S-E GOALS (Science ruling 7 Oct §2; D-06): a goal measured as a CHANCE has no level to record: that chance is what
   // Olumi works out. Refused by name, before anything else is read.
+  if (isEventShareForecast(g.raw)) {
+    return refuse('goal_measures_a_forecast',
+      'This goal measures the forecast share finished by its deadline, so today’s completion percentage is not its current level. Nothing was prepared. Type the soonest and latest times with your current team, for example "6–10 months".');
+  }
   if (goalKindOf(goal) === 'chance_of_event') {
     return refuse('goal_measures_a_chance',
       `"${goal.label}" is measured as a chance of an event, which Olumi works out, so it has no level to record. Nothing was prepared. `
@@ -1030,16 +1036,16 @@ function nodesHoldingEarlierFigure(
   goalUnit: string | undefined,
 ): { label: string; options: string[]; fromBrief: boolean }[] {
   if (goalUnit === undefined) return [];
-  const users = (source: unknown): boolean => classifyValueSource(source) === 'user_stated';
+  const users = (observed: unknown): boolean => valueClassOf(observed) === 'user_stated';
   const rawNodes = Array.isArray((g.raw as { nodes?: unknown }).nodes) ? (g.raw as { nodes: Record<string, unknown>[] }).nodes : [];
   const options = rawNodes.filter((n) => n?.kind === 'option');
   return g.nodes
     .filter((n) => n.id !== goalId && n.kind !== 'goal' && n.kind !== 'option' && n.kind !== 'decision')
-    .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state?.source)
+    .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state)
       && typeof n.observed_state?.unit === 'string' && unitComparisonKey(n.observed_state.unit) === unitComparisonKey(goalUnit))
     .map((n) => ({
       label: n.label,
-      fromBrief: n.observed_state?.source === 'brief_extraction',
+      fromBrief: heldFigureOwnerOf(n.observed_state) === 'brief',
       options: options.filter((o) => {
         const iv = (o.interventions ?? {}) as Record<string, unknown>;
         const set = iv[n.id] as { raw_value?: unknown } | undefined;
@@ -1068,6 +1074,9 @@ function productStillGives(nodes: GoalLevelRead['nodes'], goal: GoalLevelRead['n
   if (identity === null || typeof identity !== 'object' || identity.operation !== 'product' || !Array.isArray(identity.factor_ids)) return null;
   const parts = identity.factor_ids.map((id) => nodes.find((n) => n.id === id));
   if (parts.length < 2 || parts.some((p) => p === undefined || !num(p.observed_state?.raw_value))) return null;
+  // ⛔ #2851 buddy r2 P1 (DL ruling 2): a part's figure is the user's or none; Olumi's basis-less 250 gave "those figures
+  // still give £12,250 / month" on an approval while the card asked for that count.
+  if (parts.some((p) => { const o = valueClassOf(p!.observed_state); return o !== 'user_stated' && o !== 'user_ratified'; })) return null;
   return {
     parts: parts.map((p) => `"${p!.label}"`).join(' × '),
     value: parts.reduce((product, p) => product * (p!.observed_state!.raw_value as number), 1),
@@ -1385,17 +1394,20 @@ export async function applyGoalCurrentLevel(
   // Read BEFORE this write: the frame every sized link into the goal was sized on.
   const frameBefore = frameOf(approved.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
   const unretired = { ...approved.raw, nodes } as Record<string, unknown> & { nodes: typeof nodes };
-  const retiredOrSame = retireNormalisingGoalFrame(unretired);
+  const retirement = retireNormalisingGoalFrameWithSetAside(unretired);
+  const retiredOrSame = retirement.graph;
   // ⭐ D3 step 1: a goal ceiling is (re)paired on the level this write carries, in this same write (Science #87
   // 6005138341): the ceiling came first (rt10b's order) or an earlier level framed it, so the new level renormalises it.
   const ceilingPaired = holdsPairableCeiling(retiredOrSame, op.path)
     && pairGoalCeiling(retiredOrSame, op.path) === 'paired';
   const retired = retiredOrSame !== unretired;
-  // ⭐ …and the renormalised frame carries the links sized on the old one (Codex buddy r1 F3 on #2618): every user-sized or
-  // definitional link into the goal is re-derived onto the new frame from its unchanged natural size, as the target
-  // writer does when it moves the level frame (`add-constraint.ts`, D1 B). A retirement above has already re-derived.
-  const graph = ceilingPaired && !retired && frameBefore !== undefined
-    ? rederiveGoalInLinks(retiredOrSame, op.path, frameBefore) : retiredOrSame;
+  // Every actual frame change carries its sized links, including a change-goal level correction's new headroom cap.
+  // Ceiling pairing is only one way to move it. A normalising retirement above has already carried the links.
+  const frameAfter = frameOf(retiredOrSame.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
+  const rederived = !retired && frameBefore !== undefined && frameAfter !== frameBefore
+    ? rederiveGoalInLinksWithSetAside(retiredOrSame, op.path, frameBefore) : { graph: retiredOrSame, setAside: [] };
+  const graph = rederived.graph;
+  const setAside = [...retirement.setAside, ...rederived.setAside];
   const writtenGoal = (graph.nodes as readonly Record<string, unknown>[]).find((n) => n.id === op.path);
   const writtenOs = (writtenGoal?.observed_state ?? os) as { baseline?: unknown };
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
@@ -1474,6 +1486,7 @@ export async function applyGoalCurrentLevel(
           `${sayPartLevel(part.was, part.unit)}), derived from the user's figures so that the product holds; say it is ` +
           "still Olumi's estimate, never the user's. "
         : '') +
-      'An analysis the user asks for can now compare it with the target.',
+      'An analysis the user asks for can now compare it with the target.' +
+      setAside.map(s => ` ${setAsideEstimateDisclosure(s)}`).join(''),
   };
 }

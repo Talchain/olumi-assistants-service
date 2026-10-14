@@ -186,12 +186,14 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     expect(model.identities).toStrictEqual([{ ...declared[0], provenance: 'inferred' }]);
   });
   // AIQ 5892219245 (4): the levels are not all the user's (ARPU is Olumi's figure) → Olumi's reading, withheld, and no card.
-  it('DEMOTED (ARPU × subscribers, declared explicit; the 3/19 shape): Olumi\'s reading, and no card', async () => {
+  it('DEMOTED (ARPU × subscribers, declared explicit; the 3/19 shape): Olumi\'s reading, and the reading-alone card (Science §(e) add.)', async () => {
     const parts = [{ label: 'ARPU', unit: 'GBP per subscriber per month', level: 50 }, { label: 'Paying subscribers', unit: 'subscribers', level: 1500 }] as const;
     const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['ARPU', 'Paying subscribers'], provenance: 'explicit' }];
     const { goal, graph } = await registeredGoal(paulDraft({ parts, identities: declared }), 'We have 1,500 paying subscribers and £75k MRR. We want MRR above £85k within a year.');
     expect(goal.nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['arpu', 'paying_subscribers'], stated_in_brief: false });
-    expect(proposeProductIdentity(graph)).toBeNull();
+    // Science §(e) addendum (8 Oct): SUPERSEDED — Olumi's reading gets the card (the reading alone; no "your" on ARPU).
+    expect(proposeProductIdentity(graph)?.words).toBe('Olumi reads ‘Monthly recurring revenue’ as ‘ARPU’ × ‘Paying subscribers’. Is that how you work it out?');
+    expect(proposeProductIdentity(graph)?.words).not.toMatch(/your/);
   });
   it('CONTROL: a candidate with nothing to demote comes back as the very same object', () => {
     const d = paulDraft();

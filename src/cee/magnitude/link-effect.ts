@@ -35,6 +35,7 @@ import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js'
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sayFigure } from '../../orchestrator-v5/agent-lane/say-figure.js';
+import { isUsersLevelOrApproved } from '../provenance/provenance-of.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
 export type MagnitudeAuthor = NonNullable<EdgeProvenanceV3T['magnitude']>;
@@ -59,8 +60,14 @@ export interface MagnitudeNode {
   readonly goal_threshold_cap?: unknown;
   readonly goal_threshold_unit?: unknown;
   /**
+   * Recovery Batch C (gap 1): a goal measured AS a change (`quantity_frame: 'change'`, e.g. "+10% productivity" on its own
+   * 0–100 change scale). Its '%' is a change of today's level, not a percentage LEVEL, so a size into it is said in the
+   * goal's own unit, never "percentage points" (`targetUnitWords`).
+   */
+  readonly quantity_frame?: unknown;
+  /**
    * A GOAL's distance to its target in its own natural unit (£9,000 for "cut £45k by 20%"), when admission can read it.
-   * Only ever used to refuse an Olumi estimate sized FROM the target (`target_sized`, R3 #72 5899493499).
+   * Used to ask about an Olumi estimate equal to the target gap; equality does not invalidate its size.
    */
   readonly goal_gap?: number;
   /** The unit the drafter gave this quantity, for a node whose graph fields carry none. */
@@ -128,7 +135,12 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percentage_points' || cls === 'basis_points') return null;
   if (cls === 'percent') {
-    return unit !== undefined && (isPercentWithPeriod(unit) || percentLevel) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+    if (unit === undefined || !(isPercentWithPeriod(unit) || percentLevel)) return null;
+    if (frame === 100 || frame === 1) return UNIT_INTERVAL;
+    // ⭐ #2842 review P1-2: a percentage level on another frame (Olumi's convention, 0–13 points for a 3% churn; or a
+    // drafter's 0–20) keeps its natural [0, 100] domain, said on that frame: [0, 100 ÷ frame]. Returning `null` here
+    // switched D4's out-of-domain check off for every such level.
+    return frame > 1 && frame < 100 ? { lo: 0, hi: 100 / frame } : null;
   }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
   return frame === 1 ? UNIT_INTERVAL : null;
@@ -140,7 +152,8 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
  */
 export function knownBaseline(node: MagnitudeNode): number | undefined {
   const os = node.observed_state;
-  if (os === undefined || os.source === 'cee_inference' || os.extractionType === 'inferred') return undefined;
+  // ONE PROVENANCE AUTHORITY: a known baseline is the person's verified figure or Olumi's estimate they accepted.
+  if (os === undefined || !isUsersLevelOrApproved(os)) return undefined;
   if (finite(os.baseline)) return os.baseline;
   return finite(os.value) ? os.value : undefined;
 }
@@ -223,6 +236,8 @@ export function frameAwarePlaceholder(sign: 1 | -1, baseline: number, domain: Le
 }
 
 export interface LinkStatement {
+  /** Drafter claim; sizeLink independently checks the ratio, units and sign. */
+  readonly definitional?: boolean;
   readonly direction: 'positive' | 'negative';
   readonly effect_amount?: number | null;
   readonly effect_per_source_change?: number | null;
@@ -272,7 +287,16 @@ export interface NaturalEffect {
 /** Why a stated size is not what the edge carries, or why it is asked about. */
 export type LinkSizeProblem = 'out_of_domain' | 'not_representable' | 'unconvertible' | 'sign_conflict' | 'target_sized';
 
+/** An Olumi size awaiting a frame fit; never an analysed size until the fit succeeds. */
+export interface OlumiFitCandidate {
+  readonly strength_mean: number;
+  readonly strength_std: number;
+  readonly natural_effect?: NaturalEffect;
+  readonly basis?: string;
+}
+
 export interface LinkSizing {
+  readonly fit_candidate?: OlumiFitCandidate;
   /**
    * `unchanged` is today's projection, ±0.5 / 0.125, written exactly as before (no stamp): D6 with nothing to check
    * against, or R6's target with no frame.
@@ -366,7 +390,7 @@ function levelWords(level: number, target: MagnitudeNode, frame: number): string
   return `${fmt(raw)}${unit === undefined ? '' : ` ${unit}`}`;
 }
 
-function statementWords(
+export function statementWords(
   amount: number, perSourceChange: number, source: MagnitudeNode, target: MagnitudeNode,
   sourceFrame: number | undefined, targetFrame: number | undefined,
 ): string {
@@ -383,7 +407,8 @@ const round6 = (x: number): number => Number(x.toPrecision(6));
 
 /** The unit words the natural size is said in: points for a percentage level, "switch" for a yes/no. */
 export const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
-  isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
+  // Batch C gap 1: a change quantity's '%' is a % of today's level; "percentage points" would say a different quantity.
+  t.quantity_frame !== 'change' && isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
 
 /**
  * The unit words THIS sizer says a link's natural size in, for the node it points at (`naturalEffectOf`'s
@@ -489,6 +514,20 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     ? { baseline: held, domain, swing: swing ?? FULL_RANGE_SWING, frame: targetFrame as number }
     : null);
 
+  // A same-unit identity is exact, not an uncertain estimate. Carry its natural size into the existing
+  // exact-link frame refit even when the current frames put |beta| above one. Ordinary estimates still use D8.
+  const sourceUnit = unitOf(source)?.trim().toLowerCase();
+  const targetUnit = unitOf(target)?.trim().toLowerCase();
+  if (link.definitional === true && stated && per !== 0 && Math.abs(amount / per) === 1
+    && sourceUnit !== undefined && sourceUnit !== '' && sourceUnit === targetUnit
+    && beta !== null && Math.sign(beta) === sign) {
+    return {
+      outcome: link.user_stated ? 'user_stated' : 'estimate', mean: beta, std: Math.abs(beta) / 2,
+      magnitude: link.user_stated ? 'user_stated' : 'olumi_estimate', statement, stated_strength: beta,
+      ...natural(beta, per),
+    };
+  }
+
   let problem: LinkSizeProblem | undefined;
   if (stated && beta === null) problem = 'unconvertible';
   else if (beta !== null && (beta === 0 || Math.sign(beta) !== sign)) problem = 'sign_conflict';
@@ -526,20 +565,18 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
         ...(issue !== undefined ? { problem: issue, question: question! } : {}),
       };
     }
-    /**
-     * ⛔ THE TARGET IS NOT AN EFFECT (R3 #72 5899493499 / 5899535464; served cut-costs on `0a89a01`, 2 of 3 drafts): the
-     * drafter sized "GCP workload share → Monthly spend" as 20% of £45,000 — the user's own target — so the full switch
-     * landed exactly on the threshold and its chance was a coin toss. Olumi's estimate on a link INTO the goal whose
-     * largest option move shifts the goal by the gap to its target (within 1%) is set aside like D5/D8, and asked.
-     */
+    // T4 A5: equality with the target gap is a question, not evidence that
+    // this convertible estimate is numerically invalid. Keep its Olumi label.
     const reach = swing === null || targetFrame === undefined ? null : Math.abs(beta) * Math.max(Math.abs(swing.lo), Math.abs(swing.hi)) * targetFrame;
     const targetSized = issue === undefined && reach !== null && finite(target.goal_gap) && target.goal_gap > 0
       && Math.abs(reach - target.goal_gap) <= 0.01 * target.goal_gap;
-    if (issue === undefined && !targetSized) {
-      return { outcome: 'estimate', mean: beta, std: sigma, magnitude: 'olumi_estimate', statement, stated_strength: beta, ...natural(beta, per as number) };
+    if (issue === undefined) {
+      return { outcome: 'estimate', mean: beta, std: sigma, magnitude: 'olumi_estimate', statement, stated_strength: beta, ...natural(beta, per as number),
+        ...(targetSized ? { question: `Olumi estimated that ${statement}; at the largest change an option makes, that moves "${target.label}" by exactly the gap to your target. A target is not evidence for an effect size. What evidence supports this provisional estimate?` } : {}),
+      };
     }
     // D5 / D8: Olumi's estimate is set aside — never clamped to the boundary.
-    problem = issue ?? 'target_sized';
+    problem = issue;
   }
 
   // D6. A placeholder is sized to the frame only where D4 can run; at a bound with no room on the side the link
@@ -560,12 +597,6 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     }
     if (problem === 'not_representable') {
       return `Olumi estimated that ${statement}, ${NOT_REPRESENTABLE}, so it was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
-    }
-    if (problem === 'target_sized') {
-      // The per-unit statement is not the gap; the largest option move is (live arm, draft 3: "−£450 per point" × 20 points).
-      return `Olumi estimated that ${statement}; at the largest change an option makes, that moves "${target.label}" by exactly the `
-        + `gap to your target. A target is what you want, not evidence of what an option does, so it was not used: ${standIn} `
-        + `stands in for it. ${HOW_MUCH(source, target)}`;
     }
     // ⛔ Olumi's size that no frame can read is still ASKED, in words that never place it in the model (AIQ 5914222384):
     // with no range to size a placeholder to, it was said only in `not_represented`, and the Agent listed it as an input.
@@ -589,6 +620,8 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     ...(problem !== undefined ? { problem } : {}),
     ...(question !== undefined ? { question } : {}),
     ...(stated && problem !== undefined && !link.user_stated ? { set_aside: true as const } : {}),
+    ...(!link.user_stated && problem === 'not_representable' && beta !== null
+      ? { fit_candidate: { strength_mean: beta, strength_std: Math.abs(beta) / 2, ...natural(beta, per as number) } } : {}),
   };
 
   if (sized) {

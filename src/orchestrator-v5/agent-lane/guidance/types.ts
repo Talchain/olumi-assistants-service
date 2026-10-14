@@ -34,6 +34,8 @@ export interface GoalPathEdit {
   readonly label?: string;
 }
 export interface GuidanceRecord {
+  readonly variant_id?: Variant;
+  readonly slot?: number;
   readonly status: 'offered' | 'pressed' | 'completed' | 'dismissed';
   readonly state_key_fields?: StateKeyFields;
   readonly state_key_hash?: string;
@@ -144,6 +146,8 @@ export interface MethodInputs {
   readonly 'run.kind'?: string;
   /** RERUN-EXPLANATION (run_delta): the changed inputs' labels, the attribution case and the comparison's limits. */
   readonly change_labels?: readonly string[];
+  /** Recorded changes no sentence names, or input coverage that cannot rule out other changes. */
+  readonly changes_unsaid?: boolean;
   readonly attribution_case?: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
   readonly leader_licensed?: boolean;
   readonly noise_verdict?: string;

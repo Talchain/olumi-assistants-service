@@ -86,6 +86,47 @@ describe('RT-1 selection context (pure)', () => {
     expect(agentSelectionContext({ node_ids: [], edge_ids: ['e5'] }, withLink)!.grounded.unresolved).toBe('could_not_check');
   });
 
+  it('GP ID a unique stored edge id selects its own link when labels and endpoint pairs collide', () => {
+    const sharedLabel = 'Same label';
+    const withIds = { ...stateOf(entity({ ...PRICE, label: sharedLabel }), entity({ ...CHURN, label: sharedLabel })), links: [
+      { id: 'edge-first', from: PRICE.id, to: CHURN.id, source: 'cee_hypothesis', band: 'weak' },
+      { id: 'edge-picked', from: PRICE.id, to: CHURN.id, source: 'user_stated', band: 'strong' },
+    ] };
+    const picked = agentSelectionContext(parseSelectedElements([{ id: 'edge-picked', kind: 'edge', label: 'stale UI label' }]), withIds)!;
+    expect(picked.grounded).toEqual({ element_ids: [], unresolved: 'none' });
+    expect(picked.links).toEqual([{ from: PRICE.id, to: CHURN.id }]);
+    expect(noteEntries(picked.note)).toEqual([{ kind: 'link', id: 'edge-picked',
+      from: { id: PRICE.id, label: sharedLabel }, to: { id: CHURN.id, label: sharedLabel }, source: 'user_stated', band: 'strong' }]);
+    expect(picked.note).not.toContain('edge-first');
+    expect(picked.note).not.toContain('stale UI label');
+  });
+
+  it('GP ID the stored edge id takes precedence over an arrow-shaped id\'s apparent endpoints', () => {
+    const ref = `${CHURN.id}→${PRICE.id}`;
+    const withIds = { ...state, links: [
+      { id: ref, from: PRICE.id, to: CHURN.id, source: 'user_stated' },
+      { id: 'other-edge', from: CHURN.id, to: PRICE.id, source: 'cee_hypothesis' },
+    ] };
+    const picked = agentSelectionContext({ node_ids: [], edge_ids: [ref] }, withIds)!;
+    expect(picked.grounded.unresolved).toBe('none');
+    expect(picked.links).toEqual([{ from: PRICE.id, to: CHURN.id }]);
+    expect(noteEntries(picked.note)).toEqual([{ kind: 'link', id: ref, from: PRICE, to: CHURN, source: 'user_stated' }]);
+  });
+
+  it('GP ID duplicate stored edge ids are unchecked, including ids that could otherwise parse as endpoints', () => {
+    for (const ref of ['opaque-edge', `${PRICE.id}→${CHURN.id}`]) {
+      const ambiguous = { ...state, links: [
+        { id: ref, from: PRICE.id, to: CHURN.id, source: 'user_stated' },
+        { id: ref, from: CHURN.id, to: PRICE.id, source: 'cee_hypothesis' },
+      ] };
+      const picked = agentSelectionContext({ node_ids: [], edge_ids: [ref] }, ambiguous)!;
+      expect(picked.grounded).toEqual({ element_ids: [], unresolved: 'could_not_check' });
+      expect(picked.links).toBeUndefined();
+      expect(noteEntries(picked.note)).toEqual([]);
+      expect(picked.note).toContain('could not be checked');
+    }
+  });
+
   it(`S5 at most ${SELECTION_MAX_ELEMENTS} elements reach the note`, () => {
     const many = Array.from({ length: 30 }, (_, i) => entity({ id: `f${i}`, label: `Factor ${i}` }));
     const c = agentSelectionContext({ node_ids: many.map((e) => e.id), edge_ids: [] }, stateOf(...many))!;

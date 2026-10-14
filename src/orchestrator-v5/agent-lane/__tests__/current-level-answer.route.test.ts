@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../current-level-answer.js';
 import { placeholderAskWords } from '../goal-certainty.js';
 import { parsePendingAction, type PendingAction } from '../../session/pending-action.js';
+import { deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
+import { sentencesOf } from '../reply/compose-reply.js';
 
 const SCENARIO = '689f4bb9-0000-4000-8000-000000000001';
 const GOAL = 'productivity';
@@ -61,6 +63,25 @@ describe('producer, JSONB read and answer gate', () => {
       emittedAtIso: now(), prior: null, answered: false, message: '', awaitingApproval: false };
     expect(currentLevelAskOnAnswer(input)).toBeNull();
     expect(currentLevelAskOnAnswer({ ...input, sentText: question, awaitingApproval: true })).toBeNull();
+  });
+  it('the contract relocates each exact typed ask sentence while preserving its answer licence', () => {
+    const [context, ask] = sentencesOf(question);
+    expect(context).toContain('today’s level');
+    expect(ask).toBe('What is it, in %?');
+    const input = { graph, analysisResult, scenarioId: SCENARIO, userId: null, emittedAtIso: now(),
+      prior: null, answered: false, message: '', awaitingApproval: false };
+    const sentText = deriveAnswerTextFromShape({ headline: context!,
+      bullets: ["Olumi's estimates: 3, see Check estimates.", ask!], detail: '' });
+    expect(sentText).not.toContain(question);
+    const pending = currentLevelAskOnAnswer({ ...input, sentText });
+    expect(pending?.action).toMatchObject({ kind: 'elicit_goal_current_level', goal_id: GOAL, goal_label: GOAL, question });
+    expect(currentLevelAskOnAnswer({ ...input, sentText: `${ask}\n\n${context}` })?.action).toMatchObject({ goal_id: GOAL, question });
+    expect(currentLevelAskOnAnswer({ ...input, sentText: sentText.replace(/[‘’]/g, "'") })?.action).toMatchObject({ goal_id: GOAL, question });
+    // Missing, altered or negated context cannot license the otherwise generic question.
+    for (const refused of [context!, ask!, `Not ${context}\n\n${ask}`,
+      `${context!.replace('today’s', 'tomorrow’s')}\n\n${ask}`]) {
+      expect(currentLevelAskOnAnswer({ ...input, sentText: refused })).toBeNull();
+    }
   });
   it('RED at base: both clarification carriers keep only user figures, and preserve the original expiry', () => {
     const p = initialAsk();

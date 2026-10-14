@@ -56,6 +56,12 @@ function draft(edit: (c: Json) => void = () => {}): CandidateModel {
 }
 
 async function build(model: CandidateModel, brief: string = BRIEF): Promise<{ graph: { nodes: Json[]; edges: Json[] }; out: Json }> {
+  for (const f of model.factors) {
+    if (!f.baseline_known || f.provenance !== 'explicit') continue;
+    if (f.label === 'Pro plan price') f.baseline_evidence = { quote: 'Our Pro price is £49 per subscriber per month.' };
+    if (f.label === 'Paying subscribers') f.baseline_evidence = { quote: 'We have 1,500 paying subscribers.' };
+  }
+  brief = `Our Pro price is £49 per subscriber per month. We have 1,500 paying subscribers.\n\n${brief}`;
   expect(strict(model), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(model) })) as unknown as CallStructuredModel;
@@ -98,7 +104,8 @@ describe('a goal the brief reconciles as price × subscribers is read as one whe
     const withChurn = `${BRIEF} Our monthly churn is 3.5%.`;
     const { graph } = await build(draft((c) => {
       noIdentity(c);
-      Object.assign(c.factors.find((f: Json) => f.label === 'Monthly churn'), { baseline_known: true, baseline_value: 3.5, provenance: 'explicit' });
+      Object.assign(c.factors.find((f: Json) => f.label === 'Monthly churn'), { baseline_known: true, baseline_value: 3.5, provenance: 'explicit',
+        baseline_evidence: { quote: withChurn.slice(BRIEF.length).trim() } });
     }), withChurn);
     expect(goalIdentity(graph)).toBeDefined();
     expect(parentsOf(graph)).toEqual([idOf(graph, 'Paying subscribers'), idOf(graph, 'Pro plan price')].sort());

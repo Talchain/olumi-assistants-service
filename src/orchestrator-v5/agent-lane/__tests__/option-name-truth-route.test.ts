@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -19,7 +20,7 @@ const result = { type: 'analysis_result', computed_against_hash: HASH, leading_o
 const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T09:00:00.000Z', graph_hash_at_run: HASH },
   leader_claim: { permitted: true, separation: 'separated' } };
 const writes: string[] = [];
-const modelRequests: unknown[] = [];
+const modelRequests: { input?: unknown; tool_choice?: unknown }[] = [];
 const latestRunContext = (): Record<string, unknown> | undefined => {
   return explanationContext((modelRequests.at(-1) as { input?: unknown } | undefined)?.input);
 };
@@ -45,7 +46,10 @@ describe('Agent Run result names a changed option level without renaming the gra
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
-      modelRequests.push(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      modelRequests.push(body);
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       return new Response(JSON.stringify({ output: [
         { type: 'message', content: [{ type: 'output_text', text: modelText }] },
       ] }), { status: 200 });
@@ -92,8 +96,8 @@ describe('Agent Run result names a changed option level without renaming the gra
       } }));
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
       expect(modelRequests.length).toBeGreaterThan(before);
-      expect(latestRunContext()?.canonical_state).toMatchObject({
-        option_display_names: ['Spend £110,000 (set to £120,000)'],
+      expect((latestRunContext()?.canonical_state as { entities: { id: string; display_label?: string }[] }).entities.find(n => n.id === 'opt_hybrid')).toMatchObject({
+        id: 'opt_hybrid', display_label: 'Spend £110,000 (set to £120,000)',
       });
       expect((r.json() as { assistant_text: string }).assistant_text).toContain(modelText);
       expect((readBody.analysis_result as typeof repaired.result).enrichment.option_comparison[0]!.option_label).toBe('Spend £110,000');
@@ -117,7 +121,8 @@ describe('Agent Run result names a changed option level without renaming the gra
         chip: { action_type: 'run_analysis' }, turn_id: `4382b44d-7672-4c9d-9f2b-2b76a266${kind === 'complete_stale' ? '2341' : '2342'}`,
       } });
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
-      expect(modelRequests).toHaveLength(before);
+      expect(modelRequests).toHaveLength(before + 1);
+      expect(modelRequests.slice(before).some(body => body.tool_choice === 'none'), 'no Explain narration of a stale result').toBe(false);
       expect(r.json().suggested_actions.some((c: { id: string }) => c.id.startsWith('agent-explain-run:'))).toBe(false);
     } finally {
       readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,

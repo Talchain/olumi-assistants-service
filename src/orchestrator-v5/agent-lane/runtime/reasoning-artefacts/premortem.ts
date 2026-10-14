@@ -169,6 +169,20 @@ export interface PremortemWorksheetDiagnostics {
   rows: number;
 }
 
+/**
+ * ⭐ P02 (DL 8 Oct; joined witness jw-j1): the worksheet stands only when the user SEES the method reply unchanged. Egress may
+ * add WHOLE paragraphs before or after it (the provisional admission, USER_STATED_PARAMETERS_NOT_MATERIAL, is prepended on
+ * every quantified_provisional Run), but never edit, split or glue onto it. Byte equality lost every provisional Run's
+ * worksheet; this keeps the same fail-closed bar for any edit.
+ */
+export function methodReplySurvives(methodReply: string, finalText: string): boolean {
+  if (methodReply.trim() === '') return false;
+  const at = finalText.indexOf(methodReply);
+  if (at < 0) return false;
+  const before = finalText.slice(0, at), after = finalText.slice(at + methodReply.length);
+  return (before === '' || /\n\n$/u.test(before)) && (after === '' || /^\n\n/u.test(after) || /^\s*$/u.test(after));
+}
+
 /** Total, fail-closed emission boundary. Never mint a Run stamp from the current graph alone. */
 export function premortemWorksheetDiagnosticsFor(input: {
   scenarioId: string; turnId: string | undefined; turn: RunMethodTurn | null;

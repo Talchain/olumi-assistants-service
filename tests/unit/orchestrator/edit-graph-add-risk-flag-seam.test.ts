@@ -67,6 +67,8 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
   // none), and the module's third export is stubbed too so a future
   // applied-mutation test cannot hit an undefined import (review fix).
   loadMostRecentPendingActions: vi.fn(async () => []),
+  // B-FIX1: the combined read follows the existing graph double.
+  loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../../src/orchestrator-v5/build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
   loadPersistedGraphStrict: vi.fn(async () => null),
   // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
   // feed. Empty — this suite exercises the add-risk flag seam, not

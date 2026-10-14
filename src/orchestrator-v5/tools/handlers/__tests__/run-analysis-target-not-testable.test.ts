@@ -4,7 +4,7 @@
  * Served m1 after the identity card's Yes (R3 `cand2-8db2a62-1409Z/m1-yes-run`): the goal identity was evaluated, and the
  * Run said "Raise to £59" reaches £85k in 99.29% of runs, resting on Olumi's price → churn guess and churn counted once.
  * Under PTL P2 (#77 5914383843) the target can't be tested yet, so no option's chance is shown: `run_analysis` withholds
- * every option's goal figures with `GOAL_FIGURES_TARGET_NOT_TESTABLE`, the leader and shares with them.
+ * the affected option's target figures with `GOAL_FIGURES_TARGET_NOT_TESTABLE`. Gate A preserves a clean baseline.
  *
  * THE PATH: the served graph through the REAL loader and the REAL handler; the PLoT client returns the served run body.
  * Rung: TESTED (in-process), not a wire witness.
@@ -82,22 +82,37 @@ const warningsOf = (result: Json): Json[] => {
   return found;
 };
 
-describe('a target the Run can\'t test has no goal chance for any option (m1 after the identity card\'s Yes)', () => {
+describe('m1 after the identity card\'s Yes: target failures belong to their affected options', () => {
   it('PRECONDITION: the served body carries the chance this row withholds', () => {
     expect(chances(M1.plot_body)['59_price']).toBeCloseTo(0.9929, 4);
   });
 
-  it('RED: the served graph → no option\'s chance, one typed withhold in the set every reader keys on, in the DR words', async () => {
-    const result = await runOn(M1.graph);
-    expect(chances(result)).toEqual({});
+  it('the served graph withholds the affected price option; the clean baseline keeps its zero', async () => {
+    const g = structuredClone(M1.graph);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
+    const result = await runOn(g);
+    expect(chances(result)).toEqual({ current_price: 0 });
     const w = warningsOf(result).filter((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
-    expect(w.length).toBeGreaterThan(0);
-    expect(GOAL_FIGURES_WITHHELD_CODES.has(w[0]!.code)).toBe(true);
-    expect(w[0]!.message.startsWith("Not shown. Olumi can compare your options, but can't yet test them against your target")).toBe(true);
+    // Both reasons remain on the affected price option; neither may spread to the clean baseline.
+    expect(w).toHaveLength(1);
+    expect(w[0].option_ids).toEqual(['59_price']);
+    expect(Object.keys(w[0].per_option)).toEqual(['59_price']);
+    const placeholder = warningsOf(result).find(x => x.code === GOAL_FIGURES_PLACEHOLDER_PATH)!;
+    expect(placeholder.option_ids).toEqual(['59_price']);
+    expect(GOAL_FIGURES_WITHHELD_CODES.has(placeholder.code)).toBe(true);
   });
 
   it('CONTROL: the user sized the route (price → churn → subscribers at 12 months) → the chance is shown', async () => {
-    const g = clone(M1.graph);
+    const g = structuredClone(M1.graph);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
     for (const e of g.edges as Json[]) {
       if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
         e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
@@ -144,7 +159,7 @@ describe('AIQ\'s chain: an earlier per-option withhold never leaves another opti
     expect(dr?.option_ids ? [...dr.option_ids] : null).toEqual(['59_price']);
   });
 
-  it('RED (the whole-run arm): a run that shows NO goal figure and was withheld by nothing still loses its leader and shares', () => {
+  it('no goal figure and no earlier withhold: the fallback records only the affected option', () => {
     const noFigures = clone(M1.plot_body);
     const strip = (v: unknown): void => {
       if (Array.isArray(v)) { v.forEach(strip); return; }
@@ -156,7 +171,7 @@ describe('AIQ\'s chain: an earlier per-option withhold never leaves another opti
     const after = withholdGoalFiguresForUntestableTarget(noFigures, M1.graph);
     expect(after).not.toBe(noFigures);
     const dr = warningsOf(after).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
-    expect(dr?.option_ids ? [...dr.option_ids].sort() : null).toEqual(['59_price', 'current_price']);
+    expect(dr?.option_ids ? [...dr.option_ids].sort() : null).toEqual(['59_price']);
   });
 
   it('CONTROL: nothing left to withhold → the same object back (no second warning)', () => {
@@ -235,17 +250,21 @@ describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never r
     // RE-PINNED, RT-10 B′ R2: the target-only licence (the shares and the leader are this run's findings); every
     // comparative use of the KEPT outcomes is still forbidden (DL #2448 condition (1)).
     expect(agent.note).toBe(TARGET_ONLY_OUTCOME_KEPT_NOTE);
-    expect(agent.note).toMatch(/you are not given those figures, so never quote or estimate one, never rank or order the options by those outcomes/);
-    expect(agent.note).toMatch(/never say one option is better or worse/);
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q3, rulings 1ad7f7b2…): the AIE's outcome-kept note; every comparative use of the
+    // KEPT outcomes stays forbidden (no quote, estimate or rank; no ranking for the withheld chance). "Better or worse" while
+    // the leader is withheld stays the host's rule (same-run-goal-chance-and-sensitivity pins it).
+    expect(agent.note).toContain('this note does not supply or license those figures. Do not quote, estimate or rank outcomes that the selected current Run has not separately supplied and licensed.');
+    expect(agent.note).toContain('Never substitute a relative ranking for an unavailable goal chance.');
   });
 
-  it('CONTROL: P5 (outcome withheld) keeps the ban on quoting any option\'s value', async () => {
-    const { goalChanceWithheldForAgent, TARGET_ONLY_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
+  it('P5 (outcome withheld) scopes the ban to the affected option; the baseline stays licensed', async () => {
+    const { goalChanceWithheldForAgent } = await import('../../../agent-lane/goal-chance-withheld.js');
     const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), M1.graph) as Json;
     // RE-PINNED, RT-10 B′ R2: the target-only licence, which keeps the ban on quoting or estimating any option's outcome.
-    const note = goalChanceWithheldForAgent({ enrichment: after })!.note;
-    expect(note).toBe(TARGET_ONLY_NOTE);
-    expect(note).toMatch(/never quote or estimate an option’s outcome/);
+    const agent = goalChanceWithheldForAgent({ enrichment: after })!;
+    expect(agent.option_ids).toEqual(['59_price']);
+    expect(agent.note).not.toContain('EVERY option');
+    expect(agent.note).toContain('Other options');
   });
 });
 
@@ -324,4 +343,3 @@ describe('F1b [R1] condition 1(ii): the Agent\'s view of the Run carries no kept
     expect(outcomeFigures(after).filter((n) => seen.has(n))).toEqual([]);
   });
 });
-

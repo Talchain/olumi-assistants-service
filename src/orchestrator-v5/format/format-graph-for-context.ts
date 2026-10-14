@@ -42,8 +42,9 @@ import {
   type CompactUncertaintyDriversDisclosure,
 } from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../context/context-pack-assembler.js';
-import { NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from './edge-strength-bands.js';
+import { CANVAS_BAND_WORD } from './edge-strength-bands.js';
+import { edgeStrengthWords } from './edge-strength-words.js';
+import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
 
 export interface DisplaySafeNode {
   readonly id: string;
@@ -371,6 +372,7 @@ interface RawEdgeShape {
    *    - canonical GraphV3T: `{ mean, std }` object (sign carried separately
    *      via `effect_direction`) */
   readonly strength?: unknown;
+  readonly sizing?: LinkSizing;
   /** Legacy / `editCompactGraph`-like form: a top-level numeric mean.
    *  Sign carried separately via `effect_direction` when present. */
   readonly strength_mean?: unknown;
@@ -452,6 +454,7 @@ const NEGLIGIBLE_BIDIRECTED_PHRASE = `negligible co-movement, ${BIDIRECTED_COMMO
  * which would otherwise leak verbatim.
  */
 const DIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
+  'not sized yet',
   NEGLIGIBLE_DIRECTED_PHRASE,
   'slight positive link',
   'slight negative link',
@@ -484,6 +487,7 @@ const DIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
  *     on a bidirected edge.
  */
 const BIDIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
+  `not sized yet, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
   NEGLIGIBLE_BIDIRECTED_PHRASE,
   `slight positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
   `slight negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
@@ -532,13 +536,8 @@ function extractNodeUnit(raw: RawNodeShape): string | undefined {
  *  -0.10  → "slight negative link"          draws it, in its words: CANVAS_BAND_WORD)
  *   0.02  → "negligible link"            (sign suppressed below NEAR_ZERO_INFLUENCE_THRESHOLD)
  */
-export function relationshipPhrase(signedStrength: number): string {
-  if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_DIRECTED_PHRASE;
-  const abs = Math.abs(signedStrength);
-  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_DIRECTED_PHRASE;
-  const band = CANVAS_BAND_WORD[edgeBandFromMagnitude(abs)];
-  const sign = signedStrength < 0 ? 'negative' : 'positive';
-  return `${band} ${sign} link`;
+export function relationshipPhrase(signedStrength: number, sizing?: LinkSizing): string {
+  return edgeStrengthWords({ strength: signedStrength, ...(sizing !== undefined ? { sizing } : {}) }, 'relationship');
 }
 
 /**
@@ -563,13 +562,8 @@ export function relationshipPhrase(signedStrength: number): string {
  * directed path — so the two families can never disagree about where a band
  * boundary sits.
  */
-export function bidirectedRelationshipPhrase(signedStrength: number): string {
-  if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_BIDIRECTED_PHRASE;
-  const abs = Math.abs(signedStrength);
-  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_BIDIRECTED_PHRASE;
-  const band = CANVAS_BAND_WORD[edgeBandFromMagnitude(abs)];
-  const sign = signedStrength < 0 ? 'negative' : 'positive';
-  return `${band} ${sign} co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`;
+export function bidirectedRelationshipPhrase(signedStrength: number, sizing?: LinkSizing): string {
+  return edgeStrengthWords({ strength: signedStrength, ...(sizing !== undefined ? { sizing } : {}) }, 'bidirected');
 }
 
 /**
@@ -837,8 +831,10 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
   // a bidirected edge. Unknown / missing → the near-zero phrase of the
   // matching family, so the fallback can never introduce causal language.
   const existingRelationship = asAllowedRelationship(raw.relationship, isBidirected);
-  const relationship = strength !== null
-    ? (isBidirected ? bidirectedRelationshipPhrase(strength) : relationshipPhrase(strength))
+  // Keep the canonical strength object: its std is part of the tagged default-door identity.
+  const strengthWords = edgeStrengthWords(raw, isBidirected ? 'bidirected' : 'relationship');
+  const relationship = strength !== null || strengthWords.startsWith('not sized yet')
+    ? strengthWords
     : existingRelationship ?? (isBidirected ? NEGLIGIBLE_BIDIRECTED_PHRASE : NEGLIGIBLE_DIRECTED_PHRASE);
   const edge: {
     from: string;

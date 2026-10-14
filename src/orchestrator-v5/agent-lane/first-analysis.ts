@@ -39,6 +39,7 @@ import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../context/run-initiator.js';
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { blockPresumesLeadingOption } from '../compose.js';
+import { emitAgentPhase } from '../../cee/unified-pipeline/stage-stream-context.js';
 
 /**
  * What must remain of the turn budget for a first analysis to START: a worst-case run (~20 s: PLoT
@@ -168,6 +169,8 @@ export async function runFirstAnalysisAfterConstruction(params: FirstAnalysisPar
       chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
     };
     params.onDispatch?.();
+    // ⭐ P44 S2 — the automatic first analysis is dispatched now.
+    emitAgentPhase('first_analysis');
     const result = await dispatchRunAnalysis({
       payload,
       requestId: `${params.requestId}:first-analysis`,
@@ -345,6 +348,6 @@ export function describeFirstAnalysisForAgent(
     reason: outcome.reason,
     ...(outcome.reason === 'not_admissible' || outcome.reason === 'refused' ? { next_step: outcome.nextStep } : {}),
     claim_permissions: permissions,
-    note: 'No analysis ran on this turn. Olumi tells the user why beneath your reply; do not describe any result.',
+    note: "If analysis did not run, explain its actual recorded reason and a useful next action from the supplied facts. Keep reasoning useful before a Run; do not invent a missing value or promise that one answer will make analysis possible.",
   };
 }

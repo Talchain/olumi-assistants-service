@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 /**
  * THE INFERRED-VALUE DISCLOSURE — the analysis says whose numbers it ran on.
  *
@@ -68,12 +69,10 @@
  * claim-safety-review change, not this one.
  */
 
-import {
-  classifyValueSource,
-  type StructureProvenance,
-} from '../../cee/graph-readiness/obligation-provenance.js';
+import { linkProvenanceOf, settingProvenanceOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { readEdgeParams } from '../../cee/unified-pipeline/utils/edge-format.js';
 import { isLegalStructuralEdge } from '../../cee/utils/structural-edge-classifier.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 /**
  * The longest suffix this module can emit, for the caller's length budget.
@@ -197,14 +196,11 @@ export function deriveInferredValues(graph: unknown): InferredValueRecord[] {
     const data = raw.data as Record<string, unknown> | undefined;
     const hasValue =
       typeof observed?.value === 'number' || typeof data?.value === 'number';
-    if (!hasValue) continue;
-    const source = typeof observed?.source === 'string' ? observed.source : undefined;
-    const extraction = typeof data?.extractionType === 'string' ? data.extractionType : undefined;
-    const isOurs =
-      source === 'cee_inference'
-      || source === 'inferred'
-      || source === 'cee_repair'
-      || extraction === 'inferred';
+    if (!hasValue || isUnverifiedUserMaterial(observed)) continue;
+    // ⭐ ONE PROVENANCE AUTHORITY: Olumi's (repaired included; an accepted estimate is the user's to recognise as
+    // accepted, not "inferred") by `provenanceOf`; a V1 value with no observed_state is read by its extraction type.
+    const p = valueProvenanceOf(observed ?? { extractionType: data?.extractionType });
+    const isOurs = p.origin === 'ai' && !p.accepted && !p.structural;
     if (!isOurs) continue;
     out.push({ factor_id: typeof raw.id === 'string' ? raw.id : '' });
   }
@@ -215,21 +211,6 @@ export function deriveInferredValues(graph: unknown): InferredValueRecord[] {
 // EVERY OLUMI-AUTHORED VALUE THE ANALYSIS COMPUTES ON
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Whose value a classified stamp is, for THIS sentence ("They are mine rather than yours").
- *
- * ⛔ `user_ratified` IS THE USER'S HERE. A confirmed estimate is one a person acted on, and describing it back as
- * Olumi's own invention is the lie `reflectsAHumanAct` (`obligation-provenance.ts`) exists to prevent. `unattributed`
- * is nobody we can name, so it is never claimed as ours: wrongly calling a user's value our invention is the worse
- * error (`not-modelled-manifest.ts`). A `Record` so a sixth class must be ruled here, not absorbed by an `else`.
- */
-const OLUMI_AUTHORED: Readonly<Record<StructureProvenance, boolean>> = {
-  user_stated: false,
-  user_ratified: false,
-  ai_drafted: true,
-  system_repaired: true,
-  unattributed: false,
-};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -256,7 +237,8 @@ export function deriveOlumiOptionLevels(graph: unknown): OlumiAuthoredValue[] {
       const entry = asRecord(raw);
       if (entry === null) continue;
       if (typeof entry.value !== 'number' && typeof entry.raw_value !== 'number') continue;
-      if (!OLUMI_AUTHORED[classifyValueSource(entry.source)]) continue;
+      const setBy = settingProvenanceOf(entry, recordsOf(asRecord(graph)?.nodes).find((n) => n.id === factorId));
+      if (setBy.origin !== 'ai' || setBy.structural) continue;
       out.push({ kind: 'option_level', option_id: node.id, factor_id: factorId });
     }
   }
@@ -288,9 +270,13 @@ export function deriveOlumiLinkStrengths(graph: unknown): OlumiAuthoredValue[] {
     if (fromKind === undefined || toKind === undefined) continue;
     if (isLegalStructuralEdge(fromKind, toKind)) continue;
     if (readEdgeParams(edge).mean === undefined) continue;
-    const author = classifyValueSource(asRecord(edge.provenance)?.source);
-    const ours = OLUMI_AUTHORED[author] || (author === 'unattributed' && edge.defaulted === true);
-    if (!ours) continue;
+    // Science 393023 LICENCE ruling 3: a strength the ONE predicate reads as the user's (e.g. magnitude user_stated on an
+    // Olumi-proposed link) is never counted as Olumi's. Placeholders stay counted: the analysis runs on their defaults.
+    if (linkSizing(edge) === 'user') continue;
+    // ONE PROVENANCE AUTHORITY (AIE 6121121310): Olumi's size — estimated, accepted or a placeholder default — by
+    // `linkProvenanceOf`; an unmarked link is never Olumi's wholesale (it is disclosed as unverified by the census).
+    const size = linkProvenanceOf(edge, { fromKind });
+    if (size.origin !== 'ai' || size.structural) continue;
     out.push({ kind: 'link_strength', from: edge.from, to: edge.to });
   }
   return out;

@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { turnReadCache } from '../turn-read-cache.js';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 const READ = '/assist/v1/scenarios/s1/graph';
 
@@ -16,7 +17,11 @@ function fakeStore() {
   let open: (() => void) | undefined;
   const inner = async (path: string): Promise<{ status: number; json: Record<string, unknown> }> => {
     calls.push(path);
-    if (path === READ) return { status: 200, json: { graph_hash: `v${version}`, graph: { nodes: [{ id: 'a', label: 'A' }] } } };
+    if (path === READ) {
+      const graph = { nodes: [{ id: 'a', label: 'A' }] };
+      return { status: 200, json: { graph_hash: `v${version}`, graph,
+        canonical_analysis_view: projectCanonicalAnalysisView({ revision: version, graph, runFact: null }) } };
+    }
     if (path.endsWith('/graph/register')) {
       if (gate !== undefined) await gate;
       version += 1;
@@ -33,6 +38,54 @@ function fakeStore() {
 const reads = (calls: string[]) => calls.filter((c) => c === READ).length;
 
 describe('turnReadCache: one read per write epoch', () => {
+  it('retains canonical analysis cells through isolated cached copies and refreshes them after a write', async () => {
+    let version = 1;
+    let graphReads = 0;
+    const cache = turnReadCache(async path => {
+      if (path !== READ) { version += 1; return { status: 200, json: {} }; }
+      graphReads += 1;
+      const graph = { nodes: [{ id: 'goal', kind: 'goal', label: `Goal ${version}` }], edges: [] };
+      const result = {
+        type: 'analysis_result',
+        enrichment: {
+          option_comparison: [{ option_id: 'a' }],
+          inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
+            option_ids: ['a'], pct_by_option: { a: version * 10 } }],
+        },
+      };
+      const canonicalAnalysisView = projectCanonicalAnalysisView({
+        revision: version, graph,
+        runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false,
+          result: { scenario_id: 's1', summary: '', run_id: `run-${version}` } } as never,
+        analysisState: { run_state: { kind: 'complete_current' } } as never,
+        currentResult: result as never,
+      });
+      return { status: 200, json: { graph, canonical_analysis_view: canonicalAnalysisView } };
+    }, READ);
+    // A capability seeds the cache before the final reply reads it.
+    await cache.dispatch(READ, {});
+    const view = (read: { json: Record<string, unknown> }) => read.json.canonical_analysis_view as {
+      run: { run_id: string }; staleness: { revision: number }; options: { cell: { kind: string; display: string; face: string } }[];
+    };
+    const first = await cache.dispatch(READ, {});
+    expect(view(first).staleness.revision).toBe(1);
+    expect(view(first).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 10%', face: 'about 10% chance of meeting your goal, in this model.' });
+    (first.json.graph as { nodes: { label: string }[] }).nodes[0]!.label = 'Caller mutation';
+    view(first).options[0]!.cell.display = 'Caller mutation';
+    view(first).options[0]!.cell.face = 'Caller mutation';
+    const repeat = await cache.dispatch(READ, {});
+    expect(view(repeat)).not.toBe(view(first));
+    expect(view(repeat).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 10%', face: 'about 10% chance of meeting your goal, in this model.' });
+    expect((repeat.json.graph as { nodes: { label: string }[] }).nodes[0]!.label).toBe('Goal 1');
+    expect(graphReads).toBe(1);
+    await cache.dispatch('/assist/v1/scenarios/s1/graph/register', {});
+    const next = await cache.dispatch(READ, {});
+    expect(view(next).staleness.revision).toBe(2);
+    expect(view(next).run.run_id).toBe('run-2');
+    expect(view(next).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 20%', face: 'about 20% chance of meeting your goal, in this model.' });
+    expect(graphReads).toBe(2);
+  });
+
   it('RED (the approve shape): read → write → read → read → read makes TWO graph reads, and every read after the write sees it', async () => {
     const s = fakeStore();
     const c = turnReadCache(s.inner, READ);

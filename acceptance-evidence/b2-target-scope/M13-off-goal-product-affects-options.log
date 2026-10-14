@@ -1,0 +1,35 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 64ms
+     × class 1 is transitive and reaches only products on this goal path, regardless of labels 61ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 1 is transitive and reaches only products on this goal path, regardless of labels
+AssertionError: expected [ 'keep' ] to deeply equal [ 'raise', 'keep' ]
+
+- Expected
++ Received
+
+  [
+-   "raise",
+    "keep",
+  ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:127:90
+    125|     } });
+    126|     offGoal.edges.push(edge('a', 'product'), edge('b', 'product'));
+    127|     expect(chances(withholdGoalFiguresForUntestableTarget(envelope(), …
+       |                                                                                          ^
+    128|   });
+    129|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:46:23
+   Duration  7.31s (transform 5.33s, setup 194ms, import 6.87s, tests 64ms, environment 0ms)
+

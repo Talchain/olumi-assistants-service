@@ -1,3 +1,4 @@
+import { RETAINED_LIMIT_WITHHOLD_CODE } from '../../graph/retained-limit.js';
 /**
  * Single source of truth for "which array carries the option-level results",
  * with CURRENT-first precedence (M1, Codex r2 pre-merge review).
@@ -83,10 +84,17 @@ export const GOAL_FIGURES_PRODUCT_NOT_READ = 'GOAL_FIGURES_PRODUCT_NOT_READ';
 
 /**
  * CEE's code for a run whose goal figures it withheld because the goal's target can't be tested yet (DECISION-
- * REPRESENTATION row 4, `targetTestabilityOf`; AIQ #2371 5914730220). Written by `run_analysis` for EVERY option, the
- * leader and shares too; `node_ids` names the goal. The message is the DR sentence, with its one question.
+ * REPRESENTATION row 4, `targetTestabilityOf`; AIQ #2371 5914730220). Gate A writes it for options with their own
+ * failures, including typed product/derived-baseline dependencies; goal-level failures remain every option's.
+ * Target withholding keeps the ordering. `node_ids` names the goal; `option_ids` and `per_option` carry its scope.
  */
 export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
+
+/** CEE's typed current-level cause, carried from this Run's missing_goal_baseline refusal for every scored option. */
+export const GOAL_FIGURES_MISSING_CURRENT_LEVEL = 'GOAL_FIGURES_MISSING_CURRENT_LEVEL';
+
+/** Science §(ad): the Run did not compute the goal's held month and the user did not attest a steady level. */
+export const GOAL_FIGURES_HORIZON_NOT_TESTED = 'GOAL_FIGURES_HORIZON_NOT_TESTED';
 
 /**
  * ⛔ DL gate 1 v2 (Science 0df0e1, 5 Oct): an option whose RUN outcome is identical to the explicit baseline's
@@ -102,6 +110,8 @@ export const GOAL_FIGURES_OPTIONS_IDENTICAL = 'GOAL_FIGURES_OPTIONS_IDENTICAL';
  * options it names, each with its typed cause; the ordering and the outcome stay (the target claims only).
  */
 export const GOAL_FIGURES_PROBABILITY_UNUSABLE = 'GOAL_FIGURES_PROBABILITY_UNUSABLE';
+/** S2a: the normal approximation is outside its licence, per option. */
+export const GOAL_FIGURES_SHARE_APPROXIMATION = 'GOAL_FIGURES_SHARE_APPROXIMATION';
 
 /**
  * ⛔ S-E GOALS (Science ruling 7 Oct §2, P0): the goal is measured as the CHANCE of an event ("% likelihood of on-time
@@ -112,13 +122,17 @@ export const GOAL_FIGURES_CHANCE_AS_GOAL = 'GOAL_FIGURES_CHANCE_AS_GOAL';
 
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
+  RETAINED_LIMIT_WITHHOLD_CODE,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
+  GOAL_FIGURES_MISSING_CURRENT_LEVEL,
+  GOAL_FIGURES_HORIZON_NOT_TESTED,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
+  GOAL_FIGURES_SHARE_APPROXIMATION,
   GOAL_FIGURES_CHANCE_AS_GOAL,
 ]);
 
@@ -168,7 +182,13 @@ export function readOptionResultSources(
   // goal figures, ONLY the current carrier is read — `option_comparison` (top level, or as the UI nests it) — and nothing
   // when it is absent or empty. A downstream copy (`results[]`, `results.options`, `results.option_results`,
   // `decision_brief.options`) is never read in its place, even as the first array present.
-  if (runWithheldGoalFigures(envelope)) {
+  const withholds = goalFiguresWithheldWarnings(envelope);
+  // Science 93 @54dbc0fe Q-a: §(ad) retains ordering only when the stored claims say so.
+  // Any other code, missing claims, or a withheld win_share keeps the current-carrier restriction.
+  const horizonKeptOrdering = withholds.length > 0 && withholds.every(w =>
+    w.code === GOAL_FIGURES_HORIZON_NOT_TESTED && Array.isArray(w.withheld_claims)
+      && !w.withheld_claims.includes('win_share'));
+  if (withholds.length > 0 && !horizonKeptOrdering) {
     const current = [envelope.option_comparison, readRecord(envelope.results)?.option_comparison]
       .map((v) => (Array.isArray(v) ? filterObjectEntries(v) : []))
       .find((entries) => entries.length > 0);

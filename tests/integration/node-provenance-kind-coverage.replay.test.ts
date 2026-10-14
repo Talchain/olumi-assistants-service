@@ -621,6 +621,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "count_noun",
       "description",
       "display_value",
+      // P05b #2854, 8 Oct (DL lease: automatic widening at draft time) — THE VALUE-BEARING DECISION: `draft_widening` is
+      // NOT value-bearing and joins neither `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is Olumi's stamp on a node it
+      // added unasked (provenance 'ai_suggested_widen') plus the risk's attachment as words and ids (hits / through /
+      // affects / mechanism / relies_on / watch_for). It asserts no magnitude, and a stamped risk stays
+      // 'retained_excluded' with zero links, so nothing in it can reach the calculation or read as a figure.
+      "draft_widening",
       "encoding_map",
       // event_risk.v1, 7 Oct (Science 393023 pilot) — THE VALUE-BEARING DECISION: `event_risk` IS value-bearing. It carries
       // a stated magnitude (the occurrence range p_low..p_high, attested by its REQUIRED `basis`), so it JOINS `carriesValue`
@@ -642,6 +648,10 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_direction",
       "goal_horizon",
       "goal_horizon_months",
+      // NOT value-bearing: goal_horizon_reference_date mirrors goal_horizon, a WHEN frame with no magnitude of the goal metric.
+      "goal_horizon_reference_date",
+      // NOT value-bearing: goal_horizon_stated_months mirrors goal_horizon_months, the stated WHEN count rather than a metric level.
+      "goal_horizon_stated_months",
       // MG, 29 Sep (R3-B #72 5893233864, AIQ 5893340150 / 5893587951) — THE VALUE-BEARING DECISION: `goal_sense_reading`
       // is NOT value-bearing. It is Olumi's reading of the goal's SENSE (minimise) and the words that say so; its
       // `threshold` is a staleness key copied from `goal_threshold_raw`, never a level of the goal metric of its own.
@@ -653,12 +663,23 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_scope",
       "goal_sense_reading",
       "goal_stated_as",
+      // NOT value-bearing: goal_stock_reading mirrors goal_level_reading, a confirmed reading whose figures remain on their value-bearing fields.
+      "goal_stock_reading",
+      // Batch C (ruling 4), 12 Oct — THE VALUE-BEARING DECISION: `goal_target_basis` is NOT value-bearing and joins neither
+      // `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is Olumi's reading of WHAT the target is measured against (reference,
+      // denominator in words, period, effect unit); its `target_raw` is a staleness key copied from `goal_threshold_raw`
+      // and `period_months` says WHEN. The target's figure stays on `goal_threshold_raw` / `goal_threshold`.
+      "goal_target_basis",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",
       "goal_threshold_frame",
       "goal_threshold_raw",
       "goal_threshold_unit",
+      // S5 2b, 9 Oct — THE VALUE-BEARING DECISION: `horizon_basis` is NOT value-bearing and joins neither
+      // `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is a user attestation object; `bound_months` mirrors
+      // `goal_horizon_months` and says WHEN, with no model value or magnitude of the goal's own metric.
+      "horizon_basis",
       "id",
       "intercept",
       // Writer audit 2026-09-27 (#70 5854387709) — THE VALUE-BEARING DECISION: `interventionKeys`,
@@ -693,6 +714,8 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // `goal_direction` above. A node carrying only a frame carries no value; joining would let "change" read as one.
       "quantity_frame",
       "ref",
+      // RC3 a′: an option identity governing Run inclusion, never a magnitude; it does not join carriesValue.
+      "relies_on",
       "scale_frame",
       "source_quote",
       "starterId",

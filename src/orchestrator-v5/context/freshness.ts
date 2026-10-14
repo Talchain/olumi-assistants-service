@@ -1,3 +1,4 @@
+import { readRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 /**
@@ -123,6 +124,7 @@ export type FreshnessReason =
  * priorFactsReadOk — CEE #977's `PriorFactsReadResult` is that distinction.
  */
 export interface DeriveAnalysisFreshnessOptions {
+  readonly currentScenarioRevision?: number | null;
   /** The same current graph used for the hash, before any unit defaults. A
    * Run with an input snapshot cannot be declared fresh without this proof. */
   readonly currentGraph?: unknown;
@@ -150,6 +152,9 @@ export interface DeriveAnalysisFreshnessOptions {
  * cannot restamp it.
  */
 export interface FreshnessDerivation {
+  readonly selected_fact_row_id?: string | null;
+  readonly run_revision?: { readonly value: number | null; readonly source: 'recorded' | 'legacy_unknown' };
+  readonly basis?: 'analysis_graph_hash_interim' | 'recorded_run_revision';
   readonly freshness: AnalysisFreshness;
   readonly reason: FreshnessReason;
   /**
@@ -291,7 +296,7 @@ function viewRunAnalysisFact(
     fact,
     index,
     graph_hash_at_run:
-      typeof result.graph_hash_at_run === 'string' ? result.graph_hash_at_run : null,
+      typeof result.graph_hash_at_run === 'string' && result.graph_hash_at_run.length > 0 ? result.graph_hash_at_run : null,
     computed_at:
       typeof result.computed_at === 'string' ? result.computed_at : null,
     status: readAnalysisStatus(result.enrichment),
@@ -479,7 +484,7 @@ export function selectClaimBearingRunAnalysisFact(
  * the same way as the freshness fact" is a property of one function rather
  * than an agreement between two.
  */
-function orderRunAnalysisFacts(
+export function orderRunAnalysisFacts(
   priorFacts: readonly HandlerFact[],
   opts: { readonly requireSuccessfulStatus: boolean; readonly skipRefusals?: boolean },
 ): RunAnalysisFactView[] {
@@ -508,23 +513,34 @@ function orderRunAnalysisFacts(
     candidates.push(view);
   }
 
-  // Stable sort by computed_at desc, putting facts without computed_at
-  // last. JavaScript Array.sort is stable in V8, so insertion order is
-  // preserved among facts that compare equal (same timestamp or both
-  // null) — and build-turn-context delivers newest-first, so the
-  // first equal-keyed fact is the freshest by insertion.
-  candidates.sort((a, b) => {
+  return orderRunAnalysisFactsByTime(candidates);
+}
+
+/**
+ * Canonical Run ordering for fact views AND typed records. Loaded fact views
+ * already arrive newest-insertion-first; typed rows supply that same persisted
+ * fact created_at/id tie-break explicitly, never their derivation timestamp.
+ * Revision is provenance, not a second definition of newest.
+ */
+export function orderRunAnalysisFactsByTime<T extends { readonly computed_at: string | null }>(
+  rows: readonly T[],
+  insertion?: (row: T) => { readonly created_at: string; readonly id: string },
+): T[] {
+  return [...rows].sort((a, b) => {
     if (a.computed_at !== null && b.computed_at !== null) {
-      // Lexicographic ISO compare is correct for desc sort.
       if (a.computed_at < b.computed_at) return 1;
       if (a.computed_at > b.computed_at) return -1;
-      return 0;
+    } else {
+      if (a.computed_at !== null) return -1;
+      if (b.computed_at !== null) return 1;
     }
-    if (a.computed_at !== null) return -1; // a is fresher than untimestamped b
-    if (b.computed_at !== null) return 1;
-    return 0;
+    if (insertion !== undefined) {
+      const av = insertion(a); const bv = insertion(b);
+      if (av.created_at !== bv.created_at) return av.created_at < bv.created_at ? 1 : -1;
+      if (av.id !== bv.id) return av.id < bv.id ? 1 : -1;
+    }
+    return 0; // stable input order, exactly as selectRunAnalysisFact
   });
-  return candidates;
 }
 
 /**
@@ -684,8 +700,19 @@ export function deriveAnalysisFreshness(
   currentGraphHash: string | null,
   currentGraphOptionIds?: readonly string[] | null,
   opts?: DeriveAnalysisFreshnessOptions,
-): FreshnessDerivation {
+): FreshnessDerivation & Required<Pick<FreshnessDerivation, 'run_revision' | 'basis'>> {
   const selected = selectRunAnalysisFact(priorFacts);
+  const recordedRevision = selected === null ? null
+    : readRunAnalysisOccurrence(selected.fact)?.evaluated_scenario_revision ?? null;
+  const provenance = {
+    selected_fact_row_id: selected === null ? null : readRunAnalysisOccurrence(selected.fact)?.fact_row_id ?? null,
+    run_revision: { value: recordedRevision, source: recordedRevision === null ? 'legacy_unknown' as const : 'recorded' as const },
+    basis: 'analysis_graph_hash_interim' as const,
+  };
+  const finish = (value: FreshnessDerivation) => ({ ...enforceInvariants(value),
+    run_revision: provenance.run_revision, basis: value.basis ?? provenance.basis });
+  const currentRevision = validatedScenarioRevision(opts?.currentScenarioRevision);
+  if (currentGraphHash === '') currentGraphHash = null;
 
   if (selected === null) {
     // CONTEXT/MEMORY V5 defect 4 — AN EMPTY FACT LIST IS AMBIGUOUS, AND ONLY
@@ -708,6 +735,7 @@ export function deriveAnalysisFreshness(
     // decides — a degraded flag must never blank out a good analysis.
     if (opts?.priorFactsReadOk === false) {
       const degraded: FreshnessDerivation = {
+        ...provenance,
         freshness: 'unknown',
         reason: 'derivation_failed',
         selected_fact_index: null,
@@ -715,9 +743,10 @@ export function deriveAnalysisFreshness(
         current_graph_hash: currentGraphHash,
         computed_at: null,
       };
-      return enforceInvariants(degraded);
+      return finish(degraded);
     }
     const noFact: FreshnessDerivation = {
+      ...provenance,
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',
       selected_fact_index: null,
@@ -725,7 +754,7 @@ export function deriveAnalysisFreshness(
       current_graph_hash: currentGraphHash,
       computed_at: null,
     };
-    return enforceInvariants(noFact);
+    return finish(noFact);
   }
 
   const invalidatedAtMs =
@@ -741,7 +770,8 @@ export function deriveAnalysisFreshness(
       !Number.isFinite(selectedAtMs) ||
       selectedAtMs <= invalidatedAtMs)
   ) {
-    return enforceInvariants({
+    return finish({
+      ...provenance,
       freshness: 'stale',
       reason: 'model_restored_after_analysis',
       selected_fact_index: selected.index,
@@ -770,6 +800,7 @@ export function deriveAnalysisFreshness(
   let base: FreshnessDerivation;
   if (selected.graph_hash_at_run === null) {
     base = {
+      ...provenance,
       freshness: 'unknown',
       reason: 'legacy_fact_missing_hash',
       selected_fact_index: selected.index,
@@ -779,6 +810,7 @@ export function deriveAnalysisFreshness(
     };
   } else if (currentGraphHash === null) {
     base = {
+      ...provenance,
       freshness: 'unknown',
       reason: 'current_graph_hash_unavailable',
       selected_fact_index: selected.index,
@@ -788,6 +820,7 @@ export function deriveAnalysisFreshness(
     };
   } else if (selected.graph_hash_at_run === currentGraphHash) {
     base = {
+      ...provenance,
       freshness: 'fresh',
       reason: 'graph_hash_match',
       selected_fact_index: selected.index,
@@ -797,6 +830,7 @@ export function deriveAnalysisFreshness(
     };
   } else {
     base = {
+      ...provenance,
       freshness: 'stale',
       reason: 'graph_hash_diverged',
       selected_fact_index: selected.index,
@@ -804,6 +838,11 @@ export function deriveAnalysisFreshness(
       current_graph_hash: currentGraphHash,
       computed_at: selected.computed_at,
     };
+  }
+
+  if ((base.reason === 'legacy_fact_missing_hash' || base.reason === 'current_graph_hash_unavailable')
+    && recordedRevision !== null && currentRevision !== null && recordedRevision === currentRevision) {
+    base = { ...base, freshness: 'fresh', basis: 'recorded_run_revision' };
   }
 
   const legacyEdits = opts?.legacyEditFacts;
@@ -863,7 +902,7 @@ export function deriveAnalysisFreshness(
     }
   }
 
-  return enforceInvariants(base);
+  return finish(base);
 }
 
 /** Human copy for the existing freshness_reason text carrier; no new wire enum. */

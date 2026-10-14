@@ -1,3 +1,5 @@
+import { constructionOperationId } from '../../agent-lane/runtime/build-model.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 /**
  * ⭐ S-E GOALS, SLICE 1 (lane GOALS, DL 0fd71f, 7 Oct): a chance is never a goal quantity, and a stated deadline is
  * proposed as a date in the same turn. Spec: Science ruling `inflight/science-deadline-ruling-20261007.md` §2 (guard)
@@ -12,11 +14,12 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
+import { deadlineCardSubjectOf } from '../../agent-lane/proposal-object/still-applies.js';
 import { approvalChipsFor, DEADLINE_CHANGE_CHIP } from '../../agent-lane/approval-chips.js';
 import { placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { decisionInputLines, isDecisionInputAsk } from '../../agent-lane/decision-input-ask.js';
@@ -91,7 +94,7 @@ describe('§3 dates (Science ruling 7 Oct): deterministic, Europe/London, month-
     expect(readStatedDeadline('6 months', '2026-08-31')?.date).toBe('2027-02-28');
     expect(readStatedDeadline('end of Q2', '2026-10-07')?.date).toBe('2027-06-30');
   });
-  it("Paul's words on 7 Oct 2026 are 7 April 2027, 6 months from today, as a stated count", () => {
+  it("Paul's words on 7 Oct 2026 are 7 April 2027, 6 months from 7 October 2026, as a stated count", () => {
     const d = readStatedDeadline('a deadline in 6 months', '2026-10-07');
     expect(d).toEqual({ words: 'a deadline in 6 months', form: 'months_from_today', date: '2027-04-07', reference: '2026-10-07',
       stated_count: { value: 6, unit: 'months' } });
@@ -232,9 +235,10 @@ function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z'), opts: { rea
     return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
   const dispatch: InternalDispatch = async (path) => {
+    if (path.endsWith('/versions')) return { status: 200, json: { versions: [{ version_id: 'draft-v1', sequence: 1, created_at: '2026-10-07T09:13:13Z', creation: { kind: 'initial', source_turn_id: registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, PAUL_0913)) } }] } };
     if (!path.endsWith('/graph')) throw new Error(`Unexpected dispatch: ${path}`);
     const read = graph();
-    return { status: 200, json: { graph: read, graph_hash: computeAnalysisAffectingGraphHash(read as never) } };
+    return { status: 200, json: { graph: read, graph_hash: computeAnalysisAffectingGraphHash(read as never), brief_text: PAUL_0913 } };
   };
   return { caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels, now: () => now }), proposals, commits, graph,
     commitOptionLevels };
@@ -244,16 +248,16 @@ const ctxSaying = (user_text: string) => ({ scenario_id: SCENARIO, authenticated
 const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.id === GOAL_ID);
 
 describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the SAME turn, and the Yes writes it', () => {
-  it('RED on df15c8c1 (no door): propose → card "Is your deadline 7 April 2027 (6 months from today)?" [Yes] [Change date] → REAL door → stored → read-back', async () => {
+  it('RED on df15c8c1 (no door): propose → card "Is your deadline 7 April 2027 (6 months from 7 October 2026)?" [Yes] [Change date] → REAL door → stored → read-back', async () => {
     const w = world(stored());
-    const hashBefore = computeAnalysisAffectingGraphHash(w.graph() as never);
+    const hashBefore = computeAnalysisAffectingGraphHash(w.graph() as never), atOffer = w.graph();
     const r = await w.caps.proposeGoalDeadline!(ctxSaying(PAUL_0913), { deadline_words: 'a deadline in 6 months', rationale: PAUL_0913 }) as Rec;
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from today)?');
+    expect(r.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”. Basis supplied for this interpretation: ' + PAUL_0913);
     const chips = approvalChipsFor([{ name: 'propose_goal_deadline', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
       (id) => ({ proposal: w.proposals.get(id), result: r as never }));
     expect(chips.map((c) => c.label)).toEqual(['Yes', 'Change date']);
-    expect(chips[0]!.detail).toBe('Is your deadline 7 April 2027 (6 months from today)?');
+    expect(chips[0]!.detail).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”. Basis supplied for this interpretation: ' + PAUL_0913);
     expect(chips[1]).toEqual(DEADLINE_CHANGE_CHIP);
     // Nothing is written by the proposal.
     expect(goalOf(w.graph()).goal_horizon).toBeUndefined();
@@ -262,12 +266,15 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, applied: true,
       follow_up: 'Your deadline for "meet our next feature-launch deadline" is now 7 April 2027.' }));
     expect(w.commits).toHaveLength(1);
-    expect(w.commits[0]!.goal_horizon).toEqual({ goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null });
+    expect(w.commits[0]!.goal_horizon).toEqual({ goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07', stated_months: 6 });
+    // #3024: the writer also reads the card's bound goal (as offered), with no own write landed yet.
+    expect(w.commits[0]!.deadline_card).toEqual({ expected_goal: deadlineCardSubjectOf(atOffer, GOAL_ID), own_write_landed: false });
     const after = w.graph();
     expect(goalOf(after).goal_horizon).toEqual({ deadline: '2027-04-07' });
-    // ONLY the date moved: the analysis revision and every other byte of the goal are unchanged.
+    // No structural pair: H and the date are held, but the analysis hash stays unchanged.
     expect(computeAnalysisAffectingGraphHash(after as never)).toBe(hashBefore);
-    const { goal_horizon: _h, ...rest } = goalOf(after);
+    const { goal_horizon: _h, goal_horizon_months: _months, goal_horizon_reference_date: _ref, goal_horizon_stated_months: _stated, ...rest } = goalOf(after);
+    expect(_months).toBe(6); expect(_ref).toBe('2026-10-07'); expect(_stated).toBe(6);
     expect(rest).toEqual(goalOf(stored()));
   });
   it('a later card names what it replaces, and a stale card (the date moved since) writes nothing', async () => {
@@ -275,7 +282,7 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     g.nodes[1].goal_horizon = { deadline: '2027-04-07' };
     const w = world(stored(g));
     const r = await w.caps.proposeGoalDeadline!(ctxSaying('Actually the deadline is end of March.'), { deadline_words: 'end of March', rationale: 'x' }) as Rec;
-    expect(r.public_label).toBe('Is your deadline 31 March 2027 (about 5.8 months from today)? This replaces 7 April 2027.');
+    expect(r.public_label).toBe('Is your deadline 31 March 2027 (about 5.8 months from 7 October 2026)? This replaces 7 April 2027. Your words: “end of March”. Basis supplied for this interpretation: x');
     // Another write moves the date before the Yes.
     const moved = w.graph();
     goalOf(moved).goal_horizon = { deadline: '2027-05-01' };
@@ -287,7 +294,6 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(goalOf(w2.graph()).goal_horizon).toEqual({ deadline: '2027-05-01' });
   });
   it.each([
-    ['words the user never wrote', 'we need to ship soon', 'a deadline in 6 months', 'deadline_not_stated'],
     ['a phrase no calendar places without guessing', 'the deadline is next sprint', 'next sprint', 'deadline_not_placed'],
     ['the date the goal already holds', 'we have a deadline in 6 months', 'a deadline in 6 months', 'already_held'],
   ])('refused, nothing prepared: %s', async (_name, said, words, refusal) => {
@@ -298,16 +304,30 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal }));
     expect(w.proposals.get(String(r.proposal_id))).toBeUndefined();
   });
-  it('Codex r1: the words must be WHOLE words of THIS message — "6 months" inside "16 months", or only in an earlier message, is refused', async () => {
+  it('A2h earlier verified deadline remains user-stated with its words on the card', async () => {
     const w = world(stored());
-    const inside = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 16 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
-    expect(inside).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_stated' }));
-    const earlier = await w.caps.proposeGoalDeadline!({ ...ctxSaying('Yes, add the freelance option.'), user_text: `${PAUL_0913}\nYes, add the freelance option.` },
-      { deadline_words: 'a deadline in 6 months', rationale: 'x' }) as Rec;
-    expect(earlier).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_stated' }));
+    const out = await w.caps.proposeGoalDeadline!({ ...ctxSaying('Yes, add the freelance option.'), user_text: PAUL_0913 + '\nYes, add the freelance option.' },
+      { deadline_words: 'a deadline in 6 months', rationale: '' }) as Rec;
+    expect(w.proposals.get(String(out.proposal_id))!.provenance.authored_by).toBe('user_stated');
+    expect(out.public_label).toBe('Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “a deadline in 6 months”.');
+    expect(w.commits).toHaveLength(0);
+  });
+  it.each(['words the user never wrote', 'The deadline is 16 months away.'])('A2h %s cannot author the proposed six months', async said => {
+    const w = world(stored());
+    const out = await w.caps.proposeGoalDeadline!(ctxSaying(said), { deadline_words: '6 months', rationale: '' }) as Rec;
+    expect(out).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(w.proposals.get(String(out.proposal_id))).toBeUndefined();
+    expect(w.commits).toHaveLength(0);
+  });
+  it('a deadline typed in this message keeps its user-authored card', async () => {
+    const w = world(stored());
     // CONTROL: the same words typed in this message are the user's.
     const typed = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 6 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
-    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from today)?' }));
+    expect(w.proposals.get(String(typed.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: 'x' });
+    expect(typed.deadline.words).toBe('6 months');
+    expect(goalOf(w.graph()).goal_horizon).toBeUndefined();
+    expect(w.commits).toHaveLength(0);
+    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from 7 October 2026)? Your words: “6 months”. Basis supplied for this interpretation: x' }));
   });
   it('Codex r2: an approval whose write landed but came back unconfirmed is confirmed on the retry, never "nothing was recorded"', async () => {
     const w = world(stored(), undefined, { unconfirmFirst: true });
@@ -323,7 +343,7 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
   it('Codex r1: a retry of a write that landed (same turn id) is a verified no-op, never "the deadline changed"', async () => {
     const w = world(stored());
     const input = { scenario_id: SCENARIO, base_graph_hash: computeAnalysisAffectingGraphHash(w.graph() as never), turn_id: 'deadline-retry',
-      links: [], levels: [], goal_horizon: { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null } } as CommitOptionLevelsInput;
+      links: [], levels: [], goal_horizon: { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07' } } as CommitOptionLevelsInput;
     expect(await w.commitOptionLevels(input)).toEqual(expect.objectContaining({ status: 'committed', already_applied: false }));
     expect(await w.commitOptionLevels(input)).toEqual(expect.objectContaining({ status: 'committed', already_applied: true }));
     expect(goalOf(w.graph()).goal_horizon).toEqual({ deadline: '2027-04-07' });
@@ -344,19 +364,19 @@ describe('the one horizon writer (goal-horizon-write.ts): its own gates, without
     const g = stored();
     goalOf(g).goal_horizon = { deadline: '2027-05-01' };
     const before = JSON.stringify(g);
-    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'deadline_changed' });
+    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07' })).toEqual({ kind: 'refused', reason: 'deadline_changed' });
     expect(JSON.stringify(g)).toBe(before);
   });
   it('the date already held is a verified no-op (a retry), checked before the stale gate', () => {
     const g = stored();
-    goalOf(g).goal_horizon = { deadline: '2027-04-07' };
-    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'unchanged' });
+    Object.assign(goalOf(g), { goal_horizon: { deadline: '2027-04-07' }, goal_horizon_months: 6, goal_horizon_reference_date: '2026-10-07' });
+    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07' })).toEqual({ kind: 'unchanged' });
   });
-  it('only a goal, only a real calendar date; the postimage differs in goal_horizon alone', () => {
+  it('only a goal, only a real calendar date; the postimage holds the date and pinned full months', () => {
     const g = stored();
     expect(applyGoalHorizonEdit(g, { goal_id: 'feature_delivery_capacity', deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'not_a_goal' });
     expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-02-30', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'date_invalid' });
-    const ok = applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null });
+    const ok = applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null, reference_date: '2026-10-07' });
     expect(ok.kind).toBe('mutated');
     const after = (ok as { mutatedGraph: Rec }).mutatedGraph;
     expect(goalHorizonPostimageIsScoped(g, after, GOAL_ID)).toBe(true);
@@ -372,7 +392,7 @@ describe('timing (preamble rule): every new regex at 5k → 40k characters, 4 sh
   // read 8.16× against a bar of 8 (#2767, #2790 shard 3, 7 Oct). 8× input instead: linear ≈ 8×, quadratic ≈ 64×, and the bar
   // sits at their geometric midpoint (≈ 22×), so a slow CI runner's noise cannot cross it and a quadratic pattern still cannot pass.
   const patterns: readonly RegExp[] = [CHANCE_WORD, UNIT_HEAD_CUT, new RegExp(SCALE_NOTE.source), ...DEADLINE_PATTERNS_FOR_TIMING];
-  it.each([
+  timingIt.each([
     ['spaces', (n: number) => ' '.repeat(n)],
     ['counts and lead words', (n: number) => 'in 6 months by the end of q2 '.repeat(Math.ceil(n / 29)).slice(0, n)],
     ['chance words, no boundary', (n: number) => 'likelihoodchanceodds'.repeat(Math.ceil(n / 20)).slice(0, n)],

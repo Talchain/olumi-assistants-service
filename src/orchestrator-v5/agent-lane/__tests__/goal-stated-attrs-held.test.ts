@@ -113,11 +113,11 @@ describe('construction holds what the brief states on the goal, and only that', 
     expect(Object.hasOwn(goal, 'goal_direction')).toBe(false);
   });
 
-  it('⭐ what the goal holds is no longer said as a loss, and the deadline question says it is held', async () => {
+  it('⭐ what the goal holds is no longer said as a loss, and the held deadline owes no duplicate open question', async () => {
     const { result } = await build(BRIEF, candidate());
     expect(said(result)).not.toMatch(/12-month horizon|nowhere to put it/);
     expect(said(result)).not.toMatch(/floor from a ceiling/);
-    expect(questions(result)).toContain('Does "MRR" get there within 12 months? The model holds the deadline; no result answers that yet.');
+    expect(questions(result)).not.toContain('Does "MRR" get there within 12 months? The model holds the deadline; no result answers that yet.');
     expect(questions(result).join(' ')).not.toMatch(/holds no deadline/);
   });
 

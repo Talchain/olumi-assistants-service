@@ -100,7 +100,7 @@ import {
 import { ADD_CONSTRAINT_USER_GUIDANCE,
   SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from './d1-shared/user-guidance.js';
-import { retireNormalisingGoalFrame, rederiveGoalInLinks } from '../../agent-lane/normalising-goal-frame.js';
+import { retireNormalisingGoalFrameWithSetAside, rederiveGoalInLinksWithSetAside, setAsideEstimateDisclosure, type SetAsideEstimate } from '../../agent-lane/normalising-goal-frame.js';
 import { frameOf } from '../../agent-lane/refit-frames.js';
 import { pairGoalCeiling } from '../../goal-target/goal-ceiling-pair.js';
 
@@ -890,6 +890,9 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
+        ...(invocation.confirmedConstraintSourceQuote !== undefined
+          ? { source_quote: invocation.confirmedConstraintSourceQuote }
+          : existing?.source_quote !== undefined ? { source_quote: existing.source_quote } : {}),
         // BY-PRESENCE, never defaulted: an absent frame must stay absent on the
         // row, because `undefined` and "unattested" are the same fact here and
         // the contract forbids manufacturing the difference. This turn's own
@@ -901,6 +904,9 @@ export function createAddConstraintHandler(): HandlerFn {
             ? { value_frame: inheritedValueFrame }
             : {}),
         ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
+        // Batch B (SYS1 trace, DL 12 Oct): an edit of one of the goal's TARGETS stays a target. The row is rebuilt from
+        // this edit, so a marker it does not restate would be dropped, and the joint would read the target as a limit.
+        ...(existing?.role !== undefined ? { role: existing.role } : {}),
       };
 
       const newConstraint: GoalConstraintT = {
@@ -1372,7 +1378,10 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
+      const setAside: SetAsideEstimate[] = [];
       const result = applyAndValidateMutation(rawGraph, (clone) => {
+        // Capture before ANY branch writes: ceiling pairing, target stamping and baseline minting can all move a frame.
+        const frameBefore = frameOf(clone.nodes.find((n) => n.id === targetId && n.kind === 'goal'));
         const list = clone.goal_constraints ?? [];
         // F8 backfill residual (self-review hardening): when there is no
         // existing row (`existing === undefined`) AND the value is
@@ -1427,13 +1436,9 @@ export function createAddConstraintHandler(): HandlerFn {
           // The pair: the row this write just set, on the goal's own level frame (or the channel cleared). One writer.
           pairGoalCeiling(clone, targetId);
         }
-        // ⭐ D1 B: the frame the goal was read on before this write moved its level (see the stamp below), else undefined.
-        let levelFrameMovedFrom: number | undefined;
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
-            // Read BEFORE anything below writes: the frame every link into the goal was sized on (`frameOf`).
-            const frameBefore = frameOf(goalNode);
             const capBefore = goalNode.goal_threshold_cap;
             const resolvedCap = resolveGoalThresholdCapWithProvenance(
               goalNode.goal_threshold_cap,
@@ -1509,9 +1514,6 @@ export function createAddConstraintHandler(): HandlerFn {
                     ...(typeof level.std === 'number' && level.std > 0 && k !== undefined ? { std: level.std * k } : {}),
                     cap,
                   } as typeof goalNode.observed_state;
-                  // The level's cap is the goal's frame (`frameOf`: cap → goal cap), so the frame moved with it: the
-                  // user-sized links into the goal follow it below (`rederiveGoalInLinks`), in this same write.
-                  if (frameBefore !== undefined) levelFrameMovedFrom = frameBefore;
                 }
               }
               // ROADMAP 2.273 — the chat-path twin of the draft-path baseline
@@ -1585,16 +1587,20 @@ export function createAddConstraintHandler(): HandlerFn {
             };
           }
         }
-        // ⭐ D1 B (DL #85 5930770727): the level moved the goal's frame above, so every user-sized or definitional link into
-        // the goal is re-derived onto the new frame from its unchanged natural size — the F4 rule, from the old frame.
-        if (levelFrameMovedFrom !== undefined) {
-          const moved = rederiveGoalInLinks(clone, targetId, levelFrameMovedFrom);
-          if (moved !== clone) { clone.nodes = moved.nodes; clone.edges = moved.edges; }
-        }
         // ⭐ F4 (R3 #75 5922368144): a target or level landing on a goal read on a normalising frame retires that frame
         // and re-derives the user's own sizes into it, so the analysis is the same as a build with this target present.
-        const retired = retireNormalisingGoalFrame(clone);
+        const retirement = retireNormalisingGoalFrameWithSetAside(clone);
+        setAside.push(...retirement.setAside);
+        const retired = retirement.graph;
         if (retired !== clone) { clone.nodes = retired.nodes; clone.edges = retired.edges; }
+        // The old frame, rather than a particular cap-writing branch, governs rederivation. Retirement already does it.
+        const frameAfter = frameOf(clone.nodes.find((n) => n.id === targetId && n.kind === 'goal'));
+        if (retired === clone && frameBefore !== undefined && frameAfter !== frameBefore) {
+          const rederived = rederiveGoalInLinksWithSetAside(clone, targetId, frameBefore);
+          setAside.push(...rederived.setAside);
+          const moved = rederived.graph;
+          if (moved !== clone) { clone.nodes = moved.nodes; clone.edges = moved.edges; }
+        }
         return {
           // ⛔ ON A CORRECTION `before` IS THE SOURCE ROW (Codex CX-195). It
           // was `null` because `existing` is undefined by construction on a
@@ -1776,7 +1782,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // thing, which is what put the limit on the wrong node in the first
       // place. `null` ⇒ nothing was offered ⇒ no pending (fail closed).
       let alternativeForCorrection: ReturnType<typeof findConstraintTargetAlternative> = null;
-      const fragments: string[] = [constraintText];
+      const fragments: string[] = [constraintText, ...setAside.map(setAsideEstimateDisclosure)];
       if (unevaluatedDurationSpan !== null) {
         fragments.push(
           formatConstraintDurationNotEvaluated({ span: unevaluatedDurationSpan }),

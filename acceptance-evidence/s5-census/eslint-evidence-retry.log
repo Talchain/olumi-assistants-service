@@ -1,0 +1,3 @@
+Load gate exit: 0
+{"load":18.76171875,"threshold":25}
+node_modules/.bin/eslint --config acceptance-evidence/s5-census/eslint.config.mjs acceptance-evidence/s5-census/eslint.config.mjs < /dev/null

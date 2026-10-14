@@ -1144,6 +1144,13 @@ export function goalFigureCoHoldOf(blocks: unknown, graph: unknown, userText?: s
   if (!Array.isArray(warnings)) return undefined;
   const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown; links?: unknown } =>
     typeof (w as { code?: unknown } | null)?.code === 'string');
+  // §(ad) uses this existing narrator owner: the withheld Run's percentage claims are removed by dropRankingSentences,
+  // and its own typed detail replaces the generic rerun closing. No new prose classifier or guard list is needed.
+  const horizon = codes.find(w => w.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED');
+  if (horizon !== undefined && typeof horizon.message === 'string' && horizon.message.trim() !== '') {
+    const words = horizon.message.trim();
+    return { why: words, say: words };
+  }
   // #2613 CR (b): the product cause comes first whenever it holds; no link is asked for while it still blocks.
   if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
     return { why: 'Olumi has not read your goal as the product of your own figures, so its figures cannot yet support a comparison' };
@@ -1223,6 +1230,14 @@ const REASON_NOT_RECORDED =
   'and the reason is not recorded, so I will not guess at one; ask me to run the analysis and I can tell you then';
 
 const sentence = (clause: string): string => `${NO_LEADER_OPENING}, ${clause}.`;
+/**
+ * RC6 (#2801): the gate's own "No single option can be put forward yet, because <why>[; <action>]." for this co-hold, so
+ * the route can type it BY IDENTITY when the reply carries it (the reply composer then says the bare reason only once).
+ */
+export const noLeaderBecauseSentences = (coHold: GoalFigureCoHold): string[] => [
+  sentence(`because ${coHold.why}`),
+  ...(coHold.action === undefined ? [] : [sentence(`because ${coHold.why}; ${coHold.action}`)]),
+];
 
 /** Every sentence this module can append — the build-time probe and the idempotence check read this. */
 /**

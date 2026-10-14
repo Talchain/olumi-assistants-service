@@ -529,3 +529,139 @@ it('healthy gap-free Run wire bytes stay identical when the private projection s
   const stampedBody = await reload(); delete stampedBody.request_id;
   expect(JSON.stringify(stampedBody)).toBe(JSON.stringify(legacyBody));
 });
+
+
+describe('C2 recorded Run revision on the real reload route', () => {
+  function seedRevision(graph: Dict, hash: string | null, recorded: unknown, current: number) {
+    const fact = runFact(hash ?? '');
+    fact.result.run_id = 'c2-selected-run';
+    // The projection stamp keeps these rows focused on revision/hash authority.
+    fact.result.enrichment = stampRunAnalysisProjection(fact.result.enrichment!);
+    if (hash === null) delete fact.result.graph_hash_at_run;
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: null, revision: current });
+    readRecent.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ total_count: 1,
+      facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, evaluated_scenario_revision: recorded }],
+    });
+    return fact;
+  }
+  function staleness(body: Dict) {
+    return (body.canonical_analysis_view as Dict).staleness as Dict;
+  }
+  function parity(body: Dict) {
+    const kind = runStateOf(body)?.kind;
+    expect(staleness(body).stale).toBe(kind === 'complete_current' ? false : kind === 'complete_stale' ? true : null);
+  }
+
+  it('DL1: an analysis-affecting n1 → n2 edit stays stale and retains n1 after reload', async () => {
+    const before = makeBrokenF1(120000); const edited = makeBrokenF1(130000);
+    seedRevision(edited, await runStampFor(before), 11, 12);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_stale');
+    expect(staleness(body)).toMatchObject({ revision: 12, run_revision: 11, run_revision_source: 'recorded',
+      basis: 'analysis_graph_hash_interim', limitation: 'Hash equality cannot detect brief, framing or stage changes.' });
+    expect((body.canonical_analysis_view as Dict).run).toMatchObject({ run_id: 'c2-selected-run' });
+    parity(body);
+    const again = await reload();
+    expect((again.canonical_analysis_view as Dict).run).toEqual((body.canonical_analysis_view as Dict).run);
+    expect(staleness(again)).toEqual(staleness(body));
+  });
+
+  it('DL2: a non-analysis revision move with equal hashes stays fresh', async () => {
+    const graph = makeBase(); seedRevision(graph, await runStampFor(graph), 11, 12);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ stale: false, run_revision: 11, run_revision_source: 'recorded', basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it.each([undefined, null])('DL3: legacy revision %s is null, never zero, and equal hashes remain fresh', async recorded => {
+    const graph = makeBase(); seedRevision(graph, await runStampFor(graph), recorded, 0);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown', basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it.each(['11', -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('DL4: malformed stored revision %s remains legacy unknown', async recorded => {
+    seedRevision(makeBase(), null, recorded, 11);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect(staleness(body)).toMatchObject({ stale: null, run_revision: null, run_revision_source: 'legacy_unknown', basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it.each([null, ''])('no usable stored hash %s: recorded match alone supplies the revision basis', async hash => {
+    seedRevision(makeBase(), hash, 11, 11);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ stale: false, run_revision: 11, run_revision_source: 'recorded',
+      basis: 'recorded_run_revision', limitation: 'No analysis hash was available; only the scenario revision was compared.' });
+    parity(body);
+  });
+
+  it('no hash with recorded divergence stays unknown', async () => {
+    seedRevision(makeBase(), null, 11, 12);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect(staleness(body)).toMatchObject({ stale: null, run_revision: 11, basis: 'analysis_graph_hash_interim' });
+    parity(body);
+  });
+
+  it('the real durable SELECT and hot-window SELECT carry occurrence revision outside payload', async () => {
+    const graph = makeBase(); const fact = seedRevision(graph, await runStampFor(graph), 11, 12);
+    const row = { id: RUN_ROW, scenario_id: SCENARIO, v5_conversation_turn_id: RUN_TURN,
+      created_at: RUN_AT, handler_id: 'run_analysis', action_type: 'run_analysis', noop: false,
+      evaluated_scenario_revision: 11,
+      payload: { fact_type: fact.fact_type, fact_version: fact.fact_version, result: fact.result } };
+    const selects: string[] = [];
+    const client = { from: () => {
+      const chain = { select: (columns: string) => { selects.push(columns); return chain; },
+        eq: () => chain, in: () => chain, order: () => chain,
+        limit: async () => ({ data: [row], count: 1, error: null }),
+        then: (resolve: (value: { data: typeof row[]; error: null }) => unknown) => resolve({ data: [row], error: null }),
+      }; return chain;
+    } } as never;
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    readRecent.mockResolvedValue([{ id: RUN_TURN }]);
+    readFactsWithTurnFor.mockImplementation(ids => store.readFactsWithTurnFor(ids));
+    readScenarioRunAnalysisFactsFor.mockImplementation((id, limit) => store.readScenarioRunAnalysisFactsFor(id, limit));
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ run_revision: 11, run_revision_source: 'recorded' });
+    expect(selects).toHaveLength(2);
+    expect(selects.every(columns => columns.split(', ').includes('evaluated_scenario_revision'))).toBe(true);
+    const hot = await store.readFactsWithTurnFor([RUN_TURN]);
+    expect(hot[0]).toMatchObject({ fact_row_id: RUN_ROW, evaluated_scenario_revision: 11 });
+    expect(hot[0].fact).not.toHaveProperty('evaluated_scenario_revision');
+    expect(hot[0].fact.result).not.toHaveProperty('evaluated_scenario_revision');
+    parity(body);
+  });
+
+  it('no usable current graph hash: a recorded match uses the same revision fallback', async () => {
+    const graph = makeBase(); const hash = await runStampFor(graph);
+    delete (graph.nodes as Dict[]).find(node => node.id === 'fac_annual_cost')!.label;
+    seedRevision(graph, hash, 11, 11);
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('complete_current');
+    expect(staleness(body)).toMatchObject({ basis: 'recorded_run_revision', run_revision: 11, stale: false });
+    parity(body);
+  });
+
+  it('another row’s matching revision cannot license the selected Run', async () => {
+    const fact = seedRevision(makeBase(), null, undefined, 12);
+    const other = structuredClone(fact); other.result.run_id = 'c2-other-run';
+    other.result.computed_at = '2026-09-23T18:00:00.000Z';
+    // Input is reversed deliberately: wrapper identity survives durable sorting.
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ total_count: 2, facts: [
+      { fact: other, fact_row_id: 'other-row', fact_created_at: other.result.computed_at, evaluated_scenario_revision: 12 },
+      { fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT },
+    ] });
+    const body = await reload();
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect((body.canonical_analysis_view as Dict).run).toMatchObject({ run_id: 'c2-selected-run' });
+    expect(staleness(body)).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown' });
+    parity(body);
+  });
+});

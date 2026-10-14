@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * Part-accounting conservation law — DETERMINISTIC-lane defence in depth
  * (rehearsal defect A, REHEARSAL-DEFECT-TRIAGE-2026-07-20.md).
@@ -28,7 +29,7 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 
 const appendCalls: Array<unknown> = [];
 vi.mock('../session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     append: async (write: unknown) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };
@@ -41,7 +42,7 @@ vi.mock('../session/index.js', () => ({
       entries_invalidated: [],
     }),
     loadGraph: async () => null,
-  }),
+  })),
   resetSessionStoreForTests: () => {},
 }));
 

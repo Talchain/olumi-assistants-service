@@ -11,8 +11,11 @@ import { stampRunAnalysisProjection } from '../../../src/orchestrator-v5/context
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { readFileSync } from 'node:fs';
+import { runExplanationChip, RUN_EXPLANATION_PREFIX } from '../../../src/orchestrator-v5/agent-lane/run-explanation.js';
 
 import {
+  ActionSchema,
   BoundaryErrorSchema,
   OlumiResponseSchema,
 } from '@talchain/schemas/boundary';
@@ -25,6 +28,8 @@ import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store
 import { isProvenanceOnlyEdgeConfirmation } from '../../../src/orchestrator-v5/system-events/edge-strength-edit.js';
 import { edgeBandStd } from '../../../src/orchestrator-v5/format/edge-strength-bands.js';
 import { log } from '../../../src/utils/telemetry.js';
+import { goalChanceRangeOf, withGoalChanceRange } from '../../../src/orchestrator-v5/goal-target/goal-chance-range.js';
+import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../../../src/orchestrator-v5/agent-lane/goal-certainty.js';
 
 function buildPersistedGraph() {
   return {
@@ -78,7 +83,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     // shared rule, dispatch.ts `deriveWriteReplyFreshness`).
     readScenarioRunAnalysisFactsFor: readScenarioRunAnalysisFactsForMock,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId: string) => ({ revision: 7, graph: await loadGraphMock(scenarioId), briefText: null }),
     invalidateScoped: async (_scenarioId: string, scope: unknown) => ({
       scope,
       entries_invalidated: [],
@@ -314,6 +319,84 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     readFactsForMock.mockReset();
     readFactsForMock.mockResolvedValue([]);
     llmChatMock.mockClear();
+  });
+
+  it.each([false, true])('GUIDED INSPECTOR WIRE: M=2 retains strict identity-bound presses; eligible G0 range evidence=%s', async rangeEvidence => {
+    const capture = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8'));
+    const graph = structuredClone(capture.graph);
+    const third = graph.edges.find((e: Record<string, unknown>) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
+    third.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true };
+    third.defaulted = true;
+    for (const edge of graph.edges) edge.id = `edge:${edge.from}:${edge.to}`;
+    persisted = graph;
+    const beforeHash = computeAnalysisAffectingGraphHash(graph)!;
+    const prior = successfulRunFact(beforeHash);
+    if (rangeEvidence) {
+      const optionId = 'raise_pro_price_to_59';
+      const goalId = 'mrr';
+      const goalPaths = unsizedLeaderGoalPaths(graph, [optionId]);
+      const block = { drivers: [{ kind: 'link_strength', quantity_id: 'pro_plan_price->mrr_lost_to_price_sensitivity',
+        from: 'pro_plan_price', to: 'mrr_lost_to_price_sensitivity', status: 'resolved', spread: 0.4,
+        p_goal_if_low: 0.234, p_goal_if_high: 0.876, n_low: 4000, n_high: 40 }] };
+      const inputs = { driversByOption: new Map([[optionId, block]]), goalPaths, plotWithheld: false, goalId };
+      const enrichment = withGoalChanceRange({ analysis_status: 'computed',
+        option_comparison: [{ option_id: optionId, probability_of_goal_drivers: block }],
+        inference_warnings: [placeholderGoalWarning(graph, goalPaths, 'GOAL_FIGURES_PLACEHOLDER_PATH')],
+      }, graph, inputs);
+      // A carrier alone is insufficient: this same stored graph and retained evidence must pass G0.
+      expect(goalChanceRangeOf(enrichment, graph, optionId, inputs)).not.toBeNull();
+      prior.result.enrichment = stampRunAnalysisProjection(enrichment);
+    }
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [{ fact: prior,
+      fact_row_id: '44444444-4444-4444-8444-444444444444', fact_created_at: prior.result.computed_at }], total_count: 1 });
+    const runKey = runExplanationChip(SCENARIO_ID, { graphHash: beforeHash,
+      analysisState: { run_state: { kind: 'complete_current', computed_at: prior.result.computed_at } },
+      analysisResult: { type: 'analysis_result', computed_against_hash: beforeHash } })!.id.slice(RUN_EXPLANATION_PREFIX.length);
+    const edge = graph.edges.find((e: Record<string, unknown>) => e.from === 'monthly_churn' && e.to === 'paying_pro_subscribers');
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payloadFor(validEvent({
+      from: edge.from, to: edge.to, expected: { mean: edge.strength.mean, effect_direction: edge.effect_direction },
+    }), 'a1') });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    const progress = rangeEvidence ? '2 more to go; with 1 left, Olumi can show a range.' : '2 more to go.';
+    expect(body.assistant_text).not.toContain('failed validation');
+    expect(body.assistant_text.endsWith(progress)).toBe(true);
+    expect(body.graph_hash).toMatch(/^[0-9a-f]{16}$/u);
+    expect(body.guided_sizing).toMatchObject({ v: 1, total: 2, remaining: 2, progress_line: progress,
+      graph_hash: body.graph_hash, run_key: runKey });
+    expect(body.guided_sizing.links).toHaveLength(2);
+    for (const link of body.guided_sizing.links) {
+      const press = body.suggested_actions.find((p: { id: string }) => p.id === link.press.id);
+      expect(Object.keys(press).sort()).toEqual(['id', 'label', 'message']);
+      expect(link.press).toEqual({ id: press.id, parameters: { from: link.from, to: link.to, edge_id: link.id } });
+      expect(link.id).toBe(link.press.parameters.edge_id);
+    }
+    const { z } = await import('zod');
+    expect(z.array(ActionSchema).safeParse(body.suggested_actions).success).toBe(true);
+    const leaked = body.suggested_actions.map((p: Record<string, unknown>, index: number) => index === 0
+      ? { ...p, parameters: { from: 'leaked-from', to: 'leaked-to' } } : p);
+    expect(z.array(ActionSchema).safeParse(leaked).success, 'RED mutant: inspector parameters on any wire action').toBe(false);
+    const { guided_sizing: _hook, ...schemaBody } = body;
+    expect(OlumiResponseSchema.safeParse(schemaBody).success).toBe(true);
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
+  it('GUIDED INSPECTOR WIRE: a final reply without graph_hash has no guided_sizing hook', async () => {
+    // The deployed reader-only floor returns a valid reply without an authoritative graph token.
+    const capture = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8'));
+    persisted = structuredClone(capture.graph);
+    graphCasRpcEnforce = false;
+    const graph = persisted as { edges: Array<{ from: string; to: string; strength: { mean: number }; effect_direction: string }> };
+    const edge = graph.edges.find((candidate) => candidate.from === 'monthly_churn' && candidate.to === 'paying_pro_subscribers')!;
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payloadFor(validEvent({
+      from: edge.from, to: edge.to, expected: { mean: edge.strength.mean, effect_direction: edge.effect_direction },
+    }), 'a2') });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.graph_hash).toBeUndefined();
+    expect(body.guided_sizing).toBeUndefined();
+    expect(OlumiResponseSchema.safeParse(body).success).toBe(true);
+    expect(llmChatMock).not.toHaveBeenCalled();
   });
 
   it('writes the exact persisted edge through the canonical handler with trusted CAS', async () => {
@@ -1248,7 +1331,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
    * `fd4c483` measured it twice (`f-20260926T083927Z`, `f-20260926T084243Z`). The Agent's `get_canonical_state`,
    * admissibility ("a strength this system chose") and coaching then read the user's own strength as a placeholder.
    */
-  describe('a strength the user sets or confirms is no longer marked defaulted', () => {
+  describe('Batch A: a set clears defaulted; a confirm keeps defaulted and records review', () => {
     type LooseGraph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } & Record<string, unknown>;
     function withDefaultedEdges(): LooseGraph {
       const graph = buildPersistedGraph() as LooseGraph;
@@ -1297,21 +1380,21 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(body.assistant_text).toContain("Confirmed the current strength of the link between Demand and Growth.");
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
       expect(committedEdge()).toMatchObject({
         strength: { mean: -0.4, std: 0.1 },
-        // L4 (DL 5929790081): Olumi's default, approved, is sized as Olumi's estimate — authorship kept.
-        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } },
+        // Batch A ruling 1: approving an unmarked default never invents an estimate.
+        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', reviewed_by_user: { intent: 'confirm' } },
         provenance_display: 'ai_inferred',
         defaulted: true,
       });
       expect(committedEdge()).not.toHaveProperty('exists_defaulted');
-      // The analysis hash moves by that sizing ALONE (the Run correctly reads out of date), and by nothing else.
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
-      const sizedOnly = structuredClone(persisted) as { edges: Array<{ from: string; to: string; provenance?: Record<string, unknown> }> };
-      const target = sizedOnly.edges.find((e) => e.from === 'f-demand' && e.to === 'g-growth')!;
-      target.provenance = { ...(target.provenance ?? {}), magnitude: 'olumi_estimate' };
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(computeAnalysisAffectingGraphHash(sizedOnly as never));
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(committedEdge()?.provenance).not.toHaveProperty('magnitude');
       expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
     });
 
@@ -1367,7 +1450,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(body.assistant_text).toContain("Confirmed the current strength of the link between Demand and Growth.");
       expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
       expect((committedEdge()?.strength as { std: number }).std).not.toBe(edgeBandStd('strong'));
       expect(committedEdge()).toMatchObject({

@@ -1,4 +1,11 @@
+import { it } from 'vitest';
 import { performance } from 'node:perf_hooks';
+
+/** false under Required: timing assertions are advisory; behaviour assertions in the same row still gate */
+export const timingGated = process.env.CEE_REQUIRED_GATE !== '1';
+
+/** Timing rows are advisory: Required sets CEE_REQUIRED_GATE; the full advisory suite runs them. */
+export const timingIt: typeof it.skip = process.env.CEE_REQUIRED_GATE === '1' ? it.skip : it;
 
 /**
  * Growth of a call's cost from a small input to a large one (4× the size): min of 7 batches, the batch size

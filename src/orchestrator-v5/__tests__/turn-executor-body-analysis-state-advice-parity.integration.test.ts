@@ -95,7 +95,6 @@ const mockState: {
   persistedGraphReadError: Error | null;
   appendWrites: Array<Record<string, unknown>>;
   invalidationCalls: number;
-  storeDraftGraphCalls: number;
 } = {
   priorTurns: [],
   priorFacts: [],
@@ -108,7 +107,6 @@ const mockState: {
   persistedGraphReadError: null,
   appendWrites: [],
   invalidationCalls: 0,
-  storeDraftGraphCalls: 0,
 };
 
 vi.mock('../session/index.js', () => ({
@@ -184,9 +182,6 @@ vi.mock('../session/index.js', () => ({
         entries_invalidated: [],
       };
     },
-    storeDraftGraph: async () => {
-      mockState.storeDraftGraphCalls += 1;
-    },
     loadGraph: async () => {
       if (mockState.persistedGraphReadError)
         throw mockState.persistedGraphReadError;
@@ -219,7 +214,7 @@ const READY_GRAPH = {
   nodes: [
     { id: 'dec_q3', kind: 'decision', label: 'Choose the Q3 resourcing route' },
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
-    { id: 'fac_local_hire', kind: 'factor', label: 'Local Senior Hire Programme' },
+    { id: 'fac_local_hire', kind: 'factor', label: 'Local Senior Hire Programme', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     {
       id: 'opt_hire_local',
       kind: 'option',
@@ -609,7 +604,6 @@ function capturedRoutingPrompt(
 }
 
 function expectNoCanonicalAuthorityWrite(): void {
-  expect(mockState.storeDraftGraphCalls).toBe(0);
   expect(mockState.invalidationCalls).toBe(0);
   expect(
     mockState.appendWrites.length,
@@ -675,7 +669,6 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     mockState.persistedGraphReadError = null;
     mockState.appendWrites = [];
     mockState.invalidationCalls = 0;
-    mockState.storeDraftGraphCalls = 0;
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 

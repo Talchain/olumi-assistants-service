@@ -64,6 +64,11 @@ describe('the served link (R3 train-0545Z step 05)', () => {
     expect(linkSizeAsk(withAngel((e) => ({ ...e, provenance: { source: 'user_specified' } })), at(FX.served_assistant_text))).toBeNull();
     expect(linkSizeAsk(withAngel((e) => ({ ...e, provenance: { source: 'brief_extraction', magnitude: 'user_stated' } })), at(FX.served_assistant_text))).toBeNull();
   });
+  // Science 393023 LICENCE ruling 1 (buddy r2 P2): the user drew the link but gave no number (projected mean) → asked.
+  it('a user-drawn link with a PROJECTED mean is not the user\'s size → the ask; CONTROL: without the projection, no ask', () => {
+    expect(linkSizeAsk(withAngel((e) => ({ ...e, provenance: { source: 'user_specified', mean_projected: true } })), at(FX.served_assistant_text))).not.toBeNull();
+    expect(linkSizeAsk(withAngel((e) => ({ ...e, provenance: { source: 'user_specified' } })), at(FX.served_assistant_text))).toBeNull();
+  });
 });
 
 describe('AIQ 5925678816 (B): the words follow the link — direction, money, count, unit', () => {

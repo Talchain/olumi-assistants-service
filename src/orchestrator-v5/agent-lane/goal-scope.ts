@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
+import type { AdmittedModel, CandidateModel } from './admit-model.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { isPendingActionExpired, PENDING_KIND_CLAIMS_BARE_NUMBER } from '../session/pending-action.js';
 
@@ -14,7 +16,7 @@ export const scopeOf = (v: unknown): GoalScope | undefined => { const p = GoalSc
 const native = (n: Rec | undefined): { value: number; unit: string; source: string } | undefined => {
   const os = rec(n?.observed_state) ? n.observed_state : undefined;
   if (!os || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value) || typeof os.unit !== 'string'
-    || classifyValueSource(os.source) !== 'user_stated') return undefined;
+    || valueClassOf(os) !== 'user_stated') return undefined;
   return { value: os.raw_value, unit: os.unit, source: String(os.source) };
 };
 
@@ -174,7 +176,7 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
     const onPath = edges.filter(e => typeof e.from === 'string' && typeof e.to === 'string' && (e.from === id || reached.has(e.from)) && reachesGoal(e.to));
     const userPlaced = onPath.some(e => {
       const p = rec(e.provenance) ? e.provenance : {};
-      if (p.magnitude !== 'user_stated' || typeof p.source_quote !== 'string') return false;
+      if (!hasUserStatedSize(e) || typeof p.source_quote !== 'string') return false;
       const quoteWords = contentWordsOf(p.source_quote);
       return goalWords.size > 0 && [...goalWords].every(w => quoteWords.has(w));
     });
@@ -184,6 +186,25 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
   return components;
 }
 
+/**
+ * The declaration's `modelled` is the scope this model measures (GoalScopeDeclaration), so an admitted
+ * identity ON its goal binds the operand quantities to that declared reading. Identity membership is
+ * held as node ids; no population is inferred from an operand's label. A plain-total reading makes
+ * that declaration material even when no option creates a new component (`untypedScopeComponents`).
+ */
+export function goalIdentityScopeIsMaterial(
+  readsAsTotal: boolean,
+  candidate: Pick<CandidateModel, 'goal'>,
+  admitted: Pick<AdmittedModel, 'nodes'>,
+): boolean {
+  if (!readsAsTotal || !candidate.goal.scope?.modelled.trim()) return false;
+  const goal = admitted.nodes.find(n => n.kind === 'goal');
+  const identity = goal?.nonlinear_identity;
+  if (!identity || new Set(identity.factor_ids).size < 2) return false;
+  return identity.factor_ids.every(id => admitted.nodes.some(n => n.id === id && n.id !== goal!.id
+    && (n.kind === 'factor' || n.kind === 'outcome' || n.kind === 'goal')));
+}
+
 /** Science d5's words, verbatim; several components by the list rule (three named, then " and N more"). */
 export function untypedScopeDisclosure(goalLabel: string, components: readonly string[]): string {
   const named = components.slice(0, 3).map(c => `‘${c}’`);
@@ -191,6 +212,11 @@ export function untypedScopeDisclosure(goalLabel: string, components: readonly s
   const list = more > 0 ? `${named.join(', ')} and ${more} more`
     : named.length < 2 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
   return `I’ve read your goal, ‘${goalLabel}’, as the total across every tier, including ${list}. If you meant only part of it, say which.`;
+}
+
+/** Material identity scope (DL #2914 r3): the model measures the declared part, so name it and ask; never claim the total. */
+export function materialScopeQuestion(goalLabel: string, modelled: string, alternative: string): string {
+  return `I’ve modelled your goal, ‘${goalLabel}’, as ‘${modelled}’, not ‘${alternative}’. Is your target for ‘${modelled}’ or for ‘${alternative}’?`;
 }
 
 /** Refresh operands after a canvas write; retain the original user claims, never promote the derived count. */

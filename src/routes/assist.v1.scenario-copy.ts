@@ -28,12 +28,13 @@
  * changing IP. A request whose token does not verify is answered 401 before it reaches the limiter (verification is a
  * local signature check against the cached JWKS).
  */
+import type {} from '@fastify/rate-limit';
+import { commitModelChange } from '../orchestrator-v5/persist-graph-write.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { getGuestCopyStore } from '../orchestrator-v5/guest-copy/index.js';
 import type { GuestCopyRefusal, GuestCopyStorePort } from '../orchestrator-v5/guest-copy/index.js';
 import { resolveCeeRateLimit } from '../cee/config/limits.js';
-import { verifySupabaseUserJwt } from '../utils/supabase-user-jwt.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 
@@ -51,6 +52,7 @@ const REFUSAL_REPLY: Readonly<Record<GuestCopyRefusal, readonly [number, string,
   not_copyable: NOT_COPYABLE,
   no_model: NOT_COPYABLE,
   too_large: NOT_COPYABLE,
+  stale_source: [409, 'copy_conflict', 'The guest decision changed. Retry copying it.'],
   unknown_user: [401, 'sign_in_required', 'Your account could not be found. Sign in again and retry.'],
 };
 
@@ -76,21 +78,11 @@ export default async function route(
     {
       // JWT FIRST: this route-level hook is in place before the limiter attaches its own `preHandler`, so it runs first.
       preHandler: async (req, reply) => {
-        const header = req.headers.authorization;
-        const token = typeof header === 'string' && header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
-        if (token === '') {
-          return refuse(reply, req, 401, 'sign_in_required', 'Sign in to keep this decision in your account.');
-        }
-        const verified = await verifySupabaseUserJwt(token);
-        if (!verified.ok) {
-          return refuse(
-            reply, req, 401, verified.reason,
-            verified.reason === 'expired_token' ? 'Your session has expired. Sign in again and retry.' : 'That token could not be verified.',
-          );
-        }
-        verifiedUserOf.set(req, verified.userId);
+        const userId = req.scenarioAccess?.callerUserId;
+        if (!userId) return refuse(reply, req, 401, 'sign_in_required', 'Sign in to keep this decision in your account.');
+        verifiedUserOf.set(req, userId);
       },
-      config: {
+      config: { scenarioId: { from: 'params', key: 'scenario_id' },
         rateLimit: { max: RATE_LIMIT_MAX, timeWindow: '1 minute', hook: 'preHandler', keyGenerator: scenarioCopyRateKey },
       },
     },
@@ -110,7 +102,7 @@ export default async function route(
 
       let outcome;
       try {
-        outcome = await resolveStore().copyGuestScenario(sourceId, userId);
+        outcome = await commitModelChange({ operation: 'COPY_GUEST_SCENARIO', store: resolveStore(), sourceScenarioId: sourceId, userId });
       } catch (err) {
         log.warn({ event: 'scenario_guest_copy.store_failed', request_id: getRequestId(req), error: err instanceof Error ? err.message : String(err) }, 'guest copy store failed');
         return refuse(reply, req, 503, 'copy_unavailable', 'Your decision could not be copied just now. Try again shortly.');
@@ -120,7 +112,8 @@ export default async function route(
         log.info({ event: 'scenario_guest_copy.refused', request_id: getRequestId(req), reason: outcome.reason }, 'guest copy refused');
         return refuse(reply, req, status, code, message);
       }
-      log.info({ event: 'scenario_guest_copy.copied', request_id: getRequestId(req), created: outcome.created }, 'guest copy');
+      log.info({ event: outcome.created ? 'scenario_guest_copy.copied' : 'scenario_guest_copy.replayed',
+        request_id: getRequestId(req), created: outcome.created }, outcome.created ? 'guest copy created' : 'guest copy recovered');
       return reply.code(200).send({ scenario_id: outcome.scenarioId, created: outcome.created });
     },
   );

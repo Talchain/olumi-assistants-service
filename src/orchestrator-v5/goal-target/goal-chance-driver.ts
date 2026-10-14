@@ -25,6 +25,8 @@ import { linkSizing, isSizedOnlyByOlumi } from '../../cee/magnitude/link-sizing.
 import { deriveInferredValues } from '../coaching/inferred-value-disclosure.js';
 import { readEdgeParams } from '../../cee/unified-pipeline/utils/edge-format.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink, validatedDefinition } from './held-user-links.js';
+import { displayedPctAt, type GoalChanceDisplayRounding } from './goal-chance-display.js';
+export { displayedPctAt, goalChanceDisplayClass, type GoalChanceDisplayRounding } from './goal-chance-display.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -37,19 +39,6 @@ const TOL = 1e-9;
 export const WILSON_Z_95 = 1.959963984540054;
 /** Ruling 5: the widest Wilson half-width, in percentage points, that is still shown as a whole percentage. */
 export const WHOLE_PCT_MAX_HALF_WIDTH_POINTS = 2.5;
-
-export type GoalChanceDisplayRounding = 'whole' | 'nearest_5';
-
-/** The displayed percentage of a chance at a step. `whole` is exactly `displayedGoalPct`'s rule. */
-export function displayedPctAt(p: number, rounding: GoalChanceDisplayRounding): number {
-  const c = Math.max(0, Math.min(1, p));
-  if (rounding === 'whole') return Math.round(c * 100);
-  const five = Math.round(c * 20) * 5;
-  // Never 0 or 100 for a chance strictly between them: a coarse step must not manufacture a certainty.
-  if (c > 0 && five === 0) return 5;
-  if (c < 1 && five === 100) return 95;
-  return five;
-}
 
 /** Ruling 5 on a half-width in percentage points. */
 export function displayRoundingFor(halfWidthPoints: number): GoalChanceDisplayRounding {

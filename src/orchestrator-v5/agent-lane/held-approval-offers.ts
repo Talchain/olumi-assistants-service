@@ -1,19 +1,55 @@
 /** Shared Agent approval authority for turns and the opt-in scenario graph read. */
 import type { SuggestedAction } from '../compose/types.js';
+import { heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { ProposalStore } from './proposal.js';
 import { AMEND_CHIP, typedApprovalOf } from './approval-chips.js';
 import { offeredApproveChipOnRow, rehydrateProposals } from './durable-proposal.js';
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../session/pending-action.js';
+import { identityReadingOf } from './identity-card.js';
+import { identityCardOfferable } from '../system-events/identity-confirm-edit.js';
+import type { StructuredProposal } from './proposal.js';
+import { heldCardStillApplies, heldCardSubjectMoved } from './proposal-object/still-applies.js';
+
+/**
+ * ⛔ A HELD IDENTITY CARD IS SHOWN ONLY WHILE IT IS STILL OFFERABLE (#2851 Codex buddy r1 P1-1): a card held from before
+ * the part-level gate, or one whose part lost the user's level, would be restored or carried and then refused on its Yes,
+ * which is confirm-then-refuse again. Given the graph the caller read, a `confirm_identity` proposal is executable only
+ * while `identityCardOfferable` holds on it. A steady-state card also requires its held month to still match the goal;
+ * its month is outside the hash before consent. For other proposals the existing identity checks remain.
+ */
+export function identityProposalOfferable(proposal: StructuredProposal | undefined, graph: unknown): boolean {
+  const steady = proposal?.operations.find(op => op.op === 'attest_goal_steady');
+  if (steady !== undefined) {
+    if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return false;
+    const nodes = (graph as { nodes?: unknown }).nodes;
+    const goal = Array.isArray(nodes) ? nodes.find(n => n?.kind === 'goal' && n.id === steady.path) : undefined;
+    const months = (steady.value as { months?: unknown } | undefined)?.months;
+    if (typeof months !== 'number' || !Number.isInteger(months) || months <= 0 || heldGoalHorizonMonths(goal) !== months) return false;
+  }
+  const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
+  if (graph === undefined || reading === undefined) return true;
+  return identityCardOfferable(graph, reading.part_levels, reading);
+}
 
 /** The SAME process store the turn route authorises and settles. */
 export const agentProposals = new ProposalStore();
 const proposals = agentProposals;
 
+/** The other half of the press's rule (#3024): a card whose own subject moved while the analysis hash did not (a renamed goal). */
+function subjectMovedHere(id: string, graph: unknown, store: ProposalStore = proposals): boolean {
+  const p = store.get(id);
+  return graph !== undefined && p !== undefined && heldCardSubjectMoved(p, graph);
+}
+
 /** The turn's authorise call, shared verbatim: current analysis-affecting graph hash and verified subject. */
-export function executableProposalId(id: string, scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
+export function executableProposalId(id: string, scenarioId: string, userId: string | null, graphHash: string | undefined, graph?: unknown): string | undefined {
   if (graphHash === undefined) return undefined;
-  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
-  return decision.status === 'execute' ? id : undefined;
+  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
+    // The press's own field-scoped rule (#3024): a card whose subject is unchanged is offered after an unrelated change.
+    ...(graph !== undefined ? { scoped_precondition_holds: (p: StructuredProposal) => heldCardStillApplies(p, graph) } : {}),
+    // Eligibility simulates the exact offered card; this read never consumes it.
+    ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}) });
+  return decision.status === 'execute' && identityProposalOfferable(proposals.get(id), graph) && !subjectMovedHere(id, graph) ? id : undefined;
 }
 
 /**
@@ -23,12 +59,12 @@ export function executableProposalId(id: string, scenarioId: string, userId: str
  * replay checked only id membership, so after the model moved a retried Run showed a chip that could not
  * commit).
  */
-export function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
+export function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined, graph?: unknown): string | undefined {
   if (graphHash === undefined) return undefined;
   const waiting = proposals.outstanding(scenarioId, userId);
   if (waiting.length !== 1) return undefined;
   const id = waiting[0]!.proposal_id;
-  return executableProposalId(id, scenarioId, userId, graphHash);
+  return executableProposalId(id, scenarioId, userId, graphHash, graph);
 }
 
 /** The turn replay's approve/amend pair, in its original order. No other action is inferred. */
@@ -58,6 +94,8 @@ export const HELD_OFFER_ROWS_READ_CAP = 8;
 export async function readExecutableHeldProposalOffers(input: {
   scenarioId: string; userId: string | null; graphHash: string | undefined;
   latest: readonly PendingAction[];
+  /** The graph read with `graphHash`: a held identity card is armed only while it is still offerable on it. */
+  graph?: unknown;
   rows: readonly { turn_id: string }[]; // newest first, answer rows only
   store: { readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null> };
 }): Promise<HeldProposalOfferRead[]> {
@@ -74,8 +112,11 @@ export async function readExecutableHeldProposalOffers(input: {
     const request = { proposal_id: id, scenario_id: input.scenarioId,
       authenticated_user_id: input.userId, current_graph_identity_hash: input.graphHash,
       // Test the exact chip click; the row below must still offer this same typed identity.
-      typed_approval_of: id };
-    if (membership.authorise(request).status !== 'execute') return [];
+      typed_approval_of: id,
+      // The press's own field-scoped rule (#3024): a card whose subject is unchanged is offered after an unrelated change.
+      ...(input.graph !== undefined ? { scoped_precondition_holds: (p: StructuredProposal) => heldCardStillApplies(p, input.graph) } : {}) };
+    if (membership.authorise(request).status !== 'execute' || !identityProposalOfferable(membership.get(id), input.graph)
+      || subjectMovedHere(id, input.graph, membership)) return [];
     // get and authorise only read Maps; neither changes order, capacity, or settlement.
     // A known warm refusal (including applied/partial/stale/integrity) vetoes durable authority.
     if (proposals.get(id) !== undefined && proposals.authorise(request).status !== 'execute') return [];

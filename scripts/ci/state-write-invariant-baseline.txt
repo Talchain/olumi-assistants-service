@@ -12,7 +12,6 @@
 # down means routing each through a SessionStore-owning adapter (commit.ts /
 # build-turn-context.ts / apply-operations.ts), a behaviour-bearing refactor
 # that is out of scope for the PR that restores the gate.
-table	src/orchestrator-v5/decision-records/store-adapter.ts	.from('v5_handler_facts')	direct read in decision-record adapter (added #850, 10 Jul 2026, calibration R0); needs a SessionStore read method
 import	src/orchestrator/turn-fence-prehandler.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	stop-fence prehandler resolves the store (added 30 Jul 2026)
 import	src/orchestrator-v5/agent-lane/answer-offers-reload.ts	import type { AnswerOffersRead } from '../session/store.js';	type-only import (added 6 Oct 2026, X4)
 import	src/orchestrator-v5/agent-lane/run-currentness.ts	import type { SessionStore } from '../session/store.js';	type-only import (added #2501, 2 Oct 2026)
@@ -23,3 +22,6 @@ import	src/routes/agent-v1-turn.ts	import { getSessionStore } from '../orchestra
 import	src/routes/agent-v1-turn.ts	import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';	type-only import (added #1687, 22 Sep 2026)
 import	src/routes/assist.v1.scenario-graph.ts	import type { AnswerOffersRead } from '../orchestrator-v5/session/store.js';	type-only import (added 6 Oct 2026, X4)
 import	src/routes/scenario-graph-analysis-read.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	analysis read route resolves the store (added 20 Aug 2026, 2.1271)
+import	src/plugins/scenario-ownership.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	the ONE scenario-ownership admission hook (CEE #2863, OWN-ISO Phase 2) resolves the store for READ-ONLY owner/existence/membership reads and the memoised guest CREATE moved out of the per-route preflights (added 8 Oct 2026)
+import	src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts	import type { CommittedTurnLedger } from '../../session/store.js';	type-only import of the committed-turn ledger's record shape; the store is never touched here: the route injects opts.readCommittedTurnLedger (B restated goal fd12d194, 12 Oct 2026)
+import	src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts	import type { CommittedTurnLedger } from '../../session/store.js';	type-only import of the same ledger record shape for the revised-draft gates, read through the injected reader (B restated goal fd12d194, 12 Oct 2026)

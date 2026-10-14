@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ C5 THROUGH THE ROUTE — the Agent's provisional view on a WITHHELD turn (Paul's ruling, DL #70 5855324470).
@@ -82,6 +83,8 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       const req = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelRequests.push(req);
+      const runCall = runPressToolResponse(req);
+      if (runCall) return runCall;
       // The Run turn's forced provisional-view call runs IN PARALLEL with the interpreter: answer it by content, not order.
       if ((req['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view') {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(VIEW), call_id: 'forced' }] }), { status: 200 });
@@ -223,8 +226,12 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     turnSeq += 1;
     turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
     callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }]];
-    return await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
-      stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } }));
+    const before = modelRequests.length;
+    const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
+      stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
+    expect(modelRequests.length - before).toBe(1);
+    modelRequests.length = 0;
+    return explainRun(app, SCENARIO, first);
   };
 
   /**

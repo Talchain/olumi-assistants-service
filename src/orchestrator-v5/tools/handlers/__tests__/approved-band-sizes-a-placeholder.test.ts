@@ -1,19 +1,4 @@
-/**
- * ⭐ L4 — AN APPROVAL ON A PLACEHOLDER SIZES IT (52f8cd trace #85 5929778726; DL ruling 5929790081; design 1–3 approved).
- *
- * Paul's 1 Oct test (`96c6f5f4`): at 09:25 he approved Olumi's estimates for 8 unsized links ("Record these links"). Every
- * link took the review-only path — the Agent's band equalled the link's current band (0.85 = "very strong") — so the
- * writer recorded `reviewed_by_user` and KEPT `magnitude: 'olumi_placeholder'`. Nothing that asks "is it sized?" could see
- * the approval, and three Runs repeated "Olumi hasn't sized…" until he edited the canvas himself at 09:47:50.
- *
- * THE RULE (`link-sizing.ts`): a review on a placeholder makes it Olumi's estimate, accepted (`olumi_placeholder` →
- * `olumi_estimate` + review). Ruling (i): that sizes the link for GOAL FIGURES. Ruling (ii): it never scores a PARTS limit.
- * R11 is untouched: an accepted Olumi estimate earns no authorship credit, and a confirm on any non-placeholder link still
- * changes nothing but the review.
- *
- * Every row goes through the REAL writer (`adjust_edge_strength`, the path the Agent's approval and the canvas confirm
- * both reach) and reads the REAL readers.
- */
+/** Batch A rulings 1–6: placeholder approval is review; only a genuine or newly adopted estimate sizes a link. */
 import { describe, expect, it } from 'vitest';
 
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
@@ -55,7 +40,7 @@ function graphWith(provenance: Record<string, unknown>, mean = 0.85): GraphV3T {
 const target = (g: unknown) => (g as GraphV3T).edges.find((e) => e.from === FROM && e.to === TO)!;
 
 /** The Agent's approval of Olumi's band: a `set` to the value already stored (the served review-only path). */
-async function approve(graph: GraphV3T, strength: number, band?: 'very strong' | 'strong'): Promise<GraphV3T> {
+async function approve(graph: GraphV3T, strength: number, band?: 'very strong' | 'strong', adoptedBand?: 'strong'): Promise<GraphV3T> {
   const proposal: ProposalAction = {
     handler_id: 'adjust_edge_strength',
     entity: { id: `${FROM}→${TO}`, kind: 'edge', resolution_status: 'resolved', resolution_method: 'id_match' },
@@ -67,6 +52,7 @@ async function approve(graph: GraphV3T, strength: number, band?: 'very strong' |
     payload: { kind: 'message', scenario_id: SCENARIO_ID, turn_id: '11111111-1111-4111-8111-111111111411', stage: 'frame', message: 'Yes, record those.' },
     requestId: 'req-l4', signal: new AbortController().signal, orientationText: '', proposal, graphForTurn: graph,
     ...(band !== undefined ? { edgeStrengthBandAuthority: band } : {}),
+    ...(adoptedBand !== undefined ? { edgeStrengthAdoptedEstimateAuthority: { band: adoptedBand } } : {}),
   } as unknown as HandlerInvocation;
   const outcome = await createAdjustEdgeStrengthHandler()(invocation);
   return GraphV3.parse(outcome.mutated_graph);
@@ -85,57 +71,73 @@ describe('the one predicate: who sized this link', () => {
   });
 });
 
-describe('L4: an approval on a placeholder sizes it (DL 5929790081)', () => {
-  it('RED (served e-12): Olumi’s "very strong" approved on its own 0.85 placeholder → Olumi’s estimate, accepted', async () => {
+describe('Batch A: approving a placeholder records review and keeps it unsized', () => {
+  it('Batch A: approving the current placeholder band keeps its sizing and records review', async () => {
     const before = graphWith(PLACEHOLDER);
     expect(linkSizing(target(before)), 'PRECONDITION: a placeholder').toBe('placeholder');
     const after = await approve(before, 0.85, 'very strong');
     const p = target(after).provenance as Record<string, unknown>;
-    expect(p.magnitude).toBe('olumi_estimate');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(p.magnitude).toBe('olumi_placeholder');
     expect(p.source, 'authorship stays Olumi’s (R11)').toBe('cee_hypothesis');
     expect(p.reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'very strong' });
-    expect(linkSizing(target(after))).toBe('olumi_accepted');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(linkSizing(target(after))).toBe(linkSizing(target(before)));
     expect(target(after).strength.mean, 'the figure is unchanged').toBe(0.85);
+    // Batch A ruling 2: reviewing the placeholder earns no goal licence.
+    expect(placeholderGoalPaths(after, ['opt_a', 'opt_b'])).toEqual(placeholderGoalPaths(before, ['opt_a', 'opt_b']));
   });
 
-  it('RED (ruling i): the goal-figure reader stops withholding once the placeholder is approved; before, it withholds', async () => {
+  it('Batch A: adopting a newly supplied different mean licenses goal figures as an accepted Olumi estimate', async () => {
     const before = graphWith(PLACEHOLDER);
     expect(placeholderGoalPaths(before, ['opt_a', 'opt_b']).map((x) => x.option_id), 'PRECONDITION: withheld before').toContain('opt_a');
-    const after = await approve(before, 0.85, 'very strong');
+    // Batch A rulings 4 and 6: adopt a new 0.55 estimate instead of confirming the stored 0.85 placeholder.
+    const after = await approve(before, 0.55, undefined, 'strong');
+    // Batch A ruling 6: retain the goal-licence assertion on a legitimately accepted estimate.
     expect(placeholderGoalPaths(after, ['opt_a', 'opt_b'])).toEqual([]);
+    // Batch A ruling 4: adoption of a different mean really sizes the link.
     expect(isPlaceholderLink(target(after))).toBe(false);
+    // Batch A ruling 6: the accepted estimate remains Olumi's, never user credit.
+    expect(linkSizing(target(after))).toBe('olumi_accepted');
   });
 
   it('CONTROL (ruling ii): the parts rule is unchanged — an accepted Olumi size still never scores a parts limit', async () => {
-    const after = await approve(graphWith(PLACEHOLDER), 0.85, 'very strong');
+    // Batch A ruling 6: approve a genuine estimate for the accepted-size control.
+    const after = await approve(graphWith({ ...PLACEHOLDER, magnitude: 'olumi_estimate' }), 0.85, 'very strong');
     expect(olumiSizedLink(target(after) as never)).toBe(true);
     expect(isSizedOnlyByOlumi(target(after))).toBe(true);
   });
 
   it('CONTROL (R11): an accepted Olumi estimate earns no authorship credit', async () => {
-    const after = await approve(graphWith(PLACEHOLDER), 0.85, 'very strong');
+    // Batch A ruling 6: approve a genuine estimate for the accepted-size control.
+    const after = await approve(graphWith({ ...PLACEHOLDER, magnitude: 'olumi_estimate' }), 0.85, 'very strong');
     expect(earnsAuthorshipCredit(structureProvenance(target(after), after))).toBe(false);
   });
 
   it('CONTROL: a confirm on a link that is NOT a placeholder changes nothing but the review — the analysis stays fresh', async () => {
     const before = graphWith({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, 0.55);
-    // A bare confirm (no band): a named band stores that band's spread (A6f), a separate, intended analysis change.
+    // Batch A ruling 2: bare and same-band confirms both preserve the stored spread.
     const after = await approve(before, 0.55);
     expect((target(after).provenance as Record<string, unknown>).magnitude).toBe('olumi_estimate');
     expect(computeAnalysisAffectingGraphHash(after)).toBe(computeAnalysisAffectingGraphHash(before));
   });
 
-  it('the placeholder’s approval moves the analysis hash by its sizing alone (the Run correctly reads out of date)', async () => {
+  it('Batch A: placeholder approval preserves the analysis hash', async () => {
     const before = graphWith(PLACEHOLDER);
     const after = await approve(before, 0.85);
-    const sizedOnly = GraphV3.parse(structuredClone(before));
-    (target(sizedOnly).provenance as Record<string, unknown>).magnitude = 'olumi_estimate';
-    expect(computeAnalysisAffectingGraphHash(after)).not.toBe(computeAnalysisAffectingGraphHash(before));
-    expect(computeAnalysisAffectingGraphHash(after)).toBe(computeAnalysisAffectingGraphHash(sizedOnly));
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(computeAnalysisAffectingGraphHash(after)).toBe(computeAnalysisAffectingGraphHash(before));
+    const { reviewed_by_user: _review, ...kept } = target(after).provenance as Record<string, unknown>;
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(kept).toStrictEqual(target(before).provenance);
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).strength).toStrictEqual(target(before).strength);
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).defaulted).toBe(target(before).defaulted);
   });
 });
 
-describe('the canvas confirm allowlist admits exactly the one L4 transition', () => {
+describe('Batch A: the canvas confirm allowlist refuses placeholder relabelling', () => {
   const confirmAfter = (magnitude: string) => {
     const before = graphWith(PLACEHOLDER);
     const after = structuredClone(before) as GraphV3T;
@@ -144,18 +146,23 @@ describe('the canvas confirm allowlist admits exactly the one L4 transition', ()
     p.reviewed_by_user = { intent: 'confirm', at: new Date().toISOString() };
     return isProvenanceOnlyEdgeConfirmation({ before, after, from: FROM, to: TO });
   };
-  it('ACCEPTS placeholder → Olumi’s estimate', () => expect(confirmAfter('olumi_estimate')).toBe(true));
+  // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+  it('Batch A: REFUSES placeholder → Olumi’s estimate', () => expect(confirmAfter('olumi_estimate')).toBe(false));
   it('⛔ REFUSES placeholder → the user’s (a confirm is never authorship, R11)', () => expect(confirmAfter('user_stated')).toBe(false));
 });
 
-describe('L4: Olumi’s OLDER default (no sizing mark, `defaulted`) is sized by approval too — Paul’s 4 magnitude-less links', () => {
+describe('Batch A: an older unmarked default stays unmarked on approval', () => {
   const UNMARKED = { source: 'cee_hypothesis' } as const;
-  it('RED: approving it records Olumi’s estimate, accepted — origin kept', async () => {
+  it('Batch A: approving an unmarked default records review and keeps its origin', async () => {
     const before = graphWith(UNMARKED);
     expect(linkSizing(target(before)), 'PRECONDITION: unmarked').toBe('unmarked');
     const after = await approve(before, 0.85, 'very strong');
-    expect(target(after).provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
-    expect(linkSizing(target(after))).toBe('olumi_accepted');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).provenance).toMatchObject({ source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm' } });
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).provenance).not.toHaveProperty('magnitude');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(linkSizing(target(after))).toBe(linkSizing(target(before)));
   });
   it('CONTROL: a link with no sizing mark that is NOT Olumi’s default (no `defaulted`) is not re-marked', async () => {
     const before = graphWith(UNMARKED);
@@ -163,7 +170,7 @@ describe('L4: Olumi’s OLDER default (no sizing mark, `defaulted`) is sized by 
     const after = await approve(before, 0.85, 'very strong');
     expect((target(after).provenance as Record<string, unknown>).magnitude).toBeUndefined();
   });
-  it('the canvas allowlist admits unmarked default → Olumi’s estimate, and refuses it on a link that is not a default', () => {
+  it('Batch A: the canvas allowlist refuses unmarked → estimate with or without defaulted', () => {
     const run = (defaulted: boolean) => {
       const before = graphWith(UNMARKED);
       if (!defaulted) delete (target(before) as Record<string, unknown>).defaulted;
@@ -171,7 +178,33 @@ describe('L4: Olumi’s OLDER default (no sizing mark, `defaulted`) is sized by 
       Object.assign(target(after).provenance as Record<string, unknown>, { magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } });
       return isProvenanceOnlyEdgeConfirmation({ before, after, from: FROM, to: TO });
     };
-    expect(run(true)).toBe(true);
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(run(true)).toBe(false);
     expect(run(false)).toBe(false);
   });
+});
+
+describe('Batch A P03: a projected mean stays unsized after approval', () => {
+  const PROJECTED = { source: 'cee_hypothesis', mean_projected: true } as const;
+  const confirm = (sized: boolean) => {
+    const before = graphWith(PROJECTED);
+    const after = structuredClone(before) as GraphV3T;
+    const p = target(after).provenance as Record<string, unknown>;
+    delete p.mean_projected;
+    if (sized) p.magnitude = 'olumi_estimate';
+    p.reviewed_by_user = { intent: 'confirm', at: new Date().toISOString() };
+    return isProvenanceOnlyEdgeConfirmation({ before, after, from: FROM, to: TO });
+  };
+  it('Batch A: approving a projected mean records review and keeps the marker', async () => {
+    const after = await approve(graphWith(PROJECTED), 0.85, 'very strong');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).provenance).toMatchObject({ source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm' } });
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).provenance).not.toHaveProperty('magnitude');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(target(after).provenance).toHaveProperty('mean_projected', true);
+  });
+  // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+  it('Batch A: the canvas allowlist refuses marker deletion WITH relabelling', () => expect(confirm(true)).toBe(false));
+  it('⛔ REFUSES the marker dropped WITHOUT the sizing (a confirm may not touch it otherwise)', () => expect(confirm(false)).toBe(false));
 });

@@ -1,0 +1,93 @@
+[
+  {
+    "name": "GREEN-handlers-final",
+    "exit": 0,
+    "files": [
+      "tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+      "tools/handlers/__tests__/run-analysis-goal-certainty.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  23 passed (23)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  },
+  {
+    "name": "GREEN-range-guards",
+    "exit": 0,
+    "files": [
+      "goal-target/__tests__/s4b-target-not-testable.test.ts",
+      "goal-target/__tests__/goal-chance-range.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  88 passed (88)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts src/orchestrator-v5/goal-target/__tests__/goal-chance-range.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  },
+  {
+    "name": "GREEN-agent-target",
+    "exit": 0,
+    "files": [
+      "agent-lane/__tests__/bprime-target-only-goal-chance.test.ts",
+      "agent-lane/__tests__/target-not-testable-beside-ranges.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  17 passed (17)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/bprime-target-only-goal-chance.test.ts src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  },
+  {
+    "name": "GREEN-agent-route",
+    "exit": 0,
+    "files": [
+      "agent-lane/__tests__/target-not-testable-beside-ranges.route.test.ts",
+      "agent-lane/__tests__/guided-sizing.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  42 passed (42)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.route.test.ts src/orchestrator-v5/agent-lane/__tests__/guided-sizing.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  },
+  {
+    "name": "GREEN-typed-readers",
+    "exit": 0,
+    "files": [
+      "agent-lane/__tests__/run-evaluated-inferred-product.test.ts",
+      "agent-lane/__tests__/goal-level-in-goal-units.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  14 passed (14)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/run-evaluated-inferred-product.test.ts src/orchestrator-v5/agent-lane/__tests__/goal-level-in-goal-units.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  },
+  {
+    "name": "GREEN-carriers",
+    "exit": 0,
+    "files": [
+      "agent-lane/__tests__/goal-product-carrier.test.ts",
+      "admission/__tests__/confirmed-product-baseline.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  27 passed (27)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/goal-product-carrier.test.ts src/orchestrator-v5/admission/__tests__/confirmed-product-baseline.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  },
+  {
+    "name": "GREEN-goal-contracts",
+    "exit": 0,
+    "files": [
+      "agent-lane/actions/__tests__/goal-reach-class-guard.test.ts",
+      "tools/handlers/__tests__/bprime-target-keeps-ordering.test.ts"
+    ],
+    "summary": [
+      " Test Files  2 passed (2)",
+      "      Tests  39 passed (39)"
+    ],
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/actions/__tests__/goal-reach-class-guard.test.ts src/orchestrator-v5/tools/handlers/__tests__/bprime-target-keeps-ordering.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null"
+  }
+]

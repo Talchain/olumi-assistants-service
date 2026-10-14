@@ -31,7 +31,6 @@
  * dead on the live object wire — this module does not share that limitation.
  */
 
-import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import {
   ConstraintVerdictSchema,
   type ConstraintVerdict as ContractConstraintVerdict,
@@ -48,7 +47,8 @@ import {
   limitUnitsOf,
   type PlaceholderPartsReason,
 } from "./placeholder-parts.js";
-import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
+import { earnsAuthorshipCredit, settingClassOf, valueClassOf } from "../../cee/graph-readiness/obligation-provenance.js";
+import { isAssumptionFigure, valueClassOfStateOrStamp } from "../../cee/provenance/provenance-of.js";
 
 export interface WinnerConstraintFeasibility {
   /** True when the WINNING option violates a hard constraint. */
@@ -182,7 +182,16 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     if (Array.isArray(r.constraint_margins)) {
       out.constraint_margins = r.constraint_margins.filter((x) => !drop.includes(readString(readRecord(x)?.constraint_id) ?? ''));
     }
+    // Recovery Batch C: a precision describes the figure it sits beside (its n_informative and standard error ARE that
+    // figure's), so it goes with it — never a precision left standing for a withheld chance.
+    const cpp = readRecord(r.constraint_probabilities_precision);
+    if (cpp !== null) {
+      const next = { ...cpp };
+      for (const cid of drop) delete next[cid];
+      out.constraint_probabilities_precision = next;
+    }
     if ('probability_of_joint_goal' in out) delete out.probability_of_joint_goal;
+    delete out.probability_of_joint_goal_precision;
     return out;
   };
   const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
@@ -207,7 +216,8 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
       const cid = r === null ? null : readString(r.constraint_id);
       if (r === null || id === undefined || cid === null || !dropFor(id).includes(cid) || !('probability' in r)) return entry;
       if (r.probability === 0) withheldBreach = true;
-      const { probability: _withheld, ...rest } = r;
+      // Recovery Batch C (DL contract ruling 1): the entry's `probability_precision` describes that P, so it goes with it.
+      const { probability: _withheld, probability_precision: _itsPrecision, ...rest } = r;
       return rest;
     });
   }
@@ -225,6 +235,60 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
 
 /** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
 const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
+
+/** A Monte Carlo spread of an outcome: what an interval is drawn from. The centre (`mean`, `p50`) is not one. */
+const OUTCOME_SPREAD_FIGURES = ['std', 'p10', 'p90'] as const;
+/** Every precision block PLoT puts on an option's row (schemas 0.83.0 names, as PLoT sends them). */
+const OPTION_PRECISION_KEYS = ['probability_of_goal_precision', 'probability_of_joint_goal_precision', 'constraint_probabilities_precision'] as const;
+
+/**
+ * ⭐ Recovery Batch C, amendment 1 (DL contract ruling 3, 12 Oct): the status quo is "no change, by assumption" (paired
+ * arithmetic: its level is today's on every draw), so its row never carries a precision or a Monte Carlo interval — its
+ * standard error is 0 by construction, and any interval drawn from it would read "±0". In EVERY option-result carrier
+ * (the `withholdOptionGoalFigures` set) the status quo's row loses its precision blocks and its outcome's spread, and its
+ * top-level `constraint_results[]` entries lose `probability_precision`. Its centre and every other option stay exactly
+ * as PLoT sent them. Applied only where the licence records the status quo as by assumption. Pure.
+ */
+export function withholdStatusQuoIntervals<E>(envelope: E, statusQuoId: string): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const stripEntry = (entry: unknown): unknown => {
+    const r = readRecord(entry);
+    if (r === null || optionIdOf(r) !== statusQuoId) return entry;
+    const out: Record<string, unknown> = { ...r };
+    for (const k of OPTION_PRECISION_KEYS) delete out[k];
+    const outcome = readRecord(r.outcome);
+    if (outcome !== null) {
+      const kept: Record<string, unknown> = { ...outcome };
+      for (const k of OUTCOME_SPREAD_FIGURES) delete kept[k];
+      out.outcome = kept;
+    }
+    return out;
+  };
+  const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
+  const env = envelope as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else {
+    const nested = readRecord(env.results);
+    if (nested !== null) {
+      const n: Record<string, unknown> = { ...nested };
+      for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) n[k] = strip(nested[k]);
+      out.results = n;
+    }
+  }
+  const brief = readRecord(env.decision_brief);
+  if (brief !== null && 'options' in brief) out.decision_brief = { ...brief, options: strip(brief.options) };
+  if (Array.isArray(env.constraint_results)) {
+    out.constraint_results = env.constraint_results.map((entry) => {
+      const r = readRecord(entry);
+      if (r === null || readString(r.option_id) !== statusQuoId || !('probability_precision' in r)) return entry;
+      const { probability_precision: _none, ...rest } = r;
+      return rest;
+    });
+  }
+  return out as E;
+}
 
 /**
  * ⭐ F1b PER-CLAIM WITHHOLDING (contract §2, programme-docs `s1/f1b-contract`): the claim classes a goal-figure withhold
@@ -284,6 +348,8 @@ export function withholdOptionGoalFigures<E>(
       delete out.probability_of_goal;
       for (const k of GOAL_CHANCE_COMPANION_KEYS) delete out[k];
       delete out.probability_of_joint_goal;
+      // Recovery Batch C: the joint's precision goes with the joint it describes.
+      delete out.probability_of_joint_goal_precision;
       // The downside figures (p05, cvar_10, regret) are in the goal's outcome units: they go with the target claims, as
       // before R2 (Codex r1 #2606: kept under P1/P5 they reached the Agent while the outcome was withheld).
       delete out.downside;
@@ -1011,10 +1077,13 @@ export function collectLeaderEstimatedTargetIds(
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
     if (!Object.prototype.hasOwnProperty.call(setBy, c.node_id)) continue;
-    const stamp = heldFactors.has(c.node_id)
-      ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
-      : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
-    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
+    // ONE PROVENANCE AUTHORITY: a held factor's value, else the leader's setting (the wire's cell when it carries a stamp,
+    // else the stored cell), each by `provenanceOf`.
+    const cell = sourceOf(setBy[c.node_id]) !== undefined ? setBy[c.node_id] : graphInterventions?.[c.node_id];
+    const owned = heldFactors.has(c.node_id)
+      ? valueClassOf(asObject(nodeById(c.node_id))?.observed_state)
+      : settingClassOf(cell, nodeById(c.node_id));
+    if (earnsAuthorshipCredit(owned)) continue;
     out.add(c.constraint_id);
   }
   return out;
@@ -1033,8 +1102,6 @@ export function collectLeaderEstimatedTargetIds(
  */
 export type EstimateOnlyReason = 'level_user_assumption' | 'level_olumi_estimate';
 
-/** The contract literal for a figure the user accepted as an assumption — their own or Olumi's (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
-const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
 
 /**
  * The owner of one level stamp, from the ONE authority: `classifyValueSource`. `null` = the user's own figure
@@ -1044,10 +1111,11 @@ const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption
  * authorship. They differ in whose NUMBER it is, which is the question here, so that class alone is split by its
  * stamp. Every other class decides the owner by itself. Pure.
  */
-export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null {
-  const provenance = classifyValueSource(stamp);
+export function limitLevelOwnerReason(level: unknown): EstimateOnlyReason | null {
+  // ONE PROVENANCE AUTHORITY: the level's whole `observed_state` (a bare stamp is read as a state with no extraction type).
+  const provenance = valueClassOfStateOrStamp(level);
   if (earnsAuthorshipCredit(provenance)) return null;
-  return provenance === 'user_ratified' && stamp === USER_ASSUMPTION_SOURCE ? 'level_user_assumption' : 'level_olumi_estimate';
+  return provenance === 'user_ratified' && isAssumptionFigure(level) ? 'level_user_assumption' : 'level_olumi_estimate';
 }
 
 /**
@@ -1119,7 +1187,7 @@ export function collectLimitLevelOwners(
     const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
     const level = readRecord(readRecord(node)?.observed_state);
     if (level === null) continue;
-    const owner = limitLevelOwnerReason(level.source);
+    const owner = limitLevelOwnerReason(level);
     if (owner === null) out.userBaselineIds.add(c.constraint_id);
     else if (owner === 'level_user_assumption') out.userAssumptionIds.add(c.constraint_id);
   }

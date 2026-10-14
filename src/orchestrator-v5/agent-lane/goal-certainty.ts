@@ -1,3 +1,4 @@
+import { draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
 import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
 import { NOT_SIZED } from './reply/words.js';
 import { compactWordLabel } from './reply/labels.js';
@@ -28,6 +29,7 @@ import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.j
 import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
 import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
@@ -35,8 +37,9 @@ import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
 import { readUnitParts, sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
-import { chanceGoalSentence, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
+import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
+import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
 
@@ -85,8 +88,8 @@ export type NoBreakEven =
   | 'not_an_identity' | 'identity_not_evaluated' | 'level_from_inputs' | 'addends' | 'extra_goal_parent'
   | 'operand_not_parent' | 'no_exact_figure';
 
-const userOwns = (source: unknown): boolean =>
-  typeof source === 'string' && (source === 'brief_extraction' || source.startsWith('user'));
+/** The user's own level, by the ONE provenance authority (`isUsersLevelOrApproved`): theirs, or Olumi's they approved. */
+const userOwns = (observed: unknown): boolean => isUsersLevelOrApproved(observed);
 
 /** +1 / −1 when the goal is held above / below its target; 0 when the comparator is not stated. */
 function goodSign(direction: unknown): number {
@@ -100,9 +103,9 @@ function linkSign(e: Rec): number {
   return mean === undefined || mean === 0 ? 0 : Math.sign(mean);
 }
 
-const levelOf = (n: Rec | undefined): { value?: number; raw?: number; source?: unknown; unit?: string } => {
+const levelOf = (n: Rec | undefined): { value?: number; raw?: number; observed?: unknown; unit?: string } => {
   const os = isRec(n?.observed_state) ? n!.observed_state : {};
-  return { value: num(os.value), raw: num(os.raw_value), source: os.source, unit: text(os.unit) };
+  return { value: num(os.value), raw: num(os.raw_value), observed: os, unit: text(os.unit) };
 };
 
 const interventionLevel = (v: unknown): { value?: number; raw?: number } =>
@@ -132,7 +135,8 @@ export function goalCertaintyDecisions(
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
   const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string')
+    // Retain metadata only from an attestation of THIS declaration, including accumulation's month/input order.
+    .filter((e) => typeof e.node_id === 'string' && evaluatedIdentityCarriers(nodes, [e]).has(e.node_id))
     .map((e) => [e.node_id as string, e] as const));
   const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
   const declared = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -175,6 +179,11 @@ export function goalCertaintyDecisions(
     // is an interior result and gets no decision.
     const certainty: 0 | 1 | undefined = p === 1 ? 1 : p === 0 ? 0 : undefined;
     if (certainty === undefined) continue;
+    // ⛔ ZERO SPREAD IS NOT A CHANCE (Science §(ab)(2); DL hold on #2858): every draw gave the same result, so the 0 or 1
+    // says only what happens if today's figures hold. B1's Keep £49 read exactly 100% at month 12 with the user's rates
+    // held fixed, and was "earned" here because Keep moves nothing. No decision ⇒ unearned everywhere (the licence
+    // withholds its %, the transport strips the exact figure, the Agent says it cannot be confirmed).
+    if (zeroSpread(r)) continue;
     const option = byId.get(optionId);
     const iv = option !== undefined ? mergeInterventionSourceObjects(option) : {};
     // The goal would move AWAY from its target (P = 1) or TOWARDS it (P = 0) to reverse the certainty.
@@ -257,6 +266,8 @@ function breakEvenOf(
   through: string,
 ): GoalCertaintyDecision['break_even'] {
   const op = identity?.operation;
+  // Accumulation is excluded from break-even: neither a product ratio nor a sum delta models its horizon.
+  if (op === 'accumulation') return undefined;
   if ((op !== 'product' && op !== 'sum') || !operands.has(through) || through in iv) return undefined;
   const today = levelOf(goal).raw;
   const threshold = num(goal.goal_threshold_raw);
@@ -273,7 +284,7 @@ function breakEvenOf(
   if (projected === 0) return undefined;
   const fraction = Math.abs(threshold / projected - 1);
   const operand = levelOf(byId.get(through));
-  const count = operand.raw !== undefined && userOwns(operand.source) ? Math.round(fraction * operand.raw) : undefined;
+  const count = operand.raw !== undefined && userOwns(operand.observed) ? Math.round(fraction * operand.raw) : undefined;
   return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
 }
 
@@ -294,6 +305,24 @@ function sayMismatch(
       + `‘${label(goal.id)}’, so it can’t follow what ‘${label(found.from)}’ does through it.`
     : `${head}the model links ‘${label(found.through)}’ into ‘${label(goal.id)}’ beside the parts it is worked out from, so it `
       + `can’t check what ‘${label(found.from)}’ does to it.`;
+}
+
+/**
+ * Every valid draw gave this option the same goal value. Served Runs since 6 Oct carry the zero as floating-point noise
+ * (std 1.1e-16 … 3.3e-10 with p10 === p90; census over 17,927 stored Runs, 8 Oct), so identical deciles decide first and
+ * a std counts as zero within a relative tolerance far below any real spread (the smallest real one in that census:
+ * B1 £59, std 0.0045 on a 0–1 frame).
+ */
+const ZERO_SPREAD_RELATIVE = 1e-9;
+export function zeroSpread(r: Rec): boolean {
+  const o = isRec(r.outcome) ? r.outcome : undefined;
+  if (o === undefined) return false;
+  const p10 = num(o.p10);
+  const p90 = num(o.p90);
+  if (p10 !== undefined && p90 !== undefined && p10 === p90) return true;
+  const std = num(o.std);
+  const scale = Math.max(Math.abs(num(o.p50) ?? num(o.mean) ?? 0), 1);
+  return std !== undefined && std >= 0 && std <= ZERO_SPREAD_RELATIVE * scale;
 }
 
 /**
@@ -378,23 +407,19 @@ function actualMoveSeeds(graph: unknown, optionIds: readonly string[], scoredInt
 }
 
 /**
- * The leader licence's ONE "nobody sized it" predicate for a link (P5; R8-2: only the licence reads `mean_projected`): an
- * Olumi placeholder or a mean the producer projected, never the user's. The no-dead-end reader asks THIS, never the field.
+ * Delegates the leader licence's "nobody sized it" reading to the ONE predicate, `isPlaceholderLink` in link-sizing.ts.
+ * The no-dead-end reader asks this wrapper, never the provenance field.
  */
 export function licenceUnsizedLink(edge: unknown): boolean {
-  const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  return linkSizing(edge) !== 'user' && (p?.magnitude === 'olumi_placeholder' || p?.mean_projected === true);
+  return isPlaceholderLink(edge);
 }
 
 export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): PlaceholderGoalPath[] {
   const seeds = actualMoveSeeds(graph, optionIds, scoredInterventions);
   const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations);
   return paths.flatMap(path => {
-    const links = path.links.filter(e => {
-      if (exactLinks.has(e) || linkSizing(e) === 'user') return false;
-      const p = isRec(e.provenance) ? e.provenance : undefined;
-      return p?.magnitude === 'olumi_placeholder' || p?.mean_projected === true;
-    }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
+    const links = path.links.filter(e => !exactLinks.has(e) && isPlaceholderLink(e))
+      .flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
     return links.length > 0 ? [{ option_id: path.option_id, links }] : [];
   });
 }
@@ -404,7 +429,7 @@ export function legacyLeaderGoalLinks(graph: unknown, optionIds: readonly string
   const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, actualMoveSeeds(graph, optionIds, scoredInterventions), identityEvaluations);
   return goalOrderedLinks(graph, paths.flatMap(path => path.links.filter(e => {
     const p = isRec(e.provenance) ? e.provenance : undefined;
-    return !exactLinks.has(e) && linkSizing(e) !== 'user' && p?.mean_projected !== true
+    return !exactLinks.has(e) && linkSizing(e) === 'unmarked'
       && p?.magnitude === undefined && e.defaulted === true;
   }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : [])));
 }
@@ -449,8 +474,7 @@ export function placeholderGoalPaths(
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
-  const evaluated = new Set((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string').map((e) => e.node_id as string));
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
   // ⛔ THE CARD IS THE ONE ROUTE (AIQ 5902606752): a goal that declares an INFERRED product this run did not evaluate is
   // Olumi's unconfirmed reading of how the goal is made. PLoT never forwards it (variant (d), `translator-v3.ts`) and
   // withholds every goal figure itself (#416, which (S) defers to), and C46 names the leader's cause. (S) stands down, so
@@ -645,9 +669,11 @@ export function noDeadEndAsks(
   // ("today's level of … in % likelihood of on-time launch") and no link into it is asked to be sized: Olumi computes that
   // chance. The one sentence says so; nothing is asked first (the host's one question is the deadline).
   if (goal !== undefined && goalKindOf(goal) === 'chance_of_event') {
-    const deadline = goalDeadlineOf(goal);
+    const deadline = goalDeadlineFromRecord(graph, goal.id);
     return { message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)), gaugeLinks: new Set() };
   }
+  // The host owns the date -> team-time question; a forecast has no level today.
+  if (draftedTeamPartOf(graph) !== null) return { gaugeLinks: new Set() };
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {

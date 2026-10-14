@@ -187,7 +187,6 @@ vi.mock('../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => RUN_ANALYSIS_FACT,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () =>
       (global as Record<string, unknown>).__selection_graph_override ?? PERSISTED_GRAPH,
     loadGraphAndBriefText: async () => ({

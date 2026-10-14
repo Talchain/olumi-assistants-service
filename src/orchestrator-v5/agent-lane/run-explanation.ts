@@ -43,6 +43,21 @@ export function runExplanationChip(scenarioId: string, read: RunExplanationRead)
   return chipForIdentity(identity.identity);
 }
 
+/**
+ * Reference the existing stored Run after an edit has made it stale. This grants
+ * no result currentness; only the selected fact's own hash and timestamp name it.
+ */
+export function runExplanationKeyForRecord(scenarioId: string, analysisState: unknown, analysisResult: unknown): string | null {
+  const run = record(record(analysisState)?.run_state);
+  const result = record(analysisResult);
+  if (result?.type !== 'analysis_result') return null;
+  const identity = validateAnalysisRunFactIdentity({
+    scenario_id: scenarioId, graph_hash_at_run: result.computed_against_hash, computed_at: run?.computed_at,
+  });
+  return identity.status === 'confirmed'
+    ? chipForIdentity(identity.identity).id.slice(RUN_EXPLANATION_PREFIX.length) : null;
+}
+
 function chipForIdentity(identity: { readonly scenario_id: string; readonly graph_hash_at_run: string; readonly computed_at: string }): SuggestedAction {
   const digest = createHash('sha256').update(JSON.stringify({
     v: 1, run_fact: identity,

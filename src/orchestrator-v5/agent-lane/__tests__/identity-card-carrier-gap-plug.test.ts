@@ -29,7 +29,7 @@ describe('the carrier card refuses beside Olumi’s gap plug, and only there (se
   });
 
   it('R2: the same £1,500 as the USER’s figure keeps the card, named as theirs', () => {
-    const card = proposeProductIdentity(g((x) => { plug(x).observed_state.source = 'brief_extraction'; }));
+    const card = proposeProductIdentity(g((x) => { { plug(x).observed_state.source = 'brief_extraction'; delete plug(x).observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ } }));
     expect(card).not.toBeNull();
     expect(card!.words).toContain('(your figure, £1,500) that gives your £75,000');
   });

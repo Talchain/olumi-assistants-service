@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 import {
   textAssertsLeadingOption,
   textNamesLeadingOption,
@@ -71,14 +71,15 @@ describe.each([
     const elapsed = performance.now() - start;
     // Only one/two spaces or hyphens directly before time(s) denote the noun.
     expect(result).toBe(expected);
-    expect(elapsed).toBeLessThan(50);
+    if (timingGated) { expect(elapsed).toBeLessThan(50); }
   });
 
-  it('scales below 8x from 5,000 to 20,000 characters (minimum of seven calibrated batches)', () => {
-    const [n, fourN] = [5000, 20_000].map((length) => 'The lead' + '\n'.repeat(length - 'The lead'.length));
+  it('scales below 22x from 5,000 to 40,000 characters (minimum of seven calibrated batches)', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    const [n, eightN] = [5000, 40_000].map((length) => 'The lead' + '\n'.repeat(length - 'The lead'.length));
     expect(classify(n)).toBe(true);
-    expect(classify(fourN)).toBe(true);
-    const m = scalingRatio(() => classify(n), () => classify(fourN));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    expect(classify(eightN)).toBe(true);
+    const m = scalingRatio(() => classify(n), () => classify(eightN));
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(22); }
   });
 });

@@ -48,6 +48,8 @@ vi.mock('../../build-turn-context.js', () => ({
   }),
   loadMostRecentPendingActions: vi.fn(async () => pendingStore.rows),
   loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
+
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
 }));
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';

@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":4.087890625,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/canonical-analysis-view.test.ts src/routes/__tests__/canonical-analysis-view-face.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+   Start at  21:13:00
+   Duration  4.42s (transform 2.21s, setup 153ms, import 3.86s, tests 162ms, environment 0ms)
+

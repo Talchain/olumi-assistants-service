@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * STABLE ENTITY REFS on the register route (`graph/entity-refs.ts`; lease 5909544405). The route assigns refs to the
  * bytes it hashes and writes, carries the base's refs forward by node id, and never backfills an entity the base held
@@ -44,7 +45,7 @@ const readCommittedTurn = vi.fn();
 
 const store = { readMostRecentPendingActions: vi.fn(async () => []), append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 
 /**

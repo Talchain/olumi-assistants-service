@@ -4,7 +4,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
-import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent, whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import {
   GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_USER_EFFECT_CLAMPED,
@@ -63,7 +63,7 @@ async function saved(read: Json): Promise<Json> {
   return (await capabilities(read).getCanonicalState(ctx) as Json).analysis;
 }
 async function run(read: Json): Promise<Json> {
-  return (await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json).result;
+  return (await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis', effects_timing: null }) as Json).result;
 }
 function noCompanions(row: Json) {
   for (const key of GOAL_CHANCE_COMPANION_KEYS) expect(row).not.toHaveProperty(key);
@@ -215,19 +215,19 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await saved(fixture())).not.toHaveProperty('goal_horizon_line');
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
-  it('(10) both reporting rules add the exact range/deadline words and retain the existing bans', () => {
-    const rangeRule = 'For an option in goal_chance_range_display, say its range text exactly as given, then “ chance of meeting your goal, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
-    const horizonRule = 'When goal_horizon_line is present and you state any goal chance or range, add that sentence verbatim once, right after the chance or range.';
-    const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
-    const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
-    for (const rule of [runRule, savedRule]) {
-      expect(rule).toContain(rangeRule);
-      expect(rule).toContain(horizonRule);
+  it('(10) the reporting rule explains licensed figures in the AI\'s own words and keeps every licence and ban', () => {
+    // ⛔ CHANGED EXPECTATION (prompt P5/P6, AIE one-pass packet SHA 94ad9c8f…): the AI explains the licensed figures in its
+    // own words, keeping the exact number or range, option, target, unit and period; the screen-verbatim directives are retired.
+    expect(HOST_TOOL_CONTRACT).toContain('Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.');
+    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    expect(HOST_TOOL_CONTRACT).toContain('When leader permission is withheld, do not describe an option as the better, preferred or superior option, or the one to choose. You may explain a specifically scoped difference supported by current supplied facts, preserving its uncertainty and unresolved conditions; that difference does not establish an overall option to favour.');
+    expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
+    expect(HOST_TOOL_CONTRACT).toContain('Never state a single figure for an option licensed only as a range, and never compare or order ranges without an actual licence for that comparison.');
+    for (const retired of ['use goal_chance_words verbatim', 'stated_time.chance_words verbatim', 'say its range text exactly as given', 'using goal_chance_display for that option exactly']) {
+      expect(HOST_TOOL_CONTRACT).not.toContain(retired);
     }
-    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
-    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
-    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
+    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs dedicated comparative reasoning; do not turn per-option facts into an unlicensed ranking.');
   });
   it('CONTROL: similar licences and whole-percentage displays also work without a leader', async () => {
     const read = fixture([{ ...licence, withheld_option_ids: undefined, form: 'similar', similar_option_ids: [A, B], pct_by_option: { [A]: 44, [B]: 48, [C]: 25 }, display_rounding_by_option: undefined }]);
@@ -307,7 +307,7 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     const read = driven(strengthDriver as Json);
     read.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
     read.analysis_ready = { ...read.analysis_ready, analysis_admission: { ...(read.analysis_ready?.analysis_admission ?? {}), admitted: true, permitted_analysis_mode: 'comparative_leader' } };
-    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json;
+    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis', effects_timing: null }) as Json;
     expect(out.claim_permissions?.leader_may_be_named, 'precondition: a leader may be named on this Run').toBe(true);
     expect(out.result.goal_chance_driver_display).toEqual({ [A]: 'It rests most on Olumi’s own estimate of how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?' });
   });
@@ -401,17 +401,66 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     });
   });
 
-  it('both reporting rules contain the exact driver rule, with the old bans retained', () => {
-    const driverRule = "When you state an option's chance and goal_chance_driver_display has a sentence for that option, say that sentence exactly, right after the chance (before any deadline sentence). While goal_chance_driver_display has any sentence, never say that no assumption is established, measurable, or most worth investigating, in any wording.";
-    const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
-    const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
-    for (const rule of [runRule, savedRule]) expect(rule).toContain(driverRule);
-    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
-    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
-    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
-    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
+  it('the reporting rule takes drivers from measured data and keeps the old bans', () => {
+    // ⛔ CHANGED EXPECTATION (prompt P13, AIE one-pass packet): the screen-exact driver sentence is retired; what a result
+    // rests on comes from measured sensitivity and the figure\'s source. The false-absence bans stay word for word.
+    expect(HOST_TOOL_CONTRACT).toContain('Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available.');
+    expect(HOST_TOOL_CONTRACT).not.toContain('say that sentence exactly, right after the chance');
+    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    expect(HOST_TOOL_CONTRACT).toContain('Do not state a share of model runs or name a leader from that share in a result reply');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
+    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs dedicated comparative reasoning; do not turn per-option facts into an unlicensed ranking.');
     expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
     expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');
     expect(HOST_TOOL_CONTRACT).toContain('This availability grants no permission to name or rank a driver or an option.');
+  });
+});
+
+describe('#2840: the headline\'s "what would change it" names the licensed CHANCE driver only (#87; DL; Science §(n).3)', () => {
+  // A real belief link (DL review P2): price → churn. Price → MRR is a declared identity and never a driver.
+  const churnStrength = { ...strengthDriver, quantity_id: 'strength:pro_plan_price->monthly_churn', to: 'monthly_churn' };
+  const churnExistence = { ...existenceDriver, quantity_id: 'existence:pro_plan_price->monthly_churn', to: 'monthly_churn' };
+  const both = (a: Json, b: Json) => driven(a, { driver_by_option: { [A]: a, [B]: b } });
+  it.each([
+    ['strength', churnStrength, 'What would change it: how strongly ‘Pro plan price’ affects ‘Monthly churn’.'],
+    ['factor', factorDriver, 'What would change it: the value of ‘Pro plan price’.'],
+    ['existence', churnExistence, 'What would change it: whether ‘Pro plan price’ really affects ‘Monthly churn’.'],
+  ])('%s driver on every shown option: one unscoped exact line, naming the driver the screen sentence names', (_k, driver, line) => {
+    const read = both(driver as Json, driver as Json);
+    expect(Object.keys(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph))).toEqual([A, B]);
+    expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe(line);
+  });
+  it('different drivers say it per option, in licence order', () => {
+    const differ = both(churnStrength, factorDriver);
+    expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBe(
+      'What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’; for ‘Raise to £54’, the value of ‘Pro plan price’.');
+  });
+  it('(P1-2) another shown option WITHOUT a driver (point) → scoped to the option that has one; the other gets nothing', () => {
+    const read = driven(churnStrength); // B's chance is shown (about 50%) with no driver
+    expect(Object.keys(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph))).toEqual([A]);
+    expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe('What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’.');
+  });
+  it('(P1-2) another option shown as a RANGE → scoped as well, never an unscoped line', () => {
+    const rangeB = { ...rangeRecord, option_ids: [B], range_by_option: { [B]: rangeRecord.range_by_option[B] } };
+    const read = fixture([{ ...licence, driver_by_option: { [A]: churnStrength } }, rangeB]);
+    expect(Object.keys(goalChanceRangeDisplayForAgent(read.analysis_result, read.graph) ?? {})).toEqual([B]);
+    expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe('What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’.');
+  });
+  it('withheld chance → silent: no licence, a run-wide withhold, or an unruled driver gives null, never the sensitivity leader', () => {
+    const none = fixture([]);
+    // Contrast: this graph's outcome-sensitivity leader is 'paying_subscribers' (elasticity 1); it must never appear.
+    expect(none.analysis_result.enrichment.factor_sensitivity?.[0]?.factor_id).toBe('paying_subscribers');
+    expect(whatChangesFaceLine(none.analysis_result, none.graph)).toBeNull();
+    const unruled = driven({ ...churnExistence, authored_by: 'user' });
+    expect(whatChangesFaceLine(unruled.analysis_result, unruled.graph)).toBeNull();
+    const withheld = driven(churnStrength);
+    withheld.analysis_result.enrichment.inference_warnings.push({ code: GOAL_FIGURES_PLACEHOLDER_PATH, option_ids: [A] });
+    expect(goalChanceDriverDisplayForAgent(withheld.analysis_result, withheld.graph)).toEqual({});
+    expect(whatChangesFaceLine(withheld.analysis_result, withheld.graph)).toBeNull();
+  });
+  it('never names an option by id: an unlabelled option in a per-option line silences the line', () => {
+    const differ = both(churnStrength, factorDriver);
+    differ.graph.nodes.find((n: Json) => n.id === B).label = '';
+    expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBeNull();
   });
 });

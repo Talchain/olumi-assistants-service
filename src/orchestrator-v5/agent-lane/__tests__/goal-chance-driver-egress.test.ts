@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
@@ -27,6 +27,7 @@ const CORPUS = JSON.parse(fixture('driver-absence-corpus-20261007.json')) as { p
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const blockOf = (body: Json): Json => body.blocks.find((b: Json) => b.type === 'analysis_result');
 const opts = (body: Json) => ({ analysisResult: blockOf(body), graph: body.draft_graph, requestId: 'req-s2', exitPath: 'agent_lane_v1_final', turnId: 'turn-s2' });
+const shrink8 = (t: string): string => t.replace(/([\s\S])\1{999,}/g, (m) => m.slice(0, Math.ceil(m.length / 8)));
 const PROD_CLAUSE = '; sensitivity has not established which assumption matters most.';
 
 /** DL condition 1: what an edit leaves is well formed. */
@@ -180,7 +181,9 @@ describe('wiring: both Agent exits apply the edit after the leader egress', () =
     expect(live).toBeGreaterThan(route.indexOf("exitPath: 'agent_lane_v1_final',\n        scopeAuthorityUnavailable"));
     expect(route.slice(live - 200, live)).toContain('withoutDriverAbsenceClaimsAtEgress(wireBody, {');
     // #2783 r4: the replay exit keeps this order, then proves its shape after both gates (withShapeOnlyIfItDerives).
-    expect(route).toContain("const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
+    expect(route).toContain("const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
+    expect(route).toContain("const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {");
+    expect(route).toContain("const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {");
     expect(route).toContain("return withShapeOnlyIfItDerives(gatedReplay);");
     expect(route).toContain("analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',");
   });
@@ -391,19 +394,19 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
 
   // DL #2712 r1 BLOCKER: an unbounded run inside the clause-opening lookbehind was rescanned at every position
   // (quadratic: "Sensitivity" + 20,000 spaces took 9.6 s). Every run is bounded; each input is linear time.
-  it.each([
-    ['"Sensitivity" + 2,000 spaces + "x"', `Sensitivity${' '.repeat(2000)}x`, 50],
-    ['newline + 2,000 spaces + "x"', `\n${' '.repeat(2000)}x`, 50],
-    ['"." + 2,000 spaces + "x"', `.${' '.repeat(2000)}x`, 50],
-    ['"and" + 2,000 spaces + "x"', `and${' '.repeat(2000)}x`, 50],
-    ['"Sensitivity" + 20,000 spaces + "x"', `Sensitivity${' '.repeat(20000)}x`, 200],
-    ['newline + 20,000 spaces + "x"', `\n${' '.repeat(20000)}x`, 200],
-  ])('LINEAR TIME: %s', (_name, text, ms) => {
-    const t0 = performance.now();
-    SENSITIVITY_ABSENCE_CLAIM.test(text);
-    removeSensitivityAbsenceClaims(text);
-    expect(performance.now() - t0).toBeLessThan(ms);
-  });
+  timingIt.each([
+    ['"Sensitivity" + 2,000 spaces + "x"', `Sensitivity${' '.repeat(2000)}x`],
+    ['newline + 2,000 spaces + "x"', `\n${' '.repeat(2000)}x`],
+    ['"." + 2,000 spaces + "x"', `.${' '.repeat(2000)}x`],
+    ['"and" + 2,000 spaces + "x"', `and${' '.repeat(2000)}x`],
+    ['"Sensitivity" + 20,000 spaces + "x"', `Sensitivity${' '.repeat(20000)}x`],
+    ['newline + 20,000 spaces + "x"', `\n${' '.repeat(20000)}x`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const run = (text: string): void => { SENSITIVITY_ABSENCE_CLAIM.test(text); removeSensitivityAbsenceClaims(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 
   it('kept-unsafe rules unchanged: a span holding the deadline is kept and counted', () => {
     const text = 'Figures are provisional. Sensitivity has not been measured within the 9 months.';
@@ -533,8 +536,8 @@ describe('Wave B unseen brief, keys untouched: a range line is a screen driver, 
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  // DL: every new pattern at 20,000 whitespace stays linear (< 50 ms).
-  it.each([
+  // DL: every new pattern at 20,000 whitespace stays linear (8× input costs under 22×).
+  timingIt.each([
     ['"changes" + 20,000 spaces', `changes${' '.repeat(20000)}x`],
     ['"changes the" + 20,000 spaces', `changes the${' '.repeat(20000)}x`],
     ['"investigation" + 20,000 spaces', `investigation${' '.repeat(20000)}x`],
@@ -542,11 +545,11 @@ describe('Wave B unseen brief, keys untouched: a range line is a screen driver, 
     ['"has not established" + 20,000 spaces', `has not established${' '.repeat(20000)}x`],
     ['"which assumption" + 20,000 spaces', `which assumption${' '.repeat(20000)}x`],
   ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text);
-    removeDriverAbsenceClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
+    const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });
 
 /**
@@ -617,7 +620,7 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  it.each([
+  timingIt.each([
     ['denial + "which assumption" + 20,000 spaces', `has not established which assumption${' '.repeat(20000)}x`],
     ['denial + gap word + 20,000 spaces + "most"', `has not established which assumption deserves${' '.repeat(20000)}most`],
     ['"priority" + 20,000 spaces + "."', `does not establish which factor priority${' '.repeat(20000)}.`],
@@ -625,17 +628,17 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     // 7 Oct): linear (6.5/13/26/53/104 ms for 500…8,000), so the absolute bar was the flake, not the regex. Scaling row below.
     ['the limb repeated 1,000 times', 'does not establish which assumption deserves '.repeat(1000)],
   ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text);
-    removeDriverAbsenceClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
-  // 4× the input, calibrated batches (scalingRatio): linear ≈ 4×, quadratic ≈ 16×. (A 2× step at 4–8 ms read 3.5× on CI, #2727.)
-  it('LINEAR TIME: 4× the repeated limb costs under 8× (quadratic would be 16×)', () => {
-    const [small, large] = [1000, 4000].map((n) => 'does not establish which assumption deserves '.repeat(n));
+    const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
+  timingIt('LINEAR TIME: 8× the repeated limb costs under 22× (quadratic would be 64×)', () => {
+    const [small, large] = [1000, 8000].map((n) => 'does not establish which assumption deserves '.repeat(n));
     const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
     const m = scalingRatio(() => run(small), () => run(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 
@@ -709,18 +712,18 @@ describe('Wave B3, keys untouched: the "what changes the chances most" form and 
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
   });
 
-  it.each([
+  timingIt.each([
     ['negation + 20,000 spaces + coordinated tail', `has not tested${' '.repeat(20000)}or established investigation priority`],
     ['"or" + 20,000 spaces', `has not tested the deadline or${' '.repeat(20000)}established investigation priority`],
     ['"what" + 20,000 spaces', `does not establish what${' '.repeat(20000)}x`],
     ['"what changes the chances" + 20,000 spaces + "most"', `does not establish what changes the chances${' '.repeat(20000)}most`],
     ['tabs inside the lookbehind', `has not tested${'\t'.repeat(20000)}or established investigation priority`],
   ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text);
-    removeDriverAbsenceClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
+    const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });
 
 /**
@@ -858,7 +861,8 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     'Chances for every option are shown as ranges.',
     'The run does not show how often each option was supported.',
     // the producer's own opening (served verbatim on Wave B/B3): the producer owns its words
-    'This run doesn’t show how often each option reaches the goal’s target.',
+    'This run doesn’t yet show each option’s chance of reaching £20,000.',
+    'This run doesn’t yet show each option’s chance of meeting your goal.',
     // the gate's own no-target message (goal-chance-gate.ts)
     'The goal has no stated target, so no option has a chance of meeting one to show.',
   ])('MUST NOT FIRE (twin): %s', (text) => {
@@ -884,7 +888,7 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
   });
 
-  it.each([
+  timingIt.each([
     ['"withholds" + 20,000 spaces', `withholds${' '.repeat(20000)}x`],
     ['"no option" + 20,000 spaces', `no option${' '.repeat(20000)}x`],
     ['"chances" + 20,000 spaces', `chances${' '.repeat(20000)}x`],
@@ -899,21 +903,20 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     ['one 20,000-character word', 'x'.repeat(20000)],
     ['a 20,000-character word, then a coordinated tail', `has not tested ${'x'.repeat(20000)} or established investigation priority`],
   ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    ALL_WITHHELD_CLAIM.test(text);
-    removeAllWithheldClaims(text);
-    DRIVER_ABSENCE_CLAIM.test(text);
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
-  it.each([
+    const run = (text: string): void => { ALL_WITHHELD_CLAIM.test(text); removeAllWithheldClaims(text); DRIVER_ABSENCE_CLAIM.test(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
+  timingIt.each([
     ['the verb-object limb', (n: number) => 'prevents goal chances for '.repeat(n)],
     ['the passive limb', (n: number) => 'chances are withheld for '.repeat(n)],
-  // 4× the input, calibrated batches (scalingRatio): linear ≈ 4×, quadratic ≈ 16× (a 2× step flaked at 3.5× on CI).
-  ])('LINEAR TIME: 4× %s costs under 8× (quadratic would be 16×)', (_name, make) => {
-    const [small, large] = [make(1000), make(4000)];
+  ])('LINEAR TIME: 8× %s costs under 22× (quadratic would be 64×)', (_name, make) => {
+    const [small, large] = [make(1000), make(8000)];
     const run = (text: string): void => { ALL_WITHHELD_CLAIM.test(text); removeAllWithheldClaims(text); DRIVER_ABSENCE_CLAIM.test(text); };
     const m = scalingRatio(() => run(small), () => run(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 
@@ -958,15 +961,15 @@ describe('Wave B5, keys untouched: the modal "what would change the chances most
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  it.each([
+  timingIt.each([
     ['"what would" + 20,000 spaces', `doesn't establish what would${' '.repeat(20000)}x`],
     ['"what" + 20,000 spaces + modal', `doesn't establish what${' '.repeat(20000)}would change`],
   ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text);
-    removeDriverAbsenceClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
+    const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });
 
 /**
@@ -1025,17 +1028,17 @@ describe('Wave B6, keys untouched: "…or tipping point was established" and "no
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  it.each([
+  timingIt.each([
     ['"…assumption or" + 20,000 spaces', `no most-sensitive assumption or${' '.repeat(20000)}x`],
     ['"…assumption or" + one 20,000-character word', `no most-sensitive assumption or ${'x'.repeat(20000)}`],
     ['"no recorded" + 20,000 spaces', `no recorded${' '.repeat(20000)}x`],
     ['"no result establishes which" + 20,000 spaces', `no result establishes which${' '.repeat(20000)}x`],
   ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text);
-    removeDriverAbsenceClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
-  });
+    const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
+    const m = scalingRatio(() => run(shrink8(text)), () => run(text));
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });
 
 /**
@@ -1050,7 +1053,7 @@ const B7_CH1 = JSON.parse(fixture('waveB7-unseen1-7e3f8fb-challenge-turn001.json
 const B7_EX2 = JSON.parse(fixture('waveB7-unseen2-7e3f8fb-explain-turn003.json')) as Json;
 const B7_T1B = JSON.parse(fixture('waveB7-t1b-7e3f8fb-explain-turn003.json')) as Json;
 /**
- * Every egress class on `head` + n spaces + "x": the cost at 80,000 over the cost at 20,000 (scalingRatio, calibrated
+ * Every egress class on `head` + n spaces + "x": the cost at 20,000 over the cost at 2,500 (scalingRatio, calibrated
  * batches). Single-call 5k -> 20k samples read 8.18–10.24× on CI runners (7 Oct, #2765 and five other runs).
  */
 const egressCostRatio = (head: string): ReturnType<typeof scalingRatio> => {
@@ -1058,7 +1061,7 @@ const egressCostRatio = (head: string): ReturnType<typeof scalingRatio> => {
     DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
     removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
   };
-  const [small, large] = [20000, 80000].map((n) => `${head}${' '.repeat(n)}x`);
+  const [small, large] = [2500, 20000].map((n) => `${head}${' '.repeat(n)}x`);
   return scalingRatio(() => run(small), () => run(large));
 };
 
@@ -1118,18 +1121,19 @@ describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () 
     expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
   });
 
-  // 4× the whitespace (5,000 → 20,000), min of 5 timings: linear ≈ 4×, quadratic ≈ 16×. Never an absolute bar: a CI runner
-  // read 81 ms where the Mac read under 50 (#2736).
-  it.each([
+  // Calibrated batches at 2,500 → 20,000 spaces replace the absolute bar that read 81 ms on CI (#2736).
+  timingIt.each([
     ['"which change" + whitespace', "hasn't established which change"],
     ['"sensitivity and tipping points" + whitespace', 'sensitivity and tipping points'],
     ['"which assumption most affects the" + whitespace', 'which assumption most affects the'],
     ['"supplies no" + whitespace', 'supplies no'],
     ['a consequence + whitespace', "Values are Olumi's; sensitivity was not measured, so"],
-  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+  ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
     const m = egressCostRatio(head);
-    expect(m.ratio, m.detail).toBeLessThan(8);
-  });
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });
 
 /**
@@ -1187,13 +1191,15 @@ describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cu
     expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
   });
 
-  it.each([
+  timingIt.each([
     ['"which assumption matters most to the" + whitespace', 'which assumption matters most to the'],
     ['"does not establish a single most consequential" + whitespace', 'does not establish a single most consequential'],
-  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+  ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
     const m = egressCostRatio(head);
-    expect(m.ratio, m.detail).toBeLessThan(8);
-  });
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });
 
 /**
@@ -1236,12 +1242,14 @@ describe('Wave B8, keys untouched: "the biggest driver" (S2j, a superlative noun
     expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
   });
 
-  it.each([
+  timingIt.each([
     ['"does not establish the biggest" + whitespace', 'does not establish the biggest'],
     ['"the biggest driver" + whitespace (predicative)', 'the biggest driver'],
     ['"does not establish the main driver of" + whitespace (another-quantity guard)', 'does not establish the main driver of'],
-  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+  ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
     const m = egressCostRatio(head);
-    expect(m.ratio, m.detail).toBeLessThan(8);
-  });
+    process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
+  }, 30_000);
 });

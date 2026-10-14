@@ -49,7 +49,6 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_scenario: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_scenario: string, userId: string) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => structuredClone(storedGraph),
     loadGraphAndBriefText: async () => ({ graph: structuredClone(storedGraph), briefText: null }),
     readMostRecentPendingActions: async () => structuredClone(storedPendings),

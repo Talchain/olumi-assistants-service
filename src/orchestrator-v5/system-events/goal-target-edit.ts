@@ -54,6 +54,7 @@
 import type { OlumiResponse, SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { isChangeFrame } from '../agent-lane/limit-frame.js';
+import { statedGoalOperatorFor } from '../agent-lane/stated-goal-operator-context.js';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
@@ -224,6 +225,8 @@ export async function applyGoalTargetEdit(
     return refused('goal_is_a_change');
   }
 
+  // The verified Agent approval carries strictness in process; the public event retains its inclusive enum.
+  const statedOperator = statedGoalOperatorFor(payload.scenario_id, event.goal_node_id, payload.turn_id);
   // ── 4–7. the SAME proposal, validator, handler and re-merge — shared with the limit edit ──
   return applyConstraintEditThroughAddConstraint({
     payload,
@@ -233,6 +236,7 @@ export async function applyGoalTargetEdit(
     priorFacts,
     targetId: event.goal_node_id,
     constraintType: event.constraint_type,
+    ...(statedOperator !== undefined ? { statedConstraintOperator: statedOperator } : {}),
     rawValue: event.raw_value,
     unit: event.unit,
     // The CONTRACT's attestation, relayed through the handler's own side-band.
@@ -265,6 +269,7 @@ export async function applyConstraintEditThroughAddConstraint(params: {
   readonly rawValue: number;
   readonly unit?: string;
   readonly label?: string;
+  readonly confirmedConstraintSourceQuote?: string;
   readonly confirmedConstraintValueFrame?: HandlerInvocation['confirmedConstraintValueFrame'];
   /** A2 follow-up: a comparator the user STATED on this edit, typed (`limit-edit.ts`); absent keeps the row's own. */
   readonly statedConstraintOperator?: HandlerInvocation['statedConstraintOperator'];
@@ -276,7 +281,7 @@ export async function applyConstraintEditThroughAddConstraint(params: {
 }): Promise<GoalTargetEditResult> {
   const {
     payload, requestId, persistedGraph, graph, priorFacts, targetId, constraintType, rawValue, unit, label,
-    confirmedConstraintValueFrame, statedConstraintOperator, holdsGoalDirection, eventName, logBase,
+    confirmedConstraintSourceQuote, confirmedConstraintValueFrame, statedConstraintOperator, holdsGoalDirection, eventName, logBase,
   } = params;
   // ── 4. the SAME proposal the typed chip builds ───────────────────────────
   const built = buildTypedChipMutationProposal(
@@ -373,6 +378,7 @@ export async function applyConstraintEditThroughAddConstraint(params: {
     graphForTurn,
     // The caller's attestation of the row's frame, relayed through the
     // handler's own side-band (absent: the handler's own rules decide).
+    ...(confirmedConstraintSourceQuote !== undefined ? { confirmedConstraintSourceQuote } : {}),
     ...(confirmedConstraintValueFrame !== undefined ? { confirmedConstraintValueFrame } : {}),
     // A comparator the user stated on this edit (typed), relayed through the handler's side-band the same way; absent,
     // the handler keeps the row's own `operator_as_stated`.

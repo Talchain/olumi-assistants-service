@@ -53,7 +53,14 @@ const MONEY_WORDS = new Set(['revenue', 'recurring', 'a']);
 export function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null; mixed?: true } | null {
   if (typeof unit !== 'string') return null;
   const r = readCurrencyUnitWithQualifiers(unit);
-  if (r.kind !== 'currency' || r.currencyCode === undefined || (r.multiplier ?? 1) !== 1) return null;
+  // ⛔ DL (8 Oct, P02 77cb0774): the qualifier reader refuses a QUALIFIED denominator ("£ per Pro subscriber per month",
+  // "£ per paying subscriber per month"), so the card was vetoed while the Run said "hasn't been confirmed". The full
+  // reader's own currency reading (ONE unscaled currency) stands in; the segment checks below still
+  // bind every word, and `unitsCompose` still requires every denominator word in the count ("Pro" × "Basic subscribers").
+  const parts = r.kind === 'currency' ? null : readUnitParts(unit);
+  const code = r.kind === 'currency' ? ((r.multiplier ?? 1) === 1 ? r.currencyCode : undefined)
+    : parts?.kind === 'currency' && parts.scale === 1 ? parts.code ?? undefined : undefined;
+  if (code === undefined) return null;
   const ws = words(unit);
   const segments: string[][] = [[]];
   for (const w of ws) {
@@ -76,7 +83,7 @@ export function readMoney(unit: unknown, label: string): { code: string; period:
     if (!nouns.every((w) => /^[a-z]+$/.test(w) && !isCurrency(w) && !MONEY_WORDS.has(w))) return null;
     const period = periodOf([seg[seg.length - 1]!]);
     if (period === 'both' || period === null) return null;
-    return { code: r.currencyCode, period, per: nouns.map(singular), mixed: true };
+    return { code, period, per: nouns.map(singular), mixed: true };
   }
   const denominators = segments.slice(1).filter((s) => !s.every(isPeriod));
   if (denominators.length > 1) return null;
@@ -88,7 +95,7 @@ export function readMoney(unit: unknown, label: string): { code: string; period:
   const own = periodOf(ws);
   const period = own !== null ? own : periodOf(words(label));
   if (period === 'both') return null;
-  return { code: r.currencyCode, period, per: denominators.length === 1 ? denominators[0]!.map(singular) : null };
+  return { code, period, per: denominators.length === 1 ? denominators[0]!.map(singular) : null };
 }
 
 /**

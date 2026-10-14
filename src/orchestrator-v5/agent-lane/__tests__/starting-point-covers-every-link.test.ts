@@ -67,7 +67,7 @@ function fakeProduct() {
   return { d, posted, read: () => nodes };
 }
 
-const VALUES = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'five people, one lead' }];
+const VALUES = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'five people, one lead' }];
 const PARTIAL_LEVELS = [
   { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
   { option_label: 'Stage Hiring After Review', factor_label: 'Team size', value: 5, basis: 'no hires in stage one' },

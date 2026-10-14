@@ -34,20 +34,24 @@ import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, ty
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import type { CandidateModel } from './admit-model.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { readUnitParts, sameUnit } from './same-unit.js';
+import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
-import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { readCount } from './same-unit.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
+/** The qualifiers immediately beside a figure prevent recording it as an exact answer. */
+export function hasApproximateFigureQualifier(before: string, after: string): boolean {
+  return /\b(?:about|around|roughly|approximately|circa)\s*$/i.test(before)
+    || /^(?:[-\s]*ish\b|\s*or so\b)/i.test(after);
+}
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
 export function figureTheUserWroteSpan(value: number, unit: unknown, userText: string | null | undefined): { start: number; end: number } | null {
@@ -317,47 +321,6 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
   });
 }
 
-/**
- * ⛔ A LEVEL THE BRIEF STATES FOR A FACTOR IS THE USER'S, WHATEVER THE DRAFTER TAGGED IT (R3 #72 5896630173 (2); DL
- * 5896669522). Served `03b720e0` on `a20cfd6`: "We have 1,500 paying subscribers" was drafted as an ESTIMATE of "Pro plan
- * paying subscribers" (`baseline_known: false`, 1,500), so it was saved as Olumi's (`cee_inference`). The MRR goal's
- * product then had no two user-stated parts, so no card was offered and nothing was withheld, and the Run showed 6 goal
- * chances on a product-shaped goal.
- *
- * The mirror of `withdrawUnstatedBaselineStamps`, applied to the CANDIDATE before admission so every later reader (the
- * product mint, the card, the disclosure) sees one author. A factor's level is credited to the user (`baseline_known:
- * true`, `explicit`) only when the brief writes that figure FOR THAT FACTOR (`figureTheUserWroteFor`, the per-entity door
- * #2284/#2275 and the Olumi option mark trust). A figure the brief gives as a limit, the goal's target or a proposed
- * (non-status-quo) option's level is never today's level of anything, so it is never credited; the status quo's level
- * is today's. Anything unclear stays Olumi's.
- */
-export function creditStatedFactorLevels(candidate: CandidateModel, brief: string): CandidateModel {
-  const labels = [
-    candidate.goal?.metric, ...(candidate.factors ?? []).map((f) => f.label),
-    ...(candidate.outcomes ?? []).map((o) => o.label), ...(candidate.risks ?? []).map((r) => r.label),
-  ].filter((l): l is string => typeof l === 'string' && l.trim() !== '');
-  const notToday = [
-    ...(candidate.constraints ?? []).map((c) => c.value),
-    candidate.goal?.value,
-    // ⛔ PR Review CR on #2311 @ ff5e7480: a STATUS QUO sets today's level by definition ("keep it at £49" beside "from
-    // £49"), so only another option's level is a proposed one, never today's. Recognised as the Olumi mark does.
-    ...(candidate.options ?? [])
-      .filter((o) => o.is_status_quo !== true && !labelMatchesBaseline(o.label ?? ''))
-      .flatMap((o) => (o.interventions ?? []).map((i) => i.value)),
-  ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
-  let credited = false;
-  const factors = (candidate.factors ?? []).map((f) => {
-    if (f.baseline_known === true && f.provenance === 'explicit') return f;
-    const v = f.baseline_value;
-    if (typeof v !== 'number' || !Number.isFinite(v) || notToday.some((w) => same(w, v))) return f;
-    const others = labels.filter((l) => canonicalLabel(l) !== canonicalLabel(f.label));
-    if (!figureTheUserWroteFor(v, f.unit, brief, { target: [f.label], others })) return f;
-    credited = true;
-    return { ...f, baseline_known: true, provenance: 'explicit' };
-  });
-  return credited ? { ...candidate, factors } : candidate;
-}
-
 /** What `holdStatedGoalAttributes` held on the goal node; each `false` is unattested and left absent. */
 export interface HeldGoalAttributes {
   readonly target: boolean;
@@ -394,6 +357,9 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const attestation = attestHorizon(brief, goal);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
+  if ((node as { threshold_source?: unknown }).threshold_source === 'definitional') {
+    return { nodes: [...nodes], held: { target: false, direction: true, horizon: false }, horizon: attestation };
+  }
   const raw = node.goal_threshold_raw;
   // R1 S4-core: a CHANGE target is stored as the contract's figure (a fraction r for `change_rel`, a signed c for
   // `change_abs`) and the brief writes it as the user said it: "cut it by 15%" is 15 in "%", "by 2 points" is 2 in the
@@ -477,6 +443,8 @@ export function goalLevelTheUserWrote(
  * factors' nouns ("Hire Two Developers" vs "Developers hired"), so they would make the target's own word ambiguous.
  */
 export interface EntityScope {
+  /** The asked identity figure must be exact, not an approximation such as "300-ish". Other readers keep their rule. */
+  readonly exactFigure?: true;
   readonly target: readonly string[];
   readonly others: readonly string[];
   /**
@@ -512,6 +480,8 @@ export interface EntityScope {
   readonly strict?: true;
   /** A short answer may use a live question elsewhere; this door requires the figure's entity in this clause. */
   readonly requireNamed?: true;
+  /** Typed, located amounts supplied only by the current-level quote validator. Other doors retain their scanner. */
+  readonly writtenAmounts?: readonly (StatedAmount | ReturnType<typeof countsInWords>[number])[];
   /**
    * ⭐ A4 (CODEX CEE BUDDY 5919834707, AIQ 5919953251): read ONLY the written amount that starts at this index — one span,
    * never "the same figure anywhere". Opt-in, passed only by `writtenRangeFor`; every other door reads as before.
@@ -641,6 +611,19 @@ export function sentenceNamesOtherQuantity(sentence: string, _unit: unknown, sco
   });
 }
 
+/** Locate a complete declared unit frame through the shared reader, never through entity-label words. */
+function boundUnitEnd(text: string, amount: { index: number; matchedText: string; kind: string }, unit: unknown): number | null {
+  const declared = readUnitParts(unit);
+  if (declared === null || JSON.stringify(statedTailParts(text, amount)) !== JSON.stringify(declared)) return null;
+  const start = amount.index + amount.matchedText.length;
+  if (JSON.stringify(statedTailParts(text.slice(0, start), amount)) === JSON.stringify(declared)) return start;
+  for (const word of text.slice(start).matchAll(/[\p{L}\p{N}]+/gu)) {
+    const end = start + word.index! + word[0].length;
+    if (JSON.stringify(statedTailParts(text.slice(0, end), amount)) === JSON.stringify(declared)) return end;
+  }
+  return null;
+}
+
 export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const family = unitPhraseFamily(unit);
@@ -658,7 +641,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
   const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null =>
     quantityMentionOf(w, unitWords, decisiveTarget, decisiveOther);
   const strict = scope.strict === true;
-  const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
+  const written = scope.writtenAmounts ?? [...findStatedAmounts(userText), ...countsInWords(userText)];
   const severalFigures = written.length >= 2;
   const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;
@@ -667,15 +650,21 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
+    if (scope.exactFigure === true && hasApproximateFigureQualifier(before, after)) return false;
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const endAt = after.search(/[.!?;,:\n\u2013\u2014]/);
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
     const left: string[] = [];
     const right: string[] = [];
+    const frameEnd = strict ? boundUnitEnd(userText, a, unit) : null;
+    let frameWords = 0;
     for (const m of userText.slice(clauseStart, clauseEnd).matchAll(/[\p{L}\p{N}]+/gu)) {
       const at = clauseStart + (m.index ?? 0);
       if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
-      else if (at >= amountEnd) right.push(m[0].toLowerCase());
+      else if (at >= amountEnd) {
+        right.push(m[0].toLowerCase());
+        if (frameEnd !== null && at + m[0].length <= frameEnd) frameWords += 1;
+      }
     }
     /**
      * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
@@ -687,7 +676,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
      * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
      * "secured £0" is the goal's, never "Angel funding secured"'s). Anything else stays nobody's: under-claim.
      */
-    const clauseWords = [...left, ...right];
+    const clauseWords = [...left, ...right.slice(frameWords)];
     const inClause = (ws: readonly string[]): boolean => ws.some((w) => w.length >= 3 && clauseWords.some((c) => sameWord(c, w)));
     const labelWords = (labels: readonly string[]): string[][] => labels.map((l) => [...new Set(wordsOf(l))]);
     const targetLabelWords = labelWords(scope.target);
@@ -727,7 +716,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const skipped = rate ?? purpose;
     const skippedWords = skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length;
     // STRICT: a rate names its OWNER — only the rate's own word is passed over ("per senior engineer" is about seniors).
-    const afterRate = right.slice(strict && rate !== null ? skippedWords - 1 : skippedWords);
+    const afterRate = right.slice(frameWords > 0 ? frameWords : strict && rate !== null ? skippedWords - 1 : skippedWords);
     // ⛔ STRICT: a figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT
     // item, never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k and juniors £65k" read
     // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the
@@ -804,7 +793,7 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
  * fractions), for `figureTheUserWroteFor` ONLY: it then binds clause by clause exactly as its digits would. Served
  * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
-function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
+export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
     const v = parseCardinalAmount(m[0]);
     return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
@@ -915,15 +904,21 @@ const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:plea
  * The one reading both `bandTheUserWrote` and `comparatorTheUserWrote` apply, so the two cannot drift.
  */
 type Reading = { readonly said: 'asked' } | { readonly said: 'denied' } | { readonly said: 'affirmed'; readonly clauseBefore: string };
+const sentenceBeforeAt = (turnText: string, index: number): string => {
+  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
+  return turnText.slice(start, index);
+};
+/** The same clause boundary for affirmation and for a comparator's own written figure. */
+const clauseBeforeAt = (turnText: string, index: number): string =>
+  sentenceBeforeAt(turnText, index).replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
 function readingAt(turnText: string, index: number): Reading {
   // The sentence the words sit in, and the part of their clause before them (a clause restarts after , ; : a dash, or "but").
-  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
   const endAt = turnText.slice(index).search(/[.!?\n]/);
   const sentenceEnd = endAt < 0 ? '' : turnText.charAt(index + endAt);
-  const sentenceBefore = turnText.slice(start, index);
+  const sentenceBefore = sentenceBeforeAt(turnText, index);
   if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) return { said: 'asked' };
   // "anything but strong" denies it: read as a negator, never as a clause break.
-  const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+  const clauseBefore = clauseBeforeAt(turnText, index);
   if (NEGATOR.test(clauseBefore)) return { said: 'denied' };
   return { said: 'affirmed', clauseBefore };
 }
@@ -999,31 +994,105 @@ export function holdsABandWord(words: unknown): boolean {
 }
 
 /**
- * The same rule for a goal's success target: WHICH WAY it binds \u2014 at least, or at most \u2014 is recorded as the user's
+ * The same rule for a goal's success target: its comparator, including strictness, is recorded as the user's
  * only when the user SAID it, in THIS turn's own typed words (`user_turn_text`). The goal-target writer stamps the
  * target as the user's (`threshold_source: 'user'`), so a direction the Agent picked and the user only approved would
  * read as the user's own.
  *
- * - The phrases, whole words only: "at least", "minimum", "no less than", "more than", "over", "above" \u2192 at least;
- *   "at most", "no more than", "under", "below", "less than", "maximum", "cap" \u2192 at most. "no less than" and
+ * - The phrases, whole words only: "at least", "minimum", "no less than" \u2192 at least; "more than", "over", "above"
+ *   \u2192 above; "at most", "no more than", "maximum", "cap" \u2192 at most; "under", "below", "less than" \u2192 below. "no less than" and
  *   "no more than" are read whole, never as a negated "less than" / "more than".
+ * - A strict phrase completed with "or equal to", or a figure followed by "or less / more" (and their direction
+ *   synonyms), is inclusive. Read the whole completion before its strict fragment; a suffix needs a stated figure.
+ *   Beside a prefix comparator, the suffix must belong to that comparator's own figure and clause, never a repeat of
+ *   the same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
  * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
  *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
- * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" reads once as
- *   at least; "under" beside "over" reads as both, and the Agent asks.
+ * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" holds two
+ *   different comparators; "under" beside "over" reads as both, and the Agent asks.
  */
-const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
-const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
+const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|(?:less|fewer|lower|below|under|more|higher|above|over)(?:\s+than)?\s+or\s+equal\s+to|or\s+(?:less|fewer|lower|below|under|more|higher|above|over)|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
+const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'maximum', 'cap']);
+const INCLUSIVE_CEILING_WORDS: ReadonlySet<string> = new Set(['less', 'fewer', 'lower', 'below', 'under']);
+const BELOW_WORDS: ReadonlySet<string> = new Set(['less than', 'under', 'below']);
+const ABOVE_WORDS: ReadonlySet<string> = new Set(['more than', 'over', 'above']);
+type StatedComparator = 'at_least' | 'at_most' | 'above' | 'below';
 
-/** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
-export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
+/** The comparator as the user said it, including strictness; null when not said, asked, denied, or contradictory. */
+export function comparatorTheUserWrote(turnText: string | null | undefined): StatedComparator | null {
   if (typeof turnText !== 'string') return null;
-  const said = new Set<'at_least' | 'at_most'>();
-  for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
-    const reading = readingAt(turnText, m.index);
+  const said = new Set<StatedComparator>();
+  const figures = findStatedAmounts(turnText);
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const prefixes = comparators.filter(({ match, words }) => !words.startsWith('or ')
+    && readingAt(turnText, match.index).said === 'affirmed');
+  const prefixFigureIds = new Set(prefixes.flatMap(({ match }) => {
+    const figure = figures.find((amount) => amount.index >= match.index + match[0].length
+      && amount.index - clauseBeforeAt(turnText, amount.index).length <= match.index);
+    return figure === undefined ? [] : [figure.index];
+  }));
+  for (const { match: m, words } of comparators) {
+    const suffix = words.startsWith('or ');
+    const figure = suffix ? figures.find((amount) => {
+      const end = amount.index + amount.matchedText.length;
+      return end <= m.index && /^\s*$/.test(turnText.slice(end, m.index));
+    }) : undefined;
+    if (suffix && (figure === undefined || (prefixes.length > 0 && !prefixFigureIds.has(figure.index)))) continue;
+    const reading = readingAt(turnText, figure?.index ?? m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;
-    said.add(AT_MOST_WORDS.has(m[1]!.toLowerCase().replace(/\s+/g, ' ')) ? 'at_most' : 'at_least');
+    const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+    said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+      : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+      : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
+  }
+  return said.size === 1 ? [...said][0]! : null;
+}
+
+/**
+ * ⭐ THE COMPARATOR THE USER WROTE FOR ONE FIGURE (Batch B, DL 12 Oct; Paul's marketing L20: "a conversion rate of over
+ * 15% and secure 20 new customers within the first 3 months"). `comparatorTheUserWrote` reads the whole turn, so a turn
+ * stating two targets gave its one comparator ("over") to BOTH figures: 20 new customers read as "above 20", a strict
+ * bound the user never said. Here a comparator counts for `value` only when it is bound to a figure of that value: a
+ * prefix in the figure's own clause with NO other stated figure between them ("over 15%"; "at least £60k"; "a minimum
+ * of 20"), or a suffix straight after it ("20 or more"). Asked words say nothing; denied words, or two directions for the
+ * same figure, give null. No binding gives null: the caller asks, never guesses.
+ */
+export function comparatorTheUserWroteFor(turnText: string | null | undefined, value: number): StatedComparator | null {
+  if (typeof turnText !== 'string' || !Number.isFinite(value)) return null;
+  const figures = findStatedAmounts(turnText);
+  const own = figures.filter((amount) => amount.magnitude === value);
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const boundTo = (figure: StatedAmount, m: RegExpExecArray, suffix: boolean): boolean => {
+    const figureEnd = figure.index + figure.matchedText.length;
+    const comparatorEnd = m.index + m[0].length;
+    return suffix
+      ? m.index >= figureEnd && /^\s*$/.test(turnText.slice(figureEnd, m.index))
+      : comparatorEnd <= figure.index && figure.index - clauseBeforeAt(turnText, figure.index).length <= m.index
+        && !figures.some((other) => other !== figure && other.index >= comparatorEnd && other.index < figure.index);
+  };
+  // As the whole-turn reader: beside a prefix, a suffix counts only on that prefix's own figure, never on a repeat of the
+  // same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
+  const prefixed = own.filter((figure) => comparators.some(({ match, words }) => !words.startsWith('or ')
+    && boundTo(figure, match, false) && readingAt(turnText, match.index).said === 'affirmed'));
+  const said = new Set<StatedComparator>();
+  for (const figure of own) {
+    for (const { match: m, words } of comparators) {
+      const suffix = words.startsWith('or ');
+      if (!boundTo(figure, m, suffix)) continue;
+      if (suffix && prefixed.length > 0 && !prefixed.includes(figure)) continue;
+      const reading = readingAt(turnText, suffix ? figure.index : m.index);
+      if (reading.said === 'asked') continue;
+      if (reading.said === 'denied') return null;
+      const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+      said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+        : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+        : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
+    }
   }
   return said.size === 1 ? [...said][0]! : null;
 }

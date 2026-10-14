@@ -35,6 +35,7 @@ import { build } from '../../src/server.js';
 import { log as telemetryLog } from '../../src/utils/telemetry.js';
 
 let app: FastifyInstance;
+let scenarioHandlerCalls = 0;
 
 type Captured = { obj: unknown; msg: string | undefined };
 
@@ -90,14 +91,21 @@ async function read5xxCount(): Promise<number> {
 
 beforeAll(async () => {
   app = await build();
-  app.get('/__test/client-abort', async () => {
+  app.get('/__test/client-abort', { config: { scenarioId: 'none' } }, async () => {
     const err = new Error('premature close') as NodeJS.ErrnoException;
     err.code = 'ERR_STREAM_PREMATURE_CLOSE';
     throw err;
   });
-  app.get('/__test/genuine-error', async () => {
+  app.get('/__test/genuine-error', { config: { scenarioId: 'none' } }, async () => {
     throw new Error('synthetic genuine failure');
   });
+  app.post('/__test/scenario-client-abort', { config: { scenarioId: {
+    from: 'body', key: 'scenario_id', readOwner: async () => {
+      const err = new Error('premature close') as NodeJS.ErrnoException;
+      err.code = 'ERR_STREAM_PREMATURE_CLOSE';
+      throw err;
+    },
+  } } }, async () => { scenarioHandlerCalls += 1; return { admitted: true }; });
   await app.ready();
 });
 
@@ -134,6 +142,18 @@ describe('central error handler — client-abort classification (1.16i)', () => 
       (c) => (c.obj as { event?: string })?.event === 'client_aborted',
     );
     expect(abortWarns).toHaveLength(1);
+  });
+
+  it('an abort from the ownership read reaches the central 499 classifier', async () => {
+    const before = await read5xxCount();
+    const { errorCalls, warnCalls, telemetryErrorCalls } = captureAppLogs();
+    const res = await app.inject({ method: 'POST', url: '/__test/scenario-client-abort', payload: { scenario_id: '11111111-1111-4111-8111-111111111111' } });
+    expect(res.statusCode).toBe(499);
+    expect(await read5xxCount()).toBe(before);
+    expect(errorCalls).toEqual([]);
+    expect(telemetryErrorCalls.filter(c => c.msg === 'Internal server error occurred')).toEqual([]);
+    expect(warnCalls.filter(c => (c.obj as { event?: string })?.event === 'client_aborted')).toHaveLength(1);
+    expect(scenarioHandlerCalls).toBe(0);
   });
 
   it('a genuine thrown error still behaves exactly as today (500 + error.v1 INTERNAL + both error-class lines + 5xx increment)', async () => {

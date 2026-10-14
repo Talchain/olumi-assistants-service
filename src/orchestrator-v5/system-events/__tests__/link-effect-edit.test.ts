@@ -58,6 +58,17 @@ function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = stor
 const edgeOf = (g: unknown) => (g as Rec).edges.find((e: Rec) => e.from === 'price' && e.to === 'subs') as Rec;
 
 describe('link effect writer — a stated effect sizes the link exactly, as the user\'s', () => {
+  it('#2848: Olumi\'s `basis` line goes with Olumi\'s size when the user states their own', () => {
+    const g = storedGraph();
+    const e0 = edgeOf(g);
+    e0.provenance = { ...e0.provenance, magnitude: 'olumi_estimate', basis: 'a higher price loses price-sensitive buyers' };
+    const r = applyLinkEffectEdit(params({}, g));
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    expect(edgeOf(r.mutatedGraph).provenance).not.toHaveProperty('basis');
+    expect(edgeOf(r.mutatedGraph).provenance.magnitude).toBe('user_stated');
+  });
+
   it('RED: writes β from the construction converter, magnitude user_stated, source user_specified, and the natural effect', () => {
     const r = applyLinkEffectEdit(params());
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
@@ -384,5 +395,24 @@ describe('link effect writer — a confounder (bidirected) edge is never the lin
     const out = (r.mutatedGraph as Rec).edges.filter((e: Rec) => e.from === 'price' && e.to === 'subs');
     expect(out.find((e: Rec) => e.edge_type === 'bidirected')).toEqual(before);
     expect(out.find((e: Rec) => e.edge_type !== 'bidirected').provenance.magnitude).toBe('user_stated');
+  });
+});
+
+// P48 dry walk (8 Oct): the receipt's BEFORE side says who sized the link, so no reader voices a placeholder's prior as a
+// band ("Strong → Moderate"). Bound by the link's ends; control = the same link Olumi had sized.
+describe('P48: the receipt before side names a placeholder', () => {
+  const beforeOf = (r: ReturnType<typeof applyLinkEffectEdit>): Rec => {
+    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
+    const b = (r.handlerFacts[0] as Rec).result.before as Rec;
+    expect([b.from, b.to]).toEqual(['price', 'subs']);
+    return b;
+  };
+  it('price → subs (olumi_placeholder) carries sizing "placeholder"', () => {
+    expect(beforeOf(applyLinkEffectEdit(params())).sizing).toBe('placeholder');
+  });
+  it('CONTROL: the same link sized by Olumi carries no sizing key', () => {
+    const g = storedGraph();
+    const e = g.edges[0] as Rec; e.provenance = { ...e.provenance, magnitude: 'olumi_estimate' }; delete e.defaulted;
+    expect(beforeOf(applyLinkEffectEdit(params({}, g)))).not.toHaveProperty('sizing');
   });
 });

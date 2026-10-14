@@ -1,0 +1,94 @@
+{
+  "source_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+  "source_state": "uncommitted FIX3 working tree",
+  "working_source_sha256": {
+    "src/orchestrator-v5/routing/stated-event-risk.ts": "e11f36d89804ca5a2f4a7264d6434f7b3417fc37c829a536763945cc303fb599",
+    "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e"
+  },
+  "test_policy": {
+    "gate": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\"",
+    "max_files_per_run": 2,
+    "max_workers": 1,
+    "file_parallelism": false,
+    "stdin": "/dev/null",
+    "vite_config_loader": "runner",
+    "vitest_cache": false
+  },
+  "red": {
+    "passed": 52,
+    "failed": 52,
+    "active": 104
+  },
+  "green_total": 438,
+  "runs": [
+    {
+      "run": "green-final",
+      "passed": 384,
+      "failed": 0,
+      "skipped": 0,
+      "raw_json": "/private/tmp/impact-pct-fix3-green-final.json",
+      "raw_json_sha256": "8e2c01ec8ce9061d8c169c3df7a271eeaa695a2ad810df920a28ae4b0b1e1f58",
+      "files": [
+        {
+          "path": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+          "passed": 345
+        },
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+          "passed": 39
+        }
+      ]
+    },
+    {
+      "run": "neighbours-1",
+      "passed": 47,
+      "failed": 0,
+      "skipped": 0,
+      "raw_json": "/private/tmp/impact-pct-fix3-neighbours-1.json",
+      "raw_json_sha256": "ebf46f3a9fa423823e8922fc387fec17f3fb063f8059a69a6138ef4dbebed372",
+      "files": [
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts",
+          "passed": 22
+        },
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/held-proposal-user-in-control-seam.test.ts",
+          "passed": 25
+        }
+      ]
+    },
+    {
+      "run": "neighbours-2",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "raw_json": "/private/tmp/impact-pct-fix3-neighbours-2.json",
+      "raw_json_sha256": "c1c3f03229d31e28b8841849449634abf44d6ade17e37d02adcb528e42c9a4c6",
+      "files": [
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/event-risk-card-copy.test.ts",
+          "passed": 4
+        },
+        {
+          "path": "src/orchestrator-v5/agent-lane/__tests__/event-risk-zero-treatment.test.ts",
+          "passed": 3
+        }
+      ]
+    }
+  ],
+  "committed_corpus_rows": 76,
+  "all_committed_corpus_rows_passed": true,
+  "eslint": {
+    "exit_code": 0,
+    "log": "/private/tmp/impact-pct-fix3-eslint.log"
+  },
+  "typecheck": {
+    "command": "node_modules/.bin/tsc -p tsconfig.build.json --noEmit --incremental false",
+    "exit_code": 0,
+    "log": "/private/tmp/impact-pct-fix3-typecheck.log"
+  },
+  "diff_check": {
+    "exit_code": 0
+  },
+  "independent_source_review": "APPROVE after deterministic scaffold scanner; read-only, no code/tests executed by reviewer"
+}

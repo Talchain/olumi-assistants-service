@@ -3,6 +3,7 @@ import type { SuggestedAction } from '../compose/types.js';
 import { isPendingActionExpired, type PendingAction } from '../session/pending-action.js';
 import { isDurableAnswerOffer, stillValidOffers } from '../../routes/agent-v1-turn.js';
 import { typedApprovalOf } from './approval-chips.js';
+import { liveOfferId } from './answer-offers-envelope.js';
 import { RUN_EXPLANATION_PREFIX, runExplanationMatches, type RunExplanationRead } from './run-explanation.js';
 
 /** Original offers only, revalidated by the turn's existing authority on this read's exact state. */
@@ -26,7 +27,7 @@ export function answerOffersForReload(stored: AnswerOffersRead, scenarioId: stri
     if (proposalId !== undefined && !isPendingActionExpired(pending, at)) outstanding.add(proposalId);
   }
   if (outstanding.size > 0) return [];
-  const offered = stored.suggested_actions.filter(isDurableAnswerOffer);
+  const offered = stored.suggested_actions.map(action => ({ ...action, id: liveOfferId(action.id) })).filter(isDurableAnswerOffer);
   const validIds = new Set(stillValidOffers(offered, {
     outstandingProposalIds: outstanding, analysisReady: now.analysisReady, analysisState: now.analysisState, modelExists: now.modelExists,
   }).map(action => action.id));

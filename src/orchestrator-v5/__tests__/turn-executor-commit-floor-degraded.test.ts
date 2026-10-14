@@ -100,7 +100,6 @@ vi.mock('../session/index.js', () => ({
     readMostRecentPendingActions: async () => pendingActionsForRead,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => {
       if (rereadMode === 'throw') {
         throw new Error('loadGraph failed (injected): strict reread degraded');

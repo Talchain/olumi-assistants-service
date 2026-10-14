@@ -79,7 +79,8 @@ const BANDS = [
   { from_label: 'Pro plan price', to_label: 'Pro MRR', strength: 'very strong' as const },
   { from_label: 'Pro paying subscribers', to_label: 'Pro MRR', strength: 'very strong' as const },
   { from_label: 'Pro MRR', to_label: 'MRR', strength: 'very strong' as const },
-];
+// ⛔ INPUT CHANGE (#3002, known-origin transport): each stub link declares its origin, as a prompt-following AI gives it: user when it quotes the user; olumi, with Olumi's own basis, when it does not.
+].map((l) => ({ origin: typeof (l as { from_words?: unknown }).from_words === 'string' ? 'user' as const : 'olumi' as const, ...(typeof (l as { from_words?: unknown }).from_words === 'string' ? {} : { basis: 'Olumi’s own estimate from the model' }), ...l }));
 
 
 const RUN_AT = '2026-09-28T17:00:00.000Z';
@@ -140,8 +141,14 @@ describe('⛔ R3-9 × R12: a link set leaves out the links a declared identity d
     const left = p.left_out_definitional as string[];
     expect(left).toHaveLength(2);
     for (const s of left) expect(s).toContain('Pro MRR');
-    expect(String(p.public_label)).not.toContain('"Pro plan price" → "Pro MRR"');
+    // ⛔ EXPECTATION CHANGED (#3002, DL: the card names every omitted link; old: the link is absent from the whole card → new: it
+    // is never OFFERED, and the host names it as not included, by its labels, on the card and in the receipt).
+    // (packet 2b19ae59: the same reason in the AIE's "Left out of this change set" frame.)
+    const [offered, ...omitted] = String(p.public_label).split('. Left out of this change set: ');
+    expect(offered).not.toContain('"Pro plan price" → "Pro MRR"');
+    expect(omitted).toEqual(['"Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR", because a calculation the model declares defines them. Their current relationships are kept.']);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(String(out.follow_up)).toContain('Left out of this change set: "Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR", because a calculation the model declares defines them. Their current relationships are kept.');
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(doorCalls()).toBe(1);
     expect(rows.size, 'ONE commit').toBe(1);

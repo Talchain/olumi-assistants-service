@@ -52,47 +52,28 @@
  * asserts both directions on the same corpus in the same run.
  */
 import {
-  OBSERVED_STATE_SOURCE_LITERALS,
-  type KnownObservedStateSourceLiteral,
-} from '@talchain/schemas';
-
-import { linkSizing } from '../magnitude/link-sizing.js';
+  classifyValueSource,
+  edgeStrengthProvenance,
+  edgeReviewedByUser,
+  DECLARED_VALUE_SOURCE_STAMPS,
+  settingClassOf,
+  valueClassOf,
+  type StructureProvenance,
+} from '../provenance/provenance-of.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
+
+// ⭐ ONE PROVENANCE AUTHORITY (Recovery Batch C, DL 12 Oct): the vocabulary, every stamp table, `classifyValueSource`,
+// `edgeStrengthProvenance` and `edgeReviewedByUser` moved verbatim to `cee/provenance/provenance-of.ts`; this module keeps
+// the obligation rules over their answers and re-exports them for its importers. A value's class and a setting's class are
+// now PROJECTIONS of `provenanceOf` (`valueClassOf`, `settingClassOf`), so readiness agrees with every other reader.
+export {
+  classifyValueSource, edgeStrengthProvenance, edgeReviewedByUser, DECLARED_VALUE_SOURCE_STAMPS, settingClassOf, valueClassOf, type StructureProvenance,
+};
 
 // ============================================================================
 // The vocabulary
 // ============================================================================
-
-/**
- * Who authored the structure a readiness issue is raised over.
- *
- * `unattributed` is a DISTINCT value on purpose. Collapsing "we know the system
- * made this" and "nobody stamped it" into one bucket is what makes an obligation
- * rule unauditable: the probe could no longer show which graphs are
- * unclassifiable, and a producer that stops stamping would look like a producer
- * that stamped `ai_drafted`.
- *
- * ⭐ `user_ratified` is the FIFTH, added 20 Sep 2026 for the same reason one
- * level up: *"Olumi estimated it and the user endorsed it"* is neither
- * authorship nor a machine's own guess, and collapsing it into `user_stated`
- * (which is what this union did) let a single click satisfy a threshold the
- * product's own copy promises requires SETTING a value. See
- * {@link earnsAuthorshipCredit} for the ruling, and {@link reflectsAHumanAct}
- * for what ratification DOES earn.
- *
- * ⛔ THE COUNT IS NOT WRITTEN HERE ANY MORE. `STRUCTURE_PROVENANCE_VALUES` below
- * is the derivation; a number in a docblock is a hand-maintained mirror, and
- * this one said "FOURTH" until the fifth member arrived.
- */
-export type StructureProvenance =
-  | 'user_stated'
-  | 'user_ratified'
-  | 'ai_drafted'
-  | 'system_repaired'
-  | 'unattributed';
-
-/** Whether a gap may be put to the user as a demand, or only as an offer. */
 export type ObligationClass = 'required' | 'offered';
 
 /**
@@ -321,162 +302,6 @@ export function isObligationClass(value: unknown): value is ObligationClass {
   return typeof value === 'string' && (OBLIGATION_CLASS_VALUES as readonly string[]).includes(value);
 }
 
-// ============================================================================
-// Classifying ONE value-provenance stamp
-// ============================================================================
-
-/**
- * The complete shared-contract vocabulary for `observed_state.source`, mapped.
- *
- * Exhaustive by TYPE: `Record<KnownObservedStateSourceLiteral, …>` means the
- * 0.41.0 re-vendor that adds a thirteenth literal breaks the build here instead
- * of silently classifying it. That is the whole point — this is the list a human
- * would otherwise have to remember to sync.
- *
- * `explicit` and `inferred` are in this vocabulary because the estate's writers
- * stamp `ExtractionType` members into `source` as well as into `extractionType`;
- * they are classified the same way in both places (see {@link EXTRACTION_TYPE}).
- */
-const OBSERVED_STATE_SOURCE: Readonly<
-  Record<KnownObservedStateSourceLiteral, StructureProvenance>
-> = {
-  // The user speaking — directly, or through their own brief. A brief is the
-  // user's own words, so a value extracted from it is user-stated, not inferred.
-  brief_extraction: 'user_stated',
-  explicit: 'user_stated',
-  user: 'user_stated',
-  user_override: 'user_stated',
-  user_edited: 'user_stated',
-  user_calibration: 'user_stated',
-  // ── RATIFICATION, NOT AUTHORSHIP (ruled 20 Sep 2026) ───────────────────
-  // Both of these classified as `user_stated` until that ruling, and neither
-  // carried a written justification — note the asymmetry with `brief_extraction`
-  // at the top of this table, which does. They were swept in with the `user_*` family,
-  // not ruled. See {@link earnsAuthorshipCredit} for the full ground.
-  //
-  // `user_confirmed` is the UI's "confirm as is": an OLUMI estimate the user
-  // endorsed. The number is still ours. The product's own sentence promises the
-  // leader claim stays withheld "until you have SET at least one of them", and a
-  // user who only confirmed has set nothing.
-  user_confirmed: 'user_ratified',
-  // `user_assumption` is "mark as assumption": a value the user INVENTED rather
-  // than one they know. The same reasoning read from the other end — an admitted
-  // guess is not evidence of domain knowledge, and `decision-review/
-  // value-source-extraction-type.ts` has always sampled it WIDE for that reason.
-  user_assumption: 'user_ratified',
-  // Elicited FROM the user through a panel, and verified against CEE's own
-  // collab store before it is stamped — the user supplied it.
-  panel_elicited: 'user_stated',
-  // CEE's own inference. A hypothesis, however good.
-  cee_inference: 'ai_drafted',
-  inferred: 'ai_drafted',
-  // The deterministic repair authored this.
-  cee_repair: 'system_repaired',
-};
-
-/**
- * `InterventionV3.source` (`schemas/cee-v3.ts:336`) and the analysis-ready
- * option shape (`schemas/analysis-ready.ts:40`) share a narrower three-member
- * vocabulary. Kept as its own exhaustive table rather than folded into the one
- * above, because the two enums are separately declared and may drift — and a
- * single merged table would hide which one gained a member.
- */
-type InterventionSourceLiteral = 'brief_extraction' | 'cee_hypothesis' | 'user_specified';
-
-const INTERVENTION_SOURCE: Readonly<Record<InterventionSourceLiteral, StructureProvenance>> = {
-  brief_extraction: 'user_stated',
-  user_specified: 'user_stated',
-  cee_hypothesis: 'ai_drafted',
-};
-
-/**
- * `EdgeProvenanceV3.source` (`schemas/cee-v3.ts:221`) adds `domain_knowledge`:
- * the model supplying something from general knowledge. That is the model
- * speaking, not the user.
- */
-type EdgeProvenanceSourceLiteral = InterventionSourceLiteral | 'domain_knowledge';
-
-const EDGE_PROVENANCE_SOURCE: Readonly<
-  Record<EdgeProvenanceSourceLiteral, StructureProvenance>
-> = {
-  ...INTERVENTION_SOURCE,
-  domain_knowledge: 'ai_drafted',
-};
-
-/**
- * `ExtractionType` (`schemas/graph.ts`) — HOW a value was extracted, which is a
- * different question from WHO supplied it, but the two agree on this axis:
- * `explicit`/`observed` are the user's own figures; `inferred`/`range` are the
- * model's.
- */
-type ExtractionTypeLiteral = 'explicit' | 'inferred' | 'range' | 'observed';
-
-const EXTRACTION_TYPE: Readonly<Record<ExtractionTypeLiteral, StructureProvenance>> = {
-  explicit: 'user_stated',
-  observed: 'user_stated',
-  inferred: 'ai_drafted',
-  range: 'ai_drafted',
-};
-
-/**
- * Classify one stamp against every declared vocabulary, most specific first.
- * Returns `unattributed` for an absent or unrecognised stamp — never a guess.
- */
-export function classifyValueSource(stamp: unknown): StructureProvenance {
-  if (typeof stamp !== 'string') return 'unattributed';
-  if (stamp in OBSERVED_STATE_SOURCE) {
-    return OBSERVED_STATE_SOURCE[stamp as KnownObservedStateSourceLiteral];
-  }
-  if (stamp in EDGE_PROVENANCE_SOURCE) {
-    return EDGE_PROVENANCE_SOURCE[stamp as EdgeProvenanceSourceLiteral];
-  }
-  if (stamp in EXTRACTION_TYPE) {
-    return EXTRACTION_TYPE[stamp as ExtractionTypeLiteral];
-  }
-  return 'unattributed';
-}
-
-/**
- * Strength authorship follows the MEAN (Science FD, 5 Oct 2026). A marked user
- * natural effect earns credit even when spread or existence was projected.
- * An Olumi magnitude never earns credit from the link's structural source.
- * Unmarked links retain R11's source/defaulted rule exactly.
- */
-export function edgeStrengthProvenance(edge: unknown): StructureProvenance {
-  const record = asRecord(edge);
-  const stamp = asRecord(record?.provenance);
-  const sizing = linkSizing(edge);
-  if (sizing === 'user' && (stamp?.source === 'user_specified'
-    || stamp?.reading === 'agent_proposed_user_confirmed'
-    || asRecord(stamp?.natural_effect) !== null)) return 'user_stated';
-  if (stamp?.magnitude === 'user_stated' || sizing === 'placeholder'
-    || sizing === 'olumi_estimate' || sizing === 'olumi_accepted') return 'ai_drafted';
-  const provenance = classifyValueSource(stamp?.source);
-  if (record?.defaulted === true && earnsAuthorshipCredit(provenance)) return 'ai_drafted';
-  return provenance;
-}
-
-/**
- * ⭐ R11 — WHETHER THE USER HAS REVIEWED A LINK'S STRENGTH (a confirm: `provenance.reviewed_by_user`, written by
- * `adjust-edge-strength.ts`). Review is not authorship (`edgeStrengthProvenance` still gives no credit), but it IS the
- * user's settled view of that figure: a consumer that would re-derive the size, ask about it again, or flag it as an
- * unseen default treats a reviewed link as settled. One predicate, so those consumers cannot disagree.
- */
-export function edgeReviewedByUser(edge: unknown): boolean {
-  const review = asRecord(asRecord(asRecord(edge)?.provenance)?.reviewed_by_user);
-  return review !== null && review !== undefined && review.intent === 'confirm';
-}
-
-/**
- * The declared vocabularies, exported so a test can assert the tables cover them
- * and a probe can report which stamps a corpus actually carries. Derived from the
- * contract constant, never re-typed.
- */
-export const DECLARED_VALUE_SOURCE_STAMPS: readonly string[] = [
-  ...OBSERVED_STATE_SOURCE_LITERALS,
-  ...(Object.keys(EDGE_PROVENANCE_SOURCE) as readonly string[]),
-  ...(Object.keys(EXTRACTION_TYPE) as readonly string[]),
-];
 
 // ============================================================================
 // Reading a graph
@@ -546,10 +371,10 @@ export function structureProvenance(element: unknown, graph?: unknown): Structur
   const data = asRecord(node.data);
   const observed = asRecord(node.observed_state) ?? asRecord(data?.observed_state);
   if (observed) {
-    const fromSource = classifyValueSource(observed.source);
-    if (fromSource !== 'unattributed') return fromSource;
-    const fromExtraction = classifyValueSource(observed.extractionType);
-    if (fromExtraction !== 'unattributed') return fromExtraction;
+    // ⭐ ONE PROVENANCE AUTHORITY: the value's class is `provenanceOf`'s answer (the extraction type decides for the stamps
+    // that defer to it; an unestablished origin is `unattributed`). An unverified user-material receipt stops here.
+    const fromValue = valueClassOf(observed);
+    if (fromValue !== 'unattributed' || observed.user_material_unverified === true) return fromValue;
   }
 
   const interventions = asRecord(node.interventions) ?? asRecord(data?.interventions);
@@ -559,8 +384,8 @@ export function structureProvenance(element: unknown, graph?: unknown): Structur
     // working on this option, and the per-pair question is answered by
     // `structureProvenanceOfEffect` below, which is what the obligation rule
     // actually calls.
-    const classes = Object.values(interventions).map((entry) =>
-      classifyValueSource(asRecord(entry)?.source),
+    const classes = Object.entries(interventions).map(([target, entry]) =>
+      settingClassOf(entry, graph !== undefined ? nodeById(graph, target) : undefined),
     );
     // The STRONGEST stated effect wins here — the opposite question to
     // `structureProvenanceOfEffect`'s, and named apart from it on purpose.
@@ -640,7 +465,7 @@ export function structureProvenanceOfEffect(
     const interventions = asRecord(option.interventions) ?? asRecord(data?.interventions);
     const entry = interventions ? asRecord(interventions[factorId]) : null;
     if (entry) {
-      const stamped = classifyValueSource(entry.source);
+      const stamped = settingClassOf(entry, factor);
       if (stamped !== 'unattributed') return stamped;
     }
   }

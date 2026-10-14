@@ -59,7 +59,7 @@ import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 // than restated so the two cannot answer "is this factor's recorded scale
 // usable?" differently — see the derivation beside its call site below.
 import { findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
-import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
+import { preserveSiblingQuantities } from '../../agent-lane/level-batch-frame.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
 import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
@@ -867,6 +867,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       // `delete`, for the reason given for `elicited_from` above. The NODE-LEVEL
       // spelling is withdrawn below, beside `provenance`.
       delete (merged as { extractionType?: unknown }).extractionType;
+      // #2848: `frame_source: 'olumi_convention'` says OLUMI chose this cap. A write that changes the cap makes it
+      // someone else's, so the marker (and the factor-detail disclosure it drives) goes with the old cap.
+      if (after.cap !== undefined && after.cap !== priorObserved.cap) {
+        delete (merged as { frame_source?: unknown }).frame_source;
+      }
       /**
        * ⛔⛔ AND THE FALSIFIED SCALE DECLARATION — see the long note above the merge.
        *
@@ -941,19 +946,6 @@ export function createSetFactorValueHandler(): HandlerFn {
       // the node-level spelling to decide. See the block above.
       delete (node as { extractionType?: unknown }).extractionType;
 
-      // 1.16 item A2 — preserve option-intervention absolutes across the
-      // cap change. Runs inside the mutation clone so the rewritten
-      // option NODES flow through the same nodes-stamping persistence
-      // merges as the factor mutation itself.
-      if (capChanged) {
-        rescaledInterventionCount = renormaliseOptionInterventionsForCapChange(
-          clone,
-          targetId,
-          before.cap,
-          after.cap,
-        );
-      }
-
       // ⭐ A LEVEL THAT ARRIVES AFTER CONSTRUCTION SIZES OLUMI'S OWN LINKS ON IT (C, DL #70 5849216942). Admission sized
       // them once, when this factor held no level, so they kept the ±0.5 default. Served (`f-20260926T190952Z`): churn
       // got 5% from the approved starting point, both links stayed ±0.5, and every option was withheld as out of
@@ -968,6 +960,15 @@ export function createSetFactorValueHandler(): HandlerFn {
 
       return { before, after };
     });
+
+    const preserved = preserveSiblingQuantities(rawGraph, result.mutatedGraph, []);
+    if (preserved.kind === 'refused') {
+      throw new D1HandlerError('GRAPH_INVARIANT_VIOLATED', preserved.reason, {
+        details: { reason: preserved.reason }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+    Object.assign(result.mutatedGraph, preserved.graph);
+    rescaledInterventionCount = preserved.reencoded.length;
 
     // ⚠ COMPARED ON THE FOLDED KEY, NOT STRICTLY. `noop` is a THIRD reader of the
     // "are these the same unit?" question that `unitComparisonKey` owns; leaving it

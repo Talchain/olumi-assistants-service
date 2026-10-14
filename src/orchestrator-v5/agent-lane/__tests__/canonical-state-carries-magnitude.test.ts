@@ -97,7 +97,7 @@ describe('get_canonical_state — the Agent can see WHO said it', () => {
   it('carries value provenance, distinct from entity provenance', async () => {
     const [price] = await entitiesFor([PRICE]);
     // Who put THIS NUMBER here …
-    expect(price.value_provenance).toEqual({ source: 'user_stated', extraction_type: 'explicit' });
+    expect(price.value_provenance).toEqual({ source: 'user_stated', extraction_type: 'explicit', whose: 'brief' }); // `whose`: the authority's owner
     // … versus where the ENTITY came from.
     expect(price.provenance).toEqual({ source: 'user_specified' });
   });

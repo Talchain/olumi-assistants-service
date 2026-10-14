@@ -141,6 +141,35 @@ describe('the user\'s correction of today\'s level on a CHANGE goal is prepared,
     expect(String(r.note)).toContain('the Run cannot use your £50,000 / month until one of them changes');
   });
 
+  // #2851 buddy r2 P1 (DL ruling 2): Olumi's part figures give no product arithmetic; the user's do (row above).
+  // Re-derivation must FAIL to reach `productStillGives` (buddy's repro): £50,000 / £10 = 5,000 workload > its 900 cap.
+  it('#2851: when Olumi\'s part cannot follow, the approval says no "those figures still give" arithmetic; CONTROL: the user\'s parts do', async () => {
+    const run = async (source: string) => {
+      const g0 = clone(SERVED);
+      g0.nodes.push(
+        { id: 'workload', kind: 'factor', label: 'Workload', observed_state: { value: 0.5, raw_value: 450, cap: 900, source } } as Node,
+        { id: 'unit_cost', kind: 'factor', label: 'Unit cost', observed_state: { value: 0.05, raw_value: 10, cap: 200, source: 'brief_extraction' } } as Node,
+      );
+      goalOf(g0).nonlinear_identity = { operation: 'product', factor_ids: ['workload', 'unit_cost'], stated_in_brief: false };
+      const r = await setup(g0).call(TOOL, ARGS) as ToolResult & { public_label?: string };
+      return String(r.public_label);
+    };
+    expect(await run('cee_inference')).not.toMatch(/still give/);
+    expect(await run('brief_extraction')).toMatch(/those figures still give £4,500/);
+  });
+  it('#2851: when Olumi\'s part CAN follow, the re-derived figure stays labelled as Olumi\'s estimate (legitimate, DL)', async () => {
+    const g0 = clone(SERVED);
+    g0.nodes.push(
+      { id: 'workload', kind: 'factor', label: 'Workload', observed_state: { value: 0.5, raw_value: 450, cap: 900, source: 'cee_inference' } } as Node,
+      { id: 'unit_cost', kind: 'factor', label: 'Unit cost', observed_state: { value: 0.5, raw_value: 100, cap: 200, source: 'brief_extraction' } } as Node,
+    );
+    goalOf(g0).nonlinear_identity = { operation: 'product', factor_ids: ['workload', 'unit_cost'], stated_in_brief: false };
+    const s = setup(g0);
+    const r = await s.call(TOOL, ARGS) as ToolResult & { public_label?: string; note?: string };
+    expect(String(r.public_label)).not.toMatch(/still give/);
+    expect(String(r.public_label)).toMatch(/it stays Olumi's estimate, not your figure/);
+  });
+
   it('the frame holds the TARGET too: an increase goal (up 20%) is framed on its target, as construction does (60,000 × 1.25)', async () => {
     const g0 = clone(SERVED);
     Object.assign(goalOf(g0), { goal_threshold_raw: 0.2, goal_threshold: 0.2, goal_direction: '>=' });

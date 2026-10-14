@@ -13,7 +13,7 @@ import {
 export { resolveTaskRouting };
 
 export async function adminModelRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/admin/models/routing', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/models/routing', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const snapshot = resolveModelRoutingSnapshot();

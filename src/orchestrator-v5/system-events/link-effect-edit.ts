@@ -42,6 +42,7 @@ import { centreRangeOfQuote } from '../agent-lane/stated-by-user.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
+import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -245,6 +246,19 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
     target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}),
       ...(targetIsLevel && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
   };
+}
+
+/** The existing writer's conversion frames, including its mediator and adopted-% views. Read-only. */
+export function linkEffectConversionFrames(graph: unknown, from: string, to: string): { source: number | undefined; target: number | undefined } | null {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || linkEffectEndUnits(graph, from, to) === null) return null;
+  const nodes = graph.nodes.filter(isRec);
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const source = view.get(from); const target = view.get(to);
+  if (source === undefined || target === undefined) return null;
+  const readings = mediatorReadings(graph);
+  const sourceNode = withAdoptedPercentFrame(nodes.find(n => n.id === from), withMediatorReading(source, readings.get(from), 'source'));
+  const targetNode = withAdoptedPercentFrame(nodes.find(n => n.id === to), withMediatorReading(target, readings.get(to), 'target'));
+  return { source: resolveMagnitudeFrame(sourceNode), target: resolveMagnitudeFrame(targetNode) };
 }
 
 /** An end the user stated by its node's own LABEL, read as that node's count unit (shown on the card for approval). */
@@ -554,12 +568,15 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.problem !== undefined && !fitsByRefit) return refuse(sizing.problem);
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
-  const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
+  // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side names who sized it, so no reader turns a
+  // placeholder's prior into a band ("Strong → Moderate" on a link nobody sized). Additive: \`before\` is a record.
+  const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance },
+    ...(isPlaceholderLink(edge) ? { sizing: 'placeholder' as const } : {}) };
   // Olumi's why, its old size, its clamp marker and its "holds by definition" claim describe OLUMI's figure, never the
   // user's (Review Desk; Codex buddy r1): `reasoning` would be read as the stated reason for a user-set link, a stale
   // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition. MC P0: a user size
   // clears `mean_projected` (Olumi's projected-mean record) together with the mean/magnitude change, so the hash moves.
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, mean_projected: _projectedMean, ...keptProvenance } = provenance;
+  const { reasoning: _olumisWhy, basis: _olumisBasis, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, mean_projected: _projectedMean, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
@@ -590,7 +607,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (gaugeEdge !== undefined) {
     // The gauge: sized, never the user's (MIXED), never a placeholder or a projected mean, never Olumi's old size or why.
     const kept = isRec(gaugeEdge.provenance) ? gaugeEdge.provenance : {};
-    const { reasoning: _gaugeWhy, natural_effect: _gaugeSize, clamped_from: _gaugeClamp, definitional: _gaugeDefinition,
+    const { reasoning: _gaugeWhy, basis: _gaugeBasis, natural_effect: _gaugeSize, clamped_from: _gaugeClamp, definitional: _gaugeDefinition,
       mean_projected: _gaugeProjected, ...keptGauge } = kept;
     gaugeEdge.strength = { ...(isRec(gaugeEdge.strength) ? gaugeEdge.strength : {}), mean: gaugeSign };
     gaugeEdge.effect_direction = gaugeSign < 0 ? 'negative' : 'positive';

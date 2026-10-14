@@ -5,7 +5,11 @@
 import {
   appendInferenceWarning, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_WITHHELD_CODES,
+  GOAL_FIGURES_SHARE_APPROXIMATION, readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
+import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
+import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
+import { shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -24,7 +28,13 @@ export interface GoalChanceRange {
   readonly high_pct: number;
   readonly low_rounding: GoalChanceDisplayRounding;
   readonly high_rounding: GoalChanceDisplayRounding;
-  readonly kind: 'link_strength' | 'link_existence';
+  readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
+  /** S2a endpoints hold the user's original time/pace at each end, not a link. */
+  readonly basis?: 'stated_time';
+  readonly stated_estimate?: { readonly low: number; readonly high: number; readonly unit: string };
+  readonly quantity?: 'months_to_finish' | 'share_per_month';
+  readonly low?: number;
+  readonly high?: number;
   readonly from: string;
   readonly to: string;
   readonly among: 'all' | 'unsized_links';
@@ -66,7 +76,7 @@ export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: s
   const otherOptions = new Set(nodes.filter(n => n.kind === 'option' && n.id !== optionId).map(n => n.id));
   const ownGraph = { ...graph, nodes: nodes.filter(n => !otherOptions.has(n.id)),
     edges: Array.isArray(graph.edges) ? graph.edges.filter(e => isRec(e) && !otherOptions.has(e.from) && !otherOptions.has(e.to)) : [] };
-  const verdict = targetTestabilityOf(ownGraph, Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined);
+  const verdict = targetTestabilityOf(ownGraph, Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined, inputs.goalId);
   if (verdict.kind !== 'not_testable' || verdict.failures.length === 0 || !verdict.failures.every(f =>
     (f.precondition === 'P5' || f.precondition === 'P6') && (f.code === 'goal_path_placeholder' || f.code === 'goal_path_unsized'))) return null;
   const links = [...inputs.goalPaths.filter(p => p.option_id === optionId).flatMap(p => p.links),
@@ -126,4 +136,67 @@ export function withGoalChanceRange<E>(envelope: E, graph: unknown, inputs: Goal
     message: "Some options' chances are shown as a range: a link on the way to your goal isn't sized in the model yet.",
     option_ids: entries.map(([id]) => id), range_by_option: Object.fromEntries(entries), ...goalChanceHorizonOf(envelope),
   });
+}
+
+/** S2a after all existing withholds: never resurrect a figure another gate removed.
+ * Same GOAL_CHANCE_RANGE carrier and percentage endpoints; basis distinguishes
+ * the exact stated-time bounds from ISL's unsized-link conditional groups.
+ */
+export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  const share = shareByDateGoalForChanceOf(graph);
+  if (!isRec(envelope)) return envelope;
+  const failedInput = shareChanceInputFailure(graph);
+  if (failedInput !== null) return withholdOptionGoalFigures(envelope,
+    new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
+      const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : [];
+    })), { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', message: failedInput },
+    { keepOutcome: true, keepOrdering: true });
+  if (share === null) return isEventShareForecast(graph)
+    ? withholdOptionGoalFigures(envelope, new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
+      const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : []; })), { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning',
+      message: 'Not shown. This model does not yet hold a supported forecast of finishing by the deadline.' }, { keepOutcome: true, keepOrdering: true })
+    : envelope;
+  if (share.goal.id !== goalId) return envelope;
+  const missing = missingEventCapacityOptionIds(graph);
+  const capacityScopedEnvelope = missing.length > 0 ? withholdOptionGoalFigures(envelope, new Set(missing), {
+    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: missing, message: EVENT_START_GAP,
+  }, { keepOutcome: true, keepOrdering: true }) : envelope;
+  const unsupported = unresolvedEventOptionIds(graph).filter(id => !missing.includes(id));
+  const scopedEnvelope = unsupported.length > 0 ? withholdOptionGoalFigures(capacityScopedEnvelope, new Set(unsupported), {
+    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: unsupported,
+    message: "This option's effect on the deadline is not yet modelled. Say what it changes.",
+  }, { keepOutcome: true, keepOrdering: true }) : capacityScopedEnvelope;
+  let inputScopedEnvelope = scopedEnvelope;
+  for (const row of readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? []) {
+    const id = row.option_id ?? row.id;
+    if (typeof id !== 'string') continue;
+    const failure = shareChanceInputFailure(graph, id);
+    if (failure !== null) inputScopedEnvelope = withholdOptionGoalFigures(inputScopedEnvelope, new Set([id]), {
+      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: failure,
+    }, { keepOutcome: true, keepOrdering: true });
+  }
+  // ⭐ AIE 6125204695 (b1), 12 Oct: the served chance is the engine's own approximate point, licensed per option with its
+  // attribution (`goal-chance-licence.ts`). The uniform law's slow-to-fast ranges, exact figures and exact-extreme overrides
+  // (`gate`, `exactChance`, `normalChance`) are mathematical references for the later exact-law work, never this Run's result,
+  // so no range is made here. One withhold remains, with its actual reason and E5's next step: an option whose parts CEE cannot
+  // state, because it holds more ranged hiring starts than Olumi uses (so its attribution cannot be said).
+  const records = readOptionResultSources(inputScopedEnvelope).find(s => s.length > 0) ?? [];
+  const warnings = Array.isArray(inputScopedEnvelope.inference_warnings) ? inputScopedEnvelope.inference_warnings.filter(isRec) : [];
+  const nodes = (graph as Rec & { nodes: Rec[] }).nodes;
+  let out = inputScopedEnvelope;
+  for (const r of records) {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    const option = id === undefined ? undefined : nodes.find(n => n.id === id && n.kind === 'option');
+    if (id === undefined || option === undefined || sharePartsForOption(graph, id) !== null) continue;
+    // Existing gates have precedence: an option already withheld keeps its own reason.
+    if (warnings.some(w => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+      && (!Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id)))) continue;
+    const label = typeof option.label === 'string' && option.label.trim() !== '' && !/[\r\n]/.test(option.label) ? option.label.trim() : 'this option';
+    out = withholdOptionGoalFigures(out, new Set([id]), {
+      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id],
+      // AIE 6128697025, verbatim (it counts RANGED starts; fixed starts stay as context, never deleted).
+      message: `Not shown. This forecast can use at most two uncertain hiring starts for ‘${label}’ at once. Say which two it should model.`,
+    }, { keepOutcome: true, keepOrdering: true });
+  }
+  return out;
 }

@@ -25,7 +25,7 @@ export default async function route(app: FastifyInstance) {
   );
   const FEATURE_VERSION = "explain-policy-1.0.0";
 
-  app.post("/assist/v1/explain-policy", async (req, reply) => {
+  app.post("/assist/v1/explain-policy", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

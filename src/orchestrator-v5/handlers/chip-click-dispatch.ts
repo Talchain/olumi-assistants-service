@@ -803,6 +803,7 @@ function deriveChipClickFreshness(
     {
       ...chronology,
       currentGraph: cachedSnapshot?.rawPersistedGraph,
+      currentScenarioRevision: cachedSnapshot?.rawPersistedGraph != null ? cachedSnapshot.evaluatedScenarioRevision : undefined,
       analysisInvalidatedAt,
       ...(priorFactsReadOk === undefined ? {} : { priorFactsReadOk }),
     },
@@ -1686,6 +1687,9 @@ export async function dispatchChipClickRunAnalysis(
         // twice in this dispatcher (:1662, :1765) — this is the third reader of
         // the same fact, not a new channel.
         runGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+        // Same reasoning as the routed path (turn-executor.ts, `currentGraph`): the Run's own fresh snapshot is the freshest
+        // existing read; a later edit is marked stale at read time. No new read.
+        currentGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
         ...(timingsEnabled ? { callTelemetrySink } : {}),
         // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
         // disclosure threading as the turn-executor decision-review block —
@@ -2329,6 +2333,10 @@ export async function dispatchChipClickRunAnalysis(
         llm_calls_used: outcome.llm_calls_used,
         duration_ms: Date.now() - startedAt,
         handler_facts: enrichedFacts,
+        ...(outcome.__run_evaluated_revision !== undefined && enrichedFacts.some(f =>
+          f.fact_type === 'run_analysis' && f.result.run_id === outcome.__run_evaluated_revision?.run_id)
+          ? { run_evaluated_revisions: { [outcome.__run_evaluated_revision.run_id]: outcome.__run_evaluated_revision.revision } }
+          : {}),
         // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
         coaching_state: context.coaching_state,
         // V5 Conversation Context Reliability: persist the user's turn text;

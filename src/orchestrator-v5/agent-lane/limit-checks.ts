@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 /**
  * ⛔ THE AGENT SAYS HOW EACH LIMIT WAS CHECKED, FROM THE RUN'S OWN PER-LIMIT VERDICTS (MG #72 5864956818).
  *
@@ -78,6 +79,7 @@ function guessWords(
   f: PlaceholderPartsFinding,
   labelOf: (id: unknown) => string | null,
   target: string | null,
+  unverifiedLevel = false,
 ): { why: string; ask: string } | null {
   if (f.arm === 'link' && f.link !== undefined) {
     const [x, y] = [labelOf(f.link.from), labelOf(f.link.to)];
@@ -85,6 +87,7 @@ function guessWords(
       : { why: `it depends on how strongly ${q(x)} moves ${q(y)}, which Olumi estimated.`, ask: `How much does ${q(x)} change ${q(y)}?` };
   }
   if (target === null) return null;
+  if (f.arm === 'level' && unverifiedLevel) return { why: 'Not confirmed from your brief', ask: `What is "${target}" today? Not confirmed from your brief` };
   if (f.arm === 'level') return { why: `it starts from Olumi’s estimate of today’s ${q(target)}.`, ask: `What is ${q(target)} today?` };
   if (f.arm === 'point') {
     return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
@@ -106,6 +109,7 @@ function withheldOptionsFor(
   graph: unknown,
   targetId: string | null,
   identityEvaluated?: ReadonlySet<string>,
+  leftOutOptionIds?: ReadonlySet<string>,
 ): WithheldOptions {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
@@ -123,9 +127,13 @@ function withheldOptionsFor(
       identityEvaluated === undefined ? undefined : [...identityEvaluated].map(node_id => ({ node_id, evaluated: true })));
     const label = labelOf(optionIdOf(o));
     if (finding === null || label === null) continue;
+    const words = finding.reason === OLUMI_GUESS_LIMIT_REASON ? guessWords(finding, labelOf, target, isUnverifiedUserMaterial(recs.find(n => n.id === targetId)?.observed_state)) : null;
+    // Q6: filtering per-option words must not change the row's own sentence or revive its superseded level ask.
+    if (words !== null) out.hasGuesses = true;
+    const id = optionIdOf(o);
+    if (id !== undefined && leftOutOptionIds?.has(id)) continue;
     out.labels.push(label);
     if (finding.reason === OLUMI_GUESS_LIMIT_REASON) {
-      const words = guessWords(finding, labelOf, target);
       if (words === null) continue;
       out.guesses.set(words.why, [...(out.guesses.get(words.why) ?? []), label]);
       out.guessAsk ??= words.ask;
@@ -145,15 +153,17 @@ interface WithheldOptions {
   asks: string[];
   /** B6: the options withheld for resting on Olumi's guess, by their arm's words (AIQ 5916187873 (a)). */
   guesses: Map<string, string[]>;
+  /** The original row's B6 arm, before filtering options recorded as left out of this Run. */
+  hasGuesses: boolean;
   /** B6's ONE question: the first withheld option's arm's ask. */
   guessAsk?: string;
 }
-const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map() });
+const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map(), hasGuesses: false });
 
 /** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
-function withheldOptionsOrNone(graph: unknown, targetId: string | null, identityEvaluated?: ReadonlySet<string>): ReturnType<typeof withheldOptionsFor> {
+function withheldOptionsOrNone(graph: unknown, targetId: string | null, identityEvaluated?: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>): ReturnType<typeof withheldOptionsFor> {
   try {
-    return withheldOptionsFor(graph, targetId, identityEvaluated);
+    return withheldOptionsFor(graph, targetId, identityEvaluated, leftOutOptionIds);
   } catch (err) {
     log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
     return NONE_WITHHELD();
@@ -208,7 +218,7 @@ export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
 }
 
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
-export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>): LimitCheck[] | undefined {
+export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>): LimitCheck[] | undefined {
   if (verdicts === null || verdicts === undefined) return undefined;
   const limits = readRatifiedConstraints(graph);
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
@@ -231,10 +241,10 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // unscored row checked no option, so it names none (its own sentence already says it could not be checked)...
     const perOptionRow = row.state !== 'unscored' || row.reason === PLACEHOLDER_PARTS_REASON
       || row.reason === PARTS_IDENTITY_UNMODELLED_REASON || row.reason === OLUMI_GUESS_LIMIT_REASON;
-    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated) : NONE_WITHHELD();
+    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated, leftOutOptionIds) : NONE_WITHHELD();
     // ...unless B6 withheld one of its options (AIQ 5916187873): then every option was withheld PER OPTION, for its own
     // reason, and the row says each one — never one option's reason as if it were every option's.
-    if (row.state === 'unscored' && perOption.guesses.size === 0) {
+    if (row.state === 'unscored' && !perOption.hasGuesses) {
       perOption.labels.length = 0;
       perOption.byReason.clear();
       perOption.asks.length = 0;
@@ -247,8 +257,9 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // B6 supersedes B5's "checked against Olumi's estimates" (AIQ 5916187873): with an option withheld for Olumi's guess,
     // the row no longer claims a check against those estimates, and Olumi's level ask (which says it would be) yields to
     // the ONE question of the first withheld option's arm.
-    const b6 = perOption.guesses.size > 0;
-    const rowSays = !b6 ? [sentenceFor(label, row.state, row.reason)]
+    const b6 = perOption.hasGuesses;
+    const levelUnverified = Array.isArray(nodes) && isUnverifiedUserMaterial((nodes.find(n => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === limit?.node_id) as { observed_state?: unknown } | undefined)?.observed_state);
+    const rowSays = levelUnverified && row.state === 'estimate_only' ? ['Not confirmed from your brief'] : !b6 ? [sentenceFor(label, row.state, row.reason)]
       : row.state === 'unscored' ? [`${q(label)} isn’t shown for any option.`]
         : row.state === 'estimate_only' && row.reason === 'level_olumi_estimate' ? [] : [sentenceFor(label, row.state, row.reason)];
     const say = [...rowSays, ...why, ...guessed].join(' ');

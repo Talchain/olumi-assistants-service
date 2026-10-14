@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * O-1 — ONE batch-mutation lifecycle for compound value updates.
  *
@@ -38,7 +39,7 @@ import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 
 const appendCalls: Array<{ graph?: unknown }> = [];
 vi.mock('../session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     append: async (write: { graph?: unknown }) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };
@@ -51,7 +52,7 @@ vi.mock('../session/index.js', () => ({
       entries_invalidated: [],
     }),
     loadGraph: async () => null,
-  }),
+  })),
   resetSessionStoreForTests: () => {},
 }));
 

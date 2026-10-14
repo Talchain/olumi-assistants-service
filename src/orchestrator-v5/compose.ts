@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
 /**
  * Compose a successful OlumiResponse for A2 turn classes.
  *
@@ -1817,10 +1818,12 @@ function buildLifecycleBlocksFromPrior(
     return [];
   }
 
-  const priorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
+  const selectedPriorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
     requestId: lifecycle.requestId,
     scenarioId: lifecycle.scenarioId,
   });
+  const priorFact = selectedPriorFact === null ? null : { ...selectedPriorFact,
+    result: withReadTimeHorizonGate(selectedPriorFact.result, persistedGraph, selectedPriorFact.result.enrichment) };
   if (priorFact === null) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'rebuild_failed',
@@ -1877,6 +1880,7 @@ function buildLifecycleBlocksFromPrior(
   if (selectCanonicalAnalysisState({
     priorFacts,
     currentGraphHash: freshness.current_graph_hash,
+    currentScenarioRevision: undefined,
   }).contradictions.includes('fact_status_success_but_degraded_newer')) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'skipped_shadowed',

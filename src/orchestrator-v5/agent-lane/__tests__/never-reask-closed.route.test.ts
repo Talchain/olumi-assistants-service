@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ NEVER RE-ASK WHAT IS ALREADY ASKED, through the REAL `/agent/v1/turn` route (DL 0df0e1, 6 Oct; Acceptance G1b d4).
  *
@@ -9,6 +10,8 @@
  * the reason is still said. The Run endpoint returns the SERVED d4 Run block; the model is scripted (0 LLM).
  * CONTROLS: the first Run (nothing asked yet) still asks; another question in the history does not silence this one.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
+import { asSent } from './helpers/as-sent.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -58,7 +61,10 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
-      modelBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
+      modelBodies.push(body);
       const output = modelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -71,10 +77,10 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
       response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: D4.graph_hash, blocks: D4.blocks,
       analysis_ready: D4.analysis_ready, analysis_state: D4.analysis_state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: D4.draft_graph, graph_hash: D4.graph_hash, analysis_state: D4.analysis_state, analysis_ready: D4.analysis_ready,
       analysis_result: D4.blocks[0],
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -101,10 +107,14 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
       ...(first._agent?.session_id !== undefined ? { agent_session_id: first._agent.session_id } : {}),
       message: 'Explain this result', source: 'chip', chip: { id: chip!.id } } });
     expect(r.statusCode, r.body).toBe(200);
-    const sent = JSON.stringify(modelBodies);
-    const m = /\\"say\\":\\"((?:[^"\\]|\\\\.)*?)\\"/.exec(sent);
-    expect(m, 'the interpreter was handed goal_chance.say').not.toBeNull();
-    return plain(JSON.parse(`"${JSON.parse(`"${m![1]}"`)}"`) as string);
+    // Bound to goal_chance.say by path: the Explain packet also carries other scoped `say` lines (run_explanation).
+    const packet = modelBodies.flatMap((b) => (b['input'] as { content?: { text?: string }[] }[]) ?? [])
+      .flatMap((i) => Array.isArray(i.content) ? i.content : []).map((c) => c.text ?? '')
+      .find((t) => t.includes('"canonical_state"'));
+    const say = packet === undefined ? undefined : (JSON.parse(packet.slice(packet.indexOf('{'))) as
+      { canonical_state?: { analysis?: { goal_chance?: { say?: unknown } } } }).canonical_state?.analysis?.goal_chance?.say;
+    expect(typeof say, 'the interpreter was handed goal_chance.say').toBe('string');
+    return plain(say as string);
   };
   /** An Agent turn that runs (`run_analysis` scripted), then replies without the withheld sentence. */
   const agentRun = async (): Promise<string> => {
@@ -117,6 +127,24 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     expect(r.statusCode, r.body).toBe(200);
     return plain((r.json() as { assistant_text: string }).assistant_text);
   };
+
+  /**
+   * SAY-SHOWN (Codex #3018 r1): served d4's `say` asks, so the reply's composer makes its question the ask and its reason
+   * detail, and never-re-ask drops the question once asked: it is never shown as one line, so it is never promised.
+   */
+  it.each([false, true])('SAY-SHOWN: the d4 Run\'s `say` asks, so the AI is never told it is shown (asked before: %s)', async (asked) => {
+    history = asked ? [answerRow(1, D4.first_run_reply)] : [];
+    const text = await agentRun();
+    const run = modelBodies.flatMap((raw) => ((asSent(raw) as { input?: { type?: string; output?: string }[] }).input ?? []))
+      .filter((item) => item.type === 'function_call_output').map((item) => JSON.parse(String(item.output)) as Record<string, any>)
+      .find((out) => out.ran === true && out.goal_chance !== undefined);
+    expect(plain(run?.goal_chance.say ?? ''), 'PRECONDITION: the SENT Run carries the served d4 line, question and all')
+      .toBe(plain(`${REASON} ${QUESTION}`));
+    expect(run!.goal_chance).not.toHaveProperty('say_shown');
+    // Today's never-re-ask reply is unchanged: the reason is said; the question only until it was asked.
+    expect(text).toContain(plain(REASON));
+    expect(text.includes(QUESTION)).toBe(!asked);
+  });
 
   it('fixture control: the served first Run reply carries the reason AND the question', () => {
     expect(plain(D4.first_run_reply)).toContain(plain(REASON));
@@ -148,6 +176,24 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     const after = await explainSaySent();
     expect(after).toContain(plain(REASON));
     expect(after).not.toContain(QUESTION);
+  });
+
+  it('⭐ Explain: the scoped Run section carries no already-asked question either (canonical_state, not history); CONTROL: before', async () => {
+    const stateSent = (): string => {
+      const input = modelBodies.flatMap((b) => (b['input'] as { content?: { text?: string }[] }[]) ?? []);
+      const packet = input.flatMap((i) => Array.isArray(i.content) ? i.content : []).map((c) => c.text ?? '')
+        .find((t) => t.includes('"canonical_state"'));
+      expect(packet, 'Explain packet present').toBeDefined();
+      return JSON.stringify((JSON.parse(packet!.slice(packet!.indexOf('{'))) as { canonical_state: unknown }).canonical_state);
+    };
+    history = [];
+    await explainSaySent();
+    expect(stateSent(), 'CONTROL: before it was asked, the state carries the question').toContain(QUESTION);
+    history = [answerRow(1, D4.first_run_reply)];
+    await explainSaySent();
+    const after = stateSent();
+    expect(plain(after), 'the reason (the finding) is still handed over').toContain(plain(REASON));
+    expect(after, 'no copy of the asked question anywhere in the Run state (goal_chance, run_explanation section)').not.toContain(QUESTION);
   });
 
   it('a lost-response retry of the Run chip says what the live turn said (its own row is not "asked before")', async () => {

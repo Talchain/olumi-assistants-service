@@ -260,7 +260,6 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
       readFactsFor: async () => [],
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
-      storeDraftGraph: async () => undefined,
       loadGraph: async () => graphWithConstraints as unknown,
       loadGraphAndBriefText: async () => ({
         graph: graphWithConstraints as unknown,
@@ -292,7 +291,6 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
       readFactsFor: async () => [],
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
       invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
-      storeDraftGraph: async () => undefined,
       loadGraph: async () => graphWithoutConstraints as unknown,
       loadGraphAndBriefText: async () => ({
         graph: graphWithoutConstraints as unknown,
@@ -460,7 +458,6 @@ vi.mock('../session/index.js', () => ({
       }),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

@@ -229,9 +229,12 @@ describe('C5b on a RERUN (served 27 Sep: the first Run carried a view, the rerun
     expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('including a rerun or after a view you gave earlier');
     expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).not.toContain('Set it to null when you have none');
     expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Set it to null only when the model and the user’s words give you no basis for any view');
-    // Unchanged contract: never in `answer`, never ranking in `answer`.
-    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Never write the view in `answer`.');
-    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('it never names, ranks or favours an option');
+    // ⛔ CHANGED EXPECTATION (prompt P15, AIE one-pass packet 94ad9c8f…; AIE-B2-THREE-SENTENCES 75e053e8…): the view is said in
+    // `answer`, labelled as the AI's view; naming options for inquiry is allowed, favouring or recommending one never is.
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).not.toContain('Never write the view in `answer`.');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions.');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('A provisional view directs investigation. It may name and explain the options, their assumptions and unresolved questions when helpful. Describe only comparisons supported by the current supplied facts, keeping their scope, uncertainty and conditions; do not favour or recommend an option.');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('never recommend, rank or favour an option, even in first person or with a hedge');
   });
 });
 

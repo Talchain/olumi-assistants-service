@@ -17,7 +17,7 @@ import {
 import { readMayNameLeadingOptionVerdictForFact } from '../../context/claim-safety-read.js';
 import { goalFiguresLeaderWithheldWithoutConstraintCause } from '../unsized-path-cause.js';
 import { agentNoLeaderSentence, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../withheld-leader-fail-closed.js';
-import { goalChanceLineOwed, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, SAY_SHOWN_NOTE } from '../goal-chance-withheld.js';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -199,13 +199,19 @@ describe('(c) the Run tool hands the route its #416 ask (`identity_ask_say`), re
   };
 
   it('RED: a #416 Run → identity_ask_say, the same words the route owes', async () => {
-    const r = await caps([W416]).runAnalysis(ctx, { reason: 'Run it.' }) as Rec;
+    const r = await caps([W416]).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Rec;
     expect(r.identity_ask_say).toBe(identityAskLineFor(blocks([W416])[0], T1B));
+    // SAY-SHOWN: the ask owns this cause, so the AI is never told `say` is shown (the route says the ask instead).
+    expect(r.goal_chance).toMatchObject({ withheld: true });
+    expect(r.goal_chance).not.toHaveProperty('say_shown');
     expect(r.identity_ask_say).toContain('How many ‘Starter-tier subscribers’ would ‘Launch starter tier’ lead to?');
   });
 
-  it('CONTROL: a #422 Run carries none', async () => {
-    expect(await caps([W422]).runAnalysis(ctx, { reason: 'Run it.' })).not.toHaveProperty('identity_ask_say');
+  it('CONTROL: a #422 Run carries none, and its `say` (no ask owns it, and it asks nothing) is promised as shown', async () => {
+    const r = await caps([W422]).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Rec;
+    expect(r).not.toHaveProperty('identity_ask_say');
+    expect(r.goal_chance.say).not.toContain('?');
+    expect(r.goal_chance.say_shown).toBe(SAY_SHOWN_NOTE);
   });
 });
 
@@ -214,14 +220,26 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(route).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(route).toContain('const askNow = identityAskLineFor(state.analysisResult, state.graph);');
-    // Contrast: the probe sees the goal-chance line it follows.
-    expect(route).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
+    // ONE reply: the typed reason is owed after the gate only if the gate did not already say it.
+    expect(route).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
+    expect(route).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
+    expect(route).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
+  });
+  it('R13 MUTANT: replacing the scoped owed owner with raw tool results is caught', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const pin = "goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,";
+    expect(route.includes(pin)).toBe(true);
+    expect(route.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
+    expect(goalChanceLineOwed([{ ran: true, goal_chance: { withheld: true, say: 'The target cannot be tested yet.' } },
+      { ran: true }], 'Here is the run.')).toBeNull();
   });
 });
 
 describe('(f) a placeholder path beside an untestable target: the chat discloses the target\'s complete requirement (g1-b501 draft 1)', () => {
   const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
   const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
+  // This historical warning predates acceptable_links: today's composition reads that same list carrier.
+  placeholder.acceptable_links = placeholder.links;
 
   it('PRECONDITION: the served Run carried both withholds, and the target one KEPT the shares', () => {
     const codes = (D1.analysis_result.enrichment.inference_warnings as Rec[]).map((w) => w.code);
@@ -229,10 +247,25 @@ describe('(f) a placeholder path beside an untestable target: the chat discloses
     expect(placeholder.message).toMatch(/Set (it|them) to see how much (it|they) matters?\.$/);
   });
 
-  it('W5 DL re-pin: the say carries the target\'s complete ask, including links beyond the placeholder subset', () => {
+  it('W5: a legacy capture cannot prove the placeholders are its only cause; keep the complete target requirement', () => {
     const say = goalChanceWithheldForAgent(D1.analysis_result)!.say;
-    const target = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
-    expect(say).toBe(`This run doesn’t show how often each option reaches the goal’s target. ${target.say}`);
+    expect(placeholder.links).toHaveLength(2);
+    expect(say).toContain(D1.analysis_result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE').say);
+    expect(say).not.toContain('Size them to see the chance');
+  });
+
+  it('R2 RED: draw-2 has a missing level → its existing level-only ask FIRST, then the 2-link guided words', () => {
+    const draw2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Rec;
+    const warnings = (draw2.analysis_result.enrichment.inference_warnings as Rec[])
+      .filter(w => ['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE'].includes(w.code));
+    expect(warnings.map(w => w.code)).toEqual(['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE']);
+    const target = warnings.find(w => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
+    expect(target.say).toContain("What's today's level of MRR?");
+    expect(target.say).toContain('from Pro plan price to Monthly churn');
+    const say = goalChanceWithheldForAgent({ enrichment: { inference_warnings: warnings } }, draw2.graph)!.say;
+    expect(say).toContain("What's today's level of MRR?");
+    expect(say).not.toContain('Size them to see the chance');
+    expect(say).not.toContain('a size for the links from');
   });
 
   it('CONTROL: a target-only withhold that kept the shares keeps its own tail (no placeholder words appear)', () => {
@@ -250,11 +283,13 @@ describe('Codex buddy r2', () => {
 
   it('W5 DL re-pin: quoting only the placeholder subset still owes the complete target requirement', () => {
     const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
+    const p = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find(w => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
+    p.acceptable_links = p.links;
     const chance = goalChanceWithheldForAgent(D1.analysis_result)!;
     const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
     const run = { ran: true, goal_chance: chance };
     expect(goalChanceLineOwed([run], `Here is the run. ${placeholder.message}`)).toBe(chance.say);
-    expect(goalChanceLineOwed([run], `This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`)).toBe(chance.say);
+    expect(goalChanceLineOwed([run], `This run doesn’t yet show each option’s chance of meeting your goal. ${placeholder.message}`)).toBe(chance.say);
     // Control: a reply that says neither owes the whole line.
     expect(goalChanceLineOwed([run], 'Here is the run.')).toBe(chance.say);
   });

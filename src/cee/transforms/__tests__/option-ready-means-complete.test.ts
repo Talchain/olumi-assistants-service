@@ -275,10 +275,18 @@ const RECORDED_WITH_RULE_OFF = {
 const GRANDFATHER_STATUS_QUO_LEVEL = 0;
 const GRANDFATHER_LEVELLED_ASK =
   'Factor "Existing customers grandfathered" is currently 0. What should option "£59 for new Pro customers; grandfather existing customers" set it to?';
+/**
+ * AMENDED (C1 r1, Codex FAIL @04b67602 item 3): the record's "Olumi filled in the gaps here itself; you can review them, and
+ * nothing is required of you." was FALSE for this gap: it is offered and NOT waived (`waived_by_exclusion: false`), so Olumi has
+ * not filled it. The record is not edited; its one false sentence is patched here, like its hash and its ask.
+ */
+const C1_OPEN_GAP = 'One input is still open: give your value, or ask Olumi to estimate it.';
 const RECORDED_WITH_STATUS_QUO_LEVEL = {
   ...RECORDED_WITH_RULE_OFF,
   analysis_admission: {
     ...RECORDED_WITH_RULE_OFF.analysis_admission,
+    reasons: RECORDED_WITH_RULE_OFF.analysis_admission.reasons.map((reason) => reason.field === 'missing_important_inputs'
+      ? { ...reason, message: C1_OPEN_GAP } : reason),
     missing_important_inputs: [
       { ...RECORDED_WITH_RULE_OFF.analysis_admission.missing_important_inputs[0], why_it_matters: GRANDFATHER_LEVELLED_ASK },
     ],

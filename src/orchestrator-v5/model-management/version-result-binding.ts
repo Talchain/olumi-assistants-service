@@ -120,9 +120,9 @@ export function boundRunLeaderClaim(
     readRatifiedConstraints(graph).filter((c) => c.node_id == null || !distrusted.has(c.node_id)));
   const state = composeAnalysisStateV1({
     canonical: selectCanonicalAnalysisState({ priorFacts: facts, currentGraphHash: graphHash,
-      currentGraph: graph, readiness, priorFactsReadOk: true }),
+      currentGraph: graph, currentScenarioRevision: undefined, readiness, priorFactsReadOk: true }),
     readiness,
-    runFactBinding: { scenarioId: version.scenario_id, selectedResult: fact.result },
+    runFactBinding: { scenarioId: version.scenario_id, selectedResult: fact.result, selectedFact: fact },
     mayNameLeadingOption: mayPresentLeaderClaimForFact(fact),
     withheldBecauseUnrequested: (readUnsizedPathLeaderCause(fact.result) !== undefined && !wasAnalysisRequestedByUser(fact))
       || leaderWithheldOnlyBecauseUnrequested(fact)

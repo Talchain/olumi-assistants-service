@@ -338,7 +338,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   // This route accepts turns that carry NO caller identity. The origin
   // allowlist above does not change that: Origin is a browser-only defence and
   // any non-browser client can forge it. Owned scenarios are still protected
-  // by the pre-flight ownership check (build-turn-context.ts) — and, since the
+  // by the central scenario-ownership hook — and, since the
   // proxy strips the caller-asserted `user_id`, an anonymous caller cannot
   // present themselves as an owner. But GUEST scenarios (user_id IS NULL) have
   // no owner to check against, so anyone holding a guest scenario's UUID can
@@ -350,34 +350,22 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   log.warn(
     {
       guest_turns_accepted: true,
+      user_jwt_verification: "always",
       require_user_jwt: config.auth?.requireUserJwt === true,
       originCount: allowedOrigins.size,
     },
     "[proxy-v5] AUTH POSTURE: unauthenticated turns are ACCEPTED — this proxy admits a turn " +
       "with no credential at all, by design, so a visitor can use the product without signing in. " +
+      "Presented user JWTs are verified independently of CEE_REQUIRE_USER_JWT. " +
       "Origin is not authentication — a non-browser client can forge it. Guest scenarios " +
       "(user_id IS NULL) are readable and writable by anyone holding the scenario UUID. " +
-      "Owned scenarios remain protected by the pre-flight ownership check, and the caller-asserted " +
+      "Owned scenarios remain protected by the central ownership hook, and the caller-asserted " +
       "user_id is stripped from every browser body, so an anonymous caller cannot claim to be one.",
   );
 
-  // The flag still discriminates — it just discriminates about something
-  // else now. With it OFF, a presented Bearer is never parsed, so a SIGNED-IN
-  // user is anonymous to the ownership check and is refused on their own
-  // scenario. That is a distinct, quieter failure than the one above and it
-  // needs its own line, or a deployment that silently breaks every signed-in
-  // user says nothing at boot about why.
-  if (config.auth?.requireUserJwt !== true) {
-    log.warn(
-      {
-        require_user_jwt: false,
-        originCount: allowedOrigins.size,
-      },
-      "[proxy-v5] AUTH POSTURE: user JWTs are NOT verified (CEE_REQUIRE_USER_JWT is off). " +
-        "A presented Bearer is never parsed, so a signed-in caller is anonymous to the ownership " +
-        "pre-flight and will be refused on their OWN scenario. Turn it on to recognise signed-in users.",
-    );
-  }
+  // The central ownership hook verifies presented user JWTs independently of
+  // CEE_REQUIRE_USER_JWT. Guests still use owner-NULL scenarios; an owned row
+  // requires its verified owner. That flag only preserves legacy-service telemetry.
 
   // NOTE: OPTIONS preflight is handled by @fastify/cors (registered in server.ts
   // with preflightContinue: false). That plugin intercepts OPTIONS before route
@@ -386,7 +374,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   // DEFAULT_ALLOWED_HEADERS and the cors registration's exposedHeaders.
 
   // ---- POST (proxy) ----
-  app.post("/proxy/v5/turn", async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post("/proxy/v5/turn", { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const startTime = Date.now();
     const requestId =
       (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
@@ -443,13 +431,9 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // Removing this gate while STRIPPING that field serves both populations
     // and leaves the forgery closed — which neither value of the flag could do.
     //
-    // The flag itself is untouched and still governs what it should: whether a
-    // PRESENTED token is verified downstream (`resolveUserIdentity`), and
-    // therefore whether a signed-in user is recognised as themselves. An
-    // invalid or expired token is still refused there with the same typed
-    // recoverable `sign_in_required` BoundaryError, so the UI's one wire shape
-    // for "sign in required" still exists — it now means "your token is bad",
-    // never "you have no token".
+    // Presented JWTs are verified by the central ownership hook regardless of
+    // CEE_REQUIRE_USER_JWT. Invalid/expired tokens retain sign_in_required bytes;
+    // a guest without a JWT may still use an owner-NULL scenario.
 
     // 3. Build internal request headers
     const internalHeaders: Record<string, string> = {};
@@ -675,7 +659,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // running draft — and 4× tighter than the global 120 rpm an abuser
     // otherwise gets for tombstone spray. The /orchestrate sibling stays on
     // the global limit: it is service-key gated at ingress.
-    config: {
+    config: { scenarioId: { from: 'body', key: 'scenario_id' },
       rateLimit: {
         max: TURN_STOP_RATE_LIMIT_MAX,
         timeWindow: TURN_STOP_RATE_LIMIT_WINDOW,

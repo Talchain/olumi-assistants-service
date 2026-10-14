@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ A NODE'S UNIT READING SURVIVES THE REGISTER WRITE AND THE RUN'S SNAPSHOT PARSE (`@talchain/schemas` 0.67.0
  * `NodeV3Schema.unit_reading`, MG; PTL A — Paul's funding goal read in GBP from "deals between £1-2 million"; P0 SHARED
@@ -37,7 +38,7 @@ const readMostRecentPendingActions = vi.fn();
 const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn, readMostRecentPendingActions };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));

@@ -19,7 +19,7 @@ import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/pro
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 import { sayFigure } from './say-figure.js';
-import { readCount, readMoney, readMoneyTotal } from './same-unit.js';
+import { readCount, readMoney, readMoneyTotal, readUnitParts } from './same-unit.js';
 
 export { periodIn, readMoneyTotal, sameUnit } from './same-unit.js';
 
@@ -27,6 +27,25 @@ export { periodIn, readMoneyTotal, sameUnit } from './same-unit.js';
 export const RECONCILIATION_TOLERANCE = 0.05;
 
 const stated = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0;
+
+/** An accumulation's first part is S₀: today's stock, never the stock projected at the deadline. */
+export function accumulationStockFor(node: Record<string, unknown>, byId: ReadonlyMap<string, Record<string, unknown>>): Record<string, unknown> | null {
+  const identity = node.nonlinear_identity;
+  if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) return null;
+  const carrier = identity as Record<string, unknown>;
+  const ids = carrier.factor_ids;
+  if (carrier.operation !== 'accumulation' || !Array.isArray(ids) || ids.length !== 3
+    || !ids.every((id) => typeof id === 'string') || new Set(ids).size !== 3 || ids.some((id) => id === node.id)) return null;
+  return byId.get(ids[0] as string) ?? null;
+}
+
+/** The candidate equivalent, before the accumulation carrier is written by late admission. */
+function reconciliationFactor(candidate: CandidateModel, label: string) {
+  const accumulation = (candidate.identities ?? []).find((i) => i.outcome === label && i.operation === 'accumulation');
+  if (accumulation !== undefined && accumulation.factors.length !== 3) return undefined;
+  const today = accumulation !== undefined ? accumulation.factors[0] : label;
+  return candidate.factors.find((f) => f.label === today);
+}
 
 
 /**
@@ -42,7 +61,8 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
   let confirm: Composition = NO;
   for (const [m, c] of [[a, b], [b, a]] as const) {
     const money = readMoney(m.unit, '');
-    const count = readCount(c.unit);
+    // DL #2802 P0: the FULL reader decides it is a count; readCount alone takes 'percent'/'pp' as nouns (sameUnit needs that).
+    const count = readUnitParts(c.unit)?.kind === 'count' ? readCount(c.unit) : null;
     if (money === null || count === null) continue;
     if (money.code !== goal.code || money.period !== goal.period) continue;
     // AIQ 5886967509: the DENOMINATOR is the dimensional proof. A rate with none ("GBP/month") could be summed as easily
@@ -119,6 +139,9 @@ function reconcilingParts(candidate: CandidateModel, brief: string) {
   if ((candidate.identities ?? []).some((i) => i.outcome === metric)) return null;
   const options = new Set(candidate.options.map((opt) => opt.label));
   const all = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
+  // An accumulation parent is S_N, not a user-stated level today. Its goal product must be declared, never minted
+  // from a projected factor's own figure; late accumulation admission refuses a carrier with no admitted goal product.
+  if (all.some((s) => (candidate.identities ?? []).some((i) => i.outcome === s && i.operation === 'accumulation'))) return null;
   // ⛔ A THIRD PARENT THE PRODUCT WILL RE-POINT DOES NOT HIDE THE READING (R3 5903882132, guest `73192fdf`; DL 5903903027):
   // 1 in 5 constructor drafts declare no product and link churn straight into MRR beside price and subscribers — no card,
   // and Run 1 stated an additive "£59 → ~£76.8k, 0%". The extra parent must be exactly what `product-goal-extra-parent.ts`
@@ -180,7 +203,15 @@ export const GAP_ROUNDING = 0.005;
  *    names it, and no goal identity other than a product over exactly a × b.
  * A user-stated other revenue, an Olumi addend of any other size, or one with causes of its own is kept as today.
  */
-export function withoutGapResidual(candidate: CandidateModel, brief: string): { model: CandidateModel; residual: GapResidual } | null {
+export function withoutGapResidual(
+  candidate: CandidateModel,
+  brief: string,
+  /**
+   * The receipt gate's verdict on one factor (`verifiedFactorLevel`), INJECTED by the caller: this module is imported early
+   * (config-mocking route specs initialise it first), so it must not import the verifier's module graph itself.
+   */
+  levelIsVerified: (factor: CandidateModel['factors'][number]) => boolean = () => true,
+): { model: CandidateModel; residual: GapResidual } | null {
   const goal = candidate.goal;
   const metric = goal?.metric;
   const o = goal?.baseline_value;
@@ -191,7 +222,11 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
   const factor = (label: string) => candidate.factors.find((f) => f.label === label);
   const isUsers = (label: string): boolean => {
     const f = factor(label);
-    return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value) && figureTheUserWrote(f.baseline_value, f.unit, brief);
+    // ⭐ S7: "the user's level" is the receipt gate's verdict (`verifiedFactorLevel`, injected), the only construction
+    // authority. The drop is said with "on the card for you to confirm" — true only when both levels are verified, because
+    // the card refuses an unverified one. Otherwise Olumi's plug stays Olumi's and nothing claims a card that is not offered.
+    return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value)
+      && figureTheUserWrote(f.baseline_value, f.unit, brief) && levelIsVerified(f);
   };
   // The user's product beside the residual: the goal's own two user parents (m0), or ONE carrier whose declared product is
   // a user part × an unlevelled operand read at TODAY's level through its one user-levelled cause (m8).
@@ -333,7 +368,7 @@ function goalCarrierReading(candidate: CandidateModel, i: Identity): boolean {
   if (goal.baseline_known !== true || goal.baseline_provenance !== 'explicit' || !stated(o)) return false;
   const levels: number[] = [];
   for (const label of i.factors) {
-    const f = candidate.factors.find((x) => x.label === label);
+    const f = reconciliationFactor(candidate, label);
     if (f === undefined || f.baseline_known !== true || f.provenance !== 'explicit' || !stated(f.baseline_value)) return false;
     levels.push(f.baseline_value);
   }

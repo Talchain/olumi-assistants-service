@@ -37,6 +37,7 @@
  * The module is import-safe: it never fires an LLM call at load time.
  */
 
+import type { LicensedRunFacts } from '../../orchestrator-v5/context/licensed-run-facts.js';
 import { chatWithAnthropic } from '../../adapters/llm/anthropic.js';
 import { config } from '../../config/index.js';
 import type { ModelResolution } from '../../adapters/llm/router.js';
@@ -269,7 +270,13 @@ function graphEntityIndex(graph: Record<string, unknown>): Record<string, unknow
  * Build the four sub-call user messages + the structural context. Pure — no
  * network, deterministic given `input`.
  */
-export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices; ctx: DecomposeContext } {
+export function buildSlices(input: DecisionReviewInvokeInput, licensedFacts?: LicensedRunFacts): { slices: Slices; ctx: DecomposeContext } {
+  if (licensedFacts !== undefined) input = { ...input,
+    winner: { ...licensedFacts.winner,
+      ...(licensedFacts.constraintInfeasible && input.winner.constraint_infeasible ? { constraint_infeasible: true } : {}) },
+    runner_up: licensedFacts.runnerUp };
+  const analysis = licensedFacts === undefined ? {} : { analysis: licensedFacts.analysis };
+  const leaderLicensed = licensedFacts === undefined || licensedFacts.mayNameLeader;
   const isl = input.isl_results;
   const dc = input.deterministic_coaching;
 
@@ -291,8 +298,8 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
 
   const decisionContext = {
     winner: input.winner,
-    runner_up: input.runner_up,
-    margin,
+    ...(leaderLicensed ? { runner_up: input.runner_up, margin } : {}),
+    ...analysis,
   };
 
   const topFactor = factorSensitivity[0] ?? null;
@@ -337,13 +344,14 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
     block('BRIEF', briefSlice(input.brief)),
     block('EVIDENCE_GAPS', evidenceGaps),
     block('FACTOR_SENSITIVITY', factorSensitivity),
-    block('WINNER_LABEL', input.winner.label),
+    ...(leaderLicensed ? [block('WINNER_LABEL', input.winner.label ?? '')] : []),
+    ...(licensedFacts === undefined ? [] : [block('DECISION_CONTEXT', analysis)]),
     ...scaffoldBlocks,
   ].join('\n\n');
 
   // R3 FRAGILITY — robustness + scenarios + flip thresholds + pre-mortem.
   const r3 = [
-    block('DECISION_CONTEXT', { winner: input.winner, runner_up: input.runner_up }),
+    block('DECISION_CONTEXT', { winner: input.winner, ...(leaderLicensed ? { runner_up: input.runner_up } : {}), ...analysis }),
     block('ROBUSTNESS', {
       recommendation_stability: readNum(robustness.recommendation_stability),
       overall_confidence: readNum(robustness.overall_confidence),
@@ -364,12 +372,13 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
   const r4 = [
     block('BRIEF', briefSlice(input.brief)),
     ...(graphEntities !== null ? [block('GRAPH_ENTITIES', graphEntities)] : []),
+    ...(licensedFacts === undefined ? [] : [block('DECISION_CONTEXT', analysis)]),
     block('MODEL_CRITIQUES', modelCritiques),
     block('FACTOR_SENSITIVITY', factorSensitivity),
     block('CALIBRATION', {
       overall_confidence: readNum(robustness.overall_confidence),
       headline_type: headlineType,
-      winner_win_probability: readNum(input.winner.win_probability),
+      ...(leaderLicensed ? { winner_win_probability: readNum(input.winner.win_probability) } : {}),
       readiness,
       option_count: optionComparison.length,
     }),
@@ -466,7 +475,7 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
     ctx: {
       optionIds,
       optionLabels,
-      winnerLabel: input.winner.label,
+      winnerLabel: input.winner.label ?? '',
       evidenceGapFactorIds,
       fragileEdgeIds,
       flipFactorIds,
@@ -1035,7 +1044,7 @@ export async function invokeDecomposedDecisionReview(
 ): Promise<DecisionReviewInvokeResult> {
   const model = resolveDecomposeModel();
   const maxTokens = resolveDecomposeMaxTokens();
-  const { slices, ctx } = buildSlices(input);
+  const { slices, ctx } = buildSlices(input, options.licensedFacts);
   const startedAt = Date.now();
 
   // Client already gone before the fan-out: fire nothing, bill nothing.

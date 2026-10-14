@@ -107,9 +107,11 @@ const expectedCredit = {
   user_stated: [['ai_drafted', 'user_stated'], ['ai_drafted', 'user_stated'], ['ai_drafted', 'user_stated'], ['user_stated', 'user_stated'], ['ai_drafted', 'user_stated']],
   olumi_estimate: [['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['user_stated', 'user_stated'], ['ai_drafted', 'ai_drafted']],
   olumi_placeholder: [['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['user_stated', 'user_stated'], ['ai_drafted', 'ai_drafted']],
-  example_figure: [['user_stated', 'user_stated'], ['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['user_stated', 'user_stated'], ['unattributed', 'unattributed']],
-  absent: [['user_stated', 'user_stated'], ['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['user_stated', 'user_stated'], ['unattributed', 'unattributed']],
-  malformed: [['user_stated', 'user_stated'], ['ai_drafted', 'ai_drafted'], ['ai_drafted', 'ai_drafted'], ['user_stated', 'user_stated'], ['unattributed', 'unattributed']],
+  // ONE PROVENANCE AUTHORITY (AIE 6121121310): an UNMARKED link with an AI drawing stamp is never Olumi's size wholesale —
+  // unestablished (`unattributed`, offered either way); a person/brief-drawn one keeps R11's `user_stated`.
+  example_figure: [['user_stated', 'user_stated'], ['unattributed', 'unattributed'], ['unattributed', 'unattributed'], ['user_stated', 'user_stated'], ['unattributed', 'unattributed']],
+  absent: [['user_stated', 'user_stated'], ['unattributed', 'unattributed'], ['unattributed', 'unattributed'], ['user_stated', 'user_stated'], ['unattributed', 'unattributed']],
+  malformed: [['user_stated', 'user_stated'], ['unattributed', 'unattributed'], ['unattributed', 'unattributed'], ['user_stated', 'user_stated'], ['unattributed', 'unattributed']],
 } as const;
 describe('R3-2 one sizing reader / explicit differential table', () => {
   for (const magnitude of magnitudes) for (const [index, source] of sources.entries()) for (const defaulted of [true, undefined]) for (const effect of [false, true]) {

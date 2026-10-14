@@ -72,7 +72,12 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
         const shown = r.factors as { label: string; current_value: { value: number; stated_by: string; quote?: string } }[];
         for (const [i, f] of call.factors.entries()) {
           const quote = quoteOfFigure(f.value, unit, c.msg);
-          expect(quote, `${where}: a held figure is written in the message`).not.toBeNull();
+          if (held![i]!.basis === 'olumi_estimate') {
+            expect(shown[i]!.current_value.stated_by, where).toBe('olumi_estimate');
+            expect(held![i]!.quote, where).toBeUndefined();
+            continue;
+          }
+          expect(quote, `${where}: a user-attributed figure is written in the message`).not.toBeNull();
           expect(held![i]!.quote, where).toBe(quote);
           expect(shown[i]!.current_value.quote, where).toBe(quote);
           if (several) {
@@ -90,7 +95,7 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
     expect(confirmCalls).toBeGreaterThan(30);
   }, 120_000);
 
-  it('the served E04 message: the correct pairing AND the swap are both shown for confirmation — each with the user\'s whole sentence; the £400k it never wrote is refused', async () => {
+  it('the served E04 message: the correct pairing AND the swap are both shown for confirmation — each with the user\'s whole sentence; the £400k it never wrote is labelled Olumi’s', async () => {
     const door = doorFor();
     const e04 = CASES.find((c) => c.id === 'E04')!.msg;
     for (const pair of [[120000, 65000], [65000, 120000]] as const) {
@@ -103,7 +108,7 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
       ]);
     }
     const { r, held } = await door.propose(CASES.find((c) => c.id === 'E04k')!.msg, 'GBP/year per engineer', [{ label: 'Senior engineer salary', value: 400000 }]);
-    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'today_not_set' }));
-    expect(held).toBeNull();
+    expect(r).toMatchObject({ ok: true, factors: [{ current_value: { stated_by: 'olumi_estimate' } }] });
+    expect(held![0]!.basis).toBe('olumi_estimate');
   }, 60_000);
 });

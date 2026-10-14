@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":3.51806640625,"threshold":25}
+node_modules/.bin/vitest run tests/unit/schemas/accumulation-carrier.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+   Start at  18:44:10
+   Duration  1.70s (transform 1.19s, setup 121ms, import 1.45s, tests 13ms, environment 0ms)
+

@@ -1,5 +1,6 @@
 import { linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -65,7 +66,9 @@ export function groupedGoalPathLinks(input: unknown): readonly GroupedLinkSizing
   const edges = graph.edges.map(rec).filter((x): x is Rec => x !== undefined && typeof x.from === 'string' && typeof x.to === 'string');
   const kind = new Map(nodes.map((n) => [n.id, n.kind]));
   const labels = new Map(nodes.map((n) => [String(n.id), text(n.label, String(n.id))]));
-  const units = new Map(nodes.map((n) => [String(n.id), text(n.unit ?? rec(n.observed_state)?.unit, 'the model units')]));
+  // Recovery Batch C (gap 1): a goal with no level today (a change goal) is read in its target's unit, as `nodeUnitOf` reads it.
+  const units = new Map(nodes.map((n) => [String(n.id), text(n.unit ?? rec(n.observed_state)?.unit
+    ?? (n.kind === 'goal' && typeof n.id === 'string' ? readGoalRecord(graph, n.id)?.target?.unit : undefined), 'the model units')]));
   const goals = new Set(nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
   const options = new Set(nodes.filter((n) => n.kind === 'option').map((n) => n.id));
   const reached = new Set<unknown>(options);

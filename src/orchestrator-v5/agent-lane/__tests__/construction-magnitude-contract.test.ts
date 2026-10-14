@@ -13,6 +13,7 @@
  *   `ai_feature_availability` is a yes/no factor on frame 1 that both AI options set to 1 (status quo 0), so d = [0, 1];
  *   `monthly_churn` is a % factor on frame 100 at 4% today (T2's figure), so b = 0.04 on the domain [0, 1].
  */
+import type { CandidateModel } from '../admit-model.js';
 import { describe, expect, it } from 'vitest';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
@@ -88,6 +89,15 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 async function register(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+  const receipts: Record<string, string> = { 'Pro plan price': 'Our Pro price is £49 a month.', 'Monthly churn': 'Our monthly churn is 4%.' };
+  const model = wire as unknown as CandidateModel;
+  wire = { ...wire, factors: model.factors.map((f) => {
+    const quote = receipts[f.label];
+    return quote && f.baseline_known && f.provenance === 'explicit'
+      && ((f.label === 'Pro plan price' && f.baseline_value === 49) || (f.label === 'Monthly churn' && f.baseline_value === 4))
+      ? { ...f, baseline_evidence: { quote } } : f;
+  }) };
+  brief = `${Object.values(receipts).join(' ')}\n\n${brief}`;
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -249,8 +259,11 @@ describe('R5: unit-class conversions (design §4)', () => {
     expect(questions(out).filter((q) => q.includes('"Pro plan price"') && q.includes('"Monthly churn"'))).toHaveLength(1);
   });
 
-  it('D8: "+£1 → +1 pt" is β = 2.0, which the engine would truncate to 1 — Olumi\'s estimate is withdrawn and asked, never silently cut', async () => {
-    const { graph, out } = await register(saas({ amount: 1, per: 1, by: 'ai_proposed' }));
+  // ⭐ RE-PINNED by #2842 (rescue-only convention frame, Science §(u) + DL "B"): "+£1 → +1 pt" was β 2.0 on the drafter's
+  // £0–200 and is β 0.98 on Olumi's formula frame £0–98, so it is now RESCUED (next row) — re-framed and said, never cut.
+  // D8's own claim is unchanged and kept on a size NO formula frame can hold: "+£1 → +3 pt" is β 6.0, and 2.94 even on £0–98.
+  it('D8: "+£1 → +3 pt" is β > 1 on every frame Olumi may use — Olumi\'s estimate is withdrawn and asked, never silently cut', async () => {
+    const { graph, out } = await register(saas({ amount: 3, per: 1, by: 'ai_proposed' }));
     const price = edge(graph, 'pro_plan_price', CHURN);
     expect(Math.abs(price.strength.mean)).toBeLessThanOrEqual(1);
     expect(price.strength.mean).toBe(0.5);
@@ -259,6 +272,20 @@ describe('R5: unit-class conversions (design §4)', () => {
     const asked = questions(out).filter((q) => q.includes('"Monthly churn"') && q.includes('"Pro plan price"'));
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain('more than the analysis can represent');
+  });
+});
+
+describe('#2842 rescue: the D8 size Olumi\'s formula frame CAN hold is admitted on it and said', () => {
+  it('"+£1 → +1 pt" on Olumi\'s £0–98 (twice the £49 level) is β 0.98: admitted as Olumi\'s estimate, the frame disclosed', async () => {
+    const wire = saas({ amount: 1, per: 1, by: 'ai_proposed' }) as { links: Record<string, unknown>[] };
+    // A rescue needs Olumi's one-line basis (Science §(u) condition 3).
+    wire.links = wire.links.map((l) => (l.from === 'Pro plan price' && l.to === 'Monthly churn' ? { ...l, basis: 'a higher price pushes more customers to cancel' } : l));
+    const { graph } = await register(wire as unknown as Record<string, unknown>);
+    const price = edge(graph, 'pro_plan_price', CHURN);
+    expect(price.provenance?.magnitude).toBe('olumi_estimate');
+    expect(price.strength.mean).toBeCloseTo(0.98, 9);
+    const node = (graph.nodes as unknown as { id: string; observed_state?: { cap?: number } }[]).find((n) => n.id === 'pro_plan_price');
+    expect(node?.observed_state?.cap).toBe(98);
   });
 });
 
@@ -272,7 +299,8 @@ describe('R6: the contrast control — a target with no frame keeps today\'s ±0
     expect(e.strength).toStrictEqual({ mean: 0.5, std: 0.125 });
     expect(e.exists_probability).toBe(0.8);
     expect(e.defaulted).toBe(true);
-    expect(e.provenance).toStrictEqual({ source: 'cee_hypothesis', mean_projected: true });
+    // Science 393023 LICENCE (a)/(b), 7 Oct: new unsized admitted links keep projection and carry the placeholder tag.
+    expect(e.provenance).toStrictEqual({ source: 'cee_hypothesis', mean_projected: true, magnitude: 'olumi_placeholder' });
     expect(e).toStrictEqual(edge(unsized, 'pro_plan_price', 'price_sensitivity'));
   });
 });
@@ -370,7 +398,8 @@ describe('Run 1 wording: churn as "% of Pro subscribers per month" is a percenta
     const { graph } = await register(c);
     const e = edge(graph, 'price_sensitivity', CHURN);
     expect(e.strength).toMatchObject({ mean: 0.5, std: 0.125 });
-    expect(e.provenance?.magnitude).toBeUndefined();
+    // Science 393023 LICENCE (a)/(b), 7 Oct: new no-frame defaults are tagged placeholders.
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
   });
 
   it('ONE RULE (R&C #2034 B1): a 0.5 "% per month" level limit is NOT a percentage level (`percentLevelFrame`) — ±0.5 kept', async () => {

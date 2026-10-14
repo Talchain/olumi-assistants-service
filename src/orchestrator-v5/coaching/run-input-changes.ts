@@ -160,7 +160,9 @@ function factorAuthorshipExplained(
  *     (`sizing: 'user'`), its authorship (`authorship_digest`) differs between the Runs, AND `userWroteLink` finds the
  *     write's own persisted receipt for exactly this move (buddy r1: a moved digest proves metadata changed, not who wrote
  *     it). Without a receipt it is never `user` (DL: "you changed" only on a user write);
- *   - `olumi`: Olumi-sized now (`olumi_estimate`, `olumi_accepted`, `placeholder`), so the figure is said to be Olumi's;
+ *   - `olumi`: Olumi-sized now (`olumi_estimate`, `olumi_accepted`), so the figure is said to be Olumi's;
+ *   - A recorded `placeholder` is unsized, so its refitted prior supplies no sized-band sentence. These labels were
+ *     recorded by `run-input-snapshot` through `linkSizing`; historical Runs are never reclassified from today's graph.
  *   - `unknown`: anything else (no user write recorded, `unmarked`, sizing not recorded): no author is claimed.
  */
 export interface WithinBandLinkMove {
@@ -169,8 +171,6 @@ export interface WithinBandLinkMove {
   readonly band: NonNullable<RunInputSnapshot['links'][number]['band']>;
   readonly author: 'user' | 'olumi' | 'unknown';
 }
-
-const OLUMI_SIZED: ReadonlySet<string> = new Set(['olumi_estimate', 'olumi_accepted', 'placeholder']);
 
 type RecordedNaturalEffect = RunInputSnapshot['links'][number]['natural_effect'];
 /** Both Runs recorded the link's natural size and it is the same: amount, unit and the same source change. */
@@ -194,6 +194,8 @@ export function linksMovedWithinBand(
   for (const id of [...cL.keys()].sort()) {
     const pl = pL.get(id);
     const cl = cL.get(id)!;
+    // Science 393023 LICENCE ruling 3: nobody sized this link. Its prior moving inside a band is not an estimate.
+    if (cl.sizing === 'placeholder') continue;
     if (pl === undefined || pl.band === undefined || cl.band === undefined || pl.band !== cl.band) continue;
     if (pl.mean === cl.mean || Math.sign(pl.mean) !== Math.sign(cl.mean)) continue;
     // ⛔ A FRAME CHANGE IS NEVER A CHANGE (Science Q2 6009456901; e7 #87 6011176086): a move the refit's receipt accounts for
@@ -202,7 +204,7 @@ export function linksMovedWithinBand(
     const userWrite = cl.sizing === 'user'
       && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined && pl.authorship_digest !== cl.authorship_digest
       && userWroteLink(cl.from, cl.to, pl.mean, cl.mean);
-    const author = userWrite ? 'user' : cl.sizing !== undefined && OLUMI_SIZED.has(cl.sizing) ? 'olumi' : 'unknown';
+    const author = userWrite ? 'user' : cl.sizing === 'olumi_estimate' || cl.sizing === 'olumi_accepted' ? 'olumi' : 'unknown';
     out.push({ from: cl.from, to: cl.to, band: cl.band, author });
   }
   return out;
@@ -365,9 +367,20 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // move is the frame's, never a `strength` row. The mean move it carries stays partial below (coverage unchanged).
     const sameNaturalEffect = sameNaturalSize(pe, ce);
     const bandMoved = !sameNaturalEffect && pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
-    if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    // Science 393023 LICENCE ruling 3: a placeholder's band is its default, not a size. A band move that ENDS on a link the
+    // later Run still reads as a placeholder is never a `strength` row (no surface may word either default band); the move
+    // stays partial coverage. A move FROM a placeholder to a sized link keeps its row: readers suppress the before band.
+    const unsizedEitherRun = cl.sizing === 'placeholder';
+    if (bandMoved && !unsizedEitherRun) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    else if (bandMoved) complete = false;
     if (pl.sizing !== undefined && cl.sizing !== undefined) {
-      if (pl.sizing !== cl.sizing) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
+      // Science 393023 LICENCE (a)/(b), 7 Oct: the same stored link can change class under the new reader.
+      const readerReclassified = ((pl.sizing === 'unmarked' && cl.sizing === 'placeholder')
+        || (pl.sizing === 'placeholder' && cl.sizing === 'unmarked'))
+        && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined
+        && pl.authorship_digest === cl.authorship_digest
+        && pl.mean === cl.mean && pl.std === cl.std;
+      if (pl.sizing !== cl.sizing && !readerReclassified) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
     } else if (pl.sizing !== cl.sizing) {
       complete = false;
     }

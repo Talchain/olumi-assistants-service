@@ -1,0 +1,3379 @@
+{
+  "metadata": {
+    "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+    "source_state": "uncommitted working tree; no commit or push",
+    "working_source_sha256": {
+      "src/orchestrator-v5/routing/stated-event-risk.ts": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70",
+      "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+      "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+      "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f",
+      "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+      "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+      "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+      "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+      "pnpm-lock.yaml": "ce7d9e4700397052733037b77f59c985405aa01de113e4cf2050bd81b6d7f763"
+    },
+    "script_sha256": {
+      "evidence-utils-fix4.ts": "e0bc7b512cb79a5f7edb64e2ce6dc7b1aa2965c7306513f9974b89338c78e27a",
+      "compare-corpus-fix4.ts": "6c3f9178fb06e37efcca2050b13db777327ace1865c2000b4b2beb064f3a5ed1",
+      "measure-timing-fix4.ts": "ec2d78b91362b6ce695efa469d2535638963c756c08178f403a38e5bc801d9fc",
+      "run-mutants-fix4.ts": "2ab74ef77f42ab99977461dff475db50bc09b8b40053c2c702a36ab23f3be84c"
+    },
+    "created_at": "2026-10-08T10:45:19.589Z",
+    "starting_load": 11.94189453125,
+    "version": {
+      "name": "working",
+      "source_git_sha": "1ac3e2e1d166b334e3a06593493b848e9108b057",
+      "source_state": "working tree",
+      "reader_sha256": "e0aa8d4b639ff3e593d2e5f68b69bc21f0beceeec12ee50db97bc13d5db69e70",
+      "drafter_sha256": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "shared_dependency_sha256": {
+        "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+        "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+        "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+        "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+        "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+        "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+        "src/utils/telemetry.ts": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2",
+        "src/utils/logger-config.ts": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9",
+        "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+      },
+      "shared_dependencies_verified_against_source_sha": false
+    },
+    "clock": "performance.now",
+    "batches_per_pattern_reader_length": 7,
+    "measured_calls_per_batch": 1,
+    "measured_after_single_warmup": true,
+    "serial": true,
+    "scaling_policy": "minimum of seven independent batches, 160k/20k time ratio <20; medians also reported",
+    "no_llm_or_network": true
+  },
+  "pattern_count": 23,
+  "entry_point_count": 3,
+  "lengths": [
+    20000,
+    160000
+  ],
+  "worst_minimum_ratio": 11.263905309594763,
+  "worst_median_ratio": 10.754478919035579,
+  "all_scaling_rows_under_20": true,
+  "required_20k_all_medians_under_50ms": true,
+  "required_20k_worst_median_ms": 1.7190409999999474,
+  "measurements": [
+    {
+      "pattern": "whitespace",
+      "token": " ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.12054200000000037,
+        0.1173750000000382,
+        0.11629099999998971,
+        0.11625000000003638,
+        0.11750000000000682,
+        0.11624999999997954,
+        0.11616600000002109
+      ],
+      "min_ms": 0.11616600000002109,
+      "median_ms": 0.11629099999998971,
+      "max_ms": 0.12054200000000037
+    },
+    {
+      "pattern": "whitespace",
+      "token": " ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.9162499999999909,
+        0.9132079999999974,
+        0.9132920000000126,
+        0.9118750000000091,
+        0.9140830000000051,
+        0.9135410000000093,
+        0.9149580000000128
+      ],
+      "min_ms": 0.9118750000000091,
+      "median_ms": 0.9135410000000093,
+      "max_ms": 0.9162499999999909
+    },
+    {
+      "pattern": "whitespace",
+      "token": " ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.123958000000016,
+        0.11966699999999264,
+        0.11920800000001464,
+        0.11908299999998917,
+        0.11937500000004775,
+        0.1189579999999637,
+        0.11912499999999682
+      ],
+      "min_ms": 0.1189579999999637,
+      "median_ms": 0.11920800000001464,
+      "max_ms": 0.123958000000016
+    },
+    {
+      "pattern": "whitespace",
+      "token": " ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.835042000000044,
+        0.8338339999999675,
+        0.8332080000000133,
+        0.8314579999999978,
+        0.8328750000000014,
+        0.833500000000015,
+        0.8321669999999699
+      ],
+      "min_ms": 0.8314579999999978,
+      "median_ms": 0.8332080000000133,
+      "max_ms": 0.835042000000044
+    },
+    {
+      "pattern": "whitespace",
+      "token": " ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.43654199999997445,
+        1.0528750000000286,
+        1.188583000000051,
+        1.0602910000000065,
+        0.4275000000000091,
+        0.43720799999999826,
+        0.4222909999999729
+      ],
+      "min_ms": 0.4222909999999729,
+      "median_ms": 0.43720799999999826,
+      "max_ms": 1.188583000000051
+    },
+    {
+      "pattern": "whitespace",
+      "token": " ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.294207999999969,
+        3.327000000000055,
+        3.290875000000028,
+        3.2757500000000164,
+        3.2814579999999296,
+        3.312665999999922,
+        3.1704160000000456
+      ],
+      "min_ms": 3.1704160000000456,
+      "median_ms": 3.290875000000028,
+      "max_ms": 3.327000000000055
+    },
+    {
+      "pattern": "by-percent",
+      "token": "by 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.415917000000036,
+        1.9714999999999918,
+        2.369459000000006,
+        1.500750000000039,
+        1.5074170000000322,
+        1.5021669999999858,
+        1.5267089999999826
+      ],
+      "min_ms": 1.500750000000039,
+      "median_ms": 1.5267089999999826,
+      "max_ms": 2.415917000000036
+    },
+    {
+      "pattern": "by-percent",
+      "token": "by 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        12.565417000000025,
+        11.842834000000039,
+        12.21625000000006,
+        11.423000000000002,
+        12.058124999999905,
+        11.663459000000103,
+        11.916082999999958
+      ],
+      "min_ms": 11.423000000000002,
+      "median_ms": 11.916082999999958,
+      "max_ms": 12.565417000000025
+    },
+    {
+      "pattern": "by-percent",
+      "token": "by 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.4241250000000036,
+        1.4167919999999867,
+        1.4141669999999067,
+        1.4170830000000478,
+        1.4250419999999622,
+        1.4265000000000327,
+        1.513667000000055
+      ],
+      "min_ms": 1.4141669999999067,
+      "median_ms": 1.4241250000000036,
+      "max_ms": 1.513667000000055
+    },
+    {
+      "pattern": "by-percent",
+      "token": "by 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        11.46404199999995,
+        11.728791999999999,
+        11.478916000000027,
+        11.696332999999981,
+        11.465000000000032,
+        11.838042000000087,
+        11.331500000000005
+      ],
+      "min_ms": 11.331500000000005,
+      "median_ms": 11.478916000000027,
+      "max_ms": 11.838042000000087
+    },
+    {
+      "pattern": "by-percent",
+      "token": "by 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.7665829999999687,
+        1.7190409999999474,
+        1.707084000000009,
+        1.7107499999999618,
+        1.7789589999999862,
+        1.792583000000036,
+        1.6776670000000422
+      ],
+      "min_ms": 1.6776670000000422,
+      "median_ms": 1.7190409999999474,
+      "max_ms": 1.792583000000036
+    },
+    {
+      "pattern": "by-percent",
+      "token": "by 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        13.956500000000005,
+        13.877749999999992,
+        14.125875000000065,
+        13.564374999999927,
+        14.028291999999965,
+        13.664542000000097,
+        13.991916999999944
+      ],
+      "min_ms": 13.564374999999927,
+      "median_ms": 13.956500000000005,
+      "max_ms": 14.125875000000065
+    },
+    {
+      "pattern": "e.g.",
+      "token": "e.g. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.08333399999992253,
+        0.08291699999995217,
+        0.08262500000000728,
+        0.0825839999999971,
+        0.08262500000000728,
+        0.08258299999999963,
+        0.08254099999999198
+      ],
+      "min_ms": 0.08254099999999198,
+      "median_ms": 0.08262500000000728,
+      "max_ms": 0.08333399999992253
+    },
+    {
+      "pattern": "e.g.",
+      "token": "e.g. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.6507500000000164,
+        0.77962500000001,
+        0.6467499999999973,
+        0.6396250000000236,
+        0.6495830000000069,
+        0.6471669999999676,
+        0.6434580000000096
+      ],
+      "min_ms": 0.6396250000000236,
+      "median_ms": 0.6471669999999676,
+      "max_ms": 0.77962500000001
+    },
+    {
+      "pattern": "e.g.",
+      "token": "e.g. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.07270800000003419,
+        0.07266599999991286,
+        0.0724999999999909,
+        0.07233399999995527,
+        0.07129199999997127,
+        0.07170899999994162,
+        0.07162500000004002
+      ],
+      "min_ms": 0.07129199999997127,
+      "median_ms": 0.07233399999995527,
+      "max_ms": 0.07270800000003419
+    },
+    {
+      "pattern": "e.g.",
+      "token": "e.g. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.5634999999999764,
+        0.5648330000000215,
+        0.5634999999999764,
+        0.5620839999999134,
+        0.5625,
+        0.5627919999999449,
+        0.5621669999999312
+      ],
+      "min_ms": 0.5620839999999134,
+      "median_ms": 0.5627919999999449,
+      "max_ms": 0.5648330000000215
+    },
+    {
+      "pattern": "e.g.",
+      "token": "e.g. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.8656250000000227,
+        1.1543329999999514,
+        0.9814999999999827,
+        0.9334579999999733,
+        1.1586659999999256,
+        0.8991250000000264,
+        0.9032090000000608
+      ],
+      "min_ms": 0.8991250000000264,
+      "median_ms": 0.9814999999999827,
+      "max_ms": 1.8656250000000227
+    },
+    {
+      "pattern": "e.g.",
+      "token": "e.g. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        6.667208000000073,
+        7.366040999999996,
+        7.165292000000022,
+        7.0160829999999805,
+        7.06675000000007,
+        7.023916999999983,
+        6.877459000000044
+      ],
+      "min_ms": 6.667208000000073,
+      "median_ms": 7.023916999999983,
+      "max_ms": 7.366040999999996
+    },
+    {
+      "pattern": "i.e.",
+      "token": "i.e.",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.07229100000006383,
+        0.07366700000000037,
+        0.07150000000001455,
+        0.07112500000005184,
+        0.07200000000000273,
+        0.07141699999999673,
+        0.07116700000005949
+      ],
+      "min_ms": 0.07112500000005184,
+      "median_ms": 0.07150000000001455,
+      "max_ms": 0.07366700000000037
+    },
+    {
+      "pattern": "i.e.",
+      "token": "i.e.",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.5536249999998972,
+        0.5532500000000482,
+        0.5538750000000618,
+        0.5547079999998914,
+        0.5539999999999736,
+        0.569582999999966,
+        0.5203330000000506
+      ],
+      "min_ms": 0.5203330000000506,
+      "median_ms": 0.5538750000000618,
+      "max_ms": 0.569582999999966
+    },
+    {
+      "pattern": "i.e.",
+      "token": "i.e.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.056417000000010376,
+        0.05600000000004002,
+        0.05570799999998144,
+        0.05566699999997127,
+        0.05558299999995597,
+        0.05570799999998144,
+        0.05566699999997127
+      ],
+      "min_ms": 0.05558299999995597,
+      "median_ms": 0.05570799999998144,
+      "max_ms": 0.056417000000010376
+    },
+    {
+      "pattern": "i.e.",
+      "token": "i.e.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.4362500000000864,
+        0.43641600000000835,
+        0.43524999999999636,
+        0.4357919999999922,
+        0.43612499999994725,
+        0.43641600000000835,
+        0.4353329999999005
+      ],
+      "min_ms": 0.43524999999999636,
+      "median_ms": 0.43612499999994725,
+      "max_ms": 0.43641600000000835
+    },
+    {
+      "pattern": "i.e.",
+      "token": "i.e.",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.9515830000000278,
+        1.5033329999999978,
+        1.1576669999999467,
+        1.07162500000004,
+        1.0658750000000055,
+        1.0615420000000313,
+        1.063707999999906
+      ],
+      "min_ms": 1.0615420000000313,
+      "median_ms": 1.07162500000004,
+      "max_ms": 1.9515830000000278
+    },
+    {
+      "pattern": "i.e.",
+      "token": "i.e.",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        8.57712499999991,
+        13.144499999999994,
+        10.280459000000064,
+        9.483667000000082,
+        9.036374999999907,
+        9.005916999999954,
+        8.80683299999987
+      ],
+      "min_ms": 8.57712499999991,
+      "median_ms": 9.036374999999907,
+      "max_ms": 13.144499999999994
+    },
+    {
+      "pattern": "a.b.",
+      "token": "a.b.",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.07658399999991161,
+        0.0758330000001024,
+        0.07583299999987503,
+        0.07587499999999636,
+        0.07579200000009223,
+        0.07595900000001166,
+        0.0759170000001177
+      ],
+      "min_ms": 0.07579200000009223,
+      "median_ms": 0.07587499999999636,
+      "max_ms": 0.07658399999991161
+    },
+    {
+      "pattern": "a.b.",
+      "token": "a.b.",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.5901249999999436,
+        0.5910420000000158,
+        0.5894579999999223,
+        0.5903339999999844,
+        0.5930829999999787,
+        0.6664169999999103,
+        0.5903749999999945
+      ],
+      "min_ms": 0.5894579999999223,
+      "median_ms": 0.5903749999999945,
+      "max_ms": 0.6664169999999103
+    },
+    {
+      "pattern": "a.b.",
+      "token": "a.b.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.06475000000000364,
+        0.06462499999997817,
+        0.06462499999997817,
+        0.0646670000000995,
+        0.06462499999997817,
+        0.0646670000000995,
+        0.06454099999996288
+      ],
+      "min_ms": 0.06454099999996288,
+      "median_ms": 0.06462499999997817,
+      "max_ms": 0.06475000000000364
+    },
+    {
+      "pattern": "a.b.",
+      "token": "a.b.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.5073330000000169,
+        0.5076670000000831,
+        0.5066670000001068,
+        0.5065420000000813,
+        0.531458000000157,
+        0.44791699999996126,
+        0.6127910000000156
+      ],
+      "min_ms": 0.44791699999996126,
+      "median_ms": 0.5073330000000169,
+      "max_ms": 0.6127910000000156
+    },
+    {
+      "pattern": "a.b.",
+      "token": "a.b.",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        21.757291000000123,
+        18.11500000000001,
+        18.61370799999986,
+        19.06941699999993,
+        18.841333000000077,
+        18.234040999999934,
+        18.701583000000028
+      ],
+      "min_ms": 18.11500000000001,
+      "median_ms": 18.701583000000028,
+      "max_ms": 21.757291000000123
+    },
+    {
+      "pattern": "a.b.",
+      "token": "a.b.",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        156.24958400000014,
+        154.91349999999989,
+        147.53062499999987,
+        149.32187499999986,
+        166.3845839999999,
+        147.93333299999995,
+        146.75979199999983
+      ],
+      "min_ms": 146.75979199999983,
+      "median_ms": 149.32187499999986,
+      "max_ms": 166.3845839999999
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "token": "chance that x is 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.5075419999998303,
+        3.5015000000003056,
+        3.7445000000002437,
+        3.477208000000246,
+        3.2845829999996567,
+        3.3573340000002645,
+        3.2595830000000205
+      ],
+      "min_ms": 3.2595830000000205,
+      "median_ms": 3.477208000000246,
+      "max_ms": 3.7445000000002437
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "token": "chance that x is 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        26.821334000000206,
+        25.196249999999964,
+        24.671834000000217,
+        26.034791999999925,
+        24.50916700000016,
+        26.51179200000024,
+        25.66354100000035
+      ],
+      "min_ms": 24.50916700000016,
+      "median_ms": 25.66354100000035,
+      "max_ms": 26.821334000000206
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "token": "chance that x is 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.1361660000002303,
+        3.071457999999893,
+        3.0886249999998654,
+        3.045958000000155,
+        3.3270840000000135,
+        3.3359169999998812,
+        4.550291999999899
+      ],
+      "min_ms": 3.045958000000155,
+      "median_ms": 3.1361660000002303,
+      "max_ms": 4.550291999999899
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "token": "chance that x is 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        25.549291999999696,
+        26.180500000000393,
+        24.6501659999999,
+        26.223875000000135,
+        25.411375000000135,
+        24.498165999999856,
+        25.53491699999995
+      ],
+      "min_ms": 24.498165999999856,
+      "median_ms": 25.53491699999995,
+      "max_ms": 26.223875000000135
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "token": "chance that x is 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.161124999999629,
+        3.3265409999999065,
+        3.3249590000000353,
+        3.313249999999698,
+        3.293250000000171,
+        3.6561249999999745,
+        3.5510840000001735
+      ],
+      "min_ms": 3.161124999999629,
+      "median_ms": 3.3249590000000353,
+      "max_ms": 3.6561249999999745
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "token": "chance that x is 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        26.73041699999976,
+        25.714042000000063,
+        28.77691700000014,
+        26.41716699999961,
+        28.201332999999977,
+        28.658542000000125,
+        28.802208000000064
+      ],
+      "min_ms": 25.714042000000063,
+      "median_ms": 28.201332999999977,
+      "max_ms": 28.802208000000064
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "token": "chance of a fall of 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.6514579999998205,
+        2.490291999999954,
+        2.494249999999738,
+        2.4649170000002414,
+        2.4640410000001793,
+        2.5852089999998498,
+        2.612832999999682
+      ],
+      "min_ms": 2.4640410000001793,
+      "median_ms": 2.494249999999738,
+      "max_ms": 2.6514579999998205
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "token": "chance of a fall of 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        20.978917000000365,
+        22.713250000000244,
+        25.105459000000337,
+        21.193084,
+        21.793499999999767,
+        20.63929199999984,
+        21.33374999999978
+      ],
+      "min_ms": 20.63929199999984,
+      "median_ms": 21.33374999999978,
+      "max_ms": 25.105459000000337
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "token": "chance of a fall of 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.6274170000001504,
+        2.6309590000000753,
+        2.7792500000000473,
+        2.5766249999996944,
+        2.5734999999999673,
+        2.5813750000002074,
+        2.5705000000002656
+      ],
+      "min_ms": 2.5705000000002656,
+      "median_ms": 2.5813750000002074,
+      "max_ms": 2.7792500000000473
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "token": "chance of a fall of 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        20.414834000000155,
+        21.341333000000304,
+        22.611875000000055,
+        21.466083000000253,
+        21.237874999999804,
+        22.082957999999962,
+        20.872749999999996
+      ],
+      "min_ms": 20.414834000000155,
+      "median_ms": 21.341333000000304,
+      "max_ms": 22.611875000000055
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "token": "chance of a fall of 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.9066250000000764,
+        2.8006250000003092,
+        2.835541999999805,
+        2.8259170000001177,
+        2.790708999999879,
+        2.7739999999998872,
+        2.804041000000325
+      ],
+      "min_ms": 2.7739999999998872,
+      "median_ms": 2.804041000000325,
+      "max_ms": 2.9066250000000764
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "token": "chance of a fall of 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        24.348665999999866,
+        22.499499999999898,
+        22.79599999999982,
+        24.386833000000024,
+        22.74129099999982,
+        23.16037499999993,
+        24.102750000000015
+      ],
+      "min_ms": 22.499499999999898,
+      "median_ms": 23.16037499999993,
+      "max_ms": 24.386833000000024
+    },
+    {
+      "pattern": "may-happen-percent",
+      "token": "It may happen 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.311749999999847,
+        3.256167000000005,
+        2.9232499999998254,
+        2.875415999999859,
+        2.873124999999618,
+        2.8691250000001673,
+        2.9847500000000764
+      ],
+      "min_ms": 2.8691250000001673,
+      "median_ms": 2.9232499999998254,
+      "max_ms": 3.311749999999847
+    },
+    {
+      "pattern": "may-happen-percent",
+      "token": "It may happen 10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        23.24350000000004,
+        23.21858400000019,
+        24.628291999999874,
+        23.24270899999965,
+        23.368540999999823,
+        23.217791000000034,
+        23.176666999999725
+      ],
+      "min_ms": 23.176666999999725,
+      "median_ms": 23.24270899999965,
+      "max_ms": 24.628291999999874
+    },
+    {
+      "pattern": "may-happen-percent",
+      "token": "It may happen 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.8291669999998703,
+        2.8164999999999054,
+        2.91662499999984,
+        2.867584000000079,
+        2.881166000000121,
+        3.3711670000002414,
+        2.8902499999999236
+      ],
+      "min_ms": 2.8164999999999054,
+      "median_ms": 2.881166000000121,
+      "max_ms": 3.3711670000002414
+    },
+    {
+      "pattern": "may-happen-percent",
+      "token": "It may happen 10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        23.0265830000003,
+        23.00887499999999,
+        23.168707999999697,
+        23.126875000000382,
+        23.533457999999882,
+        23.104624999999942,
+        23.13733400000001
+      ],
+      "min_ms": 23.00887499999999,
+      "median_ms": 23.126875000000382,
+      "max_ms": 23.533457999999882
+    },
+    {
+      "pattern": "may-happen-percent",
+      "token": "It may happen 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.2204579999997804,
+        3.1862080000000788,
+        3.1469999999999345,
+        3.616917000000285,
+        3.5784999999996217,
+        3.539625000000342,
+        3.4551250000004075
+      ],
+      "min_ms": 3.1469999999999345,
+      "median_ms": 3.4551250000004075,
+      "max_ms": 3.616917000000285
+    },
+    {
+      "pattern": "may-happen-percent",
+      "token": "It may happen 10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        25.208666999999878,
+        25.19825000000037,
+        25.187457999999424,
+        25.22741700000006,
+        25.323041999999987,
+        25.69250000000011,
+        25.277875000000677
+      ],
+      "min_ms": 25.187457999999424,
+      "median_ms": 25.22741700000006,
+      "max_ms": 25.69250000000011
+    },
+    {
+      "pattern": "chance-hyphen",
+      "token": "10% chance-",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.35541600000033213,
+        0.42820799999935844,
+        0.550916999999572,
+        0.7803750000002765,
+        0.7160830000002534,
+        0.33550000000013824,
+        0.3406669999994847
+      ],
+      "min_ms": 0.33550000000013824,
+      "median_ms": 0.42820799999935844,
+      "max_ms": 0.7803750000002765
+    },
+    {
+      "pattern": "chance-hyphen",
+      "token": "10% chance-",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.7723750000004657,
+        2.7770000000000437,
+        2.779417000000649,
+        2.7849999999998545,
+        2.783625000000029,
+        2.729332999999315,
+        2.6546669999997903
+      ],
+      "min_ms": 2.6546669999997903,
+      "median_ms": 2.7770000000000437,
+      "max_ms": 2.7849999999998545
+    },
+    {
+      "pattern": "chance-hyphen",
+      "token": "10% chance-",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.32533300000068266,
+        0.32483400000000984,
+        0.32474999999976717,
+        0.32670800000050804,
+        0.326666999999361,
+        0.324957999999242,
+        0.32491699999991397
+      ],
+      "min_ms": 0.32474999999976717,
+      "median_ms": 0.324957999999242,
+      "max_ms": 0.32670800000050804
+    },
+    {
+      "pattern": "chance-hyphen",
+      "token": "10% chance-",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.677708000000166,
+        2.6460830000005444,
+        2.6446249999999054,
+        2.6469170000000304,
+        2.7302499999996144,
+        2.629541000000245,
+        2.6343339999993987
+      ],
+      "min_ms": 2.629541000000245,
+      "median_ms": 2.6460830000005444,
+      "max_ms": 2.7302499999996144
+    },
+    {
+      "pattern": "chance-hyphen",
+      "token": "10% chance-",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.5928330000006099,
+        0.5927500000007058,
+        0.593166999999994,
+        0.5945830000000569,
+        0.5928340000000389,
+        0.5947079999996276,
+        0.5935419999996157
+      ],
+      "min_ms": 0.5927500000007058,
+      "median_ms": 0.593166999999994,
+      "max_ms": 0.5947079999996276
+    },
+    {
+      "pattern": "chance-hyphen",
+      "token": "10% chance-",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.006458000000748,
+        4.934291000000485,
+        4.75420800000029,
+        4.750957999999628,
+        4.811542000000372,
+        4.747124999999869,
+        4.845792000000074
+      ],
+      "min_ms": 4.747124999999869,
+      "median_ms": 4.811542000000372,
+      "max_ms": 5.006458000000748
+    },
+    {
+      "pattern": "bare-percent",
+      "token": "10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        9.005040999999437,
+        9.024875000000065,
+        8.971292000000176,
+        8.947417000000314,
+        8.86712499999976,
+        9.336874999999964,
+        8.870874999999614
+      ],
+      "min_ms": 8.86712499999976,
+      "median_ms": 8.971292000000176,
+      "max_ms": 9.336874999999964
+    },
+    {
+      "pattern": "bare-percent",
+      "token": "10% ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        72.0702080000001,
+        72.25891700000011,
+        74.21816599999966,
+        73.6372080000001,
+        73.21887500000048,
+        74.02700000000004,
+        74.8711659999999
+      ],
+      "min_ms": 72.0702080000001,
+      "median_ms": 73.6372080000001,
+      "max_ms": 74.8711659999999
+    },
+    {
+      "pattern": "bare-percent",
+      "token": "10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        9.047833000000537,
+        9.02508300000045,
+        10.309583000000202,
+        8.880541999999878,
+        8.993457999999919,
+        8.881541000000652,
+        9.046000000000276
+      ],
+      "min_ms": 8.880541999999878,
+      "median_ms": 9.02508300000045,
+      "max_ms": 10.309583000000202
+    },
+    {
+      "pattern": "bare-percent",
+      "token": "10% ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        76.01279200000045,
+        75.00012499999957,
+        74.57837500000005,
+        77.36599999999999,
+        76.49433300000055,
+        91.22716700000001,
+        101.52470899999935
+      ],
+      "min_ms": 74.57837500000005,
+      "median_ms": 76.49433300000055,
+      "max_ms": 101.52470899999935
+    },
+    {
+      "pattern": "bare-percent",
+      "token": "10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        9.9375,
+        9.917790999999852,
+        9.186415999999554,
+        9.150542000000314,
+        9.293125000000146,
+        9.232582999999977,
+        9.436832999999751
+      ],
+      "min_ms": 9.150542000000314,
+      "median_ms": 9.293125000000146,
+      "max_ms": 9.9375
+    },
+    {
+      "pattern": "bare-percent",
+      "token": "10% ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        75.56704100000024,
+        75.52483299999949,
+        76.47787499999959,
+        75.89841699999943,
+        76.70362499999919,
+        76.90016599999944,
+        75.65941699999985
+      ],
+      "min_ms": 75.52483299999949,
+      "median_ms": 75.89841699999943,
+      "max_ms": 76.90016599999944
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "token": "one continuous chance-of clause",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.35841699999946286,
+        0.3491250000006403,
+        0.3485420000006343,
+        0.34487499999977445,
+        0.3483329999999114,
+        0.3484580000003916,
+        0.3452500000003056
+      ],
+      "min_ms": 0.34487499999977445,
+      "median_ms": 0.3484580000003916,
+      "max_ms": 0.35841699999946286
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "token": "one continuous chance-of clause",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.9039999999995416,
+        2.8255000000008295,
+        2.832958000000872,
+        3.0468330000003334,
+        2.8820000000005166,
+        2.914915999999721,
+        2.9092499999997017
+      ],
+      "min_ms": 2.8255000000008295,
+      "median_ms": 2.9039999999995416,
+      "max_ms": 3.0468330000003334
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "token": "one continuous chance-of clause",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.36729099999956816,
+        0.3837089999997261,
+        0.36179100000026665,
+        0.3603750000002037,
+        0.36004200000024866,
+        0.45883300000059535,
+        0.3772919999992155
+      ],
+      "min_ms": 0.36004200000024866,
+      "median_ms": 0.36729099999956816,
+      "max_ms": 0.45883300000059535
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "token": "one continuous chance-of clause",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.816291000000092,
+        2.81512500000008,
+        2.833499999999731,
+        2.939292000000023,
+        2.816541000000143,
+        2.823124999999891,
+        2.8170829999999114
+      ],
+      "min_ms": 2.81512500000008,
+      "median_ms": 2.8170829999999114,
+      "max_ms": 2.939292000000023
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "token": "one continuous chance-of clause",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.714125000000422,
+        0.6385419999996884,
+        0.6338749999995343,
+        0.6331660000005286,
+        0.6327080000000933,
+        0.6342500000000655,
+        0.6335420000004888
+      ],
+      "min_ms": 0.6327080000000933,
+      "median_ms": 0.6338749999995343,
+      "max_ms": 0.714125000000422
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "token": "one continuous chance-of clause",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.0896670000001905,
+        4.9965000000001965,
+        5.1035839999995005,
+        4.764250000000175,
+        4.850166000000172,
+        5.221250000000509,
+        5.1420829999997295
+      ],
+      "min_ms": 4.764250000000175,
+      "median_ms": 5.0896670000001905,
+      "max_ms": 5.221250000000509
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "token": "maybe 10%, ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.126041000000441,
+        6.662000000000262,
+        4.483625000000757,
+        4.654666000000361,
+        4.552625000000262,
+        4.696624999999585,
+        4.516042000000198
+      ],
+      "min_ms": 4.483625000000757,
+      "median_ms": 4.654666000000361,
+      "max_ms": 6.662000000000262
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "token": "maybe 10%, ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        37.52308300000004,
+        37.799958999999944,
+        37.277333,
+        37.399500000000444,
+        37.377958000000035,
+        37.395791999999346,
+        37.092499999999745
+      ],
+      "min_ms": 37.092499999999745,
+      "median_ms": 37.395791999999346,
+      "max_ms": 37.799958999999944
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "token": "maybe 10%, ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        4.63274999999976,
+        5.1030000000000655,
+        4.566291999999521,
+        4.476124999999229,
+        4.484499999999571,
+        4.537916999999652,
+        4.464750000000095
+      ],
+      "min_ms": 4.464750000000095,
+      "median_ms": 4.537916999999652,
+      "max_ms": 5.1030000000000655
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "token": "maybe 10%, ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        37.782750000000306,
+        37.45416600000044,
+        37.03041699999994,
+        37.409208000000035,
+        37.177582999999686,
+        37.13695800000005,
+        37.19866699999966
+      ],
+      "min_ms": 37.03041699999994,
+      "median_ms": 37.19866699999966,
+      "max_ms": 37.782750000000306
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "token": "maybe 10%, ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.586375000000771,
+        4.873459000000366,
+        4.833874999999352,
+        4.826500000000124,
+        4.892916000000696,
+        4.836250000000291,
+        4.805750000000444
+      ],
+      "min_ms": 4.805750000000444,
+      "median_ms": 4.836250000000291,
+      "max_ms": 5.586375000000771
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "token": "maybe 10%, ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        41.00958399999945,
+        39.70112499999959,
+        40.23624999999993,
+        39.84925000000021,
+        39.98170900000059,
+        39.952291000000514,
+        39.62858300000062
+      ],
+      "min_ms": 39.62858300000062,
+      "median_ms": 39.952291000000514,
+      "max_ms": 41.00958399999945
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "token": "Supplier fails has a 30% chance within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.170541000000412,
+        0.9253749999998035,
+        0.939792000000125,
+        0.919832999999926,
+        0.9247089999998934,
+        1.043083999999908,
+        0.9714579999999842
+      ],
+      "min_ms": 0.919832999999926,
+      "median_ms": 0.939792000000125,
+      "max_ms": 2.170541000000412
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "token": "Supplier fails has a 30% chance within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        7.342208000000028,
+        6.548499999999876,
+        11.39508399999977,
+        9.556999999999789,
+        6.255874999999833,
+        6.162458999999217,
+        6.8767500000003565
+      ],
+      "min_ms": 6.162458999999217,
+      "median_ms": 6.8767500000003565,
+      "max_ms": 11.39508399999977
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "token": "Supplier fails has a 30% chance within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.7295409999996991,
+        0.7292500000003201,
+        0.7523750000000291,
+        0.7399589999995442,
+        0.733208999999988,
+        0.7327500000001237,
+        0.7346250000000509
+      ],
+      "min_ms": 0.7292500000003201,
+      "median_ms": 0.733208999999988,
+      "max_ms": 0.7523750000000291
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "token": "Supplier fails has a 30% chance within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        6.979915999999321,
+        5.922375000000102,
+        5.946624999999585,
+        7.00445899999977,
+        5.982833000000028,
+        5.831999999999425,
+        7.0711660000006304
+      ],
+      "min_ms": 5.831999999999425,
+      "median_ms": 5.982833000000028,
+      "max_ms": 7.0711660000006304
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "token": "Supplier fails has a 30% chance within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        11.316208999999617,
+        10.802749999999833,
+        10.173916000000645,
+        8.89824999999928,
+        9.453333000000384,
+        10.00195900000017,
+        8.228165999999874
+      ],
+      "min_ms": 8.228165999999874,
+      "median_ms": 10.00195900000017,
+      "max_ms": 11.316208999999617
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "token": "Supplier fails has a 30% chance within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        69.38583300000028,
+        70.80574999999953,
+        67.96720800000003,
+        68.20774999999958,
+        67.72079099999974,
+        76.62345800000003,
+        67.14508299999943
+      ],
+      "min_ms": 67.14508299999943,
+      "median_ms": 68.20774999999958,
+      "max_ms": 76.62345800000003
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "token": "Supplier fails, maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe 30% within 6 months release slips. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.1515410000010888,
+        1.0638340000004973,
+        1.05870799999866,
+        1.0583750000005239,
+        1.050875000000815,
+        1.0562920000011218,
+        1.0556670000005397
+      ],
+      "min_ms": 1.050875000000815,
+      "median_ms": 1.0583750000005239,
+      "max_ms": 1.1515410000010888
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "token": "Supplier fails, maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe 30% within 6 months release slips. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        8.569790999999896,
+        8.8956249999992,
+        8.85254200000054,
+        8.481082999998762,
+        8.861291999999594,
+        8.356917000000976,
+        8.779625000001033
+      ],
+      "min_ms": 8.356917000000976,
+      "median_ms": 8.779625000001033,
+      "max_ms": 8.8956249999992
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "token": "Supplier fails, maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe 30% within 6 months release slips. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.0423749999990832,
+        1.0406249999996362,
+        1.0440419999995356,
+        1.0327919999999722,
+        1.039666999999099,
+        1.103291999999783,
+        1.0498330000009446
+      ],
+      "min_ms": 1.0327919999999722,
+      "median_ms": 1.0423749999990832,
+      "max_ms": 1.103291999999783
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "token": "Supplier fails, maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe 30% within 6 months release slips. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        8.474041999999827,
+        8.828457999999955,
+        8.440375000000131,
+        8.564833000000363,
+        8.693500000001222,
+        8.392249999998967,
+        8.656999999999243
+      ],
+      "min_ms": 8.392249999998967,
+      "median_ms": 8.564833000000363,
+      "max_ms": 8.828457999999955
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "token": "Supplier fails, maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe 30% within 6 months release slips. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.6069580000003043,
+        1.4952499999999418,
+        1.5030420000002778,
+        1.4999580000003334,
+        1.507541000000856,
+        1.5143329999991693,
+        1.6033339999994496
+      ],
+      "min_ms": 1.4952499999999418,
+      "median_ms": 1.507541000000856,
+      "max_ms": 1.6069580000003043
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "token": "Supplier fails, maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe maybe 30% within 6 months release slips. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        12.801000000001295,
+        12.330916000000798,
+        12.746375000000626,
+        12.406957999999577,
+        12.748250000000553,
+        12.885958000000755,
+        12.270500000000538
+      ],
+      "min_ms": 12.270500000000538,
+      "median_ms": 12.746375000000626,
+      "max_ms": 12.885958000000755
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "token": "The new supplier boosts our odds 10% within a year. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.8494169999994483,
+        0.8532500000001164,
+        1.2625830000015412,
+        0.8753329999999551,
+        0.8796670000010636,
+        0.9862079999984417,
+        0.8739999999997963
+      ],
+      "min_ms": 0.8494169999994483,
+      "median_ms": 0.8753329999999551,
+      "max_ms": 1.2625830000015412
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "token": "The new supplier boosts our odds 10% within a year. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        7.171458999999231,
+        7.674042000000554,
+        7.159041999999317,
+        7.043292000000292,
+        7.6652090000006865,
+        7.081333000000086,
+        7.0418750000008
+      ],
+      "min_ms": 7.0418750000008,
+      "median_ms": 7.159041999999317,
+      "max_ms": 7.674042000000554
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "token": "The new supplier boosts our odds 10% within a year. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.8225419999998849,
+        0.820040999999037,
+        1.3615420000005543,
+        0.8257079999984853,
+        0.8235839999997552,
+        0.8179589999999735,
+        0.8182080000005953
+      ],
+      "min_ms": 0.8179589999999735,
+      "median_ms": 0.8225419999998849,
+      "max_ms": 1.3615420000005543
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "token": "The new supplier boosts our odds 10% within a year. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        6.651000000001659,
+        6.756833999999799,
+        7.447374999999738,
+        6.654290999998921,
+        6.703041000000667,
+        7.23858300000029,
+        6.653416999999536
+      ],
+      "min_ms": 6.651000000001659,
+      "median_ms": 6.703041000000667,
+      "max_ms": 7.447374999999738
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "token": "The new supplier boosts our odds 10% within a year. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.8390000000017608,
+        1.898750000000291,
+        2.330708000001323,
+        1.8460419999992155,
+        1.8397919999988517,
+        1.8685419999983424,
+        2.5813749999997526
+      ],
+      "min_ms": 1.8390000000017608,
+      "median_ms": 1.8685419999983424,
+      "max_ms": 2.5813749999997526
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "token": "The new supplier boosts our odds 10% within a year. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        15.755166999999346,
+        14.87525000000096,
+        15.867457999998805,
+        15.75341599999956,
+        14.752457999999024,
+        15.63183299999946,
+        15.651292000000467
+      ],
+      "min_ms": 14.752457999999024,
+      "median_ms": 15.651292000000467,
+      "max_ms": 15.867457999998805
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "token": "The delay raises our churn risk 10% within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.7223749999993743,
+        0.7243749999997817,
+        0.7155000000002474,
+        0.7367920000015147,
+        0.7124590000003082,
+        0.7127500000005966,
+        0.7164579999989655
+      ],
+      "min_ms": 0.7124590000003082,
+      "median_ms": 0.7164579999989655,
+      "max_ms": 0.7367920000015147
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "token": "The delay raises our churn risk 10% within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        6.843292000001384,
+        5.799667000001136,
+        5.854957999999897,
+        6.4461670000000595,
+        5.91058300000077,
+        5.884374999999636,
+        6.653791999999157
+      ],
+      "min_ms": 5.799667000001136,
+      "median_ms": 5.91058300000077,
+      "max_ms": 6.843292000001384
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "token": "The delay raises our churn risk 10% within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.699958000001061,
+        0.7000840000000608,
+        0.6972499999992579,
+        0.6971250000005966,
+        0.6936249999998836,
+        0.6977079999996931,
+        0.6923339999993914
+      ],
+      "min_ms": 0.6923339999993914,
+      "median_ms": 0.6972499999992579,
+      "max_ms": 0.7000840000000608
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "token": "The delay raises our churn risk 10% within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.58849999999984,
+        6.39995799999997,
+        5.550874999998996,
+        5.669625000000451,
+        6.316667000000962,
+        5.630416999998488,
+        5.40900000000147
+      ],
+      "min_ms": 5.40900000000147,
+      "median_ms": 5.630416999998488,
+      "max_ms": 6.39995799999997
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "token": "The delay raises our churn risk 10% within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.6920000000009168,
+        1.7944589999988239,
+        1.7125410000007832,
+        1.6735410000001139,
+        2.366874999999709,
+        1.6630409999997937,
+        1.6782079999993584
+      ],
+      "min_ms": 1.6630409999997937,
+      "median_ms": 1.6920000000009168,
+      "max_ms": 2.366874999999709
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "token": "The delay raises our churn risk 10% within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        14.356082999998762,
+        14.385291000000507,
+        13.365707999999358,
+        18.872667000001456,
+        16.687041000001045,
+        13.534459000000425,
+        14.130416999998488
+      ],
+      "min_ms": 13.365707999999358,
+      "median_ms": 14.356082999998762,
+      "max_ms": 18.872667000001456
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "token": "chance that churn is 10% within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.9162500000002183,
+        0.9138340000008611,
+        0.982625000000553,
+        1.6475420000006125,
+        0.9977079999989655,
+        0.9924160000009579,
+        0.9509580000012647
+      ],
+      "min_ms": 0.9138340000008611,
+      "median_ms": 0.982625000000553,
+      "max_ms": 1.6475420000006125
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "token": "chance that churn is 10% within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        7.856124999998428,
+        7.9068329999990965,
+        7.750291999998808,
+        7.275166999999783,
+        7.839207999999417,
+        7.72229200000038,
+        7.285125000000335
+      ],
+      "min_ms": 7.275166999999783,
+      "median_ms": 7.750291999998808,
+      "max_ms": 7.9068329999990965
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "token": "chance that churn is 10% within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.8527500000000146,
+        1.2277919999996811,
+        0.8781660000004194,
+        0.8740410000009433,
+        0.9977079999989655,
+        0.8869580000009591,
+        0.8834579999984271
+      ],
+      "min_ms": 0.8527500000000146,
+      "median_ms": 0.8834579999984271,
+      "max_ms": 1.2277919999996811
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "token": "chance that churn is 10% within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        7.505041999998866,
+        7.461583000000246,
+        6.961374999998952,
+        7.580332999999882,
+        7.355208000000857,
+        6.935707999999067,
+        7.444375000000946
+      ],
+      "min_ms": 6.935707999999067,
+      "median_ms": 7.444375000000946,
+      "max_ms": 7.580332999999882
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "token": "chance that churn is 10% within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.037792000000991,
+        2.036707999999635,
+        2.179959000000963,
+        2.127915999999459,
+        2.69366699999955,
+        2.1971250000005966,
+        2.128415999999561
+      ],
+      "min_ms": 2.036707999999635,
+      "median_ms": 2.128415999999561,
+      "max_ms": 2.69366699999955
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "token": "chance that churn is 10% within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        17.7137500000008,
+        17.83354099999997,
+        17.533708000000843,
+        19.729459000000134,
+        22.267625000000407,
+        19.55829099999937,
+        21.155625000001237
+      ],
+      "min_ms": 17.533708000000843,
+      "median_ms": 19.55829099999937,
+      "max_ms": 22.267625000000407
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "token": "Supplier fails, there's a 30% chance within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.8592920000010054,
+        1.1703339999985474,
+        1.0445829999989655,
+        1.071749999999156,
+        1.230374999999185,
+        1.9899580000001151,
+        1.240749999999025
+      ],
+      "min_ms": 1.0445829999989655,
+      "median_ms": 1.230374999999185,
+      "max_ms": 1.9899580000001151
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "token": "Supplier fails, there's a 30% chance within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        13.068332999999257,
+        16.379666000000725,
+        17.88195799999994,
+        11.766084000000774,
+        13.232041999999637,
+        12.367207999999664,
+        24.002000000000407
+      ],
+      "min_ms": 11.766084000000774,
+      "median_ms": 13.232041999999637,
+      "max_ms": 24.002000000000407
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "token": "Supplier fails, there's a 30% chance within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        1.176207999998951,
+        1.4371660000015254,
+        1.0547910000004777,
+        1.1794580000005226,
+        1.2439590000012686,
+        1.256999999999607,
+        1.214750000001004
+      ],
+      "min_ms": 1.0547910000004777,
+      "median_ms": 1.214750000001004,
+      "max_ms": 1.4371660000015254
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "token": "Supplier fails, there's a 30% chance within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        12.175833999999668,
+        15.57012500000019,
+        11.989583999999013,
+        13.391499999999724,
+        12.263707999998587,
+        11.955041999999594,
+        10.229749999998603
+      ],
+      "min_ms": 10.229749999998603,
+      "median_ms": 12.175833999999668,
+      "max_ms": 15.57012500000019
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "token": "Supplier fails, there's a 30% chance within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        10.291165999999066,
+        12.127167000000554,
+        11.593957999999475,
+        9.638458000001265,
+        10.171833000000333,
+        9.038749999999709,
+        9.108874999999898
+      ],
+      "min_ms": 9.038749999999709,
+      "median_ms": 10.171833000000333,
+      "max_ms": 12.127167000000554
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "token": "Supplier fails, there's a 30% chance within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        66.08074999999917,
+        67.68475000000035,
+        66.26791599999888,
+        67.33849999999984,
+        75.76279199999954,
+        76.04612499999894,
+        69.914084
+      ],
+      "min_ms": 66.08074999999917,
+      "median_ms": 67.68475000000035,
+      "max_ms": 76.04612499999894
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "token": "Supplier fails, a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a 30% chance within 6 months release slips. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.4747079999997368,
+        0.5458330000001297,
+        0.49474999999983993,
+        0.47937499999898137,
+        0.47316700000010314,
+        0.47312500000043656,
+        0.47533300000031886
+      ],
+      "min_ms": 0.47312500000043656,
+      "median_ms": 0.47533300000031886,
+      "max_ms": 0.5458330000001297
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "token": "Supplier fails, a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a 30% chance within 6 months release slips. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.826666999999361,
+        3.8166669999991427,
+        3.7738330000011047,
+        5.101584000000003,
+        3.90625,
+        3.787000000000262,
+        3.7955830000009882
+      ],
+      "min_ms": 3.7738330000011047,
+      "median_ms": 3.8166669999991427,
+      "max_ms": 5.101584000000003
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "token": "Supplier fails, a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a 30% chance within 6 months release slips. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.4590830000015558,
+        0.4626250000001164,
+        0.5743750000001455,
+        0.4593750000003638,
+        0.45583299999998417,
+        0.45291700000052515,
+        0.4501669999990554
+      ],
+      "min_ms": 0.4501669999990554,
+      "median_ms": 0.4590830000015558,
+      "max_ms": 0.5743750000001455
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "token": "Supplier fails, a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a 30% chance within 6 months release slips. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.6092920000010054,
+        3.7027500000003783,
+        3.6646660000005795,
+        3.7808750000003783,
+        3.7745840000006865,
+        3.6494170000005397,
+        3.682542000000467
+      ],
+      "min_ms": 3.6092920000010054,
+      "median_ms": 3.682542000000467,
+      "max_ms": 3.7808750000003783
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "token": "Supplier fails, a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a 30% chance within 6 months release slips. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        4.502749999999651,
+        3.31262500000048,
+        3.334000000000742,
+        4.078499999999622,
+        3.2457909999993717,
+        3.2214160000003176,
+        3.9715830000004644
+      ],
+      "min_ms": 3.2214160000003176,
+      "median_ms": 3.334000000000742,
+      "max_ms": 4.502749999999651
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "token": "Supplier fails, a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a 30% chance within 6 months release slips. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        28.009500000000116,
+        27.72308300000077,
+        28.038291999999274,
+        28.828125,
+        27.775250000000597,
+        32.28129199999967,
+        29.880874999998923
+      ],
+      "min_ms": 27.72308300000077,
+      "median_ms": 28.038291999999274,
+      "max_ms": 32.28129199999967
+    },
+    {
+      "pattern": "tail-en-dash",
+      "token": "10% chance–",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.514667000001282,
+        4.84845900000073,
+        4.707667000000583,
+        4.998917000000802,
+        4.867999999998574,
+        4.720957999999882,
+        5.243083999999726
+      ],
+      "min_ms": 4.707667000000583,
+      "median_ms": 4.867999999998574,
+      "max_ms": 5.514667000001282
+    },
+    {
+      "pattern": "tail-en-dash",
+      "token": "10% chance–",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        39.15599999999904,
+        39.25595799999974,
+        38.537374999999884,
+        39.12674999999945,
+        38.99812500000007,
+        38.27716700000019,
+        38.45066699999916
+      ],
+      "min_ms": 38.27716700000019,
+      "median_ms": 38.99812500000007,
+      "max_ms": 39.25595799999974
+    },
+    {
+      "pattern": "tail-en-dash",
+      "token": "10% chance–",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        4.902667000000292,
+        5.324499999998807,
+        4.910083000000668,
+        4.737542000000758,
+        4.772415999999794,
+        4.866834000000381,
+        4.736791999999696
+      ],
+      "min_ms": 4.736791999999696,
+      "median_ms": 4.866834000000381,
+      "max_ms": 5.324499999998807
+    },
+    {
+      "pattern": "tail-en-dash",
+      "token": "10% chance–",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        40.7237499999992,
+        46.25037499999962,
+        42.219874999998865,
+        42.752166000000216,
+        42.554291000000376,
+        39.80104100000062,
+        38.4604589999999
+      ],
+      "min_ms": 38.4604589999999,
+      "median_ms": 42.219874999998865,
+      "max_ms": 46.25037499999962
+    },
+    {
+      "pattern": "tail-en-dash",
+      "token": "10% chance–",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        5.23491599999943,
+        5.060625000000073,
+        5.142333000001599,
+        5.099582999999257,
+        5.180417000001398,
+        5.25066599999991,
+        5.002875000000131
+      ],
+      "min_ms": 5.002875000000131,
+      "median_ms": 5.142333000001599,
+      "max_ms": 5.25066599999991
+    },
+    {
+      "pattern": "tail-en-dash",
+      "token": "10% chance–",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        40.753333000000566,
+        41.279875000000175,
+        41.843291999999565,
+        40.53741600000103,
+        40.82958299999882,
+        41.291541999999026,
+        41.07104199999958
+      ],
+      "min_ms": 40.53741600000103,
+      "median_ms": 41.07104199999958,
+      "max_ms": 41.843291999999565
+    },
+    {
+      "pattern": "horizon-head",
+      "token": "10% within the next ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.66004200000134,
+        2.6975000000002183,
+        2.8842079999994894,
+        2.7148329999999987,
+        2.6913750000003347,
+        2.6829580000012356,
+        2.769917000001442
+      ],
+      "min_ms": 2.66004200000134,
+      "median_ms": 2.6975000000002183,
+      "max_ms": 2.8842079999994894
+    },
+    {
+      "pattern": "horizon-head",
+      "token": "10% within the next ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        22.33037499999955,
+        21.651582999998936,
+        21.507958000000144,
+        21.55987500000083,
+        21.722332999999708,
+        21.750625000000582,
+        21.907208000000537
+      ],
+      "min_ms": 21.507958000000144,
+      "median_ms": 21.722332999999708,
+      "max_ms": 22.33037499999955
+    },
+    {
+      "pattern": "horizon-head",
+      "token": "10% within the next ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        2.654500000000553,
+        2.611584000000221,
+        2.60570799999914,
+        2.684832999999344,
+        2.772167000000991,
+        2.6249169999991864,
+        2.5826669999987644
+      ],
+      "min_ms": 2.5826669999987644,
+      "median_ms": 2.6249169999991864,
+      "max_ms": 2.772167000000991
+    },
+    {
+      "pattern": "horizon-head",
+      "token": "10% within the next ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        21.454874999999447,
+        21.472250000000713,
+        21.080832999999984,
+        23.377416999999696,
+        23.678250000000844,
+        23.532750000000306,
+        23.712416999998823
+      ],
+      "min_ms": 21.080832999999984,
+      "median_ms": 23.377416999999696,
+      "max_ms": 23.712416999998823
+    },
+    {
+      "pattern": "horizon-head",
+      "token": "10% within the next ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        3.1193750000002183,
+        3.051707999999053,
+        3.0674999999991996,
+        3.182542000000467,
+        3.0177499999990687,
+        3.0541250000005675,
+        3.152458000000479
+      ],
+      "min_ms": 3.0177499999990687,
+      "median_ms": 3.0674999999991996,
+      "max_ms": 3.182542000000467
+    },
+    {
+      "pattern": "horizon-head",
+      "token": "10% within the next ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        25.049957999999606,
+        23.729333999999653,
+        24.316624999999476,
+        23.528082999999242,
+        23.76983300000029,
+        24.392916000000696,
+        24.338207999999213
+      ],
+      "min_ms": 23.528082999999242,
+      "median_ms": 24.316624999999476,
+      "max_ms": 25.049957999999606
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "token": "a. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.08366599999862956,
+        0.08287500000005821,
+        0.08287500000005821,
+        0.08279200000106357,
+        0.08270799999991141,
+        0.08275000000139698,
+        0.08279200000106357
+      ],
+      "min_ms": 0.08270799999991141,
+      "median_ms": 0.08279200000106357,
+      "max_ms": 0.08366599999862956
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "token": "a. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.7078330000003916,
+        0.6640840000000026,
+        0.8007079999988491,
+        0.65020800000093,
+        0.6485419999989972,
+        0.6482080000005226,
+        0.6649170000000595
+      ],
+      "min_ms": 0.6482080000005226,
+      "median_ms": 0.6640840000000026,
+      "max_ms": 0.8007079999988491
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "token": "a. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.07266600000002654,
+        0.07229200000074343,
+        0.07220800000141026,
+        0.07533300000068266,
+        0.07566700000097626,
+        0.07554200000049605,
+        0.07545799999934388
+      ],
+      "min_ms": 0.07220800000141026,
+      "median_ms": 0.07533300000068266,
+      "max_ms": 0.07566700000097626
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "token": "a. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.5717080000013084,
+        0.6607910000002448,
+        0.7939170000008744,
+        0.5751249999993888,
+        0.587083000000348,
+        0.5870840000006865,
+        0.590249999999287
+      ],
+      "min_ms": 0.5717080000013084,
+      "median_ms": 0.5870840000006865,
+      "max_ms": 0.7939170000008744
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "token": "a. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        11.769583000001148,
+        12.245082999999795,
+        12.327791999998226,
+        12.836499999999432,
+        11.825832999998966,
+        12.614666999999827,
+        11.74395800000093
+      ],
+      "min_ms": 11.74395800000093,
+      "median_ms": 12.245082999999795,
+      "max_ms": 12.836499999999432
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "token": "a. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        102.3039579999986,
+        112.87087500000052,
+        102.20424999999886,
+        100.24533300000076,
+        100.64750000000095,
+        102.78183399999944,
+        104.48825000000033
+      ],
+      "min_ms": 100.24533300000076,
+      "median_ms": 102.3039579999986,
+      "max_ms": 112.87087500000052
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "token": "Supplier fails with probability 10% within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.963000000001557,
+        1.1275409999998374,
+        0.927958000000217,
+        1.013082999999824,
+        1.0115829999995185,
+        0.856792000000496,
+        0.8569169999991573
+      ],
+      "min_ms": 0.856792000000496,
+      "median_ms": 0.963000000001557,
+      "max_ms": 1.1275409999998374
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "token": "Supplier fails with probability 10% within 6 months. ",
+      "reader": "readStatedEventRisk",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        7.34204200000022,
+        7.018167000000176,
+        10.237084000000323,
+        13.413916000001336,
+        7.179874999999811,
+        7.100209000000177,
+        8.115999999999985
+      ],
+      "min_ms": 7.018167000000176,
+      "median_ms": 7.34204200000022,
+      "max_ms": 13.413916000001336
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "token": "Supplier fails with probability 10% within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        0.814209000000119,
+        0.8225000000002183,
+        0.7889169999998558,
+        0.7843329999996058,
+        0.8866670000006707,
+        0.7822919999998703,
+        0.7758329999996931
+      ],
+      "min_ms": 0.7758329999996931,
+      "median_ms": 0.7889169999998558,
+      "max_ms": 0.8866670000006707
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "token": "Supplier fails with probability 10% within 6 months. ",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        6.67975000000115,
+        8.008458000000246,
+        6.641250000000582,
+        6.686499999999796,
+        7.769624999998996,
+        6.702165999999124,
+        6.414000000000669
+      ],
+      "min_ms": 6.414000000000669,
+      "median_ms": 6.686499999999796,
+      "max_ms": 8.008458000000246
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "token": "Supplier fails with probability 10% within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 20000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        12.173208000000159,
+        8.249541999999565,
+        9.872959000000264,
+        8.143000000000029,
+        8.499250000000757,
+        8.073959000001196,
+        9.318499999999403
+      ],
+      "min_ms": 8.073959000001196,
+      "median_ms": 8.499250000000757,
+      "max_ms": 12.173208000000159
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "token": "Supplier fails with probability 10% within 6 months. ",
+      "reader": "holdStatedEventRisks",
+      "characters": 160000,
+      "batches": 7,
+      "calls_per_batch": 1,
+      "batch_ms": [
+        84.55987499999901,
+        88.08116700000028,
+        76.95579200000066,
+        91.01887499999975,
+        78.34416600000077,
+        114.58512500000143,
+        195.0066659999993
+      ],
+      "min_ms": 76.95579200000066,
+      "median_ms": 88.08116700000028,
+      "max_ms": 195.0066659999993
+    }
+  ],
+  "ratios": [
+    {
+      "pattern": "whitespace",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.849758104779743,
+      "median_time_ratio": 7.855646610658521,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "whitespace",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 6.989508902303767,
+      "median_time_ratio": 6.98953090396543,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "whitespace",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.507657042182403,
+      "median_time_ratio": 7.527023750709139,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "by-percent",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.611527569548362,
+      "median_time_ratio": 7.805078112462882,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "by-percent",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.0128443104674,
+      "median_time_ratio": 8.060328973931359,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "by-percent",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.085260662574626,
+      "median_time_ratio": 8.118770872829929,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "e.g.",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.749179195794645,
+      "median_time_ratio": 7.832580937971687,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "e.g.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.884250687316108,
+      "median_time_ratio": 7.780462852880982,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "e.g.",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.415218128736135,
+      "median_time_ratio": 7.156308711156502,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "i.e.",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.3157539543011785,
+      "median_time_ratio": 7.746503496502785,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "i.e.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.830631667962167,
+      "median_time_ratio": 7.828767860991107,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "i.e.",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.079873429407087,
+      "median_time_ratio": 8.432404059255402,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "a.b.",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.77731158960319,
+      "median_time_ratio": 7.780889621087616,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "a.b.",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 6.940038115309941,
+      "median_time_ratio": 7.850413926501946,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "a.b.",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.101561799613567,
+      "median_time_ratio": 7.984451102347841,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.519111186921765,
+      "median_time_ratio": 7.3805021154899375,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.04284432024296,
+      "median_time_ratio": 8.14208080822191,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-that-x-is-percent",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.13445909288721,
+      "median_time_ratio": 8.481708496255045,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.376196662311358,
+      "median_time_ratio": 8.553172296282257,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.941970044737618,
+      "median_time_ratio": 8.26742840540355,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-of-a-fall-of-percent",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.110850757029853,
+      "median_time_ratio": 8.259642066573651,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "may-happen-percent",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.077956519844333,
+      "median_time_ratio": 7.950982297101184,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "may-happen-percent",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.16931475235248,
+      "median_time_ratio": 8.026915144771044,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "may-happen-percent",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.003640927867794,
+      "median_time_ratio": 7.301448428058922,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-hyphen",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.912569299549021,
+      "median_time_ratio": 6.485166087518692,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-hyphen",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.097123941500016,
+      "median_time_ratio": 8.142846152446522,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "chance-hyphen",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.008646140859074,
+      "median_time_ratio": 8.111614435732974,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "bare-percent",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.127798807392706,
+      "median_time_ratio": 8.208093995825646,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "bare-percent",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.397953075386736,
+      "median_time_ratio": 8.475748422479521,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "bare-percent",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.253591208039579,
+      "median_time_ratio": 8.167157656869808,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.192823486778332,
+      "median_time_ratio": 8.333859460813866,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.818879464057348,
+      "median_time_ratio": 7.669893898851928,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "long-chance-of-clause",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.5299348198528735,
+      "median_time_ratio": 8.02944902386737,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.272881875712953,
+      "median_time_ratio": 8.034044118309765,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.293950837112751,
+      "median_time_ratio": 8.197299994689747,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "maybe-percent-comma",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.246076678977674,
+      "median_time_ratio": 8.261006151459934,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 6.699541112353778,
+      "median_time_ratio": 7.3173106389493014,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.997257456286411,
+      "median_time_ratio": 8.159792092023046,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "repeated-drafter-sentences",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.160394795146386,
+      "median_time_ratio": 6.819439071885659,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.952341620073268,
+      "median_time_ratio": 8.295382071568856,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.125789123075307,
+      "median_time_ratio": 8.216652356405223,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-late-failure",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.20632001337637,
+      "median_time_ratio": 8.455076843676814,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.290244956252787,
+      "median_time_ratio": 8.178649725304181,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.131214400724089,
+      "median_time_ratio": 8.149177792746881,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "likelihood-delta-filler",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.021999999991788,
+      "median_time_ratio": 8.376205619148166,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.140351936039306,
+      "median_time_ratio": 8.249727129865677,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.812703117290535,
+      "median_time_ratio": 8.075176765872328,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "likelihood-delta-risk",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.036908290295319,
+      "median_time_ratio": 8.484682624108146,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.9611472105359695,
+      "median_time_ratio": 7.887334435816763,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.133342714745176,
+      "median_time_ratio": 8.42640510359768,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "event-predicate-churn",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.608847218159886,
+      "median_time_ratio": 9.189129850557132,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 11.263905309594763,
+      "median_time_ratio": 10.754478919035579,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 9.698366785452256,
+      "median_time_ratio": 10.023324963975801,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-contraction",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.310828377817873,
+      "median_time_ratio": 6.6541350020196095,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.976397357987049,
+      "median_time_ratio": 8.029459347439758,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.01767344120866,
+      "median_time_ratio": 8.021516806302971,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "scaffold-over-cap",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.605868661482415,
+      "median_time_ratio": 8.409805638870136,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "tail-en-dash",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.13081447774353,
+      "median_time_ratio": 8.011118529172451,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "tail-en-dash",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.119516119771012,
+      "median_time_ratio": 8.675018502787553,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "tail-en-dash",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.102824076156205,
+      "median_time_ratio": 7.986849937564682,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "horizon-head",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.08557082932875,
+      "median_time_ratio": 8.052764782204987,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "horizon-head",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.162427831389053,
+      "median_time_ratio": 8.905964264777493,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "horizon-head",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.796564659102478,
+      "median_time_ratio": 7.927180114101327,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.837307152889888,
+      "median_time_ratio": 8.021113150926075,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 7.917516064565459,
+      "median_time_ratio": 7.793184925535508,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "clause-splitter-a",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.535906974462343,
+      "median_time_ratio": 8.354696983270781,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "reader": "readStatedEventRisk",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.191214437105053,
+      "median_time_ratio": 7.624134994795793,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "reader": "readStatedLikelihoodWithoutWindow",
+      "input_size_ratio": 8,
+      "min_time_ratio": 8.267243079378174,
+      "median_time_ratio": 8.475543054593853,
+      "minimum_ratio_under_20": true
+    },
+    {
+      "pattern": "explicit-probability-unbridged-control",
+      "reader": "holdStatedEventRisks",
+      "input_size_ratio": 8,
+      "min_time_ratio": 9.531357788662199,
+      "median_time_ratio": 10.363404653350877,
+      "minimum_ratio_under_20": true
+    }
+  ]
+}

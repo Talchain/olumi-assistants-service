@@ -60,7 +60,7 @@ export default async function route(app: FastifyInstance) {
   const handler = async (req: FastifyRequest, reply: FastifyReply) => {
     const startTime = Date.now();
     const parsed = ExplainDiffInput.safeParse(req.body);
-    
+
     if (!parsed.success) {
       reply.code(400);
       return reply.send(ErrorV1.parse({
@@ -73,14 +73,14 @@ export default async function route(app: FastifyInstance) {
 
     try {
       const { patch, brief, graph_summary } = parsed.data;
-      
+
       // Count total changes
-      const totalChanges = 
+      const totalChanges =
         (patch.adds?.nodes?.length || 0) +
         (patch.adds?.edges?.length || 0) +
         (patch.updates?.length || 0) +
         (patch.removes?.length || 0);
-      
+
       if (totalChanges === 0) {
         reply.code(400);
         return reply.send(ErrorV1.parse({
@@ -134,13 +134,13 @@ export default async function route(app: FastifyInstance) {
         model: adapter.model,
         cost_usd: costUsd
       });
-      
+
       const output = ExplainDiffOutput.parse({ rationales: sortedRationales });
       return reply.send(output);
-      
+
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error("unexpected error");
-      
+
       // Capability error mapping (like clarifier/critique)
       if (err.message && err.message.includes("_not_supported")) {
         reply.code(400);
@@ -151,7 +151,7 @@ export default async function route(app: FastifyInstance) {
           details: { hint: "Use LLM_PROVIDER=anthropic or fixtures" }
         }));
       }
-      
+
       log.error({ err }, "explain-diff route failure");
       reply.code(500);
       return reply.send(ErrorV1.parse({
@@ -165,6 +165,6 @@ export default async function route(app: FastifyInstance) {
   // Derived from the path list above — one handler reference, so the two
   // surfaces cannot fork.
   for (const path of EXPLAIN_DIFF_PATHS) {
-    app.post(path, handler);
+    app.post(path, { config: { scenarioId: 'none' } }, handler);
   }
 }

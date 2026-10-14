@@ -15,6 +15,8 @@
  * the user gave is `user_specified`, and the brief's own level keeps `brief_extraction`.
  * Nothing here calls a model or a live service.
  */
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetConfigCache } from '../../../config/index.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -131,7 +133,7 @@ describe('an approved option level carries WHOSE level it is, through the real w
     const p = product(hiring());
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' }],
+      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
@@ -154,9 +156,9 @@ describe('an approved option level carries WHOSE level it is, through the real w
     const p = product(start);
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const sp = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Onboarding share', value: 0.4, unit: '', basis: 'the user: it is 40%', revise: true } as never],
+      assumptions: [{ user_stated: true, factor_label: 'Onboarding share', value: 0.4, unit: '', basis: 'the user: it is 40%', revise: true } as never],
       option_levels: [
-        { option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' },
+        { option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire', user_stated: false },
         { option_label: 'Hire Two Developers', factor_label: 'Onboarding share', value: 0.45, basis: 'the user: two starters', user_stated: true },
       ],
     });
@@ -178,21 +180,30 @@ describe('an approved option level carries WHOSE level it is, through the real w
  * rows go through `dispatchTool` with JSON arguments, as the model sends them, never a direct call.
  */
 describe('the Agent-facing contract can say whose level it is', () => {
-  const userStatedDoc = (tool: string, list: string): string => {
-    const t = AGENT_TOOLS.find((x) => x.name === tool)!;
-    const items = ((t.parameters as { properties: Record<string, { items: { properties: Record<string, { description?: string }> } }> })
-      .properties[list]!.items.properties.user_stated)!;
-    return String(items.description ?? '');
-  };
-
+  const approvedBytes = readFileSync(new URL('./fixtures/aie-a2-option-level-field-20261013.json', import.meta.url));
+  const approved = JSON.parse(approvedBytes.toString('utf8'));
+  it('pins the verbatim AIE artifact', () => {
+    expect(createHash('sha256').update(approvedBytes).digest('hex')).toBe('199b0b50164d9c10be50b6d70fa43f9ce3ede50dd93bc5a525a864777b51910d');
+  });
   it.each([['propose_option_interventions', 'interventions'], ['propose_starting_point', 'option_levels']] as const)(
-    'RED: %s documents user_stated as "the user gave this level" — for ANY option, not only a held status quo',
-    (tool, list) => {
-      const doc = userStatedDoc(tool, list);
-      expect(doc).toContain('Set true ONLY when the USER gave this level');
-      expect(doc).toContain('without it the level is recorded as Olumi\u2019s estimate');
-      expect(doc).not.toContain('Omit it in every other case');
+    'A2i9 B5 equality: %s carries the exact schema and required array', (tool, list) => {
+      const items = (AGENT_TOOLS.find(t => t.name === tool)!.parameters as any).properties[list].items;
+      expect(items.properties.user_stated).toEqual(approved.option_level_user_stated.schema);
+      expect(items.required).toEqual(approved.option_level_user_stated.required_arrays_after[`${tool}.parameters.${list}.items.required`]);
     });
+  it('the obsolete omission instruction is absent from every tool description', () => {
+    const descriptions: string[] = [];
+    const visit = (v: unknown): void => {
+      if (!v || typeof v !== 'object') return;
+      for (const [key, value] of Object.entries(v)) {
+        if (key === 'description' && typeof value === 'string') descriptions.push(value);
+        else visit(value);
+      }
+    };
+    visit(AGENT_TOOLS);
+    expect(descriptions.filter(d => d.includes('without it the level is recorded as Olumi’s estimate'))).toEqual([]);
+    expect(descriptions.filter(d => d.includes('Set true ONLY when the USER gave this level'))).toEqual([]);
+  });
 
   it('CONTROL (now contract-compliant): a user-given ORDINARY level sent through the tool boundary reads back user_specified after approval', async () => {
     const p = product(hiring());
@@ -206,13 +217,19 @@ describe('the Agent-facing contract can say whose level it is', () => {
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'user_specified' });
   });
 
-  it('CONTRAST: the same level WITHOUT the flag — Olumi\u2019s proposal — reads back cee_hypothesis', async () => {
+  it('CONTRAST: the same level with explicit false — Olumi\u2019s proposal — reads back cee_hypothesis', async () => {
     const p = product(hiring());
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await dispatchTool('propose_option_interventions', JSON.stringify({
-      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire, as a starting point' }],
+      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire, as a starting point', user_stated: false }],
     }), ctx, caps);
     expect((await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), ctx, caps)).ok).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

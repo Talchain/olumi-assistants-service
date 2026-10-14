@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * S2i P6 (DL, 7 Oct): "make no claim about investigation priority beyond the screen's own driver lines; if the screen
  * shows no driver and no range, say it is not established yet." One row each way, through the real route and its egress.
@@ -27,7 +28,10 @@ const B1 = ((): Read => {
 })();
 const B1_SENTENCE = 'Sensitivity was not measured, so investigation priority is not established.';
 const LIMIT = 'Investigation priority is not established yet.';
-const CLAUSE = "make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.";
+// ⛔ CHANGED EXPECTATION (prompt P17, AIE one-pass packet 94ad9c8f…): the screen-driver deferral is replaced by the packet's driver
+// sentence; the investigation-priority prohibition stays. The behaviour rows below (the limit said only where true) are unchanged.
+const CLAUSE = 'make no claim about investigation priority. Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty. If a sensitivity was not measured, say so rather than infer a decisive driver or an untested numerical effect.';
+const RETIRED_CLAUSE = "beyond the screen's own driver lines";
 const withResult = (read: Read, edit: (r: Json) => void): Read => {
   const r = structuredClone(read.analysis_result);
   edit(r);
@@ -72,6 +76,8 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
   const sent: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: narrator }] }] }), { status: 200 });
     }));
@@ -98,7 +104,7 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
   const explainSaying = async (on: Read, text: string): Promise<{ reply: string; bodies: string[] }> => {
     read = on;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);
@@ -126,6 +132,7 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
     expect(bodies.length).toBeGreaterThan(0);
     expect(bodies.some((b) => b.includes(CLAUSE))).toBe(true);
     expect(bodies.some((b) => b.includes('say investigation priority is not established.'))).toBe(false);
+    expect(bodies.some((b) => b.includes(RETIRED_CLAUSE))).toBe(false);
   });
 
   it('(a) served range Run (B1 unseen 1): the served "…so investigation priority is not established." is not said', async () => {

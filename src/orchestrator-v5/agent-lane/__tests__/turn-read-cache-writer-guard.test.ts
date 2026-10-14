@@ -69,7 +69,7 @@ describe('the read cache sees every write the Agent turn can make', () => {
 
   it('F1b B8: every in-process door that commits a graph write claims the turn fence first', () => {
     const commits = [...ROUTE.matchAll(/\b(commit\w+InProcess)\(input/g)];
-    expect(commits.map((m) => m[1]).sort(), 'control: the four committing doors').toEqual(['commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionLevelsInProcess', 'commitOptionStatusInProcess']);
+    expect(commits.map((m) => m[1]).sort(), 'control: the five committing doors').toEqual(['commitLimitAddInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionLevelsInProcess', 'commitOptionStatusInProcess']);
     for (const m of commits) {
       const line = ROUTE.slice(ROUTE.lastIndexOf('\n', m.index!) + 1, m.index!);
       expect(line, m[1]).toMatch(/runFencedInProcessWrite\(input\.scenario_id, input\.turn_id, \(\) => $/);

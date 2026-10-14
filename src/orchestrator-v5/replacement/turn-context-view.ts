@@ -307,6 +307,7 @@ export function projectTurnContext(
   context: EnrichedTurnContext | null,
   currentGraphHash: string | null,
   graph: GraphStateIngress | null | undefined,
+  currentScenarioRevision?: number,
 ): ReplacementTurnContextView {
   if (context === null) {
     return {
@@ -320,6 +321,7 @@ export function projectTurnContext(
   const freshness = deriveAnalysisFreshness(facts, currentGraphHash, extractGraphOptionIds(graph), {
     priorFactsReadOk: readOk,
     currentGraph: graph,
+    currentScenarioRevision,
     analysisInvalidatedAt: context.analysis_invalidated_at,
     priorFactsWithTurn: context.prior_facts_with_turn,
     legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),

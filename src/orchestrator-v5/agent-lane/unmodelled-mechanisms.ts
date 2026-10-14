@@ -110,6 +110,14 @@ export function optionGapOperands(graph: unknown, optionId: string): Dict | null
     ...(Object.hasOwn(graph, 'options') ? { options: mirrors.map(fields) } : {}) };
 }
 
+/** A clear has nothing to do only when every current carrier has no listed entries.
+ * Unknown carrier values are retained for the existing validation/clear path. */
+export function optionGapOperandsAreEmpty(operands: Dict): boolean {
+  const rows = [operands.node as Dict, ...((operands.options as Dict[] | undefined) ?? [])];
+  return rows.every(row => ['unresolved_targets', 'user_questions'].every(key =>
+    !Object.hasOwn(row, key) || (Array.isArray(row[key]) && row[key].length === 0)));
+}
+
 /** Full named consent statement; empty, absent and shadowed operands remain distinct. */
 export function optionGapApprovalWords(label: string, mechanisms: readonly string[], operands: Dict): string {
   const node = operands.node as Dict;

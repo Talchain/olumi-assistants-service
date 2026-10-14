@@ -1,5 +1,14 @@
 import type { SuggestedAction } from '../compose/types.js';
 
+/**
+ * The pre-mortem plan pick's live id is `agent-premortem-plan:<12 hex>` (method-turn.ts PLAN_PICK_PREFIX); the migration's
+ * id check refuses ':', so it is stored as `agent-premortem-plan-<12 hex>` and restored as the live id (P48 probe5, 8 Oct).
+ */
+const PLAN_PICK_LIVE = 'agent-premortem-plan:';
+const PLAN_PICK_STORED = 'agent-premortem-plan-';
+export const storedOfferId = (id: string): string => (/^agent-premortem-plan:[0-9a-f]{12}$/.test(id) ? PLAN_PICK_STORED + id.slice(PLAN_PICK_LIVE.length) : id);
+export const liveOfferId = (id: string): string => (/^agent-premortem-plan-[0-9a-f]{12}$/.test(id) ? PLAN_PICK_LIVE + id.slice(PLAN_PICK_STORED.length) : id);
+
 /** The migration's narrow envelope: no execution or approval metadata. */
 export function parseAnswerOffers(value: unknown): SuggestedAction[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 8) return null;

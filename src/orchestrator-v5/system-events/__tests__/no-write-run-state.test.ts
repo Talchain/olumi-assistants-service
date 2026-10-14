@@ -54,7 +54,7 @@ beforeEach(() => {
   // Any accidental network call fails the row instead of reaching a provider/database.
   stub(globalThis, 'fetch', async () => { assert.fail('offline rows prohibit network'); });
   stub(store, 'loadGraph', async () => graph);
-  stub(store, 'loadGraphAndBriefText', async () => ({ graph, briefText: null }));
+  stub(store, 'loadGraphAndBriefText', async (scenarioId: string) => ({ revision: 7, graph: await store.loadGraph(scenarioId), briefText: null }));
   stub(store, 'readMostRecentPendingActions', async () => []);
   stub(store, 'readAnalysisInvalidatedAt', async () => null);
   stub(store, 'readRecent', async () => []);
@@ -134,8 +134,10 @@ test('ROW 4 — an actual graph-changing edit retains the writer stale verdict',
   assert.equal(result.freshness?.freshness, 'stale');
   assert.equal(state.run_state.kind, 'complete_stale');
   // Existing post-write derivation wins: this class repair adds no reread after it.
-  assert.deepEqual(result.freshness, deriveAnalysisFreshness([fact], response.graph_hash ?? null, undefined,
-    { currentGraph: graph, priorFactsReadOk: true, analysisInvalidatedAt: null }));
+  assert.deepEqual(result.freshness, { ...deriveAnalysisFreshness([fact], response.graph_hash ?? null, undefined,
+    { currentGraph: graph, priorFactsReadOk: true, analysisInvalidatedAt: null }),
+    selected_fact_row_id: factRow.fact_row_id, run_revision: { value: null, source: 'legacy_unknown' },
+    basis: 'analysis_graph_hash_interim' });
 });
 
 test('FAIL CLOSED — graph reread failure cannot manufacture current', async () => {

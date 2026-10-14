@@ -2,7 +2,8 @@
  * ⭐ S-C MODEL WIDENING, target risks, on the LIVE route end to end (DL 0fd71f 7 Oct, lane WIDEN; Paul's prod test D-11):
  *   "Suggest risks" press → ONE tool-less model call → the identity gate → a deterministic reply (method, what each hits,
  *   one gap question) + one Add per item + Something else, NOTHING stored → Add → NO model call → the existing add-risk
- *   door holds ONE card → the existing approve → the risk is in the model WITH its driver (never inert, D-09).
+ *   door holds ONE card → the existing approve → the risk is in the model with its validated links (RC3: timing and
+ *   dependency risks stay on the canvas, stamped to one option, with zero links and left out of the Run).
  * The model is Paul's served v1 (scenario 6582edbc, CEE 7e3f8fb2), reconstructed from its run fact; the risk names are the
  * ones served as prose on turn #2 ("None has been added", no Add buttons).
  *
@@ -14,12 +15,23 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { asSent } from './helpers/as-sent.js';
 import { readFileSync } from 'node:fs';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
+
+let lastComposeInput: ReplyComposeInput | undefined;
+vi.mock('../reply/compose-reply.js', async (original) => {
+  const actual = await original<typeof import('../reply/compose-reply.js')>();
+  return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
+    lastComposeInput = structuredClone(input);
+    return actual.composeReplyShape(input);
+  } };
+});
 
 let n = 0;
 let SCENARIO = '';
 const nextScenario = () => { n += 1; SCENARIO = `5a0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d2c${String(n).padStart(2, '0')}`; };
 
-type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; response_emitted: boolean; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
 const rows = new Map<string, Row>();
 const order: string[] = [];
 let graphOf = new Map<string, unknown>();
@@ -40,7 +52,6 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   const raw = row ? (jsonbOrder(JSON.parse(JSON.stringify(row.pending_actions))) as unknown[]) : [];
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
-let tick = 0;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
@@ -48,23 +59,24 @@ const store = {
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; response_emitted?: boolean; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
-      tick += 1;
+      vi.setSystemTime(Date.now() + 1);
       rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash,
+        response_emitted: w.response_emitted ?? true,
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
         // Stored with the turn, as `append_turn_atomic` does, so a writer's own read-back of its fact is served.
         handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
-        created_at: new Date(Date.UTC(2026, 8, 26, 0, 0, tick)).toISOString() });
+        created_at: new Date().toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
     }
     return { id: rows.get(k)!.id };
   }),
-  readRecent: vi.fn(async (sid: string) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'))),
+  readRecent: vi.fn(async (sid: string, limit = 20) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim')).slice(0, limit)),
   readFactsFor: vi.fn(async () => []),
   // The production shape (`supabase-store.ts` readFactsWithTurnFor): each stored fact with the id of the turn row it rode on.
   readFactsWithTurnFor: vi.fn(async (ids: readonly string[]) => [...rows.values()].filter((r) => ids.includes(r.id))
@@ -72,7 +84,6 @@ const store = {
   readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
   invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
-  storeDraftGraph: vi.fn(async (sid: string, g: unknown) => { graphOf.set(sid, g); }),
   loadGraph: vi.fn(async (sid: string) => graphOf.get(sid) ?? null),
   loadGraphAndBriefText: vi.fn(async (sid: string) => ({ graph: graphOf.get(sid) ?? null, briefText: null })),
   hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
@@ -96,11 +107,15 @@ vi.mock('../../../adapters/llm/router.js', () => {
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: async () => 'test system prompt' }));
 
 type Chip = { id: string; label: string; message: string; detail?: string };
-type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
+type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
   _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string; conflict_fields?: string[]; rejected_levels?: Record<string, unknown>[] }[] } };
 
 /** Scripted OpenAI: each Agent model call takes the next reply; anything that is not OpenAI throws. */
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
+/** The construction response goes through the real builder, without spending a scripted conversation reply. */
+let constructionCandidate: Record<string, unknown> | undefined;
+/** #2854 draft-time widening: when set, the served route's widening request is answered from the graph it was sent. */
+let wideningAnswer: ((graph: { nodes: { id: string; kind: string; label: string }[] }) => unknown) | undefined;
 let openAiCalls = 0;
 const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
@@ -120,6 +135,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const { computeGraphIdentityHash } = await import('../../context/graph-identity.js');
+    const { registrationTurnId, registrationRequestHash } = await import('../../graph-registration/registration-identity.js');
     const a = Fastify({ logger: false });
     a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
     a.addHook('onSend', async (req, _reply, payload) => { if (req.url === '/orchestrate/v2/turn') onInnerSent?.(req.body as Record<string, unknown>); return payload; });
@@ -128,6 +144,17 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never),
         graph_identity_hash: g === null ? null : computeGraphIdentityHash(g as never), ...extraRead };
     });
+    a.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
+      const sid = (req.params as { id: string }).id;
+      const body = req.body as { graph: unknown; brief_text?: string; operation_id?: string };
+      const g = jsonbOrder(JSON.parse(JSON.stringify(body.graph)));
+      // The production registration leaves a committed, non-public row as the first construction's stored marker.
+      await store.append({ scenario_id: sid, turn_id: registrationTurnId(sid, body.operation_id),
+        request_hash: registrationRequestHash(g, body.brief_text), response_emitted: false,
+        turn_class: 'direct_answer', handler_id: null, graph: g });
+      return { registered: true, graph_hash: computeAnalysisAffectingGraphHash(g as never) };
+    });
+    a.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [], next_cursor: null }));
     await a.register(ceeOrchestratorRouteV2);
     await a.register(agentV1TurnRoute);
     await a.ready();
@@ -135,10 +162,20 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   }
   let app: FastifyInstance;
   beforeAll(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
       openAiCalls += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      // Both widening passes open with widen-draft's DRAFT_WIDENING_PREAMBLE (not imported: it reorders this file's mocks).
+      if (wideningAnswer !== undefined && String(body['instructions'] ?? '').startsWith("This is Olumi's own check of a first draft;")) {
+        const sent = JSON.parse(String(body['input'])) as { graph: { nodes: { id: string; kind: string; label: string }[] } };
+        return new Response(JSON.stringify(say(JSON.stringify(wideningAnswer(sent.graph)))), { status: 200 });
+      }
+      if (constructionCandidate !== undefined
+        && (body['text'] as { format?: { type?: string } } | undefined)?.format?.type === 'json_schema') {
+        return new Response(JSON.stringify(say(JSON.stringify(constructionCandidate))), { status: 200 });
+      }
       const next = script.shift();
       return new Response(JSON.stringify(next !== undefined ? next(body) : say('Done.')), { status: 200 });
     }));
@@ -146,10 +183,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     process.env.AGENT_LANE_PREVIEW = 'false';
     app = await buildApp();
   }, 600_000);
-  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
+  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.useRealTimers(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; lastComposeInput = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
+    // Issuance allows 2 seconds of clock skew; separate public turns so the preceding answer cannot be the issuer.
+    vi.setSystemTime(Date.now() + 3000);
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
@@ -159,12 +198,438 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const approveChipOf = (b: Body) => b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
   /** The hold the Agent's LATEST answer row carries — what the next turn (and route-v2's confirm) will read. */
   const heldOnLatestRow = async () => {
-    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; expires_at_turn_count: number; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string }[] } } }[];
+    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; expires_at_turn_count: number; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string; value?: unknown }[] } } }[];
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
 
 
   const RISKS = { id: 'agent-next-suggest-risks', message: "Suggest risks I haven't considered." };
+  const THIN_BUTTON = 'Suggest up to 3 more risks, including one against ‘Raise to £59’';
+  const CONSTRUCTION_BRIEF = 'Raise Pro £49 → £59 to reach £20,000 Total MRR within 12 months. One risk is customer churn.';
+  /** A real constructor candidate: one user-proposed option, a declared baseline, and unquantified risks. */
+  const thinConstruction = async (riskCount: number, prepare?: () => void, brief = CONSTRUCTION_BRIEF, expectRisks = riskCount) => {
+    constructionCandidate = {
+      goal: { kind: null, deliverable: null, metric: 'Total MRR', operator: '>=', target_stated: true, value: 20000,
+        unit: 'GBP', horizon_months: 12, provenance: 'explicit', frame: 'level', baseline_known: false,
+        baseline_value: null, baseline_provenance: 'inferred', scope: null },
+      constraints: [],
+      options: [
+        { label: 'Raise to £59', provenance: 'explicit', changes: ['Pro plan price'], interventions: [], is_status_quo: null, added_capacity: null },
+        { label: 'Keep £49', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true, added_capacity: null },
+      ],
+      factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100 }],
+      risks: ['Customer churn', 'Competitor discount', 'Slower acquisition'].slice(0, riskCount).map((label) => ({ label, provenance: 'inferred', unit: null, plausible_max: null })),
+      outcomes: [],
+      links: [{ from: 'Pro plan price', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null }],
+      identities: [], unknowns: [], decision_question: null,
+    };
+    script = [() => fnCall('build_model_from_brief', { brief }), () => say('Here is the model to explore together.')];
+    prepare?.();
+    const t = await turn({ message: brief });
+    expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true, mutated: true }));
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(expectRisks);
+    expect(graphNow().nodes.find((node) => node.label === 'Raise to £59')).toMatchObject({ kind: 'option', provenance: 'from_brief' });
+    return t;
+  };
+
+  /** R1's real first-draft identity card, reused by the identity-answer rows below. */
+  const thinIdentityConstruction = async (riskCount: number, prepare?: () => void) => {
+    const t = await thinConstruction(riskCount, () => {
+      const candidate = constructionCandidate!;
+      (candidate.factors as Record<string, unknown>[])[0]!.unit = 'GBP/month';
+      (candidate.factors as Record<string, unknown>[])[0]!.baseline_evidence = { quote: 'Our Pro price is £49 a month.' };
+      // #2851 RE-PIN (class: Olumi's inferred 250, now a missing level so no card): these rows test the risk offers beside
+      // a pending identity card, so the brief states the count and the card is offered on the user's figure.
+      (candidate.factors as Record<string, unknown>[]).push({ label: 'Paying subscribers', role: 'observable',
+        baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000,
+        baseline_evidence: { quote: 'We have 250 paying subscribers.' } });
+      (candidate.links as Record<string, unknown>[]).push({ from: 'Paying subscribers', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+      // Churn threatens the subscriber count. Give every risk its own real path, so the constructor does not repair
+      // an unconnected risk straight into the goal and change the product's two direct parents.
+      for (const risk of candidate.risks as { label: string }[]) {
+        (candidate.links as Record<string, unknown>[]).push({ from: risk.label, to: 'Paying subscribers', direction: 'negative', provenance: 'inferred',
+          effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+      }
+      candidate.identities = [{ outcome: 'Total MRR', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'ai_proposed' }];
+      script.splice(1, 1, () => fnCall('propose_identity', {}), () => say('Here is the model to explore together.'));
+      prepare?.();
+    }, `Our Pro price is £49 a month. We have 250 paying subscribers.\n\n${CONSTRUCTION_BRIEF}`);
+    const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
+    expect(identity, `identity fixture setup: ${JSON.stringify(t)}`).toMatchObject({ ok: true, mutated: false });
+    expect(t.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t.suggested_actions)).toHaveLength(1);
+    expect(approveChipOf(t)!.id).toBe(`agent-approve-proposal:${identity!.proposal_id}`);
+    return t;
+  };
+  const pressCard = (chip: Chip) => turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+  const expectThinPress = (t: Body) => {
+    const runIndex = t.suggested_actions.findIndex((c) => c.id === 'agent-run-analysis');
+    expect(runIndex, JSON.stringify(t.suggested_actions)).toBeLessThanOrEqual(0);
+    expect(t.suggested_actions[runIndex === 0 ? 1 : 0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
+    expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
+    expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
+  };
+  const expectNoThinPress = (t: Body) =>
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  /** A real proposing tool called AFTER the builder, on the same public construction answer. */
+  const thinConfirmConstruction = async (name: string, args: Record<string, unknown>, brief = CONSTRUCTION_BRIEF, prepare?: () => void) => {
+    const t = await thinConstruction(1, () => {
+      script.splice(1, 1, () => fnCall(name, args), () => say('Here is the model to explore together.'));
+      prepare?.();
+    }, brief);
+    const proposal = t._agent.tool_calls.find(c => c.name === name);
+    expect(proposal, `construction confirm fixture: ${JSON.stringify(t)}`).toMatchObject({ ok: true, mutated: false });
+    expect(proposal!.proposal_id).toBeTypeOf('string');
+    expect(approveChipOf(t)?.id, JSON.stringify(t)).toBe(`agent-approve-proposal:${proposal!.proposal_id}`);
+    expectNoThinPress(t);
+    return t;
+  };
+  const heldAgentProposal = async (id: string) => {
+    const { agentProposalOf } = await import('../proposal-object/record.js');
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    return (await store.readMostRecentPendingActions(SCENARIO)).flatMap(raw => {
+      const pa = parsePendingAction(raw);
+      const proposal = pa === null ? undefined : agentProposalOf(pa);
+      return proposal?.proposal_id === id ? [proposal] : [];
+    })[0];
+  };
+
+  /** The construction ANSWER row this route wrote (claim rows excluded), as the store received it. */
+  const answerWrite = (): Record<string, unknown> | undefined => [...store.append.mock.calls].map(([w]) => w as Record<string, unknown>)
+    .reverse().find((w) => w.scenario_id === SCENARIO && !String(w.turn_id).endsWith(':claim') && w.response_emitted !== false);
+  it('E6 (DL 12 Oct): the construction answer that shows the thin risks offer records RC-WIDEN\'s risks row as SHOWN; CONTRAST: with one proposed option the row is W2 (options) and nothing is recorded', async () => {
+    // This file's store has no guidance history (so the route fails closed: no row); a readable, empty history here only.
+    const readable = store as Record<string, unknown>;
+    readable.readGuidanceHistory = vi.fn(async () => ({}));
+    try {
+    const t = await thinConstruction(1, () => {
+      const candidate = constructionCandidate! as { options: Record<string, unknown>[]; factors: Record<string, unknown>[]; links: Record<string, unknown>[] };
+      candidate.options.push({ label: 'Increase ad spend', provenance: 'explicit', changes: ['Ad spend'], interventions: [], is_status_quo: null, added_capacity: null });
+      candidate.factors.push({ label: 'Ad spend', role: 'controllable', baseline_known: true, baseline_value: 1000, unit: 'GBP', provenance: 'explicit', plausible_max: 10000 });
+      candidate.links.push({ from: 'Ad spend', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+    });
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id), JSON.stringify(t.suggested_actions)).toBe(true);
+    expect(answerWrite()?.agent_guidance, JSON.stringify(answerWrite())).toMatchObject({ version: 1, entries: { 'RC-WIDEN': { status: 'offered', variant_id: 'W6' } } });
+    nextScenario();
+    const one = await thinConstruction(1);
+    expectThinPress(one);
+    expect((answerWrite()?.agent_guidance as { entries?: Record<string, unknown> } | undefined)?.entries?.['RC-WIDEN']).toBeUndefined();
+    } finally { delete readable.readGuidanceHistory; }
+  });
+
+  it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
+    const t = await thinConstruction(1);
+    expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
+    expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
+    expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
+    // The live pre-composition base supplies the sentence identities; shaping may move them but loses/adds none.
+    expect(lastComposeInput?.faceContract).toBe('draft');
+    expect(lastComposeInput?.text).toBeDefined();
+    expect(sentenceMultiset(t.assistant_text)).toEqual(sentenceMultiset(lastComposeInput!.text));
+    expect(t._answer_shape).toBeDefined();
+    expect(t.assistant_text).toBe(deriveAnswerTextFromShape(t._answer_shape!));
+  }, 120_000);
+
+  it('R1 first-draft construction with a pending identity approval keeps exactly the offers without thin, including approve and decline', async () => {
+    const nextSteps = await import('../next-steps-from-guidance.js');
+    const { AMEND_CHIP } = await import('../approval-chips.js');
+    const selectOffers = nextSteps.nextStepOffersForTurn;
+    let withoutThin: Chip[] = [];
+    const selection = vi.spyOn(nextSteps, 'nextStepOffersForTurn').mockImplementation((...args) => {
+      const result = selectOffers(...args);
+      // Snapshot this turn's offers before the route can inject/relabel the thin press.
+      withoutThin = structuredClone(result.offered);
+      return result;
+    });
+    try {
+      expect(graphOf.has(SCENARIO)).toBe(false);
+      const t = await thinIdentityConstruction(0);
+      const { thinDraftOffer } = await import('../method-turn/widen-turn.js');
+      expect(thinDraftOffer(graphNow(), true)?.button).toBe(THIN_BUTTON);
+      const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
+      expect(identity, JSON.stringify(t)).toMatchObject({ ok: true, mutated: false });
+      expect(identity!.proposal_id).toBeTypeOf('string');
+      const approveId = `agent-approve-proposal:${identity!.proposal_id}`;
+      const decline = { id: `agent-decline-proposal:${identity!.proposal_id}`, label: 'Not now', message: 'Not now.' };
+      const words = 'Olumi reads ‘Total MRR’ as ‘Pro plan price’ × ‘Paying subscribers’. Is that how you work it out?';
+      expect(withoutThin).toEqual([
+        { id: approveId, label: "Yes, that's how", message: `Yes — ${words}`, detail: words },
+        AMEND_CHIP,
+      ]);
+      // The unchanged downstream route inserts this approval's decline after Change something first.
+      expect(t.suggested_actions, JSON.stringify(t)).toEqual([...withoutThin, decline]);
+      expect(t.suggested_actions.find((c) => c.id === approveId)).toEqual(withoutThin[0]);
+      expect(t.suggested_actions.find((c) => c.id === decline.id)).toEqual(decline);
+      expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON)).toBe(false);
+    } finally {
+      selection.mockRestore();
+    }
+  }, 120_000);
+
+  it('r5-identity / r4a: Paul\'s B1 construction with a pending identity and one risk offers the exact thin press after Yes', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const identity = construction._agent.tool_calls.find((c) => c.name === 'propose_identity');
+    expect(identity, JSON.stringify(construction)).toMatchObject({ ok: true, mutated: false });
+    expect(construction.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON)).toBe(false);
+    const approve = approveChipOf(construction)!;
+    expect(approve.id).toBe(`agent-approve-proposal:${identity!.proposal_id}`);
+    const t = await pressCard(approve);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: identity!.proposal_id }));
+    expect(t._diagnostic_trace.fast_path).toBe('approve');
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r4a Run placement: a naturally runnable thin identity-answer keeps Run first and the thin press second', async () => {
+    const construction = await thinIdentityConstruction(0, () => {
+      const option = (constructionCandidate!.options as Record<string, unknown>[])[0]!;
+      option.interventions = [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP/month', provenance: 'explicit' }];
+    });
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(t.suggested_actions[0]?.id, JSON.stringify(t)).toBe('agent-run-analysis');
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r4b RED: Not now on the real B1 identity card offers the exact thin press without another confirm', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const identity = construction._agent.tool_calls.find((c) => c.name === 'propose_identity')!;
+    const decline = construction.suggested_actions.find((c) => c.id === `agent-decline-proposal:${identity.proposal_id}`)!;
+    expect(decline).toEqual({ id: `agent-decline-proposal:${identity.proposal_id}`, label: 'Not now', message: 'Not now.' });
+    const t = await pressCard(decline);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false, proposal_id: identity.proposal_id }));
+    expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t)).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r4c CONTRAST: an ordinary chat turn after the identity Yes offers no relabelled thin press', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const answered = await pressCard(approveChipOf(construction)!);
+    expect(answered._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    script = [() => say('We can explore this model together.')];
+    const t = await turn({ message: 'What do you think about the pricing options?' });
+    expect(t._agent.tool_calls).toEqual([]);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('r4c repeated-Yes CONTRAST: a settled identity card cannot offer the relabelled thin press twice', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const approve = approveChipOf(construction)!;
+    const first = await pressCard(approve);
+    expect(first._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    const repeated = await pressCard(approve);
+    expect(repeated._agent.tool_calls.some((c) => c.name === 'authorise_change' && c.mutated === true)).toBe(false);
+    expect(repeated.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(repeated)).toBe(false);
+  }, 120_000);
+
+  it('r4d CONTRAST and producer mutant: Yes on a non-identity link approval on a one-risk graph offers no relabelled thin press', async () => {
+    await thinConstruction(1);
+    script = [() => fnCall('propose_model_change', { from_label: 'Customer churn', to_label: 'Pro plan price', direction: 'negative', strength: 'strong' }),
+      () => say('I can connect Customer churn to Pro plan price as your strong negative influence. Shall I?')];
+    const proposed = await turn({ message: 'Connect Customer churn to Pro plan price with a strong negative influence.' });
+    const link = proposed._agent.tool_calls.find((c) => c.name === 'propose_model_change');
+    expect(link, JSON.stringify(proposed)).toMatchObject({ ok: true, mutated: false });
+    const t = await pressCard(approveChipOf(proposed)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: link!.proposal_id }));
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    const { thinDraftOffer } = await import('../method-turn/widen-turn.js');
+    expect(thinDraftOffer(graphNow(), true)?.button).toBe(THIN_BUTTON);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('r4e CONTRAST: Yes on an identity card when the graph has three risks offers no relabelled thin press', async () => {
+    const construction = await thinIdentityConstruction(3);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(3);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(3);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('r4f unchanged diagnostic: construction with only an untyped goal-scope pending question already offers the thin press', async () => {
+    const t = await thinConstruction(1, () => {
+      const candidate = constructionCandidate!;
+      const goal = candidate.goal as Record<string, unknown>;
+      goal.metric = 'Non-Pro MRR';
+      goal.scope = { modelled: 'the Pro plan only', alternative: 'all plans together', stated_in_brief: false };
+      (candidate.links as Record<string, unknown>[])[0]!.to = 'Non-Pro MRR';
+    });
+    const pending = await store.readMostRecentPendingActions(SCENARIO) as { chip_id: string; action: { kind: string; expected?: string; scope?: unknown } }[];
+    expect(pending, JSON.stringify(pending)).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ chip_id: 'goal-scope:non_pro_mrr', action: { kind: 'reconcile_goal_scope', expected: 'scope' } });
+    expect(pending[0]!.action.scope).toBeUndefined();
+    expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-deadline RED: the construction turn\'s set_goal_deadline card offers the thin press after Yes', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_deadline')!.proposal_id!;
+    expect((await heldAgentProposal(proposalId))?.operations).toEqual([
+      expect.objectContaining({ op: 'set_goal_deadline', path: 'total_mrr' }),
+    ]);
+    expect(approveChipOf(construction)?.message).toBe('Yes, that is my deadline.');
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expect(t._diagnostic_trace.fast_path).toBe('approve');
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-deadline declined: Not now on the construction deadline card resolves the held confirm and offers thin', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_deadline')!.proposal_id!;
+    const decline = construction.suggested_actions.find(c => c.id === `agent-decline-proposal:${proposalId}`)!;
+    const t = await pressCard(decline);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false, proposal_id: proposalId }));
+    expect(t.suggested_actions.some(c => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t)).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-target RED: the construction turn\'s set_goal_target card offers the thin press after Yes', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_target', { constraint_type: 'at_least', value: 20000, unit: 'GBP', rationale: 'The user stated this target.' }, CONSTRUCTION_BRIEF, () => {
+      // The card owns this first target. Restating a target already stored on the node is a writer no-op without a row.
+      const goal = constructionCandidate!.goal as Record<string, unknown>;
+      goal.target_stated = false;
+      goal.value = null;
+    });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_target')!.proposal_id!;
+    expect((await heldAgentProposal(proposalId))?.operations).toEqual([
+      expect.objectContaining({ op: 'set_goal_target', path: 'total_mrr' }),
+    ]);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-scope RED: a reachable typed goal-scope card issued by construction resolves through authorise_change and offers thin', async () => {
+    const { composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION } = await import('../../compose/analysis-state-v1.js');
+    const { canonicalStateFromFreshness } = await import('../../context/canonical-analysis-state.js');
+    // The real graph reader supplies canonical authority even before any Run. A missing mock authority removes scope cards.
+    extraRead.analysis_state = composeAnalysisStateV1({ canonical: canonicalStateFromFreshness(NO_ANALYSIS_CONTEXT_DERIVATION), rawRobustness: null });
+    const quote = 'Total MRR covers all plans together and is £10,000 today.';
+    const scope = { modelled: 'all plans together', alternative: 'the Pro plan only', extent: 'total', stated_in_brief: true, source: { quote } };
+    const construction = await thinConfirmConstruction('reconcile_goal_scope', {
+      goal_label: 'Total MRR', scope, current_level: { value: 10000, unit: 'GBP', quote },
+    }, `${CONSTRUCTION_BRIEF} ${quote}`);
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'reconcile_goal_scope')!.proposal_id!;
+    expect((await heldAgentProposal(proposalId))?.operations).toEqual([
+      expect.objectContaining({ op: 'update_node', path: 'total_mrr', value: expect.objectContaining({ goal_scope: scope }) }),
+    ]);
+    // The constructor's untyped goal-scope:<goal> question (r4f) is not this proposal-backed approval door.
+    expect(approveChipOf(construction)?.id).toBe(`agent-approve-proposal:${proposalId}`);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expect((await store.readMostRecentPendingActions(SCENARIO)).some(raw =>
+      (raw as { action?: { kind?: string } }).action?.kind === 'reconcile_goal_scope')).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-later CONTRAST and issuing-turn mutant: Yes on a deadline card issued after construction offers no thin press', async () => {
+    await thinConstruction(1);
+    script = [() => fnCall('propose_goal_deadline', { deadline_words: '6 months', rationale: 'The user changed their deadline.' }),
+      () => say('Please confirm the new deadline.')];
+    const proposed = await turn({ message: 'Set my deadline to 6 months.' });
+    const proposal = proposed._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
+    expect(proposal, JSON.stringify(proposed)).toMatchObject({ ok: true, mutated: false });
+    const t = await pressCard(approveChipOf(proposed)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposal!.proposal_id }));
+    expect(graphNow().nodes.filter(node => node.kind === 'risk')).toHaveLength(1);
+    expectNoThinPress(t);
+  }, 120_000);
+
+  it.each(['registration', 'public user message'] as const)('r5 fail closed: a missing construction %s marker offers no thin press after identity Yes', async (marker) => {
+    const construction = await thinIdentityConstruction(1);
+    const row = marker === 'registration'
+      ? [...rows.values()].find(r => r.scenario_id === SCENARIO && r.request_hash.startsWith('graph_registration:'))
+      : latestRow();
+    expect(row).toBeDefined();
+    if (marker === 'registration') row!.request_hash = 'sha256:unverified_registration';
+    else row!.user_message = null;
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expectNoThinPress(t);
+  }, 120_000);
+
+  it('r5 import CONTRAST: a generic graph registration cannot attest build_model_from_brief before a first-chat confirm', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const { registrationTurnId } = await import('../../graph-registration/registration-identity.js');
+    const registration = [...rows.values()].find(r => r.scenario_id === SCENARIO && r.request_hash.startsWith('graph_registration:'));
+    expect(registration).toBeDefined();
+    // A UI import shares the committed registration shape, but has no construction operation identity.
+    registration!.turn_id = registrationTurnId(SCENARIO);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expectNoThinPress(t);
+  }, 120_000);
+
+  it('r5 fail closed: an unreadable issuing/construction window offers no thin press after identity Not now', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const decline = construction.suggested_actions.find(c => c.id.startsWith('agent-decline-proposal:'))!;
+    const failedRead = vi.spyOn(store, 'readRecent').mockRejectedValue(new Error('construction history unavailable'));
+    try {
+      // Withdrawal resolves this held card without making the writer's separate confirmation read unavailable too.
+      const t = await pressCard(decline);
+      expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false }));
+      expectNoThinPress(t);
+    } finally {
+      failedRead.mockRestore();
+    }
+  }, 120_000);
+
+  it('r5 fail closed: a full bounded window cannot attest the first construction answer', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const readRecent = store.readRecent.getMockImplementation()!;
+    const fullRead = vi.spyOn(store, 'readRecent').mockImplementation(async (sid, limit = 20) => {
+      const recent = await readRecent(sid, limit);
+      if (sid !== SCENARIO) return recent;
+      // Keep the real construction and its live hold visible, while the raw cap cannot prove history exhaustion.
+      return [...recent, ...Array.from({ length: Math.max(0, limit - recent.length) }, (_, i): Row => ({
+        ...recent[0]!, id: `older-row-${i}`, turn_id: `older-internal-${i}`, request_hash: 'sha256:older-internal',
+        response_emitted: false, user_message: null, assistant_message: null, pending_actions: [],
+        created_at: new Date(Date.UTC(2026, 9, 7, 0, 0, i)).toISOString(),
+      }))];
+    });
+    try {
+      const t = await pressCard(approveChipOf(construction)!);
+      expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+      expectNoThinPress(t);
+    } finally {
+      fullRead.mockRestore();
+    }
+  }, 120_000);
+
+  it('P05b-8b CONTRAST: construction with three risks has no relabelled risks press', async () => {
+    const t = await thinConstruction(3);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('#2854 served-500 row: a construction turn whose draft is WIDENED (an Olumi risk with draft_widening and no relies_on) completes 200 through the real route and names it', async () => {
+    const t = await thinConstruction(1, () => {
+      wideningAnswer = (graph) => {
+        const id = (kind: string, label: string) => graph.nodes.find((n) => n.kind === kind && n.label === label)!.id;
+        return { risk_suggestions: [{ label: 'Feature release slips', category: 'timing', mechanism: 'relies_on',
+          hits_id: id('option', 'Raise to £59'), through_id: id('factor', 'Pro plan price'), through_direction: 'positive',
+          affects_id: graph.nodes.find((n) => n.kind === 'goal')!.id, direction: 'negative',
+          relies_on: 'shipping the feature release with the new price', watch_for: 'the release date moves later' }] };
+      };
+    }, undefined, 2);
+    const widened = graphNow().nodes.filter((n) => (n as { draft_widening?: { provenance?: string } }).draft_widening?.provenance === 'ai_suggested_widen');
+    expect(widened.map((n) => n.label), 'control: the route really widened this draft').toEqual(['Feature release slips']);
+    expect((widened[0] as { relies_on?: unknown }).relies_on).toBeUndefined();
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
+  });
+
+  it('P05b-8c CONTRAST: a non-construction turn on the one-risk graph has no relabelled risks press', async () => {
+    await thinConstruction(1);
+    script = [() => say('We can explore this model together.')];
+    const t = await turn({ message: 'What do you think about the pricing options?' });
+    expect(t._agent.tool_calls.some((c) => c.name === 'build_model_from_brief' && c.mutated === true)).toBe(false);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
   const paulV1 = () => {
     const g = JSON.parse(readFileSync(new URL('../method-turn/__tests__/fixtures/s-c-widen/paul-6582edbc-v1.json', import.meta.url), 'utf8')) as Record<string, unknown>;
     delete g['_provenance'];
@@ -176,9 +641,9 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'no accepted offer by week 4' },
     { label: 'Wrong bottleneck', category: 'dependency', hits_id: 'hire_a_tech_lead', through_id: 'tech_lead_hires', through_direction: 'positive',
       affects_id: 'meet_our_next_feature_launch_deadline', direction: 'negative', relies_on: 'a Tech Lead removing the main delivery blocker', watch_for: 'delays persist after the Tech Lead starts' },
-    { label: 'Coordination drag', category: 'people', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive',
+    { label: 'Coordination drag', category: 'people', mechanism: 'drives', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive',
       affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'new developers joining without slowing the team', watch_for: 'senior time spent on onboarding' },
-    { label: 'Quality trade-off', category: 'cost', hits_id: 'hire_a_tech_lead', through_id: 'tech_lead_hires', through_direction: 'positive',
+    { label: 'Quality trade-off', category: 'cost', mechanism: 'drives', hits_id: 'hire_a_tech_lead', through_id: 'tech_lead_hires', through_direction: 'positive',
       affects_id: 'meet_our_next_feature_launch_deadline', direction: 'negative', relies_on: 'keeping quality while hiring under time pressure', watch_for: 'rising defect counts before launch' },
   ];
   const candidates = (items: unknown) => say(`<risk_suggestions>${JSON.stringify(items)}</risk_suggestions>`);
@@ -200,7 +665,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(addChips(t1).map((c) => c.label), JSON.stringify(t1.suggested_actions)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’', 'Add ‘Coordination drag’']);
     expect(t1.suggested_actions.map((c) => c.id).slice(3)).toEqual(['agent-widen-something-else']);
     expect(t1.assistant_text).toContain('(assumption-based planning)');
-    expect(t1.assistant_text).toContain('- ‘Hire Two Developers’ relies on filling both developer roles quickly. Risk: ‘Recruitment delay’ (timing), through ‘Developer Hires’. Watch for: no accepted offer by week 4.');
+    expect(t1.assistant_text).toContain("- Olumi's suggestion: ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
     expect((t1 as unknown as { model_gap?: { kind: string } }).model_gap?.kind, 'the typed gap rides the wire').toBe('deadline_missing');
     expect(t1.assistant_text).not.toContain('<risk_suggestions>');
     expect(t1.assistant_text.trim().split('\n').at(-1)).toBe(S1_ASK);
@@ -209,12 +674,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(nodeLabels(), 'nothing is written by the suggestion').toEqual(before);
   }, 120_000);
 
-  it('SR-2 RED: Add → NO model call → ONE held card through the add-risk door → approve → the risk is in the model WITH its driver (never inert)', async () => {
+  it('SR-2: Add → NO model call → ONE held card → approve → stamped timing risk has zero edges', async () => {
     paulV1();
     script = [() => candidates(TURN2)];
     const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
     const add = addChips(t1)[0]!;
-    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: driven by more ‘Developer Hires’, it would lower ‘Feature Delivery Capacity’.');
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
     const before = nodeLabels();
     const calls = openAiCalls;
     const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
@@ -229,13 +694,15 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const held = await heldOnLatestRow();
     expect(held).toHaveLength(1);
     const ops = held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`);
-    expect(ops).toEqual(['add_node risk_recruitment_delay', 'add_edge risk_recruitment_delay::feature_delivery_capacity', 'add_edge developer_hires::risk_recruitment_delay']);
+    expect(ops).toEqual(['add_node risk_recruitment_delay']);
+    expect(held[0]!.action.inline_patch!.operations![0]!.value).toMatchObject({ relies_on: { option_id: 'hire_two_developers' } });
     expect(nodeLabels(), 'nothing is written before the approval').toEqual(before);
     await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     const g = graphNow();
     expect(g.nodes.some((x) => x.id === 'risk_recruitment_delay' && x.kind === 'risk' && x.label === 'Recruitment delay')).toBe(true);
-    expect(g.edges.filter((e) => e.to === 'risk_recruitment_delay').map((e) => e.from), 'D-09: the risk has a parent the options move').toEqual(['developer_hires']);
-    expect(g.edges.filter((e) => e.from === 'risk_recruitment_delay').map((e) => e.to)).toEqual(['feature_delivery_capacity']);
+    expect(g.edges.filter((e) => e.to === 'risk_recruitment_delay').map((e) => e.from), 'RC3: hiring is not the cause of its timing precondition failing').toEqual([]);
+    expect(g.edges.filter((e) => e.from === 'risk_recruitment_delay').map((e) => e.to)).toEqual([]);
+    expect(g.nodes.find((x) => x.id === 'risk_recruitment_delay')).toMatchObject({ relies_on: { option_id: 'hire_two_developers' } });
   }, 120_000);
 
   it('SR-3 RED: the canvas "+" Risk press (ask:risks) reaches the SAME door', async () => {
@@ -277,7 +744,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   it('SR-7 (reload): the Add presses are live-only until the offers envelope admits their id, and stand only while the result is current and nothing awaits approval', async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const { riskAddPressFor } = await import('../method-turn/widen-turn.js');
-    const add = riskAddPressFor({ label: 'Recruitment delay', hits: { id: 'hire_two_developers', label: 'Hire Two Developers', kind: 'option' },
+    const add = riskAddPressFor({ label: 'Recruitment delay', mechanism: 'drives', hits: { id: 'hire_two_developers', label: 'Hire Two Developers', kind: 'option' },
       through: { id: 'developer_hires', label: 'Developer Hires', direction: 'positive' },
       affects: { id: 'feature_delivery_capacity', label: 'Feature Delivery Capacity', direction: 'negative' } });
     expect(isDurableAnswerOffer(add)).toBe(false);
@@ -304,7 +771,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
 
   it('SR-9 (Codex r1 P1): a STALE Add — its factor renamed and a new node given the old name — is refused; nothing held', async () => {
     paulV1();
-    script = [() => candidates(TURN2)];
+    script = [() => candidates([TURN2[2]])];
     const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
     const add = addChips(t1)[0]!;
     const g = graphOf.get(SCENARIO) as { nodes: Record<string, unknown>[] };
@@ -398,7 +865,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const SERVED_ADD_MESSAGE = 'Add the risk ‘Weak starter demand’ to ‘Launch cheaper starter plan’: driven by less ‘Starter-plan paying subscribers’, it would lower ‘Starter-plan MRR’.';
   it('SR-14 RED (served sc-plus-1): canvas "+" Risk → Add with the served message VERBATIM → ONE held card AND the words say it is prepared, never "I couldn’t prepare"', async () => {
     graphOf.set(SCENARIO, structuredClone(STARTER));
-    script = [() => candidates([{ label: 'Weak starter demand', category: 'external', hits_id: 'opt_launch', through_id: 'fac_subs', through_direction: 'negative',
+    script = [() => candidates([{ label: 'Weak starter demand', category: 'external', mechanism: 'drives', hits_id: 'opt_launch', through_id: 'fac_subs', through_direction: 'negative',
       affects_id: 'out_starter_mrr', direction: 'negative', relies_on: 'attracting new paying subscribers with a cheaper plan', watch_for: 'interest fails to convert into paid subscriptions' }])];
     const t1 = await turn({ message: 'What could go wrong, or unexpectedly well, that this model doesn’t have yet?', source: 'chip', chip: { id: 'ask:risks' } });
     const add = addChips(t1)[0]!;
@@ -432,5 +899,127 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return say('No suggestion.'); }];
     await turn({ message: 'What other options could answer this that I have not put on the board?', source: 'chip', chip: { id: 'ask:widen' } });
     expect(((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name)).toEqual(['propose_new_option']);
+  }, 120_000);
+
+  /** RC3: Paul's pricing precondition, separate from the historical hiring fixture above. */
+  const RC3_PRICING = {
+    nodes: [
+      { id: 'dec_pricing', kind: 'decision', label: 'How should we price the Pro plan?' },
+      { id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_unit: '£', goal_threshold_raw: 50000 },
+      { id: 'pro_plan_price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 0.49, raw_value: 49, unit: '£', cap: 100 } },
+      { id: 'keep_49', kind: 'option', label: 'Keep £49', is_baseline: true, interventions: { pro_plan_price: { value: 0.49, raw_value: 49, unit: '£' } } },
+      { id: 'raise_59', kind: 'option', label: 'Raise Pro price to £59', interventions: { pro_plan_price: { value: 0.59, raw_value: 59, unit: '£' } } },
+    ],
+    edges: [
+      { from: 'dec_pricing', to: 'keep_49', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'dec_pricing', to: 'raise_59', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'keep_49', to: 'pro_plan_price', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive', origin: 'repair' },
+      { from: 'raise_59', to: 'pro_plan_price', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'pro_plan_price', to: 'mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ],
+    goal_node_id: 'mrr',
+    goal_constraints: [],
+  };
+  const RC3_TIMING = {
+    label: 'Feature release slips', category: 'timing', hits_id: 'raise_59', through_id: 'pro_plan_price', through_direction: 'negative', mechanism: 'drives',
+    affects_id: 'mrr', direction: 'negative', relies_on: 'the feature release enabling the planned price increase', watch_for: 'release date moves',
+  };
+
+  it('rc3-paul-known-answer: timing overrides model drives; Add → no model → hold → approve stores stamped zero-edge risk', async () => {
+    const { assembleGuidanceSignals } = await import('../turn-context/guidance-signals.js');
+    const { riskGate, risksTurnFromSignals } = await import('../method-turn/widen-turn.js');
+    graphOf.set(SCENARIO, structuredClone(RC3_PRICING));
+    const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [], graph: RC3_PRICING,
+      analysisState: undefined, analysisResult: undefined, optionParticipation: undefined, leaderLicensed: false });
+    expect(signals['model.status_quo_option_id']).toBe('keep_49');
+    const method = risksTurnFromSignals(signals, RC3_PRICING);
+    if (method.kind !== 'run_risks') throw new Error(`expected a risks run, got ${method.kind}`);
+    expect(method.options.map((o) => o.id)).toEqual(['raise_59']);
+    const gate = riskGate(method, [RC3_TIMING]);
+    expect(gate.kept, 'the known-answer item is accepted, never silently dropped').toHaveLength(1);
+    expect((gate.kept[0] as typeof gate.kept[number] & { mechanism?: string }).mechanism,
+      'M1: timing deterministically overrides the model’s drives').toBe('relies_on');
+
+    script = [() => candidates([RC3_TIMING])];
+    const before = nodeLabels();
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    expect(openAiCalls, 'one suggestion call').toBe(1);
+    const adds = addChips(t1);
+    expect(adds).toHaveLength(1);
+    const add = adds[0]!;
+    expect(add.message).toBe('Add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
+    expect(add.message).not.toContain('driven by');
+    expect(t1.assistant_text).toContain("- Olumi's suggestion: ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release enabling the planned price increase. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
+    expect(t1.assistant_text).not.toContain('affects every option alike');
+    expect(nodeLabels(), 'suggesting writes nothing').toEqual(before);
+    const calls = openAiCalls;
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
+    expect(openAiCalls, 'the Add press makes no model call').toBe(calls);
+    expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
+    expect(t2.assistant_text).toContain('I’ve prepared this change');
+    expect(t2.assistant_text).not.toContain('driven by');
+    const leftOutLine = "‘Feature release slips’: ‘Raise Pro price to £59’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.";
+    expect(t2.assistant_text).toBe([
+      "I’ve prepared this change: add risk 'Feature release slips'.", leftOutLine, 'Approve this change?',
+    ].join('\n\n'));
+    const cards = (t2 as unknown as { _proposal_fields?: { proposals: { approve_action: { detail?: string }; missing: unknown[] }[] } })._proposal_fields?.proposals ?? [];
+    expect(cards[0]?.approve_action.detail).toContain(leftOutLine);
+    expect(cards[0]?.missing).toEqual([]);
+    const approve = approveChipOf(t2);
+    expect(approve?.id, JSON.stringify(t2.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`), 'the relies_on door holds no edge at all')
+      .toEqual(['add_node risk_feature_release_slips']);
+    expect(held[0]!.action.inline_patch!.operations![0]!.value).toEqual({ id: 'risk_feature_release_slips', kind: 'risk', label: 'Feature release slips', relies_on: { option_id: 'raise_59' } });
+    expect(nodeLabels(), 'holding writes nothing').toEqual(before);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow();
+    expect(g.nodes.some((x) => x.id === 'risk_feature_release_slips' && x.kind === 'risk' && x.label === 'Feature release slips')).toBe(true);
+    expect(g.edges.some((e) => e.from === 'pro_plan_price' && e.to === 'risk_feature_release_slips'), 'no invented price → release-slip driver').toBe(false);
+    expect(g.nodes.find((x) => x.id === 'risk_feature_release_slips')).toMatchObject({ relies_on: { option_id: 'raise_59' } });
+    expect(g.edges.filter((e) => e.from === 'risk_feature_release_slips' || e.to === 'risk_feature_release_slips'), 'M2: no incoming OR outgoing edge').toEqual([]);
+  }, 120_000);
+
+  it('rc3-drives-control: explicit cost/drives keeps the exact old Add wording and stores price → risk → MRR', async () => {
+    const { assembleGuidanceSignals } = await import('../turn-context/guidance-signals.js');
+    const { riskGate, risksTurnFromSignals } = await import('../method-turn/widen-turn.js');
+    graphOf.set(SCENARIO, structuredClone(RC3_PRICING));
+    const cost = { ...RC3_TIMING, label: 'Price-driven churn', category: 'cost', mechanism: 'drives', through_direction: 'positive',
+      relies_on: 'customers accepting the increased price', watch_for: 'cancellations after the price increase' };
+    const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [], graph: RC3_PRICING,
+      analysisState: undefined, analysisResult: undefined, optionParticipation: undefined, leaderLicensed: false });
+    expect(signals['model.status_quo_option_id']).toBe('keep_49');
+    const method = risksTurnFromSignals(signals, RC3_PRICING);
+    if (method.kind !== 'run_risks') throw new Error(`expected a risks run, got ${method.kind}`);
+    expect(method.options.map((o) => o.id)).toEqual(['raise_59']);
+    const gate = riskGate(method, [cost]);
+    expect(gate.kept).toHaveLength(1);
+    expect((gate.kept[0] as typeof gate.kept[number] & { mechanism?: string }).mechanism).toBe('drives');
+    script = [() => candidates([cost])];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    const add = addChips(t1)[0]!;
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Price-driven churn’ to ‘Raise Pro price to £59’: driven by more ‘Pro plan price’, it would lower ‘MRR’.');
+    const calls = openAiCalls;
+    const before = nodeLabels();
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
+    expect(openAiCalls, 'the drives Add press also makes no model call').toBe(calls);
+    expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
+    const approve = approveChipOf(t2);
+    expect(approve?.id, JSON.stringify(t2.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`))
+      .toEqual(['add_node risk_price_driven_churn', 'add_edge risk_price_driven_churn::mrr', 'add_edge pro_plan_price::risk_price_driven_churn']);
+    expect(nodeLabels(), 'holding writes nothing').toEqual(before);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow();
+    expect(g.nodes.some((x) => x.id === 'risk_price_driven_churn' && x.kind === 'risk' && x.label === 'Price-driven churn')).toBe(true);
+    expect(g.nodes.find((x) => x.id === 'risk_price_driven_churn')).not.toHaveProperty('relies_on');
+    expect(g.edges.filter((e) => e.to === 'risk_price_driven_churn').map((e) => e.from)).toEqual(['pro_plan_price']);
+    expect(g.edges.find((e) => e.from === 'pro_plan_price' && e.to === 'risk_price_driven_churn'))
+      .toMatchObject({ effect_direction: 'positive', strength: { mean: 0.5 } });
+    expect(g.edges.find((e) => e.from === 'risk_price_driven_churn' && e.to === 'mrr'))
+      .toMatchObject({ effect_direction: 'negative', strength: { mean: -0.5 } });
   }, 120_000);
 });

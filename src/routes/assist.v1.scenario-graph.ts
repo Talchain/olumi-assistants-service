@@ -1,225 +1,23 @@
+/** Scenario graph and analysis read.
+ * Identity and owner/viewer-member admission run in plugins/scenario-ownership.ts.
+ * A verified viewer member reads this route only, without the owner's conversation.
+ * Reads never create scenarios; unknown/non-owner ids share the same 404 envelope.
+ * The handler retains payload validation, persisted-graph fidelity and analysis projection. */
+
+import { toOutboundGraph } from '../orchestrator-v5/goal-target/outbound-graph.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
-/**
- * ROADMAP 2.312 track 2 (2) — THE SCENARIO-ADDRESSED GRAPH READ.
- *
- * CEE owns the ONLY live reader of `scenarios.graph`
- * (`supabase-store.ts::loadGraphAndBriefText`) and, until this route, exposed no
- * scenario-addressed way to reach it: every existing caller is an internal
- * turn-context builder. The guest tier can never read the graph directly —
- * `REVOKE ALL ON scenarios FROM anon` stands and is NOT loosened by this work.
- * This route is the CEE-mediated substitute: the browser asks CEE, CEE asks
- * Supabase with the service role, and the browser never touches Supabase.
- *
- * ── WHY POST FOR A READ (the convention DEMANDS it; this is not a preference) ─
- * Two independent reasons, both derived at the tip WHEN WRITTEN. (1)'s premise
- * has since moved and is corrected in place beneath it; (2) is unaffected and is
- * sufficient on its own.
- *
- *   1. IDENTITY LIVES IN THE BODY. `CEE_REQUIRE_USER_JWT` is off on staging, so
- *      `resolveUserIdentity` returns `mode: "off"` and `authorizeScenarioOwnership`
- *      falls back to the CALLER-SUPPLIED `user_id` — which the shared parser
- *      (`parseRequestExtensions`) reads from the request BODY. A GET has no body,
- *      so `claimedUserId` would be null on every request, and a null caller
- *      against a stored owner is precisely the IDOR case the pre-flight refuses.
- *      Every OWNED scenario would be permanently unreadable by its own owner.
- *
- *      ⚠⚠ THE PREMISE OF (1) NO LONGER HOLDS. THE PARAGRAPH ABOVE IS LEFT
- *         STANDING ON PURPOSE — it is an accurate record of the deployment it
- *         was written against, it is FALSE about the deployment today, and both
- *         halves are load-bearing: it is WHY this route is a POST, so a tidy
- *         rewrite would hide that a premise which no longer holds once governed
- *         the shape of the route.
- *
- *         WHEN WRITTEN — staging deployed `CEE_REQUIRE_USER_JWT` OFF, so
- *         `resolveUserIdentity` answered `mode: "off"` and the body-supplied
- *         `user_id` was the only identity this route had.
- *
- *         TODAY (26 Aug 2026) — staging deploys it ON.
- *
- *         HOW THAT WAS ESTABLISHED — BEHAVIOURALLY, at the DEPLOYED build. Not
- *         from `render.yaml`, not from this comment, not from any prose: the
- *         YAML is a drifting subset of the Render dashboard and has been wrong
- *         about this class of question before (trap 18). Witnessed on this
- *         route: a real user token resolves as a VERIFIED SUBJECT and reads a
- *         scenario that subject owns, while a caller presenting no verified
- *         identity is answered the ordinary refusal. Ownership on this surface
- *         is therefore the verified token subject, and a request-supplied
- *         identifier is not an input to it — see
- *         `CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE` at the call site below.
- *
- *         ⚠ DO NOT CITE (1) AS AN ARGUMENT ABOUT THE CURRENT DEPLOYMENT. Its
- *           conclusion — "every OWNED scenario would be permanently unreadable
- *           by its own owner" — follows from the flag being OFF and does not
- *           follow while it is ON. A reviewer reading (1) in good faith as a
- *           live statement would reach the wrong verdict about this file.
- *
- *         ⚠⚠ BUT (1)'s CONCLUSION IS NOW THE FLAG-OFF STATE, AND THE FLAG IS
- *            NO LONGER A ROLLBACK LEVER. Ownership on this surface is the
- *            verified token subject ALONE, so CEE_REQUIRE_USER_JWT is
- *            load-bearing, not optional. It defaults to FALSE
- *            (config/index.ts), and nothing in the config layer guards that
- *            direction — the only refine on it fires when it is TRUE. With it
- *            off, every OWNED scenario is refused to its OWN owner across all
- *            six /assist/v1/scenarios/* endpoints, reads and writes alike.
- *            Staging deploys it ON today (witnessed above), so this is about
- *            the DEFAULT and about anyone reaching for the flag in an
- *            incident — not a live outage. Disclosed at boot
- *            (`config.scenario_ownership_posture`, server.ts) and pinned in
- *            the suite as a KNOWN MISCONFIGURATION rather than as correct
- *            behaviour.
- *
- *         WHAT DOES NOT CHANGE — the route stays a POST. Reason (2) below never
- *         depended on the flag, is sufficient on its own, and the method is
- *         part of a shipped wire contract the UI already builds against.
- *
- *         ⚠ AND RE-DERIVE THIS BEFORE YOU RELY ON IT. A flag posture written
- *           into a comment is a hand-maintained mirror of a dashboard value
- *           (trap 12) — which is exactly how (1) came to be false here. The
- *           dated sentence above is a record of a measurement, never a
- *           standing guarantee, and that applies to this sentence too.
- *
- *   2. THE ALTERNATIVE PUTS A USER ID IN A URL. Carrying `user_id` as a query
- *      parameter would write an account identifier into proxy logs, browser
- *      history and referrers. Not acceptable for an identifier that is the
- *      authorization input.
- *
- * The scenario is still addressed in the PATH, so the route is scenario-addressed
- * in the sense that matters: one URL per scenario, cacheable to reason about,
- * and no graph is ever sent by the caller. Every other `/assist/v1/*` route is
- * POST, so this also matches the family it joins.
- *
- * ── THE UI REACHES THIS AS `/bff/cee/scenarios/:id/graph` ───────────────────
- * DERIVED from the UI's `cee-proxy` EDGE FUNCTION on its `staging` branch
- * (`netlify/edge-functions/cee-proxy.ts`, ROADMAP 2.317):
- *     config.path = "/bff/cee/*"      → target https://cee-staging.onrender.com
- *     pathname.replace(/^\/bff\/cee/, "/assist/v1")
- *     methods GET/HEAD/POST/OPTIONS   → POST is allowed
- *     injects X-Olumi-Assist-Key, forwards `authorization` (the user's
- *     Supabase token, which is what this route's identity step reads — this
- *     line said "will read once CEE_REQUIRE_USER_JWT is on", in the future
- *     tense, for the same reason (1) above is now wrong: it was written against
- *     a deployment where the flag was off)
- * The rewrite is a PREFIX replace, so the multi-segment
- * `/bff/cee/scenarios/<uuid>/graph` lands on
- * `/assist/v1/scenarios/<uuid>/graph`. The key never reaches the browser.
- *
- * ⚠ DO NOT RE-DERIVE THIS FROM `netlify.toml` ON THE UI'S `main` BRANCH — that
- *   is where this note first went wrong. `main` still carries the SUPERSEDED
- *   `[[redirects]]` pair, which (a) never executed at all (Netlify processes
- *   `public/_redirects` first, and its SPA catch-all `/* /index.html 200` won
- *   every time, so `/bff/cee/*` answered SPA HTML) and (b) named
- *   `olumi-assistants-service.onrender.com` — measured 3 Aug at
- *   `/v1/status`: version 1.11.1, uptime 9,936,008s (≈115 days), against CEE
- *   staging's 1.12.0. Wrong twice over. The edge function on `staging` is the
- *   live seam and it targets `cee-staging`, which is where this route deploys.
- *
- * ⚠ AND THAT IS EXACTLY WHY THE ASSIST KEY IS NOT AN AUTHORIZATION BOUNDARY
- *   HERE. The edge injects it for ANY visitor, so "holds a valid assist key"
- *   distinguishes nobody from anybody. The key gate (applied globally by
- *   `plugins/auth.ts` to every non-public route — this one included, by
- *   omission from `isPublicRoute`) stops anonymous internet traffic and does
- *   the per-key quota. USER separation is done below, by the same
- *   scenario-ownership pre-flight the turn route runs.
- *
- * ── THE ORDER OF THE CHECKS IS THE DESIGN ──────────────────────────────────
- *   0. identity      — headers only, no state read. FIRST, so that a refusal
- *                      status cannot become a scenario-existence oracle for a
- *                      caller presenting a deliberately bad token (the exact
- *                      regression turn-stop.ts had to hoist away).
- *   1. UUID syntax   — `scenarios.id` is a UUID column, so a non-UUID cannot
- *                      name a row. Refused without a round trip.
- *   2. EXISTENCE     — and it is before ownership FOR A REASON, see below.
- *   3. ownership     — the SAME two shared functions the turn route uses. No
- *                      second ownership rule is written in this file.
- *   4. the read      — only now, and only for a caller who passed 0–3.
- *
- * ⚠ (2) BEFORE (3) IS LOAD-BEARING: A READ MUST NEVER CREATE THE ROW IT READS.
- *   `authorizeScenarioOwnership` → `preflightEnsureScenario` →
- *   `ensureScenarioExists` runs `INSERT … ON CONFLICT (id) DO NOTHING`. Reached
- *   with an id that does not exist, it CREATES that scenario — so a stranger
- *   posting random UUIDs at a read endpoint would grow `scenarios` without
- *   bound. Gating on existence first makes the upsert a pure read (the row
- *   always already exists when it runs, so ON CONFLICT DO NOTHING does
- *   nothing) while still keeping ownership in the shared function where it
- *   belongs. turn-stop.ts ordered these two the same way for the same reason.
- *
- * ── EVERY REFUSAL ANSWERS THE SAME BYTES ───────────────────────────────────
- * "No such scenario", "not your scenario" and "ownership oracle unavailable"
- * are INDISTINGUISHABLE: one status, one code, one message. A refusal that
- * named its reason would hand any holder of a scenario UUID a free oracle over
- * which scenarios exist and who owns them — rebuilt one bit at a time. Guest
- * (unowned) scenarios stay addressable by anyone holding the UUID: that is the
- * accepted PoC posture, it is what the turn route already does, and it is what
- * makes PC5's guest tier work at all.
- *
- * ── RATE LIMITING, AND WHY THE BUCKET IS KEYED ON THE CLIENT ───────────────
- * The first cut of this route shipped with NO route-local limiter, arguing the
- * global `@fastify/rate-limit` (`global: true`) and the auth plugin's per-key
- * quota already covered it. Both of those are real and do apply — but CodeQL
- * flagged `js/missing-rate-limiting` HIGH ("this route handler performs
- * authorization, but is not rate-limited") and it was RIGHT to: every sibling
- * `/assist/v1/*` route carries one, and this is the only route in the estate
- * that returns another user's decision graph. A coarse global limiter is not
- * the same control as a per-route one on a data-read endpoint.
- *
- * It is applied as route-level `config.rateLimit` on the repo's own
- * `@fastify/rate-limit` registration (the `proxy-v5-turn.ts` stop-rung
- * pattern), NOT as a bespoke in-handler check — see the note at the config
- * itself for why that distinction earned its own revision.
- *
- * ⚠ THE BUCKET IS PER CLIENT (`req.ip`, the plugin default), deliberately —
- *   the inverse of the sibling routes' `keyId || req.ip`. Through the
- *   `/bff/cee/*` edge EVERY visitor arrives carrying the SAME injected assist
- *   key, so any key-derived bucket is a single shared-fate bucket in which one
- *   busy tab throttles every other user of the product. `req.ip` resolves from
- *   `x-forwarded-for` in production (`trustProxy: nodeEnv === "production"`),
- *   so it is per-visitor, which is also the granularity that actually limits
- *   the threat here: one host enumerating many scenario ids.
- *
- * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
- * · It does not write. Not the graph, not the row, not a turn.
- * · It does not MINT AN IDENTITY SCHEME. `graph_identity_hash` is
- *   `computeGraphIdentityHash` — identity.v1, the single normaliser authority
- *   named by the CAS migration itself.
- *
- *   ⚠ IT IS AN OPAQUE CEE-ISSUED TOKEN. Consumers STORE it and compare it
- *     CEE-to-CEE, gated on `.projection_version`; they must NEVER recompute it
- *     locally. There is no client-side way to reproduce this value and no
- *     promise that there ever will be — the normalisation, the strip list and
- *     the projection are CEE's, and they are versioned precisely so they can
- *     move without a consumer noticing.
- *
- *   ⚠ AN EARLIER REVISION OF THIS COMMENT CLAIMED "the UI's rebase detection
- *     compares the same value CEE's own compare-and-swap does". THAT WAS FALSE
- *     and it was never measured — a claim about ANOTHER REPO'S live path,
- *     asserted from this side of the seam (CLAUDE.md trap 16). Verified at the
- *     bytes at UI tip `8d0f3a76` (`rg -a` over the whole repo, excluding
- *     `.git`): `graph_identity_hash` appears in ZERO files and
- *     `projection_version` in ZERO files. The UI's #561 detector is a
- *     VALUE comparison and hashes nothing; no compatible projection exists
- *     UI-side. The field is new surface for consumers to adopt, not a
- *     rendezvous with something already there.
- * · It does not carry layout. `scenarios.graph` holds no positions (the UI
- *   merges those locally), and `layout_present` REPORTS that by measuring the
- *   returned bytes rather than promising it in prose.
- */
+
 
 import type { FastifyInstance } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
-import {
-  authorizeScenarioOwnership,
-  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-  resolveVerifiedIdentityOrRefuse,
-} from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
-import { proposalRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
-import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -227,6 +25,8 @@ import { log } from "../utils/telemetry.js";
 // ROADMAP 2.1271 — the additive analysis payload. All composition lives in the
 // helper; this route contributes the security ladder and the graph it read.
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
+import { withEstimateGoalPointsAtEgress } from "../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js";
+import { runExplanationKeyForRecord } from "../orchestrator-v5/agent-lane/run-explanation.js";
 import { projectAnalysisAdmission } from './analysis-admission-projection.js';
 import { readExecutableHeldProposalOffers, type HeldProposalOfferRead } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -302,7 +102,7 @@ export const CONVERSATION_TURNS_CAP = 50;
  *  claim row and its sub-turns). */
 export const CONVERSATION_ROWS_READ = CONVERSATION_TURNS_CAP * 4;
 
-/** One restored turn: text only, as stored. */
+/** One restored turn: stored text, with the same current-Run estimate attribution gate as live replies. */
 export interface ConversationTurnRead {
   readonly turn_id: string;
   readonly created_at: string;
@@ -342,23 +142,44 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[]; run_narration?: { readonly run_key: string } | null } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
   scenarioId: string,
   requestId: string,
   authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
-    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; modelExists: boolean },
-): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[] } | null> {
+    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; graph: unknown; modelExists: boolean },
+): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[]; proposalRows: readonly ProposalIssuingRow[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
     const answers = rows.filter(isAgentAnswerRow)
       .filter(r => typeof r.user_message === "string" || typeof r.assistant_message === "string").slice(0, CONVERSATION_TURNS_CAP);
-    const turns: ConversationTurnRead[] = [...answers].reverse()
-      .map((r) => ({
-        turn_id: r.turn_id,
-        created_at: r.created_at,
-        user_message: typeof r.user_message === "string" ? r.user_message : null,
-        assistant_message: typeof r.assistant_message === "string" ? r.assistant_message : null,
-      }))
+    const current = (authority.analysisState as { run_state?: { kind?: unknown } } | null)?.run_state?.kind === "complete_current";
+    const userAuthoredTexts = answers.flatMap(answer => typeof answer.user_message === 'string' ? [answer.user_message] : []);
+    // ⛔ AN EARLIER ANSWER NEVER ACQUIRES A NEWER RUN'S WORDS (capacity witness, staging 351eeda0, 14 Oct: an answer that
+    // said "about 37%" reloaded as the second Run's "about 64%"). The stored text is the post-wire text the user saw, already
+    // gated for its own Run when it was written. It is re-gated against the CURRENT Run only when the narration stored WITH
+    // it names that Run (`run_narration`, migration 20261013230000); an older or unknown Run keeps its words byte for byte.
+    const currentRunKey = current ? runExplanationKeyForRecord(scenarioId, authority.analysisState, authority.analysisResult) : null;
+    const egress = { analysisResult: authority.analysisResult, graph: authority.graph, current, userAuthoredTexts };
+    // The ONE estimate point classifier on this read (one call site); `current` only where the text's own Run is current.
+    const atEgress = (text: string, ownRunIsCurrent: boolean): string => {
+      return withEstimateGoalPointsAtEgress({ assistant_text: text }, { ...egress, current: current && ownRunIsCurrent }).assistant_text;
+    };
+    const turns: ConversationTurnRead[] = (await Promise.all([...answers].reverse()
+      .map(async (r) => {
+        // Only a row the gate would change reads its own Run (one read each; none in the usual case). Every row still
+        // crosses the gate; for any other Run it is not current, and the gate returns the stored text unchanged.
+        const ownRunIsCurrent = typeof r.assistant_message === "string" && currentRunKey !== null
+          && typeof store.readCommittedTurn === "function"
+          && atEgress(r.assistant_message, true) !== r.assistant_message
+          && (await store.readCommittedTurn(scenarioId, r.turn_id).catch(() => null))?.run_narration?.run_key === currentRunKey;
+        return {
+          turn_id: r.turn_id,
+          created_at: r.created_at,
+          user_message: typeof r.user_message === "string" ? r.user_message : null,
+          assistant_message: typeof r.assistant_message === "string"
+            ? atEgress(r.assistant_message, ownRunIsCurrent) : null,
+        };
+      })))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
     const heldOffers = await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store });
@@ -369,14 +190,14 @@ async function readConversationTurns(
         const last = turns[turns.length - 1];
         if (stored !== null && last !== undefined && last.turn_id === stored.turn_id) {
           const outstandingProposalIds = new Set(heldOffers.map(offer => offer.proposal_id));
-          const waiting = executableWaitingProposal(scenarioId, authority.userId, authority.graphHash);
+          const waiting = executableWaitingProposal(scenarioId, authority.userId, authority.graphHash, authority.graph);
           if (waiting !== undefined) outstandingProposalIds.add(waiting);
           const actions = answerOffersForReload(stored, scenarioId, { ...authority, latestPending: authority.latest, outstandingProposalIds });
           if (actions.length > 0) turns[turns.length - 1] = { ...last, suggested_actions: actions };
         }
       } catch { /* Offers unavailable: retain the existing response. */ }
     }
-    return { turns, heldOffers };
+    return { turns, heldOffers, proposalRows: rows };
   } catch (err) {
     log.warn(
       {
@@ -427,7 +248,7 @@ export default async function route(app: FastifyInstance) {
       //   `x-forwarded-for` in production (`trustProxy: nodeEnv === "production"`),
       //   so it is per-visitor — which is also the granularity that bounds the
       //   real threat here: one host walking scenario ids.
-      config: {
+      config: { scenarioId: { from: 'params', key: 'scenario_id', viewerMemberRead: true },
         rateLimit: {
           max: RATE_LIMIT_MAX,
           timeWindow: "1 minute",
@@ -477,12 +298,6 @@ export default async function route(app: FastifyInstance) {
       // The rate limit runs BEFORE this handler — it is the plugin's
       // onRequest hook, driven by the `config.rateLimit` above.
 
-      // ── 0. Identity, from headers only, before ANY read of server state ──
-      const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
-      if (!resolved.ok) {
-        return reply.code(resolved.status).send(resolved.error);
-      }
-
       // ── 1. Syntax: a non-UUID cannot name a row. No round trip. ─────────
       if (!UUID_PATTERN.test(scenarioId)) {
         return refuse();
@@ -494,45 +309,13 @@ export default async function route(app: FastifyInstance) {
 
       // Production reads one existing row: absence stays distinct from a guest owner,
       // and this read has no create-on-read path. Legacy stores retain their original ladder.
-      let snapshot: Awaited<ReturnType<NonNullable<typeof store.readExistingScenario>>> | undefined;
-      // True only when access came from viewer membership (never for the owner or a guest row). See §6.
-      let memberRead = false;
+      let snapshot = req.scenarioAccess?.snapshot;
+      const memberRead = req.scenarioAccess?.memberRead ?? false;
       if (typeof store.readExistingScenario === "function") {
-        try {
-          snapshot = await store.readExistingScenario(scenarioId);
-        } catch {
-          return unavailable();
+        if (snapshot === undefined) {
+          try { snapshot = await store.readExistingScenario(scenarioId); } catch { return unavailable(); }
         }
         if (snapshot === null) return refuse();
-        const caller = resolved.identity.mode === 'verified' ? resolved.identity.userId : null;
-        let access = scenarioAccessDecision(snapshot.userId, caller);
-        // ⭐ A VIEWER MEMBER MAY READ (ACCOUNTS "Invite a colleague", DL #85 5947426886). THIS ROUTE ONLY: it is a
-        // read, and every write door (turns, register, versions, the Supabase saves) keeps its owner-only check, so a
-        // member is a non-owner everywhere else. Only a VERIFIED caller on an OWNED row is asked. A membership read
-        // that fails answers the SAME refusal bytes (logged), never 503: a distinct status for "exists but your
-        // membership could not be checked" would tell a stranger the scenario exists.
-        if (access !== 'allow' && caller !== null && snapshot.userId !== null && typeof store.isScenarioMember === 'function') {
-          let member = false;
-          try {
-            member = await store.isScenarioMember(scenarioId, caller);
-          } catch (err) {
-            log.warn(
-              {
-                event: 'v5.scenario_graph.member_check_failed',
-                request_id: requestId,
-                scenario_id: scenarioId,
-                err: err instanceof Error ? err.message : String(err),
-              },
-              'Scenario graph read — membership check failed; refusing',
-            );
-          }
-          if (member) {
-            access = 'allow';
-            memberRead = true;
-            log.info({ event: 'v5.scenario_graph.member_read', request_id: requestId, scenario_id: scenarioId }, 'Scenario graph read by a viewer member');
-          }
-        }
-        if (access !== 'allow') return refuse();
       } else {
         // ── 2. EXISTENCE — before ownership, so the read cannot CREATE ──────
         // Error discipline is the INVERSE of turn-stop's fail-open: a Stop
@@ -582,59 +365,18 @@ export default async function route(app: FastifyInstance) {
           return refuse();
         }
 
-        // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
-        // The caller-supplied `user_id` is read by the SAME parser the turn
-        // route uses, not a hand-rolled `body.user_id` read that would drift the
-        // day the extension contract moves.
-        let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
-        try {
-          owned = await authorizeScenarioOwnership(
-            scenarioId,
-            // Ownership on this surface is derived from the verified token
-            // subject. A request-supplied identifier is not an input to that
-            // decision, so the sentinel is passed rather than the parsed
-            // extension. See the constant for why this is expressed here and not
-            // in the shared function.
-            CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-            resolved.identity,
-            requestId,
-          );
-        } catch (err) {
-          log.warn(
-            {
-              event: "v5.scenario_graph.ownership_read_failed",
-              request_id: requestId,
-              scenario_id: scenarioId,
-              err: err instanceof Error ? err.message : String(err),
-            },
-            "Scenario graph read — ownership pre-flight threw; failing closed",
-          );
-          return unavailable();
-        }
-        if (!owned.ok) {
-          // Reason is LOGGED, never returned — including the oracle-down case,
-          // which is fail-CLOSED here (see the header).
-          log.warn(
-            {
-              event: "v5.scenario_graph.refused_not_owner",
-              request_id: requestId,
-              scenario_id: scenarioId,
-              reason: owned.reason,
-            },
-            "Scenario graph read — caller is not authorized for this scenario",
-          );
-          return refuse();
-        }
 
       }
 
       // ── 4. The read ─────────────────────────────────────────────────────
       let graph: unknown;
       let briefText: string | null;
+      let revision: number | undefined;
       try {
         const loaded = snapshot ?? await store.loadGraphAndBriefText(scenarioId);
         graph = loaded.graph;
         briefText = loaded.briefText;
+        revision = loaded.revision;
       } catch (err) {
         log.warn(
           {
@@ -686,6 +428,7 @@ export default async function route(app: FastifyInstance) {
         graph: graphPresent ? graph : null,
         requestId,
         goalScopeClaimInput: scopeInput,
+        revision,
         ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
       });
       // The selected block already has one public carrier, `analysis_result`.
@@ -707,8 +450,9 @@ export default async function route(app: FastifyInstance) {
       // OPT-IN, because the Agent reads this route internally on every turn
       // (`turnReadCache`): without `include_conversation_turns: true` the body is
       // byte-identical and no extra query runs. The stored `assistant_message` is the
-      // POST-WIRE text the user saw (AIQ 5907360564), served as stored — never
-      // re-derived. `null` = this leg did not answer, never "no conversation".
+      // POST-WIRE text the user saw (AIQ 5907360564). Its narration passes the
+      // same current-Run estimate attribution gate as live replies and retries;
+      // other stored bytes remain intact. `null` = this leg did not answer, never "no conversation".
       //
       // ⚠ A VIEWER MEMBER GETS THE MODEL AND THE RUN, NEVER THE OWNER'S CONVERSATION. The premise above ("the caller
       // entitled to read the graph is exactly the caller entitled to read its conversation") holds for the owner and
@@ -717,13 +461,14 @@ export default async function route(app: FastifyInstance) {
       const conversationRequested = wantsConversationTurns(req.body) && !memberRead;
       const conversationRead = conversationRequested
         ? await readConversationTurns(store, scenarioId, requestId, {
-          userId: resolved.identity.mode === 'verified' ? resolved.identity.userId : null,
+          userId: req.scenarioAccess?.callerUserId ?? null,
           // EXACTLY the graph_hash the Agent turn reads from this route, not identity.v1's different projection.
           graphHash: (graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null) ?? undefined,
           latest: latestPending,
           analysisState: analysis.analysis_state,
           analysisResult: analysis.analysis_result,
           analysisReady: analysis.current_read.analysis_ready,
+          graph: graphPresent ? graph : null,
           modelExists: graphPresent && typeof graph === 'object'
             && ['nodes', 'edges'].some(key => Array.isArray((graph as Record<string, unknown>)[key])
               && ((graph as Record<string, unknown>)[key] as unknown[]).length > 0),
@@ -757,8 +502,13 @@ export default async function route(app: FastifyInstance) {
        * from the latest row's holds read above, pinned to THIS graph's hash. Opt-in with the conversation, so the
        * Agent's own internal reads stay byte-identical.
        */
+      const heldProposalRecords = conversationRequested && graphPresent
+        ? latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }) : [];
+      const proposalRows = conversationRead?.proposalRows ?? [];
+      const issuedTurnIds = await issuedTurnIdsForProposalRecords(proposalIssuances(heldProposalRecords, latestPending), proposalRows, CONVERSATION_ROWS_READ,
+        typeof store.readCommittedTurn === 'function' ? turnId => store.readCommittedTurn!(scenarioId, turnId) : undefined);
       const proposalFields = conversationRequested && graphPresent
-        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }),
+        ? ((hash) => proposalFieldsWire(heldProposalRecords, hash, issuedTurnIds, heldRecordsApplyAt(latestPending, graph, hash)))(
           computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
         : undefined;
 
@@ -777,9 +527,10 @@ export default async function route(app: FastifyInstance) {
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
         ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
-        graph: graphPresent ? graph : null,
+        graph: graphPresent ? toOutboundGraph(graph) : null,
         graph_present: graphPresent,
         brief_text: briefText,
+        scenario_created_at: snapshot?.createdAt ?? null,
         // identity.v1, from the single normaliser authority. Null when the
         // graph is absent or identity-empty — there is no identity to anchor
         // to, and a hash of nothing would be a false anchor.
@@ -862,6 +613,7 @@ export default async function route(app: FastifyInstance) {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
         analysis_result: analysis.analysis_result,
+        canonical_analysis_view: analysis.canonical_analysis_view,
         ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the
@@ -887,6 +639,9 @@ export default async function route(app: FastifyInstance) {
         // 52f8cd: the Olumi options the selected Run left out of the comparison, and why — same fact, same gates.
         ...(analysis.analysis_option_participation !== undefined
           ? { analysis_option_participation: analysis.analysis_option_participation }
+          : {}),
+        ...(analysis.analysis_run_option_set !== undefined
+          ? { analysis_run_option_set: analysis.analysis_run_option_set }
           : {}),
         // C46 × R3-4: the carriers the selected fact's engine evaluated — same fact, same gates; absent when it records none.
         ...(analysis.analysis_identity_evaluated_node_ids !== undefined

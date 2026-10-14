@@ -1,8 +1,14 @@
+import { toErrorV1, getStatusCodeForErrorCode } from '../../../utils/errors.js';
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createMockSessionStore } from '../../../../tests/utils/mock-session-store.js';
 
-const store = createMockSessionStore();
+let savedPending: NonNullable<import('../../session/store.js').SessionTurnWrite['pending_actions']> = [];
+const store = createMockSessionStore({
+  append: async write => { savedPending = write.pending_actions ?? []; return { id: 'drawn-answer' }; },
+  readMostRecentPendingActions: async () => savedPending,
+  });
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 const graph = { nodes: [{ id: 'team', kind: 'factor', label: 'Team capacity' }, { id: 'velocity', kind: 'outcome', label: 'Delivery pace' }], edges: [] };
@@ -24,11 +30,16 @@ describe('drawn link through the actual route and final card egress', () => {
     }));
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
+    app.setErrorHandler((err, req, reply) => {
+      const body = toErrorV1(err, req);
+      return reply.code(getStatusCodeForErrorCode(body.code)).send(body);
+  });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: 'h-drawn' }));
+    app.post('/orchestrate/v2/turn', async (_request, reply) => reply.code(409).send({ code: 'revision_conflict', details: { expected: 7, current: 8 } }));
     await app.register(agentV1TurnRoute); await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { scenario = `6f1c2a3b-4d5e-4f60-8a7b-${String(++n).padStart(12, '0')}`; modelCalls = []; modelArgs = proposal; });
+  beforeEach(() => { savedPending = []; scenario = `6f1c2a3b-4d5e-4f60-8a7b-${String(++n).padStart(12, '0')}`; modelCalls = []; modelArgs = proposal; });
   const press = async (id = 'agent-drawn-link:team>velocity', session_id?: string) => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
       message: 'Suggest this link.', source: 'chip', chip: { id }, ...(session_id !== undefined ? { session_id } : {}) } });
@@ -36,6 +47,19 @@ describe('drawn link through the actual route and final card egress', () => {
     return res.json() as { assistant_text: string; suggested_actions: { id: string; label: string; detail?: string }[];
       _agent: { session_id: string; mutated: boolean; tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
   };
+  it('real Agent 409 uses the exact shared revision-conflict bytes', async () => {
+    const proposed = await press();
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: scenario, session_id: proposed._agent.session_id,
+      message: 'Yes, make that change.', source: 'chip',
+      chip: { id: proposed.suggested_actions.find(action => action.label === 'Approve')!.id },
+    } });
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().code).toBe('revision_conflict');
+    expect(res.json().message).toBe('The scenario changed while I was saving, so nothing was saved. Try again.');
+    expect(createHash('sha256').update(res.json().message, 'utf8').digest('hex'))
+      .toBe('7cbca4e052c5af522548124b909e5e0aa9346c7d7662cf75fb5d23fad110a8ab');
+  });
   it('one forced call for the pressed pair yields the complete estimate card at final egress', async () => {
     const body = await press();
     expect(modelCalls).toHaveLength(1);

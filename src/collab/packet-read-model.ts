@@ -193,28 +193,8 @@ export async function assembleRevealView(
     );
   }
 
-  /**
-   * ⭐ OWNERSHIP, AND IT IS CHECKED BEFORE STATUS.
-   *
-   * Until this existed, EVERY authenticated Supabase user who held (or guessed)
-   * a round_id could read that round's reveal AND its disagreement view — every
-   * participant's number, their verbatim words and their attached evidence —
-   * because the owner routes verified only that the CALLER was signed in, never
-   * that the ROUND was theirs. `closeRound` (rounds-service.ts:147) and
-   * `ownerPreview` (:202) have always checked; this projection did not, and it
-   * is the one that serves the beliefs.
-   *
-   * ⚠ BEFORE THE STATUS GATE, deliberately. Checking after would answer
-   * `collab_round_open` to a stranger and turn the refusal into a status oracle
-   * on a round they cannot see — a smaller leak than the beliefs, but the same
-   * kind, and free to close by ordering.
-   *
-   * ⚠ `service` is exempt, matching `requireOwnerActor`: an internal caller has
-   * no `user_id` to compare and is not reachable from the browser seam.
-   */
-  if (args.requested_by.kind === 'owner' && round.created_by !== args.requested_by.user_id) {
-    refuse('collab_owner_only', 'No round you own with that id.');
-  }
+  // Owner HTTP callers passed the central scenario hook before this read.
+  // Participant capability checks below remain independent.
 
   if (round.status === 'open' || round.status === 'draft') {
     refuse(

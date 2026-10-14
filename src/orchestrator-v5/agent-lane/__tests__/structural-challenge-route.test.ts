@@ -8,7 +8,7 @@ type Rec = Record<string, any>;
 const LINK = { from_id: 'driver_retention', to_id: 'goal_value' };
 const RUN_A = 'run-a';
 const RUN_B = 'run-b';
-const SCENARIO = '8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f6';
+const SCENARIO = '8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f600';
 const PRESS = structuralChallengePressId(LINK);
 const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], baseline: null as Rec | null }));
 const OPTIONS = [{ id: 'option_a', kind: 'option', label: 'Option A' }, { id: 'option_b', kind: 'option', label: 'Option B' }];
@@ -65,6 +65,8 @@ vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal
 
 const rows = new Map<string, Rec>();
 const store = {
+  readExistingScenario: vi.fn(async (id: string) => id === SCENARIO
+    ? { userId: null, graph: null, briefText: null, analysisInvalidatedAt: null } : null),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
   readMostRecentPendingActions: vi.fn(async () => []),
@@ -72,7 +74,6 @@ const store = {
     const key = `${sid}:${turnId}`;
     if (rows.get(key)?.request_hash === hash) rows.delete(key);
   }),
-  storeDraftGraph: vi.fn(async () => {}),
   append: vi.fn(async (w: Rec) => { const key = `${w.scenario_id}:${w.turn_id}`; rows.set(key, { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` }); return { id: rows.get(key)!.id }; }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -88,19 +89,21 @@ describe('agent route: structural challenge press', () => {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => { graphReads.count += 1; if (graphReads.noGraph) return {}; return { graph: { nodes: [{ id: LINK.from_id, kind: 'factor', label: 'Driver retention' }, { id: LINK.to_id, kind: 'goal', label: 'Goal value' }, ...OPTIONS], edges: [{ from: LINK.from_id, to: LINK.to_id }] }, graph_hash: 'graph-a', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-04T10:00:00.000Z' }, leader_claim: { permitted: state.permission === 'licensed', separation: 'separated' } }, analysis_ready: { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: state.provisionalReceipt ? 'quantified_provisional' : 'comparative_leader' } } }; });
-    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'normal', blocks: [] }));
+    const { scenarioOwnershipPlugin } = await import('../../../plugins/scenario-ownership.js');
+    await app.register(scenarioOwnershipPlugin);
+    app.post('/assist/v1/scenarios/:id/graph', { config: { scenarioId: { from: 'params', key: 'id' } } }, async () => { graphReads.count += 1; if (graphReads.noGraph) return {}; return { graph: { nodes: [{ id: LINK.from_id, kind: 'factor', label: 'Driver retention' }, { id: LINK.to_id, kind: 'goal', label: 'Goal value' }, ...OPTIONS], edges: [{ from: LINK.from_id, to: LINK.to_id }] }, graph_hash: 'graph-a', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-04T10:00:00.000Z' }, leader_claim: { permitted: state.permission === 'licensed', separation: 'separated' } }, analysis_ready: { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: state.provisionalReceipt ? 'quantified_provisional' : 'comparative_leader' } } }; });
+    app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async () => ({ assistant_text: 'normal', blocks: [] }));
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); dispatch.baseline = null; state.provisionalReceipt = false; turnId = randomUUID(); state.throws = false; state.noRun = false; graphReads.noGraph = false; store.releaseTurnClaim.mockClear(); store.storeDraftGraph.mockClear(); dispatch.calls.length = 0; graphReads.count = 0; store.append.mockClear(); vi.mocked(fetch).mockClear(); state.run = RUN_A; state.permission = 'licensed'; });
+  beforeEach(() => { rows.clear(); dispatch.baseline = null; state.provisionalReceipt = false; turnId = randomUUID(); state.throws = false; state.noRun = false; graphReads.noGraph = false; store.releaseTurnClaim.mockClear(); dispatch.calls.length = 0; graphReads.count = 0; store.append.mockClear(); vi.mocked(fetch).mockClear(); state.run = RUN_A; state.permission = 'licensed'; });
   const post = async (chip: string | undefined, message = 'test') => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message, source: chip ? 'chip' : 'user', ...(chip ? { chip: { id: chip } } : {}) } }));
 
   it('current licensed Run: replies structurally, makes no model call, appends no graph change, and marks fastPath method', async () => {
     const response = await post(PRESS); const body = response.json();
     expect(response.statusCode).toBe(200); expect(body.assistant_text).toContain('Without the link'); expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(dispatch.calls).toHaveLength(1); expect(dispatch.calls[0].link).toEqual(LINK); expect(dispatch.calls[0].requestId).toContain('structural-challenge');
-    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(store.storeDraftGraph).not.toHaveBeenCalled(); expect(body._agent.mutated).toBe(false); expect(body._agent?.tool_calls ?? []).toEqual([]);
+    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(body._agent.mutated).toBe(false); expect(body._agent?.tool_calls ?? []).toEqual([]);
   });
   it('accel P24 / SCI-10: a completed test carries its typed rows beside the reply, bound to the pressed link; a stale one carries none', async () => {
     const body = (await post(PRESS)).json();
@@ -174,7 +177,7 @@ describe('agent route: structural challenge press', () => {
     expect(body.assistant_text).toBe("I can't tell which link this is, so I can't test it. Nothing in your model changed.");
     expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(body._diagnostic_trace.timing.provider_calls).toBe(0); expect(fetch).not.toHaveBeenCalled();
-    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(store.storeDraftGraph).not.toHaveBeenCalled(); expect(body._agent.mutated).toBe(false); expect(body._agent.tool_calls).toEqual([]);
+    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(body._agent.mutated).toBe(false); expect(body._agent.tool_calls).toEqual([]);
   });
   it('canonical press absent from read-back graph reaches dispatcher typed link_not_found', async () => {
     const link = { from_id: 'absent', to_id: LINK.to_id };
@@ -217,7 +220,6 @@ describe('agent route: structural challenge press', () => {
     expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(fetch).not.toHaveBeenCalled(); expect(body._diagnostic_trace.timing.provider_calls).toBe(0);
     expect(body._agent.tool_calls).toEqual([]); expect(body._agent.mutated).toBe(false);
-    expect(store.storeDraftGraph).not.toHaveBeenCalled();
     expect(store.releaseTurnClaim).not.toHaveBeenCalled();
     expect(rows.has(`${SCENARIO}:${turnId}:claim`)).toBe(true);
     expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1);

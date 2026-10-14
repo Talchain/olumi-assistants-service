@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":17.65185546875,"threshold":25}
+node_modules/.bin/vitest run tests/contract/goal-record-census.guard.test.ts --config vitest.required.config.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  01:02:29
+   Duration  1.07s (transform 113ms, setup 133ms, import 794ms, tests 7ms, environment 0ms)
+

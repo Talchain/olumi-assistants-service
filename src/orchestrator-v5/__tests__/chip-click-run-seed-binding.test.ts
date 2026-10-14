@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * ⛔ C1 ON THE PATH THE USER'S RUN ACTUALLY TAKES (R3 #85 5939245408; DL ruling 5939278824).
  *
@@ -58,8 +59,9 @@ const served = JSON.parse(readFileSync(new URL('../agent-lane/__tests__/fixtures
 const happy = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as V2RunResponseEnvelope;
 const DRAW_KEY = 'd'.repeat(64);
 
-function harness(opts: { goalLevelOlumis?: boolean } = {}) {
-  const graph = structuredClone(served.graph);
+function harness(opts: { goalLevelOlumis?: boolean; asServed?: boolean } = {}) {
+  // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+  const graph = opts.goalLevelOlumis === true && opts.asServed !== true ? legacyDoorGraph(served.graph) : structuredClone(served.graph);
   // MC D1 (b): the served goal level is the USER's, so Gate 5 withholds every comparison on this graph (no leader, so no
   // "explore the leading option"). The first-analysis rows need a Run whose leader CAN be named: the same graph with the
   // goal's level Olumi's, which Gate 5 does not read as the user's product.
@@ -379,4 +381,11 @@ describe('C1 durable history — a Run that aged out of the hot window still len
     expect(runIdsOf(h.last.out!.priorFacts), 'the window (empty) — not the history holding a Run newer than this one').toEqual([runIdOf(b)]);
     expect(finaliseChip(h.last.out!).run_delta, 'no pair').toBeUndefined();
   });
+});
+
+it('Science 393023: as-served goal-level twin first Run is now withheld on its placeholder paths', async () => {
+  const h = harness({ goalLevelOlumis: true, asServed: true });
+  const a = await h.run('turn-a');
+  expect(JSON.stringify(a)).not.toContain('FIRST_ANALYSIS_COMPLETE');
+  expect(JSON.stringify(a)).toContain('GOAL_FIGURES_PLACEHOLDER_PATH');
 });

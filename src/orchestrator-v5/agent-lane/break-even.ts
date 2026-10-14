@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 import { identityConflictsWithScope, nodesOf } from './goal-scope.js';
 /**
  * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205:
@@ -16,12 +17,14 @@ import { identityConflictsWithScope, nodesOf } from './goal-scope.js';
  * inexact or in another unit — never an approximate answer.
  */
 import { nonlinearIdentityForAgent } from './admit-model.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOfStateOrStamp } from '../../cee/provenance/provenance-of.js';
 import { deriveEmittedGoalDirection, heldComparatorSense, readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
-import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
+import { readMoneyTotal, readUnitParts } from './same-unit.js';
+import { sayFigure } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
+import { thresholdReasonOf, type ThresholdReason } from '../compose/claim-safety-cage.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -74,8 +77,8 @@ export interface BreakEven {
  * `user_ratified` (an estimate the user confirmed or approved as an assumption) is NOT the user's figure and is said
  * as approved; anything the rule cannot attribute (a repair, an unknown stamp) makes the whole answer `null`.
  */
-const byOf = (source: unknown): FigureBy | null => {
-  const provenance = classifyValueSource(source);
+const byOf = (observed: unknown): FigureBy | null => {
+  const provenance = valueClassOfStateOrStamp(observed);
   if (provenance === 'user_stated') return 'user';
   if (provenance === 'user_ratified') return 'approved';
   if (provenance === 'ai_drafted') return 'olumi';
@@ -118,13 +121,18 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
   const volume = byId.get(volumeId);
   const pos = price?.observed_state;
   const vos = volume?.observed_state;
+  if (isUnverifiedUserMaterial(pos) || isUnverifiedUserMaterial(vos)) return null;
   const cap = typeof pos?.cap === 'number' && pos.cap > 0 ? pos.cap : undefined;
   const p0 = exactRaw(pos, cap);
   const v0 = exactRaw(vos, undefined);
-  const p0By = byOf(pos?.source);
-  const v0By = byOf(vos?.source);
+  const p0By = byOf(pos);
+  const v0By = byOf(vos);
   const unit = typeof pos?.unit === 'string' ? pos.unit.trim() : '';
   if (p0 === null || v0 === null || p0By === null || v0By === null || !(p0 > 0) || !(v0 > 0) || unit === '') return null;
+  // ⛔ #2851 (DL ruling 2; Paul's 2 Oct brief §9 check 1): the product's PARTS today are the user's figures or nothing.
+  // Olumi's basis-less count (B1 9f32a4b4's drafted 250) gave "£12,250 … 208/227 subscribers" in the Run reply while the
+  // card asked for that count: two stories from one model. The card's own rule (`identityPartsWithoutLevel`) decides.
+  if (p0By === 'olumi' || v0By === 'olumi') return null;
   // MG B3: the volume must be a COUNT with a stated unit — a rate (%, points, basis points) times a price is no revenue.
   const volumeUnit = typeof vos?.unit === 'string' ? vos.unit.trim() : '';
   if (volumeUnit === '' || classifyUnitScaleClass(volumeUnit) !== 'unknown') return null;
@@ -135,7 +143,7 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
     if (level === undefined) continue;
     const stored = (typeof level === 'number' ? { value: level } : level) as { value?: unknown; raw_value?: unknown; source?: unknown };
     const p = exactRaw(stored, cap);
-    const by = byOf(stored.source);
+    const by = byOf(stored);
     if (p === null || by === null || !(p > 0)) return null;
     const least = Math.ceil(baselineGoal / p - 1e-9);
     rows.push({
@@ -166,25 +174,17 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
 }
 
 /**
- * The symbol for an ISO code, DERIVED from the one currency vocabulary (`utils/currency-alphabet.ts`, ROADMAP 2.972) —
- * never a second list here (`currency-vocabulary.union.test.ts` forbids the mirror). The first symbol the map gives the
- * code wins; a code the map does not know is written as the unit itself.
- */
-const symbolForCode = (code: string): string | undefined =>
-  Object.entries(CURRENCY_SYMBOL_TO_CODE).find(([, c]) => c === code.toUpperCase())?.[0];
-
-/**
- * A money figure in the price's unit ("GBP/month" → "£14,700/month"); otherwise the number and the unit. "GBP per month"
- * reads the same (served `0592c43`: the goal line said "20,000 GBP per month" beside the reply's own "£20k/month").
+ * The shared readers own the unit and the shared figure writer owns its display. A price is already named as the price
+ * factor here, so its per-item denominator is not repeated: "£49 a month", "£12,250 a month". Unread or numbered periods
+ * keep their stored words through `sayFigure`; no second unit grammar or currency formatter lives in this producer.
  */
 function money(n: number, unit: string): string {
-  const m = /^([A-Za-z]{3})\s*(?:(?:\/|\bper\s)\s*(.+))?$/i.exec(unit);
-  const digits = n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  const symbol = m === null ? undefined : symbolForCode(m[1]!);
-  if (m === null || symbol === undefined) return `${digits} ${unit}`;
-  // A lettered symbol reads with a space before the figure; a sign does not.
-  // "seat per month" reads "seat/month": one separator, as the slash form writes it.
-  return `${symbol}${/^[A-Za-z]+$/.test(symbol) ? ' ' : ''}${digits}${m[2] !== undefined ? `/${m[2].replace(/\s*\bper\s+/gi, '/')}` : ''}`;
+  const total = readMoneyTotal(totalUnitOfPerUnitPrice(unit), '');
+  if (total !== null) return sayFigure(n, `${total.code} a ${total.period}`);
+  const parts = readUnitParts(unit);
+  return parts?.kind === 'currency' && parts.scale === 1 && parts.period !== null
+    ? sayFigure(n, `${parts.code} a ${parts.period}`)
+    : sayFigure(n, unit);
 }
 const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' ? ' (an assumption you approved)' : ' (Olumi’s estimate)');
 /**
@@ -193,7 +193,7 @@ const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' 
  * subscribers" and "a loss of at most 248.388". A fractional count is said "about 1,469"; the stored level is untouched.
  */
 const count = (n: number): string =>
-  (Number.isInteger(n) ? n.toLocaleString('en-GB') : `about ${Math.round(n).toLocaleString('en-GB')}`);
+  (Number.isInteger(n) ? sayFigure(n, '') : `about ${sayFigure(Math.round(n), '')}`);
 /** "of the 1,300", or "of about 1,469" when the count is itself an estimate's quotient. */
 const ofThe = (n: number): string => `of ${Number.isInteger(n) ? 'the ' : ''}${count(n)}`;
 
@@ -258,6 +258,10 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   const raw = goal?.goal_threshold_raw;
   const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
   if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
+  // GOAL-REACH 3b: PLoT #444 carries ISL's reason; with it, the cause is SAID, per Science §(g). Without it (a pre-#444
+  // payload), the lines below are unchanged.
+  const reasonLine = thresholdReasonLine(graph, analysisResult);
+  if (reasonLine !== null) return reasonLine;
   const label = goal.label ?? goal.id;
   // R&C B1 (#2071): ISL mints this code for seven reasons, and "no current figure" is only one of them. The cause is said
   // ONLY when the graph itself shows it — the goal carries no current figure at all; otherwise the target is named with
@@ -271,4 +275,77 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   return hasCurrent
     ? `Your ${label} ${target} was not checked in this analysis.`
     : `Your ${label} ${target} is not checked yet: the model has no current ${label} figure to measure it against.`;
+}
+
+/**
+ * GOAL-REACH 3b: the ONE producer of the carried-reason sentence, for every reply that speaks of a Run's result: the build
+ * turn's goal line (`goalNotCheckedLine`), an explicit Run's typed owed lines, and that Run's replay (DL CHANGES_REQUIRED
+ * on #2816: an explicit Run never said it). `null` without a carried reason (pre-#444) or a stated target amount.
+ */
+export function thresholdReasonLine(graph: unknown, analysisResult: unknown): string | null {
+  const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
+  if (carried === null) return null;
+  const goal = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[]).find((n) => n.kind === 'goal');
+  const raw = goal?.goal_threshold_raw;
+  const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
+  if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
+  return thresholdReasonSentence(carried, goal, graph);
+}
+
+/** Science §(g) (AIQ final): every reason's sentence ends with this, since only the goal chance was refused. */
+export const THRESHOLD_REST_STANDS = ' The rest of this Run\'s results still stand.';
+const OLUMI_BUILT = ' That\'s a limit of how Olumi built the model, not something you entered.';
+
+/** The one option whose interventions set the goal node itself, or undefined (none, or more than one: not guessed). */
+function optionSettingGoal(graph: unknown, goalId: string): string | undefined {
+  const options = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as (Node & { interventions?: unknown; data?: { interventions?: unknown } })[])
+    .filter((n) => n.kind === 'option');
+  const setting = options.filter((o) => [o.interventions, o.data?.interventions]
+    .some((iv) => iv !== null && typeof iv === 'object' && Object.prototype.hasOwnProperty.call(iv, goalId)));
+  return setting.length === 1 ? (setting[0]!.label ?? setting[0]!.id) : undefined;
+}
+
+/**
+ * GOAL-REACH 3b: Science §(g)'s sentence for the carried reason, words verbatim (AIQ final), {goal}/{option}/{X} from
+ * the model. A sentence whose slot the model cannot fill (no single option sets the goal; a %-change reason on a goal not
+ * framed as one) falls back to the 'unknown' sentence, never a guess.
+ */
+export function thresholdReasonSentence(carried: ThresholdReason, goal: Node, graph: unknown): string {
+  const g = goal.label ?? goal.id;
+  const raw = goal.goal_threshold_raw;
+  const pct = goal.goal_threshold_frame === 'change_rel' && typeof raw === 'number' && Number.isFinite(raw)
+    ? `${Math.round(Math.abs(raw) * 100 * 1e6) / 1e6}%` : undefined;
+  const unknown = `Olumi can't show each option's chance of reaching your ${g} target in this Run.`;
+  const say = (): string => {
+    switch (carried.reason) {
+      case 'missing_goal_baseline':
+        return `Olumi can't show each option's chance of reaching your ${g} target yet: the model doesn't have ${g}'s current level to measure from.`;
+      case 'root_goal':
+        if (carried.root_case === 'root_value_source') return `Olumi can't show the chance of reaching your ${g} target: nothing in the model is linked to ${g}, and it has no current level, so the options have nothing to move.`;
+        if (carried.root_case === 'root_intercept') return `Olumi can't show the chance of reaching your ${g} target: nothing in the model is linked to ${g}, and the way Olumi built it doesn't let today's level be compared with the target.${OLUMI_BUILT}`;
+        return unknown;
+      case 'goal_pinned_by_intervention': {
+        const option = optionSettingGoal(graph, goal.id);
+        return option === undefined ? unknown
+          : `Olumi can't show the chance of reaching your ${g} target: ‘${option}’ sets ${g} directly, so its result would be the setting itself, not something the model worked out.`;
+      }
+      case 'goal_values_outside_normalised_domain':
+        return `Olumi can't show the chance of reaching your ${g} target reliably: the target sits outside the range Olumi set up for ${g} in this model. That's a limit of how Olumi built the model, not of your figures.`;
+      case 'non_finite_conversion_input':
+      case 'goal_node_missing':
+        return `Olumi can't show the chance of reaching your ${g} target in this Run because of a fault on Olumi's side.`;
+      case 'epsilon_breaks_status_quo_reference':
+      case 'auto_scaled_noise_breaks_status_quo_reference':
+        return `Olumi can't show the chance of reaching your ${g} target: random variation Olumi added to the model can't be separated from the options' own effect.${OLUMI_BUILT}`;
+      case 'change_rel_raw_range_missing':
+        return pct === undefined ? unknown
+          : `Olumi can't show the chance of a ${pct} change in ${g}: the model doesn't carry the range it needs to measure a percentage change of ${g}. That's a limit of how Olumi set up the goal.`;
+      case 'change_rel_base_zero':
+        return pct === undefined ? unknown
+          : `Olumi can't show the chance of a ${pct} change in ${g}: its current level is zero, and a percentage of zero is still zero. A target stated as an amount would work.`;
+      case 'unknown':
+        return unknown;
+    }
+  };
+  return say() + THRESHOLD_REST_STANDS;
 }

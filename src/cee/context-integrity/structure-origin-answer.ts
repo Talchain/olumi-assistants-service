@@ -678,6 +678,8 @@ function composeAnswer(node: GraphNodeView): string | null {
   // dark-arm defect. Pinned by `RED-DICT` and `RED-10`.
   if (node.provenanceEnum === null) return null;
 
+  if (node.provenanceEnum === 'unverified_brief') return 'Not confirmed from your brief';
+
   if (node.provenanceEnum === 'from_brief') {
     // Already means stated AND brief-verified, or label-bound-and-verified.
     // No second opinion needed, and none may be substituted.

@@ -24,6 +24,8 @@ export interface GraphNodeLike {
   readonly kind?: string;
   readonly label?: string;
   readonly observed_state?: { value?: unknown } | undefined;
+  /** CEE's option-bound precondition stamp; read by `inertRiskBranch`, never inferred from connectivity. */
+  readonly relies_on?: unknown;
   /** What an OPTION sets, keyed by factor id. An option with none does nothing. */
   readonly interventions?: Record<string, unknown> | undefined;
   readonly changes?: unknown;
@@ -39,6 +41,7 @@ export type StatusQuoNodeLike = Pick<GraphNodeLike, 'id' | 'kind' | 'label' | 'i
 export interface GraphEdgeLike {
   readonly from: string;
   readonly to: string;
+  readonly edge_type?: unknown;
   /** Read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
   readonly origin?: unknown;
 }

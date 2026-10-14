@@ -13,6 +13,11 @@ export function subtractMagnitudeDelta<E>(edges: readonly E[]): { edges: E[]; si
     const e = raw as unknown as AnyEdge;
     if (e.provenance?.magnitude !== 'olumi_placeholder') return raw;
     const mean = e.strength?.mean ?? 0;
+    // Science 393023 LICENCE (a): door tag → the old untagged default, without a sizing receipt.
+    if (e.provenance.mean_projected === true || (Math.abs(mean) === 0.5 && e.strength?.std === 0.125 && e.provenance.natural_effect === undefined)) {
+      const { magnitude: _doorTag, ...provenance } = e.provenance;
+      return { ...e, provenance } as unknown as E;
+    }
     if (!(Math.abs(mean) < 0.5)) throw new Error(`a placeholder that is not smaller than the old projection: ${JSON.stringify(e)}`);
     sized += 1;
     const { magnitude: _m, natural_effect: _n, ...provenance } = e.provenance;

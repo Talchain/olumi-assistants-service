@@ -117,8 +117,8 @@ async function approve(p: ReturnType<typeof product>, assumptions: Record<string
   return { r: r as Record<string, unknown>, revAtApproval };
 }
 
-const REVISE_WIN_RATE = [{ factor_label: 'Win rate', value: 0.35, unit: '', basis: 'the user asked for 35%', revise: true }];
-const ADOPT_PRO_SHARE = [{ factor_label: 'Pro share', value: 0.4, unit: '', basis: 'a starting assumption' }];
+const REVISE_WIN_RATE = [{ user_stated: true, factor_label: 'Win rate', value: 0.35, unit: '', basis: 'the user asked for 35%', revise: true }];
+const ADOPT_PRO_SHARE = [{ user_stated: false, factor_label: 'Pro share', value: 0.4, unit: '', basis: 'a starting assumption' }];
 
 describe('(i) an UNRELATED concurrent edit does not make a refused write "saved"', () => {
   it('⛔ our write is refused while another writer changes a DIFFERENT factor → NOT saved', async () => {

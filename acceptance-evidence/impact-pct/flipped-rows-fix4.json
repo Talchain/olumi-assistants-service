@@ -1,0 +1,139 @@
+{
+  "ruling": "DL ruling 8 Oct: explicit likelihood words only",
+  "expected_flip": "READ or HELD or no-window=true to REFUSE/no likelihood",
+  "existing_expectation_flips": 44,
+  "groups": [
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "old_test_family": "2a-positive",
+      "ids": [
+        "range",
+        "single",
+        "between-percent",
+        "hyphen",
+        "to",
+        "both-percent",
+        "weeks",
+        "week-minimum",
+        "zero",
+        "hundred",
+        "decimal"
+      ]
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "old_test_family": "r2-plain-likelihood",
+      "ids": [
+        "probable"
+      ]
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "old_test_family": "fix1-must-still-read",
+      "ids": [
+        "percent-risk",
+        "reckon-after-semicolon",
+        "maybe-range",
+        "put-it-at-range",
+        "may-happen-card-words",
+        "might-happen-colon"
+      ]
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "old_test_family": "impact-pct-must-still-read",
+      "ids": [
+        "served-developer",
+        "served-competitor",
+        "bare-event",
+        "put-it-at"
+      ]
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "old_test_family": "said-door-likelihood-without-window",
+      "ids": [
+        "percent-only",
+        "range-only",
+        "put-it-at"
+      ]
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/review-rows-fix3.json",
+      "old_test_family": "readerRows",
+      "ids": [
+        "review-44",
+        "review-45",
+        "review-59",
+        "review-63",
+        "review-64",
+        "review-65",
+        "review-66",
+        "review-67",
+        "review-72",
+        "review-74"
+      ]
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/review-rows-fix3.json",
+      "old_test_family": "noWindowRows",
+      "ids": [
+        "no-window-09"
+      ]
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/review-rows-fix3.json",
+      "old_test_family": "draftRows",
+      "ids": [
+        "must-fire-key-developer",
+        "must-fire-supplier-probable"
+      ]
+    },
+    {
+      "file": "acceptance-evidence/impact-pct/corpus-labels.json",
+      "old_test_family": "LIKELIHOOD",
+      "ids": [
+        "corpus-002",
+        "corpus-005",
+        "corpus-078",
+        "corpus-079"
+      ]
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "old_test_family": "named-test",
+      "ids": [
+        "2c-decimal-sentence"
+      ]
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/agent-event-risk-door-seam.test.ts",
+      "old_test_family": "named-test",
+      "ids": [
+        "impact-pct-door-corpus-likelihood"
+      ]
+    }
+  ],
+  "new_r3_fixture_policy_refusals": [
+    "F2",
+    "F4",
+    "F6",
+    "D4"
+  ],
+  "separate_restored_read": [
+    {
+      "file": "acceptance-evidence/impact-pct/review-rows-fix3.json",
+      "id": "review-47",
+      "input": "Odds are about 20% within a year.",
+      "reason": "are is an allowlisted likelihood bridge"
+    }
+  ],
+  "numeric_format_controls_preserved_with_new_explicit_inputs": [
+    "between-percent-explicit",
+    "weeks-explicit",
+    "week-minimum-explicit",
+    "zero-explicit",
+    "hundred-explicit",
+    "decimal-explicit"
+  ]
+}

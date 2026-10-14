@@ -31,6 +31,8 @@ describe('MC P0 FD: strength credit follows its mean', () => {
     control();
     expect(edgeStrengthProvenance({ defaulted: true, provenance: { source: 'brief_extraction' } })).toBe('ai_drafted');
     expect(edgeStrengthProvenance({ provenance: { source: 'brief_extraction' } })).toBe('user_stated');
+    // ONE PROVENANCE AUTHORITY (AIE 6121121310): an unmarked link with an AI drawing stamp is never Olumi's size wholesale.
+    expect(edgeStrengthProvenance({ provenance: { source: 'cee_hypothesis' } })).toBe('unattributed');
     expect(edgeStrengthProvenance({ defaulted: true, provenance: { source: 'brief_extraction', magnitude: 'user_stated' } })).toBe('ai_drafted');
   });
   it('ALL material link means are yours: exact copy and same code, including the reader', () => {

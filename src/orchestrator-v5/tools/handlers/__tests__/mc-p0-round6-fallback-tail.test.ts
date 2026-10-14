@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../agent-lane/__tests__/licence-test-graphs.js';
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
@@ -7,6 +8,9 @@ import { resolveAnalysisAdmission } from '../../../admission/analysis-admission.
 import { authorshipReasonForRun } from '../../../compose/authorship-reason-for-run.js';
 
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-r0-1f9d769.json', import.meta.url), 'utf8'));
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const RAW_GRAPH = F.graph;
+F.graph = legacyDoorGraph(F.graph);
 const ids = ['remain_on_aws', 'switch_fully_to_gcp', 'phase_50_to_gcp'];
 const workload = { from: 'gcp_workload_share', to: 'monthly_gcp_cost_saving' };
 const otherLinks = [
@@ -125,4 +129,10 @@ it('R6 capture :212, authorised :219, and :241 original/authorised setup results
     semantics.push({ tag, reason, mode: admission.reasons.find(r => r.field === 'permitted_analysis_mode'),
       withoutLeader: authorshipReasonForRun({ analysis_ready: { analysis_admission: { reasons: [reason] } }, blocks: [] }).analysis_ready.analysis_admission.reasons[0] });
   }
+});
+
+it('Science 393023: as-served two → three unsized links, including workload', () => {
+  const paths = unsizedLeaderGoalPaths(RAW_GRAPH, ids);
+  const links = [...new Map(paths.flatMap(p => p.links).map(l => [`${l.from}->${l.to}`, l])).values()];
+  expect(links).toEqual([workload, ...otherLinks]);
 });

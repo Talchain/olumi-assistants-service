@@ -290,7 +290,12 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     } finally { config.cee.modelVersionsEnabled = enabled; }
   });
   it('SUCCESS: canonical read → readiness → captured Run input → Agent context → explanation → cold reload, with no transcript or process memory', async () => {
-    const h = await harness(); await open(h); await share(h); const p = await clarified(h); expect(await approve(h, p)).toMatchObject({ applied: true });
+    const inputGraph = g0();
+    // Fixture-only supported risk premise for the end-to-end successful Run.
+    inputGraph.nodes.find(n => n.id === 'risk_discount_leakage')!.observed_state = {
+      value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred',
+    };
+    const h = await harness(inputGraph); await open(h); await share(h); const p = await clarified(h); expect(await approve(h, p)).toMatchObject({ applied: true });
     h.clearHistory(); h.restart(); const read = await h.read(); expect(read.status).toBe(200); expect(read.json.brief_text).toBeNull();
     const canonical = GraphV3.parse(read.json.graph); expect(canonical.nodes.find(n => n.id === 'mrr')!.goal_scope?.extent).toBe('total');
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', h.store as never);
@@ -322,7 +327,11 @@ describe('S6–S7: the actual Agent route owns the durable reconciliation and co
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: script.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Ready.' }] }] }), { status: 200 })));
     await h.startAgentProcess();
     const reply = await h.agentTurn(scopeWithdrawalWords('mrr'));
-    expect(reply._agent).toMatchObject({ tool_calls: [{ name: 'withdraw_proposal', ok: true }] });
+    // GOAL-REACH #2802: the goal still carries Olumi's unconfirmed reading, so the route's existing re-offer may attach the
+    // identity card (it writes nothing) after the withdrawal; the withdrawal is the turn's own call.
+    const calls = (reply._agent as { tool_calls: { name: string; ok?: boolean; mutated?: boolean }[] }).tool_calls;
+    expect(calls[0]).toMatchObject({ name: 'withdraw_proposal', ok: true });
+    expect(calls.slice(1).every(c => c.name === 'propose_identity' && c.mutated !== true)).toBe(true);
     expect(h.row.pending.some(p => p.action.kind === 'reconcile_goal_scope')).toBe(false);
     expect(h.row.writes).toHaveLength(0); expect(count(h.row.graph)).toBe(300);
     h.restart(); expect((await h.read()).json).not.toHaveProperty('goal_scope_reconciliation');

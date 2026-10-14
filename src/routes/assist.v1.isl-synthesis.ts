@@ -26,7 +26,7 @@ export default async function route(app: FastifyInstance) {
   );
   const FEATURE_VERSION = "isl-synthesis-1.0.0";
 
-  app.post("/assist/v1/isl-synthesis", async (req, reply) => {
+  app.post("/assist/v1/isl-synthesis", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

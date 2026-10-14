@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 /**
  * An edit on a structurally-invalid base never writes the elements it did not
  * touch — and, because the targeted element's own result is lossy there, it
@@ -38,7 +39,7 @@
  * (Paul's exports + DL captures) failed GraphV3 on 28 Sep; `std: 0` is the one
  * invalidity CEE is known to manufacture, so it is the cause this file models.
  */
-import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
@@ -91,6 +92,8 @@ vi.mock('../../commit.js', () => ({
 // base); everything else in build-turn-context stays real.
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../build-turn-context.js')>()),
+  // B-FIX1: the combined read follows the existing graph double.
+  loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
   loadPersistedGraphStrict: vi.fn(async () => storedGraphRef.current),
   loadRecentConversationTurns: vi.fn(async () => []),
   loadMostRecentPendingActions: vi.fn(async () => []),
@@ -298,7 +301,12 @@ const DOORS = [
 
 for (const door of DOORS) {
   describe(`structural-fallback base, ${door.name} — the stored model is not wiped`, () => {
-    beforeEach(() => { gmModeRef.current = door.mode; });
+    beforeEach(() => {
+      // A2: these rows pin the old std=0 structural-fallback refusal.
+      // CAS ON now admits that sanctioned stored class; its rename row is in graph-writer-cas-on.
+      __setUseAppendV6ForTest(false);
+      gmModeRef.current = door.mode;
+    });
 
     it('untouched nodes keep observed_state, interventions, goal threshold and provenance', async () => {
       const stored = storedInvalidGraph();
@@ -394,6 +402,7 @@ for (const door of DOORS) {
 }
 
 describe('controls', () => {
+
   for (const mode of [null, 'shadow', 'off'] as const) {
     it(`VALID base (GM ${mode ?? 'default'}) — the rename still commits, and moves only the label`, async () => {
       gmModeRef.current = mode;
@@ -418,6 +427,8 @@ describe('controls', () => {
   }
 
   it('invalid base, GM live, ordinary rename — the referee HOLD still owns the reply (unchanged), and nothing is written', async () => {
+    // A2: std=0 was the rollback path's invalid-base premise.
+    __setUseAppendV6ForTest(false);
     gmModeRef.current = 'live';
     const stored = storedInvalidGraph();
     const { result, metadata } = await runEdit(
@@ -430,3 +441,5 @@ describe('controls', () => {
     expect(result.response.blocks.some((b) => b.type === 'held_proposal')).toBe(true);
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

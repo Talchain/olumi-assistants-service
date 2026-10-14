@@ -12,7 +12,8 @@
  * #2275 trust). The status quo is never marked (declared, read from its name, stamped `is_baseline`, or setting no level).
  * Anything unclear, such as two
  * options that share a name, is left unmarked, so it stays compared: a wrongly marked user option would be dropped from
- * the comparison, a wrongly unmarked Olumi one is only compared as today.
+ * the comparison, a wrongly unmarked Olumi one is only compared as today. Server-authored `draft_widening` receipts are
+ * direct authorship evidence and bypass that brief heuristic, including a label or level that also appears there.
  *
  * The mark is written ONLY as `'olumi'`, never as `'user'`: a graph with no Olumi option is returned unchanged (the same
  * array), so its analysis hash cannot move. Pure.
@@ -47,8 +48,10 @@ export function olumiAddedOptionLabels(candidate: CandidateModel, brief: string)
   return new Set(options
     .filter((o) => typeof o.label === 'string' && canonicalLabel(o.label) !== '')
     .filter((o) => count.get(canonicalLabel(o.label)) === 1)
-    .filter((o) => o.provenance === 'ai_proposed' && !statusQuo(o) && setsALevel(o))
-    .filter((o) => !briefKey.includes(canonicalLabel(o.label)) && !levelTheUserWrote(o))
+    .filter((o) => o.draft_widening?.provenance === 'ai_suggested_widen'
+      || (o.provenance === 'ai_proposed' && !statusQuo(o) && setsALevel(o)))
+    .filter((o) => o.draft_widening?.provenance === 'ai_suggested_widen'
+      || (!briefKey.includes(canonicalLabel(o.label)) && !levelTheUserWrote(o)))
     .map((o) => canonicalLabel(o.label)));
 }
 
@@ -56,17 +59,20 @@ export function olumiAddedOptionLabels(candidate: CandidateModel, brief: string)
  * The admitted graph's nodes with `proposed_by: 'olumi'` on each option node Olumi added. A node is marked only when
  * exactly one option node carries that name, and never on a node stamped `is_baseline`; otherwise nothing is marked for it.
  */
-export function markOlumiOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly is_baseline?: unknown }>(
+export function markOlumiOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly is_baseline?: unknown; readonly draft_widening?: unknown }>(
   nodes: readonly N[], candidate: CandidateModel, brief: string,
 ): readonly N[] {
   const olumi = olumiAddedOptionLabels(candidate, brief);
-  if (olumi.size === 0) return nodes;
+  const serverAuthored = (n: N): boolean => n.kind === 'option'
+    && n.draft_widening !== null && typeof n.draft_widening === 'object'
+    && (n.draft_widening as { provenance?: unknown }).provenance === 'ai_suggested_widen';
+  if (olumi.size === 0 && !nodes.some(serverAuthored)) return nodes;
   const optionNodes = new Map<string, number>();
   for (const n of nodes) {
     if (n.kind === 'option' && typeof n.label === 'string') optionNodes.set(canonicalLabel(n.label), (optionNodes.get(canonicalLabel(n.label)) ?? 0) + 1);
   }
   const marks = (n: N): boolean => n.kind === 'option' && typeof n.label === 'string' && n.is_baseline !== true
-    && olumi.has(canonicalLabel(n.label)) && optionNodes.get(canonicalLabel(n.label)) === 1;
+    && (serverAuthored(n) || (olumi.has(canonicalLabel(n.label)) && optionNodes.get(canonicalLabel(n.label)) === 1));
   if (!nodes.some(marks)) return nodes;
   return nodes.map((n) => (marks(n) ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }

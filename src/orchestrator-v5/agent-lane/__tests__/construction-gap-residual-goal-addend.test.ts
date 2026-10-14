@@ -35,6 +35,15 @@ function m0(edit: (c: Json) => void = () => {}): CandidateModel {
 }
 
 async function build(model: CandidateModel, brief = BRIEF): Promise<{ graph: { nodes: Json[]; edges: Json[] }; out: Json }> {
+  const facts: string[] = [];
+  for (const f of model.factors) {
+    if (!f.baseline_known || f.provenance !== 'explicit') continue;
+    const quote = f.label === 'Paying subscribers' ? `We have ${f.baseline_value!.toLocaleString('en-GB')} paying subscribers.`
+      : f.label === 'Other MRR' ? `Our other MRR is £${f.baseline_value!.toLocaleString('en-GB')} a month.`
+        : `Our Pro monthly price is £${f.baseline_value} per subscriber per month.`;
+    Object.assign(f, { baseline_evidence: { quote } }); facts.push(quote);
+  }
+  brief = `${facts.join(' ')}\n\n${brief}`;
   expect(strict(model), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(model) })) as unknown as CallStructuredModel;

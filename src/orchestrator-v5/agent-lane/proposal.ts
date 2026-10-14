@@ -31,6 +31,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { carriesQuoteConfirmation } from './quote-confirmation.js';
 
 /** One structural change. Deliberately the estate's existing op vocabulary. */
 export interface ProposalOperation {
@@ -88,6 +89,8 @@ export interface ProposalOperation {
      * user's. Never adds a limit, never the goal's own target.
      */
     | 'set_limit'
+    /** S-E S4: one new limit on an existing quantity, via add_constraint. */
+    | 'add_limit'
     /**
      * ⭐ ONE LINK OF A SET OF LINK STRENGTHS (DL #72 5871594233; seam Canonical 5871633483) — `path` is `from::to`, `value`
      * is `{magnitude, intent, expected, band, author}`. A set is written ONLY whole: every link through the canonical link
@@ -113,7 +116,32 @@ export interface ProposalOperation {
      * is outside the analysis hash), the words, and the day it was counted from. Written only through the atomic level
      * door's `goal_horizon` member (`commitOptionLevels`), alone, as `NodeV3.goal_horizon.deadline`.
      */
-    | 'set_goal_deadline';
+    | 'set_goal_deadline'
+    /** The user's card-only temporal judgement for the held month; `value` is `{months}`. */
+    | 'attest_goal_steady'
+    /**
+     * G — THE USER'S ANSWER TO THEIR GOAL'S OPEN QUESTION about how its target is read (`goal-target/held-change-target.ts`).
+     * `path` is the goal's id; `value` is `{expected_basis, open_question}`: the stored reading the card showed, byte for byte.
+     * Written only through the atomic level door's `goal_reading` member (`goal-reading-write.ts`), alone: it removes ONLY the
+     * question. The reading stays Olumi's.
+     */
+    | 'confirm_goal_reading'
+    /**
+     * ⭐ OLUMI'S STARTING ASSUMPTION FOR A RISK ROOT (DL 14 Oct; `risk-occurrence.ts`) — `path` is the risk's id, `value` is
+     * `{event_risk, expected_node}`: Olumi's occurrence range over the goal's period (`basis: 'olumi'`) and the node as stored
+     * when the card was made. Written only through the atomic level door's `risk_occurrence` member, alone, card-only.
+     */
+    | 'set_risk_occurrence'
+    | 'set_team_time'
+    /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
+    | 'set_hiring_times'
+    /**
+     * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244) — REPLACE AN UNREVIEWED DRAFT WITH THE REVISED ONE
+     * PREPARED FROM THE STORED BRIEF AND THE USER'S TYPED GOAL. `path` is the scenario id; `value` is the prepared
+     * candidate and the identities it was prepared against (`runtime/draft-replacement.ts`). Written only through
+     * `/graph/register` with compare-and-set on that base, and only while the draft still holds no later human material.
+     */
+    | 'replace_draft';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
@@ -213,6 +241,7 @@ export function createProposal(content: ProposalContent): StructuredProposal {
  * what a retry must be able to hand back unchanged.
  */
 export interface ReceiptSummary {
+  readonly reencoded_siblings?: readonly import('./level-batch-frame.js').ReencodedSibling[];
   /** The version number the user would see ("version 7"). */
   readonly version: number;
   readonly version_id: string;
@@ -230,6 +259,8 @@ export interface ReceiptSummary {
 export interface PartialProgress {
   /** The canonical revision this proposal's own partial write left. */
   readonly revision: string;
+  /** Expected bytes retained before read-back; retry must verify them before the revision gate. */
+  readonly expected_postimage?: unknown;
   /** The operation paths confirmed landed from readback. */
   readonly landed: readonly string[];
   readonly receipts: readonly ReceiptSummary[];
@@ -261,13 +292,29 @@ export interface AuthorisationRequest {
   readonly authenticated_user_id: string | null;
   /** The model's CURRENT revision, read server-side. Never client-supplied. */
   readonly current_graph_identity_hash: string;
+  /**
+   * EBD: a FIELD-SCOPED precondition, read server-side from the current model. When it returns true the proposal executes
+   * although the whole-model revision moved (only what the proposal read is compared). Its writer stays CAS-fenced.
+   */
+  readonly scoped_precondition_holds?: (proposal: StructuredProposal) => boolean;
 }
 
 export const MAX_PROPOSALS = 200;
+/** Distinct approved-operation memos kept for ONE proposal (distinct turn ids); the oldest is forgotten first. */
+export const MAX_EXECUTIONS_PER_PROPOSAL = 32;
 
-/** B3's card-only approval authority also covers a level's temporal reading. */
+/**
+ * B3's card-only approval authority also covers a level's temporal reading, and a revised draft (`replace_draft`): a
+ * whole-draft replacement is approved only by pressing its own card, never by the Agent's reading of a "yes".
+ */
 export function hasCardOnlyOperations(operations: readonly ProposalOperation[]): boolean {
-  return operations.some(op => op.op === 'set_option_intervention'
+  // B2-c: a figure read from the user's words is adopted ONLY by the press on its confirmation card (`quote-confirmation.ts`;
+  // AIE #94 6132054663: never a typed yes without the current permission binding, a reseeded message or another card).
+  if (operations.some(carriesQuoteConfirmation)) return true;
+  // G: the answer to the goal's open question about its reading is the user's choice on the card that shows that reading.
+  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
+    // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
+    || op.op === 'set_risk_occurrence' || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));
 }
@@ -279,6 +326,45 @@ export class ProposalStore {
   /** Proposals whose own write landed only in part, with what landed and the revision it left. */
   private readonly partial = new Map<string, PartialProgress>();
   private order: string[] = [];
+  /**
+   * Single-flight only. This does not establish durable exactly-once. Unknown writes stay blocked.
+   * Keyed by proposal id, then by the approved-operation key, so discarding a proposal also forgets its memo
+   * and the map is bounded by the same cap as the proposals themselves (oldest proposal's memo evicted first).
+   */
+  private readonly executions = new Map<string, Map<string, Promise<boolean>>>();
+
+  async executeApproved<T>(
+    p: StructuredProposal, turnId: string, execute: () => Promise<T>,
+    classify: (result: T) => 'applied' | 'unknown' | 'none', reconcile: () => Promise<T>,
+  ): Promise<T> {
+    const key = approvedOperationKey(p, turnId);
+    const memo = this.executions.get(p.proposal_id) ?? new Map<string, Promise<boolean>>();
+    const prior = memo.get(key);
+    if (prior !== undefined) {
+      if (!await prior) return reconcile();
+      return execute(); // the existing applied-receipt arm answers without a write
+    }
+    let close!: (known: boolean) => void;
+    memo.set(key, new Promise<boolean>(resolve => { close = resolve; }));
+    // Bounded per proposal as well as in total: the oldest turn's memo goes first.
+    if (memo.size > MAX_EXECUTIONS_PER_PROPOSAL) memo.delete(memo.keys().next().value as string);
+    if (!this.executions.has(p.proposal_id)) {
+      this.executions.set(p.proposal_id, memo);
+      if (this.executions.size > MAX_PROPOSALS) this.executions.delete(this.executions.keys().next().value as string);
+    }
+    try {
+      const result = await execute();
+      const kind = classify(result);
+      // A refusal that provably wrote nothing leaves nothing to block or reconcile: forget the key so the same
+      // approval can be retried once its precondition holds. Only an UNKNOWN outcome stays blocked.
+      if (kind === 'none' && memo.get(key) !== undefined) memo.delete(key);
+      close(kind !== 'unknown');
+      return result;
+    } catch (err) {
+      close(false);
+      throw err;
+    }
+  }
 
   put(p: StructuredProposal): StructuredProposal {
     if (this.items.size >= MAX_PROPOSALS && !this.items.has(p.proposal_id)) {
@@ -304,6 +390,8 @@ export class ProposalStore {
     this.partial.delete(id);
   }
 
+  partialProgressOf(id: string): PartialProgress | undefined { return this.partial.get(id); }
+
   /** Record what THIS proposal's own write landed, and the canonical revision that left. */
   markPartial(id: string, progress: PartialProgress): void {
     this.partial.set(id, progress);
@@ -318,6 +406,7 @@ export class ProposalStore {
    */
   discard(id: string): void {
     this.items.delete(id);
+    this.executions.delete(id);
     this.order = this.order.filter((x) => x !== id);
   }
 
@@ -350,7 +439,7 @@ export class ProposalStore {
       if (partial.revision === req.current_graph_identity_hash) return { status: 'execute', proposal: p, continuation: partial };
       return { status: 'superseded', expected: partial.revision, actual: req.current_graph_identity_hash };
     }
-    if (p.base_graph_identity_hash !== req.current_graph_identity_hash) {
+    if (p.base_graph_identity_hash !== req.current_graph_identity_hash && req.scoped_precondition_holds?.(p) !== true) {
       return {
         status: 'superseded',
         expected: p.base_graph_identity_hash,
@@ -388,4 +477,11 @@ export class ProposalStore {
   size(): number {
     return this.items.size;
   }
+}
+
+/** The host turn and approved content bind dedupe; provider tool-call ids cannot affect it. */
+export function approvedOperationKey(p: StructuredProposal, turnId: string): string {
+  return createHash('sha256').update(JSON.stringify(sortedKeysDeep([
+    p.scenario_id, turnId, p.proposal_id, p.operations, p.base_graph_identity_hash,
+  ]))).digest('hex');
 }

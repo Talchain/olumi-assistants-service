@@ -30,7 +30,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { FastifyRequest } from "fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { attachCallerContext } from "../../context/index.js";
+import { attachCallerContext, getCallerContext } from "../../context/index.js";
 
 const STAGING_ORIGIN = "https://staging--olumi.netlify.app";
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
@@ -65,14 +65,14 @@ vi.mock("../../utils/supabase-user-jwt.js", () => ({
 }));
 
 // ── The store double ────────────────────────────────────────────────────────
-// `ensureScenarioExists` is what the SHARED ownership pre-flight reads, so the
-// REAL `preflightEnsureScenario` logic runs in every test below rather than a
-// stubbed verdict. That is the point: the fix reuses that function, so the
-// suite must exercise it.
+// The hook reads existence separately from the read-only owner oracle.
+// Store fixtures provide facts; the real ownership hook makes the decision.
 const markTurnStopped = vi.fn();
 const scenarioExists = vi.fn();
 const turnFenceRowExists = vi.fn();
-const ensureScenarioExists = vi.fn();
+const getScenarioOwner = vi.fn();
+const ownerReadCallers = vi.fn();
+let currentScenarioRequest: FastifyRequest | undefined;
 let storeMethods = {
   markTurnStopped: true,
   scenarioExists: true,
@@ -80,14 +80,15 @@ let storeMethods = {
 };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => ({
-    ensureScenarioExists,
+    getScenarioOwner: (scenarioId: string) => { ownerReadCallers(currentScenarioRequest?.scenarioAccess?.callerUserId); return getScenarioOwner(scenarioId); },
     ...(storeMethods.markTurnStopped ? { markTurnStopped } : {}),
     ...(storeMethods.scenarioExists ? { scenarioExists } : {}),
     ...(storeMethods.turnFenceRowExists ? { turnFenceRowExists } : {}),
   }),
 }));
 
-const { recordExplicitTurnStop, MAX_TURN_ID_LENGTH } = await import("../turn-stop.js");
+const { recordExplicitTurnStop: recordStopHandler, MAX_TURN_ID_LENGTH } = await import("../turn-stop.js");
+const { scenarioOwnershipPlugin } = await import("../../plugins/scenario-ownership.js");
 const { proxyV5TurnRoute } = await import("../proxy-v5-turn.js");
 const { classifyTurnFence } = await import(
   "../../orchestrator-v5/session/turn-fence.js"
@@ -119,6 +120,27 @@ function hmacReq(body: unknown, headers: Record<string, string> = {}): FastifyRe
   return request;
 }
 
+// Exercise the same HTTP preHandler boundary as production, even for the
+// helper-focused cases. Carry the existing verified HMAC fixture context.
+async function recordExplicitTurnStop(input: FastifyRequest, requestId: string) {
+  const app = Fastify({ logger: false });
+  app.addHook('onRequest', (request, _reply, done) => {
+    currentScenarioRequest = request;
+    const caller = getCallerContext(input);
+    if (caller) attachCallerContext(request, caller);
+    done();
+  });
+  await app.register(scenarioOwnershipPlugin);
+  app.post('/orchestrate/v2/turn/stop', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (request, reply) => {
+    const result = await recordStopHandler(request, requestId);
+    return reply.code(result.status).send(result.body);
+  });
+  try {
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', headers: { ...input.headers, 'x-request-id': requestId }, payload: input.body as object });
+    return { status: response.statusCode, body: response.json() };
+  } finally { await app.close(); }
+}
+
 beforeEach(() => {
   markTurnStopped.mockReset();
   markTurnStopped.mockResolvedValue({
@@ -130,11 +152,13 @@ beforeEach(() => {
   scenarioExists.mockResolvedValue(true);
   turnFenceRowExists.mockReset();
   turnFenceRowExists.mockResolvedValue(true);
-  ensureScenarioExists.mockReset();
+  getScenarioOwner.mockReset();
   // Default = GUEST scenario. This is the staging-representative case: measured
   // 2026-08-01, ALL 727 `v5_turn_fence` rows, all 171 fenced scenarios and all
   // 12 recorded Stops on staging are on scenarios with `user_id IS NULL`.
-  ensureScenarioExists.mockResolvedValue({ user_id: null });
+  getScenarioOwner.mockResolvedValue(null);
+  ownerReadCallers.mockClear();
+  currentScenarioRequest = undefined;
   verifySupabaseUserJwt.mockReset();
   storeMethods = {
     markTurnStopped: true,
@@ -151,7 +175,7 @@ beforeEach(() => {
 describe("recordExplicitTurnStop — identity and scenario ownership", () => {
   // THE HEADLINE PIN. Pre-fix this answered 200 and wrote a fence row.
   it("an UNAUTHENTICATED Stop on an OWNED scenario is refused and writes NOTHING", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const reply = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN }),
       "req-anon-owned",
@@ -163,7 +187,7 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
   // The audit's exact scenario: a caller who knows the UUID and supplies a
   // GUESSED user_id is still not the owner.
   it("a Stop from a DIFFERENT user on an owned scenario is refused and writes NOTHING", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const reply = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN, user_id: OTHER_USER }),
       "req-cross-tenant",
@@ -175,8 +199,10 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
   // ORIGIN IS NOT AUTHORITY. Driven through the REAL route so the allowlist is
   // genuinely satisfied — the request is indistinguishable from a browser's.
   it("an ALLOWED Origin without identity does not authorize a Stop on an owned scenario", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const app: FastifyInstance = Fastify({ logger: false });
+    app.addHook('onRequest', (request, _reply, done) => { currentScenarioRequest = request; done(); });
+    await app.register(scenarioOwnershipPlugin);
     await proxyV5TurnRoute(app);
     await app.ready();
     try {
@@ -210,8 +236,10 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
   // REAL route, because the strip lives in the route and a handler-level call
   // would bypass the very thing under test.
   it("a FORGED body user_id sent through the REAL proxy route does NOT authorize a Stop", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const app: FastifyInstance = Fastify({ logger: false });
+    app.addHook('onRequest', (request, _reply, done) => { currentScenarioRequest = request; done(); });
+    await app.register(scenarioOwnershipPlugin);
     await proxyV5TurnRoute(app);
     await app.ready();
     try {
@@ -249,7 +277,7 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
   // one forged body, two auth postures, two different answers — which is the
   // only shape that can tell a binding apart from a blanket lockout.
   it("a SHARED-KEY caller's forged body user_id does NOT authorize a Stop", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const reply = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
       "req-shared-key-forged",
@@ -258,25 +286,27 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
     expect(markTurnStopped).not.toHaveBeenCalled();
     // The claim was discarded BEFORE the ownership comparison: the oracle was
     // asked about an anonymous caller, not about OWNER.
-    expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, null);
+    expect(getScenarioOwner).toHaveBeenCalledWith(SCENARIO);
+    expect(ownerReadCallers).toHaveBeenCalledWith(null);
   });
 
   it("POSITIVE CONTROL: the same body DOES authorize for a VERIFIED HMAC caller (carve-out preserved)", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const reply = await recordExplicitTurnStop(
       hmacReq({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
       "req-service-seam-carveout",
     );
     expect(reply.status).toBe(200);
     expect(markTurnStopped).toHaveBeenCalled();
-    expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, OWNER);
+    expect(getScenarioOwner).toHaveBeenCalledWith(SCENARIO);
+    expect(ownerReadCallers).toHaveBeenCalledWith(OWNER);
   });
 
   // The ownership ORACLE being down must not open the door. Fail CLOSED, and
   // it matches the turn route: when the oracle is down no turn can be admitted
   // either, so no admissible turn loses its Stop.
   it("an ownership read that THROWS fails CLOSED — the Stop is refused", async () => {
-    ensureScenarioExists.mockRejectedValue(new Error("scenarios unreachable"));
+    getScenarioOwner.mockRejectedValue(new Error("scenarios unreachable"));
     const reply = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN }),
       "req-oracle-down",
@@ -306,7 +336,7 @@ describe("recordExplicitTurnStop — the turn must have been ADMITTED", () => {
     );
     expect(reply.status).toBe(404);
     expect(scenarioExists).not.toHaveBeenCalled();
-    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(getScenarioOwner).not.toHaveBeenCalled();
     expect(markTurnStopped).not.toHaveBeenCalled();
   });
 
@@ -363,7 +393,7 @@ describe("recordExplicitTurnStop — every refusal is INDISTINGUISHABLE", () => 
   it("unknown scenario, non-UUID scenario, not-your-scenario, unknown turn and over-long turn id all answer the SAME bytes", async () => {
     const RID = "req-shape";
 
-    ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
     scenarioExists.mockResolvedValue(false);
     const unknownScenario = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN }),
@@ -376,13 +406,13 @@ describe("recordExplicitTurnStop — every refusal is INDISTINGUISHABLE", () => 
       RID,
     );
 
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const notYours = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN }),
       RID,
     );
 
-    ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
     turnFenceRowExists.mockResolvedValue(false);
     const unknownTurn = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: ATTACKER_TURN }),
@@ -437,7 +467,7 @@ describe("recordExplicitTurnStop — the OWNER's Stop is unchanged", () => {
   // owner's OWN browser Stop is the verified-JWT case further down (which
   // sends no body identity at all and is unaffected by the admissibility rule).
   it("the OWNER of an owned scenario can stop their own admitted turn", async () => {
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const reply = await recordExplicitTurnStop(
       hmacReq({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
       "req-owner",
@@ -464,7 +494,7 @@ describe("recordExplicitTurnStop — the OWNER's Stop is unchanged", () => {
   // and the owner is authorized without supplying a body user_id.
   it("with the JWT flag ON, a VERIFIED owner can stop their own turn", async () => {
     mockConfig.auth.requireUserJwt = true;
-    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     verifySupabaseUserJwt.mockResolvedValue({ ok: true, userId: OWNER });
     const reply = await recordExplicitTurnStop(
       req(
@@ -499,7 +529,7 @@ describe("recordExplicitTurnStop — the OWNER's Stop is unchanged", () => {
     //   404 — the refusal status was a free scenario-existence oracle for any
     //   caller, requiring no valid credential at all. A title is not a pin.
     expect(scenarioExists).not.toHaveBeenCalled();
-    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(getScenarioOwner).not.toHaveBeenCalled();
     expect(turnFenceRowExists).not.toHaveBeenCalled();
     expect(markTurnStopped).not.toHaveBeenCalled();
   });

@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /** MC: the real registration seam admits only quote-bound count ranges on create-only construction. */
 import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,7 @@ const { store, resolveUserIdentity } = vi.hoisted(() => ({
   resolveUserIdentity: vi.fn(),
 }));
 vi.mock('../../orchestrator-v5/session/index.js', async importOriginal => ({
-  ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()), getSessionStore: () => store,
+  ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()), getSessionStore: () => withScenarioRevision(store),
 }));
 vi.mock('../../orchestrator/user-identity.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../orchestrator/user-identity.js')>()), resolveUserIdentity,

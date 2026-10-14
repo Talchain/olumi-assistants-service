@@ -2,6 +2,7 @@ import type { SuggestedAction } from '../compose/types.js';
 import { nextStepsWithWiden, SUGGEST_RISKS_CHIP, WIDEN_CHIP } from './method-turn/widen-turn.js';
 import { turnGuidanceFor, type GuidanceWire, type TurnGuidanceInputs } from './turn-context/guidance-wire.js';
 import { strengthenCardFor, type StrengthenPressState } from './strengthen-press.js';
+import { linkSizeQuestion } from './guided-sizing.js';
 
 /** The W6 press: S-C's ONE widening door, target risks (`widen-turn.ts` `widenTargetOf`); re-exported for its readers. */
 export { SUGGEST_RISKS_CHIP };
@@ -30,8 +31,11 @@ export function nextStepsFromGuidance(
     if (press !== undefined && row.policy_id === 'RC-STRENGTHEN-ITEM') {
       // The press chooses its own S1 card. An estimate label is truthful only for that same item.
       const card = strengthenCardFor(state);
-      if (card !== null && row.item === `${card.target.from_id}->${card.target.to_id}`) {
-        primary = { ...press, label: row.primary_action.label };
+      if (card !== null && row.item === `${card.target.from_id}->${card.target.to_id}`
+        && card.target.from_label.trim() !== '' && card.target.to_label.trim() !== '') {
+        // R3-3: "Give your estimate" sent the generic "What would most strengthen this model?" (run 2, hiring/marketing
+        // step 2). The chip asks for THAT estimate, by its labels, in the existing size ask.
+        primary = { ...press, label: row.primary_action.label, message: linkSizeQuestion(card.target.from_label, card.target.to_label) };
       }
     }
   }

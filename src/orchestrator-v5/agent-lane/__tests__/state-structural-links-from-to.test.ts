@@ -55,9 +55,17 @@ describe('⭐ PJ-C1 lever 2: a structural link is said by its ends only', () => 
       const { links } = await stateOf(graph);
       const causal = links.filter((l) => kind.get(String(l.from)) !== 'decision' && kind.get(String(l.from)) !== 'option');
       expect(causal.length).toBeGreaterThan(0);
+      expect(causal.some((l) => (l as { sizing?: unknown }).sizing !== 'placeholder'), 'control: a sized causal link is present').toBe(true);
       for (const l of causal) {
-        expect(l, JSON.stringify(l)).toHaveProperty('strength');
-        expect(l).toHaveProperty('band');
+        // Science 393023 LICENCE ruling 3, re-derived: a placeholder (nobody sized it) projects no band; every other keeps it.
+        // D1 ECHO GUARD (DL ruling 12 Oct, Batch D): nor its strength, which the Agent echoed back as its estimate.
+        if ((l as { sizing?: unknown }).sizing === 'placeholder') {
+          expect(l).not.toHaveProperty('band');
+          expect(l).not.toHaveProperty('strength');
+        } else {
+          expect(l, JSON.stringify(l)).toHaveProperty('strength');
+          expect(l).toHaveProperty('band');
+        }
       }
     });
   }

@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * SCI-DEEP beat 4 (DL 5 Oct): the served fa027cf5 Run was licensed (gap 0.134), yet "Test without this link" said
  * "Which option leads cannot be compared" and printed its expected results as "0 now and -0".
@@ -170,9 +171,12 @@ function canonicalStore(facts: Rec[]) {
   return store;
 }
 
-async function harness(link: { from_id: string; to_id: string }, candidate: Shape, baseline: Shape = 'served') {
+async function harness(link: { from_id: string; to_id: string }, candidate: Shape, baseline: Shape = 'served', asServed = false) {
   currentnessStore.current = undefined;
-  const graph = structuredClone(servedGraph);
+  // ⚠ SYNTHETIC by default (Science 393023 pre-review P0-1): served fa027's licensed leader is false by ruling (its door
+  // constants are placeholders), so the default harness runs a std 0.125 → 0.1 clone that keeps this file's independent
+  // claims; it no longer witnesses the served shape. `asServed` runs the captured bytes unchanged (the withhold row below).
+  const graph = asServed ? structuredClone(servedGraph) : legacyDoorGraph(servedGraph);
   const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(graph) }));
   const plot = plotDouble(link, candidate, baseline);
   const handler = resolveHandler(createRegistry({ plotClient: plot.client, scenarioReader: reader, counterfactualClient: null }), 'run_analysis')!;
@@ -398,3 +402,14 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
   });
 });
 
+
+it('Science 393023: as-served fa027 licensed leader → withheld, exact new placeholder paths', async () => {
+  const h = await harness(LEAD_LINK, 'same', 'served', true);
+  expect(h.runA.result.leading_option_id).toBeNull();
+  const w = h.runA.result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
+  expect(w.links).toEqual([
+    { from: 'enterprise_prospect_signing_likelihood', to: 'quarterly_revenue' },
+    { from: 'revenue_lost_to_trial_abandonment', to: 'quarterly_revenue' },
+    { from: 'trial_profile_abandonment_rate', to: 'revenue_lost_to_trial_abandonment' },
+  ]);
+});

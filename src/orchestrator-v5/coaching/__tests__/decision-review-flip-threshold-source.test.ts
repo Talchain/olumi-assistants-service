@@ -61,7 +61,7 @@ function baseEnrichment(flipThresholds: unknown): Record<string, unknown> {
 }
 
 function build(enrichment: Record<string, unknown>) {
-  const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner');
+  const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner', undefined, true);
   expect(input).not.toBeNull();
   return input!;
 }

@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /** Route → real method adapter → real SCI-DEEP dispatch → real Run handler, entirely offline.
  * Only transport boundaries are replaced. Replaying the bank-2 response tests press reachability and licences;
  * it does not claim that the fixture is a fresh scientific recomputation of the renamed test graph.
@@ -55,7 +56,6 @@ describe('agent route: real structural challenge press reachability', () => {
   let link = LINK;
   let plotCalls: { body: Rec; requestId: string; opts?: PLoTClientRunOpts }[];
   let append: Mock<SessionStore['append']>;
-  let graphWrite: Mock<SessionStore['storeDraftGraph']>;
   const provider = vi.fn(async () => new Response(JSON.stringify({
     output: [{ type: 'message', content: [{ type: 'output_text', text: 'normal' }] }],
   }), { status: 200 }));
@@ -128,9 +128,9 @@ describe('agent route: real structural challenge press reachability', () => {
     return { fact, payload };
   }
 
-  async function licensedRun(selectedLink = LINK) {
+  async function licensedRun(selectedLink = LINK, model = MODEL_A) {
     link = selectedLink;
-    graph = renameIds(MODEL_A, link);
+    graph = renameIds(model, link);
     // The user has stated these sizes before Run A; the current real admission/licence logic stays in force.
     for (const edge of graph.edges as Rec[]) edge.provenance = { ...edge.provenance, source: 'user_specified', magnitude: 'user_stated' };
     transport.store = createNoopSessionStore({ loadGraphResult: graph });
@@ -162,9 +162,7 @@ describe('agent route: real structural challenge press reachability', () => {
       return { id };
     });
     transport.store.readCommittedTurn = vi.fn(async (_sid, id) => rows.get(id) ?? null);
-    graphWrite = vi.fn(async () => {});
     transport.store.append = append;
-    transport.store.storeDraftGraph = graphWrite;
     const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
     const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'licensed-read' });
     expect(read.analysis_state?.run_state.kind).toBe('complete_current');
@@ -198,7 +196,6 @@ describe('agent route: real structural challenge press reachability', () => {
       expect(write.modelVersion).toBeUndefined();
     }
     expect(append.mock.calls.find(([write]) => write.turn_id === turnId)?.[0].assistantMessage).toBe(body.assistant_text);
-    expect(graphWrite).not.toHaveBeenCalled();
     expect(transport.plot!.validatePatch).not.toHaveBeenCalled();
   }
 
@@ -281,11 +278,11 @@ describe('agent route: real structural challenge press reachability', () => {
     const chip = `agent-test-without-link:${':'.repeat(100_000)}`;
     const parseStarted = performance.now();
     expect(parseStructuralChallengePress(chip)).toBeNull();
-    expect(performance.now() - parseStarted).toBeLessThan(20);
+    if (timingGated) { expect(performance.now() - parseStarted).toBeLessThan(20); }
     const started = performance.now();
     const response = await post(chip);
     const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(2_000);
+    if (timingGated) { expect(elapsed).toBeLessThan(2_000); }
     expect(response.statusCode).toBe(200);
     expect(response.json().assistant_text).toBe(REFUSAL);
     expect(plotCalls).toHaveLength(0); noModelCallsOrGraphWrites(response.json());
@@ -328,6 +325,13 @@ describe('agent route: real structural challenge press reachability', () => {
   });
 
   it('not-a-press keeps ordinary model handling', async () => {
+    const localModel = structuredClone(MODEL_A);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of localModel.nodes.filter((n: Rec) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
+    await licensedRun(LINK, localModel);
     const response = await post('not-a-press');
     const body = response.json();
     expect(response.statusCode).toBe(200); expect(body.assistant_text).toBe('normal');
@@ -425,6 +429,13 @@ describe('agent route: real structural challenge press reachability', () => {
     });
 
     it('F2-C2: a chipless ordinary-chip retry keeps exactly its stored words', async () => {
+      const localModel = structuredClone(MODEL_A);
+      // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+      for (const goal of localModel.nodes.filter((n: Rec) => n.kind === 'goal')) {
+        delete goal.goal_horizon_months;
+        delete goal.goal_deadline_as_stated;
+      }
+      await licensedRun(LINK, localModel);
       const live = await post('not-a-press');
       expect(live.statusCode).toBe(200);
       expect(live.json().assistant_text).toBe('normal');

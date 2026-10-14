@@ -1,0 +1,230 @@
+[
+  {
+    "mutant": "M01-scoping-off",
+    "source": "src/orchestrator-v5/tools/handlers/run-analysis.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "B2: three Starter",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'B2: three Starter' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > B2: three Starter links keep its 40\u201351% range; Raise and Keep keep their own point chances",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M02-class1-option-only",
+    "source": "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "class 1:",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'class 1:' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 1: an upstream unsized link feeding operand A also affects an option moving operand B",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M03-derived-baseline-off",
+    "source": "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "class 2:",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'class 2:' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 2: a evaluation marking the goal baseline derived from inputs withholds everyone fed by its unsized input",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 2: a warning marking the goal baseline derived from inputs withholds everyone fed by its unsized input",
+      " Test Files  1 failed (1)",
+      "      Tests  2 failed | 12 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M04-goal-level-option-scoped",
+    "source": "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "missing goal baseline",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'missing goal baseline' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a missing goal baseline still withholds every option, including Keep",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M05-linkless-dropped",
+    "source": "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "linkless P5",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'linkless P5' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a linkless P5 failure preserves the existing no-goal-path withhold for everyone",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M06-clean-option-waits",
+    "source": "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "without an earlier withhold",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'without an earlier withhold' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > without an earlier withhold, only Starter is withheld and explained; no reason is invented for Keep",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M07-final-warning-scope-off",
+    "source": "src/orchestrator-v5/goal-target/scope-target-not-testable.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts",
+    "selection": "R2 s4b",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts -t 'R2 s4b' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts > S-E GOALS S6: each option owns its target-testability reason > R2 s4b unseen-1: clean loyalty_app and carry_on_as_now have no target withhold beside the fourth-shop range",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 9 skipped (10)"
+    ]
+  },
+  {
+    "mutant": "M08-derived-borrows-attestation",
+    "source": "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "cannot borrow",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'cannot borrow' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a false derived evaluation cannot borrow a stated-level evaluation attestation",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a mismatched derived evaluation cannot borrow a stated-level evaluation attestation",
+      " Test Files  1 failed (1)",
+      "      Tests  2 failed | 12 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M09-producer-speech-unscoped",
+    "source": "src/orchestrator-v5/tools/handlers/run-analysis.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "Agent target-only note",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'Agent target-only note' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > the Agent target-only note keeps the partial option scope and permits clean options' licences",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M10-agent-scope-off",
+    "source": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "Agent target-only note",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'Agent target-only note' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > the Agent target-only note keeps the partial option scope and permits clean options' licences",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M11-malformed-grants-shares",
+    "source": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "legacy partial warning",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'legacy partial warning' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims undefined grants no share or outcome permission",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims malformed grants no share or outcome permission",
+      " Test Files  1 failed (1)",
+      "      Tests  2 failed | 12 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M12-malformed-claims-kept-outcome",
+    "source": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "legacy partial warning",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'legacy partial warning' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims undefined grants no share or outcome permission",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims malformed grants no share or outcome permission",
+      " Test Files  1 failed (1)",
+      "      Tests  2 failed | 12 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M13-off-goal-product-affects-options",
+    "source": "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "class 1 is transitive",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'class 1 is transitive' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 1 is transitive and reaches only products on this goal path, regardless of labels",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  },
+  {
+    "mutant": "M14-other-goal-marker-applies",
+    "source": "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "test": "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "selection": "another goal's derived warning",
+    "exit": 1,
+    "killed": true,
+    "restored": true,
+    "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts -t 'another goal'\"'\"'s derived warning' --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+    "summary": [
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > another goal's derived warning and non-input failure cannot hold this baseline",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 13 skipped (14)"
+    ]
+  }
+]

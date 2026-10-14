@@ -83,17 +83,17 @@ describe('PRECONDITIONS — the served bytes and R3\'s card', () => {
 
 describe('the issue point: a Run offers the card once per revision', () => {
   it('a Run on run 0\'s model tells the Agent a reading is waiting; on a CONFIRMED model it says nothing', async () => {
-    const r0 = await world(served(0)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    const r0 = await world(served(0)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.', effects_timing: null }) as Json;
     expect(r0.identity_card).toEqual(expect.objectContaining({ available: true }));
     expect(String(r0.identity_card.note)).toMatch(/propose_identity/);
-    const r1 = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    const r1 = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.', effects_timing: null }) as Json;
     expect(r1).not.toHaveProperty('identity_card');
   });
 
   it('a later Run on the SAME unconfirmed revision offers it again: the same proposal, never a dead end (R3 run k)', async () => {
     const w = world(served(0));
     const first = await w.caps.proposeIdentity!(ctxSaying('Is MRR price times subscribers?')) as Json;
-    const again = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    const again = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.', effects_timing: null }) as Json;
     expect(again.identity_card).toEqual(expect.objectContaining({ available: true }));
     const reissued = await w.caps.proposeIdentity!(ctxSaying('Run it')) as Json;
     expect(reissued.proposal_id).toBe(first.proposal_id);
@@ -104,7 +104,7 @@ describe('the issue point: a Run offers the card once per revision', () => {
 describe('the route issues the card when the Agent did not (served 3727537: 0/3 typed Runs called propose_identity)', () => {
   it('a Run saying a card is waiting, with no proposal in the turn → the route issues it, and the button shows the words', async () => {
     const w = world(served(1));
-    const run = await w.caps.runAnalysis(ctxSaying('Run the analysis'), { reason: 'Run it.' }) as Json;
+    const run = await w.caps.runAnalysis(ctxSaying('Run the analysis'), { reason: 'Run it.', effects_timing: null }) as Json;
     const calls = [{ name: 'run_analysis', ok: true, mutated: false }];
     expect(identityCardToIssue(calls, [run])).toBe(true);
     const issued = await dispatchTool('propose_identity', '{}', ctxSaying('Run the analysis'), w.caps) as Json;
@@ -124,7 +124,7 @@ describe('the route issues the card when the Agent did not (served 3727537: 0/3 
     const waiting = [{ identity_card: { available: true, note: 'x' } }];
     expect(identityCardToIssue([{ name: 'run_analysis' }, { name: 'propose_identity' }], waiting)).toBe(false);
     expect(identityCardToIssue([{ name: 'authorise_change' }, { name: 'run_analysis' }], waiting)).toBe(false);
-    const run = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    const run = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.', effects_timing: null }) as Json;
     expect(identityCardToIssue([{ name: 'run_analysis' }], [run])).toBe(false);
     expect(identityCardToIssue([{ name: 'run_analysis' }], [{ identity_card: { available: false } }, null, undefined])).toBe(false);
   });
@@ -149,7 +149,7 @@ describe('an unwritable base offers no card (DL 5897757819; served 8826224 run o
     expect(proposeProductIdentity(unwritable())).not.toBeNull(); // the reading exists; only its Yes cannot be written
     const r = await w.caps.proposeIdentity!(ctxSaying('x')) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'identity_not_writable' }));
-    const run = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    const run = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.', effects_timing: null }) as Json;
     expect(run).not.toHaveProperty('identity_card');
     expect(identityCardToIssue([{ name: 'run_analysis' }], [run])).toBe(false);
     expect(w.s.writes).toBe(0);
@@ -224,7 +224,7 @@ describe('"Yes" on the card: one write through the real door, then nothing runs'
     const r = await w.caps.proposeIdentity!(ctxSaying('x')) as Json;
     const chip = cardFor(w.store, r)[0]!;
     await w.caps.authoriseChange(ctxPressing(String(r.proposal_id), chip.message!), { proposal_id: String(r.proposal_id) });
-    const run = await w.caps.runAnalysis(ctxSaying('x'), { reason: 'Run it.' }) as Json;
+    const run = await w.caps.runAnalysis(ctxSaying('x'), { reason: 'Run it.', effects_timing: null }) as Json;
     expect(run.ran).not.toBe(true);
   });
 

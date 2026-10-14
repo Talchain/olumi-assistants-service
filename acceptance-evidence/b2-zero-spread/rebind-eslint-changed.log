@@ -1,0 +1,3 @@
+Load gate exit: 0
+{"load":3.73388671875,"threshold":25}
+node_modules/.bin/eslint src/routes/__tests__/b2-zero-spread.test.ts src/routes/__tests__/fixtures/b2-zero-spread/generate-staging-control.ts < /dev/null

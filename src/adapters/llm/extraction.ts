@@ -7,8 +7,9 @@
  * Uses the existing LLM router infrastructure for provider selection and failover.
  */
 
+import { createHash } from "node:crypto";
 import OpenAI from "openai";
-import { assertProviderAllowed } from "./provider-policy.js";
+import { assertProviderAllowed, recordProviderAttempt, recordProviderUsage, type ProviderCallHandle } from "./provider-policy.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
@@ -180,6 +181,22 @@ function getActiveProvider(): "openai" | "anthropic" | "fixtures" {
   return "openai"; // Default to OpenAI
 }
 
+/**
+ * The abort reason our OWN cancellation cap uses (callLLMForExtraction's timer). A call stopped at its cap is an
+ * expected budget outcome, logged at info as `cee.extraction.cap_reached`, never as a provider error: the 8 Oct
+ * classification found every "LLM extraction aborted" error was the agent factor review's own 5 s cap.
+ */
+export const EXTRACTION_CAP_REACHED = "extraction_cap_reached";
+
+function logExtractionFailure(provider: "openai" | "anthropic", abortSignal: AbortSignal, message: string, timeoutMs: number): void {
+  if (abortSignal.aborted && abortSignal.reason === EXTRACTION_CAP_REACHED) {
+    log.info({ event: "cee.extraction.cap_reached", provider, timeoutMs }, "LLM extraction stopped at its own time cap");
+    return;
+  }
+  log.error({ event: `cee.extraction.${provider}_error`, error: message },
+    `${provider === "openai" ? "OpenAI" : "Anthropic"} extraction call failed`);
+}
+
 // ============================================================================
 // Timeout Wrapper
 // ============================================================================
@@ -242,6 +259,19 @@ function getOpenAIClient(): OpenAI {
   return openaiClient;
 }
 
+/** A failed extraction attempt as the ledger records it: its own cap is a timeout, never a provider error. */
+function extractionFailureAttempt(error: unknown, abortSignal: AbortSignal, message: string): Parameters<typeof recordProviderAttempt>[1] {
+  if ((abortSignal.aborted && abortSignal.reason === EXTRACTION_CAP_REACHED) || message.startsWith("LLM extraction timed out")) {
+    return { transport_status: null, result: EXTRACTION_CAP_REACHED, outcome: 'timeout', retry: false };
+  }
+  if (abortSignal.aborted) return { transport_status: null, result: 'aborted', outcome: 'cancelled', retry: false };
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') {
+    return { transport_status: status, result: 'http_error', outcome: status === 429 ? 'rate_limited' : 'http_error', retry: false };
+  }
+  return { transport_status: null, result: error instanceof Error && error.name !== '' ? error.name : 'transport_failure', outcome: 'transport_error', retry: false };
+}
+
 async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
@@ -249,6 +279,13 @@ async function callOpenAI(
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
   const { timeoutMs = EXTRACTION_TIMEOUT_MS, maxTokens = 2000, temperature = 0, modelOverride } = options;
+  /**
+   * ⭐ SYS1 (B2): THE RECEIPT RIDES THE HANDLE THE LEDGER ALREADY GAVE. Under the Agent route this is the factor review,
+   * the one call an Agent turn reaches outside `postResponses`; its row said only that it happened (served 50530b5f: no
+   * duration, usage, attempt or prompt identity on any Run). Same functions `postResponses` closes its rows with.
+   * ⚠ The SDK's own internal retries stay inside one attempt here: they are not visible to this call site.
+   */
+  let handle: ProviderCallHandle;
 
   try {
     const client = getOpenAIClient();
@@ -256,7 +293,9 @@ async function callOpenAI(
       "openai",
       modelOverride,
     ).model;
-    assertProviderAllowed('openai', 'extraction.openai', { model, purpose: 'extraction' });
+    const settings = { max_tokens: maxTokens, temperature, response_format: { type: "json_object" as const } };
+    handle = assertProviderAllowed('openai', 'extraction.openai', { model, purpose: 'extraction',
+      prompt_sha256: createHash('sha256').update(systemPrompt, 'utf8').digest('hex'), max_output_tokens: maxTokens, settings });
 
     const responsePromise = client.chat.completions.create({
       model,
@@ -264,12 +303,13 @@ async function callOpenAI(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: maxTokens,
-      temperature,
-      response_format: { type: "json_object" },
+      ...settings,
     }, ...(options.signal !== undefined ? [{ signal: abortSignal }] as const : [] as const));
 
     const response = await withTimeout(responsePromise, timeoutMs, abortSignal);
+    // The SDK resolves only on a 2xx; Chat Completions answers a completed request with 200.
+    recordProviderUsage(handle, response.usage);
+    recordProviderAttempt(handle, { transport_status: 200, result: response.choices[0]?.finish_reason ?? 'response', outcome: 'success', retry: false });
 
     const rawText = response.choices[0]?.message?.content;
     if (!rawText) {
@@ -294,10 +334,8 @@ async function callOpenAI(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log.error(
-      { event: "cee.extraction.openai_error", error: message },
-      "OpenAI extraction call failed"
-    );
+    recordProviderAttempt(handle, extractionFailureAttempt(error, abortSignal, message));
+    logExtractionFailure("openai", abortSignal, message, timeoutMs);
     return {
       response: null,
       success: false,
@@ -373,10 +411,7 @@ async function callAnthropic(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log.error(
-      { event: "cee.extraction.anthropic_error", error: message },
-      "Anthropic extraction call failed"
-    );
+    logExtractionFailure("anthropic", abortSignal, message, timeoutMs);
     return {
       response: null,
       success: false,
@@ -488,7 +523,7 @@ export async function callLLMForExtraction(
   if (options.signal?.aborted) onOuterAbort();
   // Cancel at the enrichment's own cap; withTimeout still settles if the SDK ignores cancellation.
   const cancellationTimer = options.signal !== undefined
-    ? setTimeout(() => abortController.abort(), options.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
+    ? setTimeout(() => abortController.abort(EXTRACTION_CAP_REACHED), options.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
     : undefined;
 
   try {

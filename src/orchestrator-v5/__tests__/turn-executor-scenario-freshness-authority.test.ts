@@ -86,7 +86,6 @@ vi.mock('../session/index.js', () => ({
     readFactsWithTurnFor: async () => mockState.priorFactsWithTurn,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => mockState.persistedGraph,
     loadGraphAndBriefText: async () => ({
       graph: mockState.persistedGraph,

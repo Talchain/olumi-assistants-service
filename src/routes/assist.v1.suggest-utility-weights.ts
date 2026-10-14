@@ -76,7 +76,7 @@ export default async function route(app: FastifyInstance) {
   const UTILITY_WEIGHT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_UTILITY_WEIGHT_RATE_LIMIT_RPM") ?? 30;
   const FEATURE_VERSION = "utility-weight-1.0.0";
 
-  app.post("/assist/v1/suggest-utility-weights", async (req, reply) => {
+  app.post("/assist/v1/suggest-utility-weights", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

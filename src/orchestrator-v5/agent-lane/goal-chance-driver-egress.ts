@@ -161,8 +161,8 @@ export const ALL_WITHHELD_CLAIM = new RegExp([
   R`${ADV}\bno\s+option(?:['’]s)?\s+(?:(?:goal|target)\s+)?chances?(?:\s+or\s+[\w’'-]+(?:\s+[\w’'-]+){0,2})?\s+(?:is|are|has\s+been|have\s+been)\s+(?:yet\s+)?(?:established|known|available|shown|computed)\b`,
   // "none of the options has a chance (shown) yet"
   R`${ADV}\b(?:none|not\s+one)\s+of\s+the\s+options\s+(?:has|have)\s+(?:an?\s+)?(?:(?:goal|target)\s+)?chances?\b`,
-  // "I can't yet say how likely any option is …" (never the producer's own opening, "This run doesn’t show how often each
-  // option reaches the goal’s target.": the producer owns its words, and S4b swaps it for the range opening)
+  // "I can't yet say how likely any option is …" (never the producer's own "This run doesn’t yet show each option’s
+  // chance of …" opening: the producer owns its target/no-target words, and S4b swaps it for the range opening)
   R`${NEG}${VERB}\s+how\s+likely\s+${OPT}\b`,
   // "chances for every option are not shown / withheld"
   R`${NP_START}${ADV}\bchances?\s+(?:for|of)\s+${OPT}\s+(?:are|is)\s+(?:not\s+(?:yet\s+)?(?:shown|established|available)|withheld|unavailable)\b`,

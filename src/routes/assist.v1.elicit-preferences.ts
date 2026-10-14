@@ -82,7 +82,7 @@ export default async function route(app: FastifyInstance) {
   const ELICIT_PREFERENCES_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_ELICIT_PREFERENCES_RATE_LIMIT_RPM") ?? 10;
   const FEATURE_VERSION = "elicit-preferences-1.0.0";
 
-  app.post("/assist/v1/elicit/preferences", async (req, reply) => {
+  app.post("/assist/v1/elicit/preferences", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

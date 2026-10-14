@@ -1,0 +1,11 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+{"level":"info","time":1791474268645,"pid":53821,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_cancellations","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791474268656,"pid":53821,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_cancellations","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  16:44:18
+   Duration  9.76s (transform 5.93s, setup 134ms, import 9.06s, tests 322ms, environment 0ms)
+

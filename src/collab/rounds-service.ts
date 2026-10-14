@@ -2,7 +2,7 @@
  * COLLAB U-S0 — rounds service (seam pinned by contracts.ts:79).
  *
  * mintRound / closeRound / ownerPreview. All three are OWNER-ONLY, and the
- * owner check is the FIRST thing each does — before any store read, so a
+ * HTTP scenario-owner check runs in the central hook before these services, so a
  * refusal cannot leave a partial write or reveal that something exists.
  *
  * ── ROADMAP 2.910: THE VERSION ANCHOR MUST BE EXPLICIT ────────────────────
@@ -82,9 +82,6 @@ export async function mintRound(
       'This scenario has no owner. Sign in and claim it before inviting a panel.',
     );
   }
-  if (args.actor.kind === 'owner' && scenarioOwner !== owner.user_id) {
-    refuse('collab_owner_only', 'Only the scenario owner can open a round on it.');
-  }
 
   // ROADMAP 2.910 — EXPLICIT mint. The returned id IS the pin. The everyday
   // pointer is deliberately not consulted (see the module header).
@@ -144,9 +141,6 @@ export async function closeRound(
     // such round" are indistinguishable to a caller, by design.
     refuse('collab_owner_only', 'No round you own with that id.');
   }
-  if (args.actor.kind === 'owner' && round.created_by !== owner.user_id) {
-    refuse('collab_owner_only', 'Only the scenario owner can close this round.');
-  }
   if (round.status !== 'open') {
     refuse('collab_round_closed', 'That round is already closed.');
   }
@@ -193,14 +187,11 @@ export async function ownerPreview(
   store: CollabStore,
   args: { round_id: string; actor: CollabActor },
 ): Promise<OpenPacketLikePreview> {
-  const owner = requireOwnerActor(args.actor, 'Previewing a round');
+  requireOwnerActor(args.actor, 'Previewing a round');
 
   const round = await store.getRound(args.round_id);
   if (round === null) {
     refuse('collab_owner_only', 'No round you own with that id.');
-  }
-  if (args.actor.kind === 'owner' && round.created_by !== owner.user_id) {
-    refuse('collab_owner_only', 'Only the scenario owner can preview this round.');
   }
 
   const roster = await store.listParticipants(args.round_id);

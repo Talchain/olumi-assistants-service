@@ -45,7 +45,7 @@ import { agentV1TurnRoute, persistedFactorReviewFor } from '../../../routes/agen
 import legacyReviewRoute from '../../../routes/assist.v1.review.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { decisionReviewFor, factorReviewPressLine, DECISION_REVIEW_PRESS_ID } from '../decision-review-press.js';
-import { AGENT_LANE_ENRICH_MODEL, agentFactorEnrichments, factorReviewSensitivity } from '../factor-review.js';
+import { AGENT_FACTOR_REVIEW_TIMEOUT_MS, AGENT_LANE_ENRICH_MODEL, agentFactorEnrichments, factorReviewSensitivity } from '../factor-review.js';
 import { guidanceHistoryOf } from '../turn-context/guidance-history.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -308,8 +308,12 @@ describe('MC factor review served from the persisted Agent Run', () => {
     vi.useFakeTimers();
     try {
       sdk.openai.mockImplementationOnce(() => new Promise(() => {}));
-      const pending = runAndPersist();
-      await vi.advanceTimersByTimeAsync(5_001);
+      // The time box is the factor-review cap itself (8 s since 8 Oct), never a literal.
+      let settled = false;
+      const pending = runAndPersist().then((r) => { settled = true; return r; });
+      await vi.advanceTimersByTimeAsync(AGENT_FACTOR_REVIEW_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
       const { result } = await pending;
       const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
       expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');

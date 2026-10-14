@@ -66,7 +66,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => mockState.persistedGraph,
     loadGraphAndBriefText: async () => ({
       graph: mockState.persistedGraph,
@@ -515,7 +514,6 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
     const session = await import('../session/index.js');
     const store = session.getSessionStore();
     const append = vi.spyOn(store, 'append');
-    const storeDraftGraph = vi.spyOn(store, 'storeDraftGraph');
     const invalidateScoped = vi.spyOn(store, 'invalidateScoped');
     const invalidateAll = vi.spyOn(store, 'invalidateAll');
     const getSessionStore = vi.spyOn(session, 'getSessionStore').mockReturnValue(store);
@@ -558,7 +556,6 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
       expect(write.graph, 'discussion must not persist a graph').toBeUndefined();
       expect(write.handler_facts).toEqual([]);
       expect(write).not.toHaveProperty('modelVersion');
-      expect(storeDraftGraph).not.toHaveBeenCalled();
       expect(invalidateScoped).not.toHaveBeenCalled();
       expect(invalidateAll).not.toHaveBeenCalled();
       expect(mockState.persistedGraph).toEqual(graphBefore);

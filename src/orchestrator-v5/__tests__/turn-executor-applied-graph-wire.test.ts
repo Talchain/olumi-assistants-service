@@ -80,7 +80,6 @@ vi.mock('../session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     // STEP 7 strict read: null = genuinely-empty scenario → the mutated
     // graph commits as the first valid write (no persisted-base merge),
     // keeping the committed shape equal to the handler's applied view.

@@ -28,6 +28,7 @@
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
 import type { CandidateModel } from '../admit-model.js';
+import { verifiedFactorLevel } from '../verified-option-setting.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -93,6 +94,18 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 type Graph = { nodes: Array<Record<string, unknown> & { id: string; kind: string }>; edges: Array<{ from: string; to: string }> };
 
 async function construct(...drafts: ReturnType<typeof c22>[]) {
+  const facts = new Set<string>();
+  for (const d of drafts) for (const f of d.factors) {
+    if (f.label === 'Engineering delivery capacity' && f.baseline_value === 40 && f.unit === 'story points'
+      && (!f.baseline_known || f.provenance !== 'explicit')) {
+      Object.assign(f, { baseline_evidence: { quote: 'Capacity today is 40 story points.' } });
+      continue;
+    }
+    if (!f.baseline_known || f.provenance !== 'explicit' || f.baseline_value === null) continue;
+    const amount = f.unit === 'GBP' ? `£${f.baseline_value}` : `${f.baseline_value} ${f.unit}`;
+    const quote = `Our ${f.label.toLowerCase()} is ${amount}.`;
+    Object.assign(f, { baseline_evidence: { quote } }); facts.add(quote);
+  }
   for (const d of drafts) expect(strict(d), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown;
   const inputs: string[] = [];
@@ -105,7 +118,7 @@ async function construct(...drafts: ReturnType<typeof c22>[]) {
   };
   const result = await buildModelFromBrief('32edf657-e3f7-44a5-b80a-ec6a4e00d149',
     // States the 40 story points the rows below call the user's (a baseline is theirs only when the brief states it).
-    'Should we hire two developers or a tech lead to lift delivery velocity? Capacity today is 40 story points.', dispatch,
+    `${[...facts].join(' ')}\n\nShould we hire two developers or a tech lead to lift delivery velocity? Capacity today is 40 story points.`, dispatch,
     async (req) => {
       inputs.push(String((req as { input: unknown }).input));
       return { text: JSON.stringify(drafts[Math.min(inputs.length - 1, drafts.length - 1)]) };
@@ -168,8 +181,14 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     // An ESTIMATE stays Olumi's: 0.5 FTE is written nowhere in the brief.
     expect(node(graph, 'technical_leadership_capacity').observed_state).toMatchObject({ source: 'cee_inference' });
     // ⛔ #2311 (R3 5896630173 (2)): "Capacity today is 40 story points" STATES the 40 the drafter tagged an estimate, so it is
-    // the user's (`creditStatedFactorLevels`), never Olumi's guess.
-    expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 40 });
+    // the USER'S figure, never Olumi's guess. S7 (AIE quantity contract, disposition `unverified_human_claim`): the sentence
+    // has no first-person owner ("Capacity today is …"), so the receipt gate cannot CREDIT it — it stays the user's claim,
+    // visible and unverified (display "Not confirmed from your brief"), 40 preserved, never Olumi's estimate and never
+    // brief-credited. The separate 0.5 FTE above is the genuine AI estimate.
+    const claimed = node(graph, 'engineering_delivery_capacity');
+    expect(claimed.observed_state).toMatchObject({ raw_value: 40, source: 'cee_inference', user_material_unverified: true });
+    expect(claimed.observed_state?.extractionType).not.toBe('explicit');
+    expect(claimed.provenance).toBe('unverified_brief');
     expect(JSON.stringify(graph.nodes)).not.toMatch(/user_specified|user_override|user_stated/);
   });
 
@@ -492,7 +511,7 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(said.filter((s) => s.startsWith(`"Hire Two Developers" puts "${CUT}" at -60000 GBP`))).toHaveLength(1);
     expect(said.filter((s) => s.includes('treated your') && s.includes(CUT))).toEqual([]);
     // Readiness asks for exactly that one pair's value, and nothing else.
-    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0 (Olumi's estimate). What should option "Hire Two Developers" set it to?`]);
+    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0. What should option "Hire Two Developers" set it to?`]);
   });
 
   it('CONTROL (#1930 test): the same pair with NO level is a gap, and the retry IS spent on it', async () => {
@@ -568,5 +587,54 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(result.additions_without_total).toBeUndefined();
     expect(((result.not_represented ?? []) as string[]).filter((s) => s.includes('adds 12'))).toEqual([]);
     expect(blockers(graph)).toEqual(blockers(alone.graph));
+  });
+});
+
+
+describe('RUN9 typed unit frame keeps rival evidence outside the frame', () => {
+  const quote = 'Our Pro price is £49 per subscriber per month.';
+  const current = (text = quote, unit = 'GBP/subscriber/month') => {
+    const m = c22();
+    m.factors = [factor('Pro price', 49, 200, unit), factor('New Pro subscribers per month', 20, 1000, 'subscribers/month')];
+    Object.assign(m.factors[0]!, { baseline_evidence: { quote: text } });
+    return m as unknown as CandidateModel;
+  };
+  for (const unit of ['GBP/subscriber/month', '£/subscriber/month', 'GBP per subscriber per month']) {
+    it(`a complete ${unit} frame names no rival entity`, () => {
+      const m = current(quote, unit);
+      expect(verifiedFactorLevel(m, m.factors[0]!, quote)).toBe(true);
+    });
+  }
+  for (const text of [
+    'Our supplier claims the Pro price is £49 per subscriber per month.',
+    'Our Pro price target is £49 per subscriber per month.',
+    'Our Pro price forecast is £49 per subscriber per month.',
+    'Our Pro price is at most £49 per subscriber per month.',
+    'Our Pro price is £49 per subscriber per year.',
+    'Our Pro price is £49 per customer per month.',
+  ]) {
+    it(`ownership, role or frame still refuses: ${text}`, () => {
+      const m = current(text);
+      expect(verifiedFactorLevel(m, m.factors[0]!, text)).toBe(false);
+    });
+  }
+  it('a stock count and a declared per-month inflow are provably different quantities (rival set aside); the same period stays a tie', () => {
+    const text = 'We have 250 Pro subscribers.'; const base = current();
+    const m = { ...base, factors: [factor('Pro subscribers today', 250, 2000, 'subscribers'), factor('New Pro subscribers per month', 20, 1000, 'subscribers/month')] };
+    Object.assign(m.factors[0]!, { baseline_evidence: { quote: text } });
+    expect(verifiedFactorLevel(m, m.factors[0]!, text)).toBe(true);
+    const sameFrame = { ...base, factors: [factor('Pro subscribers today', 250, 2000, 'subscribers'), factor('New Pro subscribers', 20, 1000, 'subscribers')] };
+    Object.assign(sameFrame.factors[0]!, { baseline_evidence: { quote: text } });
+    expect(verifiedFactorLevel(sameFrame, sameFrame.factors[0]!, text)).toBe(false);
+  });
+  it('a real price versus risk tie remains unknown', () => {
+    const text = 'Our Pro price is £49 a month.'; const base = current(text, 'GBP/month');
+    const m = { ...base, risks: [{ label: 'Pro price driven', provenance: 'inferred' as const }] };
+    m.factors[0]!.label = 'Pro plan price';
+    expect(verifiedFactorLevel(m, m.factors[0]!, text)).toBe(false);
+  });
+  it('a correction outside a bound unit frame still retracts credit', () => {
+    const m = current();
+    expect(verifiedFactorLevel(m, m.factors[0]!, `${quote} Ignore 49.`)).toBe(false);
   });
 });

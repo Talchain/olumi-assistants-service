@@ -1,3 +1,4 @@
+import { beforeDoorTagsDeep } from '../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * ⭐ A1 — ATOMIC, COMPLETE OPTION CHANGES: A NEW FACTOR AN OPTION SWITCHES ON IS A 0/1 SWITCH, IN THE SAME COMMIT.
  *
@@ -237,7 +238,8 @@ describe('R2 — today = 0 is Olumi\'s INFERENCE: "I supplied N+1 values" and "E
     // What the Agent is shown: a stated 0, with its author.
     const shown = projectEntity(factor as never);
     expect(shown.value).toBe(0);
-    expect(shown.value_provenance).toEqual({ source: 'cee_inference', extraction_type: 'inferred' });
+    // ONE PROVENANCE AUTHORITY: the Agent is also told whose it is — Olumi's — never left to read the stamps.
+    expect(shown.value_provenance).toEqual({ source: 'cee_inference', extraction_type: 'inferred', whose: 'olumi' });
     expect(String(factor.observed_state.source)).not.toMatch(/^user/);
   });
 });
@@ -389,7 +391,8 @@ describe('CONTRAST — everything that is not a new switch is byte-identical to 
     if (levels !== undefined) expect(base.assistant_text, 'control: the base text names the option').toContain(named);
     const expected = levels === undefined ? base.assistant_text : String(base.assistant_text).replace(named, `${named}${levels}`);
     expect(head.assistant_text).toBe(expected);
-    expect(JSON.stringify({ ...head, assistant_text: undefined })).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
+    // Science 393023 LICENCE (a): subtract only the new door-default tag; keep the full old fidelity assertion.
+    expect(JSON.stringify(beforeDoorTagsDeep({ ...head, assistant_text: undefined }, base))).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
   });
 
   it('CONTRAST: a GRADED new factor ("Marketing spend", £5,000/month asked) stays valueless and asked — never 0', () => {

@@ -387,6 +387,14 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // Run on its own saved graph and matching Run identity through the canonical
     // selector and claim composition; it defines no alternative permission rule.
     'src/orchestrator-v5/model-management/version-result-binding.ts': 2,
+    // DECISION REVIEW LICENSED RUN FACTS (core system 2, 10 Oct 2026): import + one call. The review runs INSIDE the
+    // compose bracket, before the finalise-seam frame exists (the frame is built from facts that include this review), so
+    // the remedy this guard prescribes ("read it off the frame you already hold") is not available. This seam is the
+    // review's ONE currency derivation per Run, the canonical selector with the Run's own fact, so the review is no longer
+    // an independent opinion about what the model may say. It adds exactly one rule of its own: a Run with no hash to
+    // compare against is not marked stale (only a known, differing current hash is). Migrate when the review's input is
+    // built from the frame, threading the already-derived state instead; do not add more.
+    'src/orchestrator-v5/context/licensed-run-facts.ts': 2,
     // C2 Phase-3 lifecycle: freshness deliberately selects the older successful
     // Run for historical cards, while this one card-builder seam needs the
     // canonical contradiction from the same prior-fact set to suppress those

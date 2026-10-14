@@ -31,6 +31,7 @@ import { normalizeRunGoalUnit } from '../context/run-goal-unit.js';
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../tools/handlers/run-goal-certainty.js';
 import { goalChanceDisplayForAgent } from '../goal-target/goal-chance-licence.js';
+import { withReadTimeHorizonGate } from '../goal-target/goal-horizon-verdict.js';
 import { mayPresentComparedRunLeader } from './compared-run-leader.js';
 import { deriveBuildsEquality, readRunEchoes, type RunEchoes } from './build-run-delta.js';
 import { leadNoise, meanChangeNoise, proportionChangeNoise } from './structural-challenge-noise.js';
@@ -320,6 +321,11 @@ function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallenge
 }
 
 export function compareStructuralChallenge(input: CompareStructuralChallengeInput): CompareStructuralChallengeOutput {
+  // Both stored endpoints are read on their supplied graphs; neither the hash nor a stored display licences a deadline edit.
+  const gatedFact = (fact: HandlerFact, graph: unknown): HandlerFact => fact.fact_type === 'run_analysis'
+    ? { ...fact, result: withReadTimeHorizonGate(fact.result, graph, fact.result.enrichment) } : fact;
+  input = { ...input, baselineFact: gatedFact(input.baselineFact, input.baselineGraph),
+    candidateFact: gatedFact(input.candidateFact, input.candidateGraph) };
   const a: RunEchoes | null = readRunEchoes(input.baselineFact);
   if (a === null) return { ok: false, reason: 'baseline_unreadable' };
   const b: RunEchoes | null = readRunEchoes(input.candidateFact);

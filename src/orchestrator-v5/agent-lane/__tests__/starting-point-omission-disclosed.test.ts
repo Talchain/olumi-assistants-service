@@ -35,9 +35,9 @@ const NODES = [
 ];
 const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' });
 const EDGES = [edge('hire_two', 'onboarding_load'), edge('onboarding_load', 'velocity'), edge('hiring_ramp_up_delay', 'velocity')];
-const RISK = { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' };
-const FACTOR = { factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' };
-const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
+const RISK = { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' };
+const FACTOR = { user_stated: false, factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' };
+const LEVEL = { user_stated: false, option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
 
 type Chip = { id: string; label: string };
 describe('a starting point that leaves a named input out says so in the response itself', () => {

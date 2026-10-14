@@ -1,22 +1,18 @@
 /**
- * ⛔ GATE 2: THE TREATED-AS-ZERO LINE REACHES THE USER WHOLE, OR NOT WITH ITS LABEL (Codex #2577 rounds 2-3).
+ * Carry canonical missing-root refusals and their useful next steps through the
+ * existing reply editors. Labels that cannot survive those editors use a
+ * counted, label-free ask. T4e never presents an unknown root as zero.
  *
- * `treatedAsZeroLine` quotes the user's own node labels. A label is user text, and every editor the reply passes after
- * the line is placed reads text: the proposal-id scrub (`withoutProposalIds`), the at-rest marker parse (`textAtRest`),
- * the withheld-leader ranking drop (`dropRankingSentences`), the shared leader gate (keyed on option names) and the
- * leader enforcement (`textAssertsLeadingOption`, the vocabulary its deleting consumers read). A label such as
- * `Hire a Tech Lead leads. Demand falls`, one holding a `prop_…` id, or
- * one holding "Questions this model does not answer yet:" was rewritten, cut or truncated by one of them.
- *
- * So the labelled line is said only when EVERY one of those editors leaves it byte-identical, in the strictest posture
- * (the leader withheld). Otherwise the label-free form is said: the disclosure and the ask survive, the label does not.
- * Structural, not a wording rule: the editors themselves decide, and none of them is changed. One helper for the live Run
- * turn and its replay, from the same readback, so both say the same words.
+ * Historical zero-disclosure constants remain exported for readers of an
+ * older Run's explicit GOAL_ANCESTOR_DATA_GAP fact; they do not admit a new Run.
  */
 
-import { readinessViewOf, treatedAsZeroLine } from './readiness-view.js';
+import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { placeholderZeroFactorIds } from '../coaching/unvalued-driver-card.js';
+import { treatedAsZeroLine } from './readiness-view.js';
 import { withoutProposalIds } from './display-ids.js';
 import { textAtRest } from './decision-input-ask.js';
+import { sentencesOf } from './reply/compose-reply.js';
 import { dropRankingSentences, rankingLabelContext } from './withheld-leader-fail-closed.js';
 import { textAssertsLeadingOption } from '../compose/leading-option-egress-guard.js';
 import { optionRosterFromGraph, textNamesAnOption } from '../compose/leading-option-wire-enforcement.js';
@@ -36,6 +32,8 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   if (line.includes('\n')) return false;
   if (withoutProposalIds(line) !== line) return false;
   if (textAtRest(line) !== line) return false;
+  // The face composer splits this ask: test each partition as its displayed bullet, including the marker at its start.
+  if (sentencesOf(line).some(sentence => textAtRest(`• ${sentence}`) !== `• ${sentence}`)) return false;
   if (dropRankingSentences(line, rankingLabelContext(graph, analysisReady)).droppedSentences !== 0) return false;
   if (textNamesAnOption(line, optionRosterFromGraph(graph))) return false;
   // The leader vocabulary as the DELETING consumers read it (`textAssertsLeadingOption`: the egress vocabulary minus its
@@ -44,19 +42,33 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   return !textAssertsLeadingOption(line);
 }
 
-/**
- * The Run reply's treated-as-zero line for this readback: `treatedAsZeroLine`'s words when they survive the reply's
- * editors and every label it quotes says something, else the label-free form with the same count; `null` when no root
- * is treated as zero. A blank label quoted as `""` names nothing and asks about nothing (Codex #2581 r3), so it takes the
- * label-free form too; only the first two labels are ever quoted ("and N more" counts the rest).
- */
-export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown): string | null {
-  const view = readinessViewOf(graph);
-  const labelled = treatedAsZeroLine(view);
-  if (labelled === null) return null;
-  const quoted = (view.treated_as_zero ?? []).slice(0, 2);
-  const quotesBlank = quoted.some((label) => label.replace(/\s+/g, ' ').trim() === '');
-  if (!quotesBlank && survivesReplyEditors(labelled, graph, analysisReady)) return labelled;
-  const n = (view.treated_as_zero ?? []).length;
-  return n === 1 ? TREATED_AS_ZERO_UNNAMED_ONE : treatedAsZeroUnnamedMany(n);
+/** A bound saved Run keeps its explicit zero treatment; without that evidence,
+ * current unknown non-factor roots retain their canonical refusal and ask. */
+export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown, analysisResult?: unknown): string | null {
+  const nodes = graph !== null && typeof graph === 'object' && Array.isArray((graph as { nodes?: unknown }).nodes)
+    ? (graph as { nodes: Array<{ id?: unknown; kind?: unknown; label?: unknown }> }).nodes : [];
+  // Historical treatment is an explicit saved fact, never inferred from a missing current value.
+  const savedRoots = (analysisReady as { unvalued_roots?: unknown } | null)?.unvalued_roots;
+  const recorded = new Set(Array.isArray(savedRoots) ? savedRoots.filter(root => root?.treated_as === 'zero').map(root => root.node_id) : []);
+  const candidates = nodes.filter(n => (n.kind === 'risk' || n.kind === 'outcome') && typeof n.id === 'string');
+  for (const id of placeholderZeroFactorIds(analysisResult, candidates.map(n => n.id as string))) recorded.add(id);
+  const historical = candidates.filter(n => recorded.has(n.id));
+  if (historical.length > 0) {
+    const labels = historical.map(n => typeof n.label === 'string' ? n.label : '');
+    const labelled = treatedAsZeroLine({ checked: true, may_run: true, treated_as_zero: labels,
+      needs_from_user: [], olumi_can_offer: [], will_run_without: [], levels_not_set: [] })!;
+    if (labels.slice(0, 2).every(label => label.trim() !== '') && survivesReplyEditors(labelled, graph, analysisReady)) return labelled;
+    return historical.length === 1 ? TREATED_AS_ZERO_UNNAMED_ONE : treatedAsZeroUnnamedMany(historical.length);
+  }
+  const nonFactors = new Set(nodes.filter(n => n.kind !== 'factor').map(n => n.id));
+  const gaps = assessCanonicalAnalysisReadiness(graph).blockingIssues.filter(issue =>
+    issue.code === 'MISSING_FACTOR_LEVEL' && nonFactors.has(issue.factor_id));
+  if (gaps.length === 0) return null;
+  const labelled = gaps.map(gap => gap.message.replace(/\s+/g, ' ').trim()).join(' ');
+  if (gaps.every(gap => (gap.factor_label ?? '').trim() !== '') && survivesReplyEditors(labelled, graph, analysisReady)) return labelled;
+  return missingRootUnnamedLine(gaps.length);
 }
+
+export const missingRootUnnamedLine = (count: number): string => count === 1
+  ? 'One input on your goal’s path has no supported figure. Numerical analysis is withheld; give it a current value on the canvas, or ask Olumi to propose a labelled starting assumption for review.'
+  : `${count} inputs on your goal’s path have no supported figures. Numerical analysis is withheld; give each a current value on the canvas, or ask Olumi to propose labelled starting assumptions for review.`;

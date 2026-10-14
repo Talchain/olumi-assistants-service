@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":3.44140625,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/b2-zero-spread.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'reviewer row' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 16 skipped (17)
+   Start at  22:00:43
+   Duration  2.43s (transform 1.65s, setup 108ms, import 2.19s, tests 18ms, environment 0ms)
+

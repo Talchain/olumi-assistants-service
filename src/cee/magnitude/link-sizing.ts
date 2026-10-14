@@ -11,7 +11,7 @@
  * THE CLASSES (read off the stored provenance, nothing inferred):
  *   · `user`           — the user sized it: `source: 'user_specified'`, or a size construction credits to the user
  *                        (`magnitude: 'user_stated'`).
- *   · `placeholder`    — nobody sized it: Olumi's default strength (`magnitude: 'olumi_placeholder'`).
+ *   · `placeholder`    — nobody sized it: tagged, mean-projected or untagged door default (Science 393023 LICENCE (a)/(b), 7 Oct).
  *   · `olumi_accepted` — Olumi's estimate the user approved (`olumi_*` + `reviewed_by_user` confirm). Still Olumi's figure:
  *                        it earns no authorship credit (`earnsAuthorshipCredit` reads authorship, not this).
  *   · `olumi_estimate` — Olumi's estimate, not yet reviewed.
@@ -24,27 +24,34 @@
  *        strength ({@link isSizedOnlyByOlumi}, the parts rule, unchanged).
  * Pure.
  */
+import {
+  type LinkSizing, PLACEHOLDER_MAGNITUDE, ESTIMATE_MAGNITUDE, DOOR_DEFAULT_CONSTANTS, linkSizing,
+} from '../provenance/provenance-of.js';
+
+// The classes, their literals, the door constants and `linkSizing` itself live in the ONE provenance authority (Recovery
+// Batch C, DL 12 Oct): this module keeps the writers and the predicates over `linkSizing`'s answer, never the strings.
+export { type LinkSizing, PLACEHOLDER_MAGNITUDE, ESTIMATE_MAGNITUDE, DOOR_DEFAULT_CONSTANTS, linkSizing };
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-export type LinkSizing = 'user' | 'placeholder' | 'olumi_accepted' | 'olumi_estimate' | 'unmarked';
 
-/** The writer's own literal for a link nobody sized (`cee-v3.ts` `magnitude`). */
-export const PLACEHOLDER_MAGNITUDE = 'olumi_placeholder';
-/** The literal an approval writes on a placeholder whose band the user approved: Olumi's size, now chosen. */
-export const ESTIMATE_MAGNITUDE = 'olumi_estimate';
-
-function reviewedByUser(p: Rec): boolean {
-  const r = p.reviewed_by_user;
-  return isRec(r) && r.intent === 'confirm';
+/** Mark a projected mean at the writer seam. An authored spread may keep its existing magnitude eligibility. */
+export function markPlaceholder<E extends { provenance?: object; defaulted?: boolean }>(
+  edge: E, { tagMagnitude = true }: { tagMagnitude?: boolean } = {},
+): E {
+  const p = (edge.provenance ??= {}) as Rec;
+  p.mean_projected = true;
+  if (tagMagnitude) p.magnitude = PLACEHOLDER_MAGNITUDE;
+  edge.defaulted = true;
+  return edge;
 }
 
-export function linkSizing(edge: unknown): LinkSizing {
-  const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  if (p?.source === 'user_specified' || p?.magnitude === 'user_stated') return 'user';
-  if (p?.magnitude === PLACEHOLDER_MAGNITUDE) return 'placeholder';
-  if (typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) return reviewedByUser(p) ? 'olumi_accepted' : 'olumi_estimate';
-  return 'unmarked';
+/** A real size replaces the projected mean; the caller writes its magnitude and natural effect together. */
+export function clearPlaceholderMarker<E extends { provenance?: object; defaulted?: boolean }>(edge: E): E {
+  if (edge.provenance !== undefined) delete (edge.provenance as Rec).mean_projected;
+  delete edge.defaulted;
+  return edge;
 }
 
 /** (i) The link nobody sized — the one class that withholds goal figures and reads "Olumi hasn't sized…". */
@@ -72,8 +79,8 @@ export function isAcceptedOlumiSize(edge: unknown): boolean {
 }
 
 /**
- * The links an approval SIZES (L4 design 2): nobody sized them — Olumi's placeholder, or Olumi's older default (no sizing
- * mark at all, `defaulted: true`, not the user's: Paul's 4 magnitude-less links approved at 09:25, `96c6f5f4`).
+ * Links that need a new size before approval can size them: a placeholder or an older unmarked default.
+ * Confirmation of their stored default supplies no estimate; only a different, newly adopted size can replace it.
  */
 export function approvalSizes(edge: unknown): boolean {
   const s = linkSizing(edge);
@@ -81,13 +88,22 @@ export function approvalSizes(edge: unknown): boolean {
 }
 
 /**
- * The approval rule (L4 design 2): a review recorded on a link nobody sized ({@link approvalSizes}) sizes it — Olumi's
- * band, now chosen and accepted — and on any other link changes nothing. Authorship is untouched (`source`, `reasoning`
- * and the rest are kept by the caller): an accepted Olumi estimate is still Olumi's figure. Returns the provenance to
- * store. `edge` is the link as stored BEFORE this write.
+ * Only adoption of a newly supplied, different estimate may replace an unsized default. A confirmation alone
+ * never supplies a size. `newMean` is passed only by the trusted adoption writer; `edge` is its stored preimage.
  */
-export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
+export function sizedByApproval<P extends object>(provenance: P, edge: unknown, newMean?: number): P {
+  if (newMean === undefined || !Number.isFinite(newMean) || !isRec(edge) || !isRec(edge.strength)
+    || newMean === edge.strength.mean) return provenance;
   if (!approvalSizes(edge)) return provenance;
+  // Science 393023 LICENCE ruling 1 / R3 B1: `user_specified` on a projected mean records who drew the link, not who
+  // sized it. A review must keep that carrier: clearing it would make the unchanged prior read `user` under the ONE
+  // predicate's ordering and award authorship for a confirm. Record the review only; no size or source is rewritten.
+  const stored = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
+  if (stored?.source === 'user_specified' && stored.mean_projected === true) return provenance;
+  // R8-3 (Science 393023 ruling 1): a projected mean beside Olumi's estimate is a placeholder, but an approval that would
+  // write the same magnitude would clear the carrier ALONE, and the carrier is outside the analysis hash. Nothing is
+  // written: the link stays a placeholder (fail-closed) rather than reading sized against an unchanged hash.
+  if ((provenance as { magnitude?: unknown }).magnitude === ESTIMATE_MAGNITUDE) return provenance;
   // R8 hash safety: approval changes magnitude; confirm-only review keeps the carrier.
   const { mean_projected: _projectedMean, ...kept } = provenance as P & { mean_projected?: unknown };
   return { ...kept, magnitude: ESTIMATE_MAGNITUDE } as P;

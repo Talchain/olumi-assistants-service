@@ -23,7 +23,8 @@
  * a bidirected link, or one touching a node kept out of the calculation, is not in the route structure at all. An event
  * risk's OCCURRENCE is never a route's doubt for this rule (occurrence is not existence): only drawn link existence covers.
  */
-import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { eventShareEndpointMatches } from './share-by-date-carrier.js';
+import { isUserStatedLink } from '../../cee/provenance/provenance-of.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { sameUnit } from '../agent-lane/same-unit.js';
 import { isRetainedExcluded } from '../tools/handlers/run-analysis-participation-guard.js';
@@ -69,6 +70,10 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
  */
 export interface LinkEnds {
   readonly fromLabel: string | undefined;
+  readonly fromId?: string;
+  readonly fromKind?: string;
+  readonly toKind?: string;
+  readonly toId?: string;
   readonly toLabel: string | undefined;
   readonly fromUnit: string | undefined;
   readonly toUnit: string | undefined;
@@ -138,6 +143,9 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const structural = (e: Rec): boolean => typeof e.from === 'string' && typeof e.to === 'string'
     && participating.has(e.from) && participating.has(e.to) && e.edge_type !== 'bidirected';
   const baseEnds = (e: Rec): LinkEnds => ({
+    // S-E GOALS S2b: the actual endpoint ids and kinds, so a minted share_by_date carrier binds to real nodes.
+    fromId: text(byId.get(e.from)?.id), toId: text(byId.get(e.to)?.id),
+    fromKind: text(byId.get(e.from)?.kind), toKind: text(byId.get(e.to)?.kind),
     fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
     fromUnit: unitOf(e.from), toUnit: unitOf(e.to), routeOnce: false,
     ...(fixedSources.get(e.to)?.has(e.from) ? { fixedByIsl: true } : {}),
@@ -183,7 +191,21 @@ export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefi
   const u = currentDefinitionalCarrier(e);
   if (u === undefined) return undefined;
   if (ends.toUnit === undefined || !sameUnit(ends.toUnit, u) || (ends.fromUnit !== undefined && !sameUnit(ends.fromUnit, u))) return undefined;
+  // Admission's durable, endpoint-bound team definition survives renaming.
+  const carrier = isRec(e) && isRec(e.provenance) ? e.provenance.share_by_date : undefined;
+  if (carrier !== undefined) return isRec(carrier) && u === `% of ${carrier.deliverable}`
+    && eventShareEndpointMatches(e, { id: ends.fromId, kind: ends.fromKind }, { id: ends.toId, kind: ends.toKind }) ? u : undefined;
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
+}
+
+/** RC4's graph-bound definition reader, using the same endpoint ID as GoalPathLink. Ambiguous links stay estimates. */
+export function validatedDefinitionForGraph(graph: unknown): (linkId: string) => string | undefined {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const ends = endsOfGraph(graph);
+  return linkId => {
+    const matches = edges.filter(e => typeof e.from === 'string' && typeof e.to === 'string' && `${e.from}->${e.to}` === linkId);
+    return matches.length === 1 ? validatedDefinition(matches[0], ends(matches[0])) : undefined;
+  };
 }
 
 /** A definitional link's spread on the Run input: the structural minimum (d5). */
@@ -192,16 +214,8 @@ const DEFINITIONAL_STD = 0.01;
 /** The z-width of a 90% range: 2 × 1.645. */
 const RANGE_90_WIDTH_Z = 3.29;
 
-/**
- * The licence's "the user's link" class: the user sized it, or their brief stated it WITH its evidence. Science d5 #87
- * 6008444863: a `brief_extraction` edge without its `source_quote` may be a drafter-invented mediator, never "your link".
- */
-export function isUserStatedLink(e: unknown): boolean {
-  if (!isRec(e)) return false;
-  if (linkSizing(e) === 'user') return true;
-  const p = e.provenance;
-  return isRec(p) && p.source === 'brief_extraction' && typeof p.source_quote === 'string' && p.source_quote.trim() !== '';
-}
+/** The licence's "the user's link" class — moved verbatim to the ONE provenance authority (`provenance-of.ts`). */
+export { isUserStatedLink };
 
 /**
  * The hold for one edge, or `null`.
@@ -234,6 +248,13 @@ export function heldLinkOf(e: unknown, ends: LinkEnds): LinkHold | null {
   if (base !== null) return base;
   if (!isRec(e) || !ends.routeOnce || !defaultExistence(e, ends)) return null;
   return { reason: 'route_once', std: isRec(e.strength) && finite(e.strength.std) ? e.strength.std : undefined };
+}
+
+/** The existence the wire sends. With no ends, read an already-projected wire edge without applying a hold again. */
+export function effectiveLinkExistenceProbability(e: unknown, ends?: LinkEnds): number | undefined {
+  if (ends !== undefined && heldLinkOf(e, ends) !== null) return 1;
+  return isRec(e) && finite(e.exists_probability) && e.exists_probability >= 0 && e.exists_probability <= 1
+    ? e.exists_probability : undefined;
 }
 
 /**
@@ -282,10 +303,11 @@ export function withHeldUserLinks<G>(graph: G): G {
   g.edges = (g.edges as Rec[]).map((copy, i) => {
     const held = holds[i] as LinkHold | null;
     if (held === null) return copy;
+    const exists_probability = effectiveLinkExistenceProbability(edges[i], endsOf(edges[i]));
     // Rule R changes only existence: the copy's strength (mean, std, absent or not) is the persisted one, byte for byte.
     // Built from the CLONE, never the persisted edge, so no nested object of the persisted graph is shared with the Run's.
-    if (held.reason === 'route_once') return { ...copy, exists_probability: 1 };
-    return { ...copy, exists_probability: 1, strength: { ...(isRec(copy.strength) ? copy.strength : {}), std: held.std } };
+    if (held.reason === 'route_once') return { ...copy, exists_probability };
+    return { ...copy, exists_probability, strength: { ...(isRec(copy.strength) ? copy.strength : {}), std: held.std } };
   });
   return g as G;
 }

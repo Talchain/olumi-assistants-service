@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":4.44140625,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/goal-chance-sides.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  1 passed (1)
+      Tests  36 passed (36)
+   Start at  21:37:58
+   Duration  2.24s (transform 1.48s, setup 114ms, import 1.99s, tests 12ms, environment 0ms)
+

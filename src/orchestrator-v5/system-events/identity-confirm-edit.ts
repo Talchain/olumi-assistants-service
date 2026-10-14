@@ -22,6 +22,8 @@
  * `identity_confirm`, which commits `mutatedGraph` + `handlerFacts` on the one CAS-guarded append. Pure: the stored graph
  * is never mutated.
  */
+import { readGoalRecord } from '../goal-target/goal-record.js';
+import { goalStockAccumulationOf, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -29,7 +31,9 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { admitStoredProductDeclaration, type StoredProductDeclarationRefusal } from '../agent-lane/admit-model.js';
-import { todaysLevelFor } from '../agent-lane/identity-proposal.js';
+import { proposeProductIdentity, todaysLevelFor, type IdentityPartLevel, type IdentityProposal } from '../agent-lane/identity-proposal.js';
+import { identityConfirmBaseIsWritable } from './editable-graph.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
@@ -37,6 +41,9 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { identityConflictsWithScope } from '../agent-lane/goal-scope.js';
 import type { GoalScope } from '../../schemas/goal-scope.js';
+import { ceilingStockPostimage, ceilingStockWords, proposeCeilingStock, type CeilingStockPending } from '../agent-lane/ceiling-stock.js';
+import { ceilingStockPendingOfferable } from '../agent-lane/ceiling-stock-carrier.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 
 export interface IdentityWithdrawalReading {
   outcome_id: string;
@@ -65,14 +72,19 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
 
 /** The reading the approval card SHOWED: which quantity is the product of which, in the card's own words. */
 export interface IdentityConfirmReading {
+  readonly ceiling_stock?: CeilingStockPending;
   readonly outcome_id: string;
   /** In the order the card named them. */
   readonly factor_ids: readonly string[];
   /** The card's displayed sentence (1..400), bound into the token so other words cannot approve it. */
   readonly words: string;
+  /** Every missing part's figure shown on this same card, written together only by its Yes. */
+  readonly part_levels?: readonly IdentityPartLevel[];
+  readonly choice?: 'one_off';
 }
 
 export interface ApplyIdentityConfirmEditParams extends IdentityConfirmReading {
+  readonly brief_text?: string | null;
   /** The STORED graph (strict server-side read) — never a client copy. */
   readonly persistedGraph: unknown;
   /** The wire analysis hash (`computeAnalysisAffectingGraphHash`) the card was issued against; moved ⇒ `superseded`. */
@@ -90,6 +102,8 @@ export type IdentityConfirmRefusal =
   | 'carrier_conflict'
   | 'goal_scope_conflict'
   | 'already_carried'
+  | 'operand_level_missing'
+  | 'part_level_not_asked'
   | Exclude<StoredProductDeclarationRefusal, 'invalid_graph'>;
 
 export type IdentityConfirmEditResult =
@@ -111,7 +125,10 @@ const WORDS_MAX = 400;
  * is asked to write. No card shown ⇒ no token; a card with other words or other factors ⇒ the wrong one: nothing written.
  */
 export function identityConfirmReadingToken(reading: IdentityConfirmReading): string {
-  const bound = { outcome_id: reading.outcome_id, operation: 'product', factor_ids: [...reading.factor_ids], words: reading.words };
+  const bound = { outcome_id: reading.outcome_id, operation: 'product', factor_ids: [...reading.factor_ids], words: reading.words,
+    ...(reading.ceiling_stock !== undefined ? { ceiling_stock: reading.ceiling_stock } : {}),
+    ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}),
+    ...(reading.choice !== undefined ? { choice: reading.choice } : {}) };
   return `identity:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 
@@ -128,14 +145,150 @@ function todaysWrite(part: Rec, today: { raw: number; unit: string; source: stri
   return out;
 }
 
+/** The asked figure uses today's framing, replacing only a level that is not the user's. */
+function partLevelWrite(part: Rec, level: IdentityPartLevel): { scale_frame?: number; observed_state: Rec } {
+  const os = isRec(part.observed_state) ? part.observed_state : undefined;
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const pairFrame = positive(os?.value) && positive(os?.raw_value) ? os.raw_value / os.value : 0;
+  const existingFrame = positive(os?.cap) ? os.cap : positive(part.scale_frame) ? part.scale_frame
+    : positive(pairFrame) ? pairFrame : undefined;
+  const frame = existingFrame !== undefined && existingFrame >= level.raw_value ? existingFrame : 2 * level.raw_value;
+  const observed_state = { value: level.raw_value / frame, raw_value: level.raw_value, unit: level.unit, source: 'user_override' };
+  // The written level has no cap. Retain its selected frame on the node if the old one was insufficient, or if removing
+  // the cap would expose a different scale_frame. A resolving pair alone may retain an adequate frame as before.
+  const writeFrame = existingFrame === undefined || existingFrame < level.raw_value
+    || !plotResolvesFrame({ ...part, observed_state }) || (positive(part.scale_frame) && part.scale_frame !== frame);
+  return { ...(writeFrame ? { scale_frame: frame } : {}), observed_state };
+}
+
+/** This identity door saves both kinds; the general level writer's kinds stay unchanged. */
+export const IDENTITY_PART_LEVEL_KINDS = ['factor', 'outcome'] as const;
+function partLevelWasAsked(graph: unknown, ids: readonly string[], level: IdentityPartLevel): boolean {
+  return typeof level?.raw_value === 'number' && Number.isFinite(level.raw_value) && level.raw_value > 0
+    && typeof level.unit === 'string' && level.unit.trim() !== ''
+    && identityPartsWithoutLevel(graph, ids).some(p => p.id === level.part_id
+      && IDENTITY_PART_LEVEL_KINDS.some(kind => kind === p.kind));
+}
+
+function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: readonly IdentityPartLevel[]): boolean {
+  return Array.isArray(levels) && levels.every(level => partLevelWasAsked(graph, ids, level))
+    && new Set(levels.map(level => level.part_id)).size === levels.length;
+}
+
+/**
+ * ⛔ NO YES OVER A PART WITH NO LEVEL (DL blocker, Paul's golden brief B1, scenario 828d87ac, 8 Oct): the card offered
+ * "Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’" while ‘Pro paying subscribers’ (an outcome the drafter
+ * left level-less) had no figure; the Yes recorded it as the user's, and both Runs refused `identity_operand_missing` (ISL
+ * multiplies a product only over every part's level today). The parts this writer cannot give a level today: no level of
+ * their own, and none read through the user's figure on a levelled cause (`todaysLevelFor`, the level `todaysWrite` would
+ * write). ONE predicate for the writer and every door that offers the card, so the card is never offered where its Yes
+ * would be refused. By label, in factor order. Pure.
+ */
+export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): { readonly id: string; readonly label: string; readonly kind: string }[] {
+  if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes)) return [];
+  const stock = goalStockAccumulationOf(persistedGraph);
+  if (stock !== null && factorIds.length === 1 && factorIds[0] === stock.carrier.id) {
+    return identityPartsWithoutLevel(persistedGraph, [String(stock.stock.id), String(stock.inflow.id),
+      ...(stock.netZero === null ? [String(stock.rate.id)] : [])]);
+  }
+  const out: { id: string; label: string; kind: string }[] = [];
+  for (const id of new Set(factorIds)) {
+    const part = persistedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
+    if (part === undefined) continue;
+    const os = isRec(part.observed_state) ? part.observed_state : undefined;
+    // ⛔ ONLY THE USER'S FIGURE IS A LEVEL HERE (DL correction, 8 Oct; Paul's 2 Oct brief §9 check 1: "With unknown
+    // subscribers, do not invent that result"; Science §(p): an Olumi estimate needs a basis). B1 9f32a4b4's 250 is the
+    // drafter's, with no basis (levels carry no basis field yet), so it is MISSING: the reading never computes from it.
+    const owner = valueClassOf(os);
+    const usersLevel = typeof os?.value === 'number' && Number.isFinite(os.value) && (owner === 'user_stated' || owner === 'user_ratified');
+    // Today's level read through the user's figure counts only where the part has NO value of its own: that is the only
+    // case `todaysWrite` writes it (#2851 buddy r1 P1-2: an Olumi value with no raw figure passed here and was kept).
+    // An EXACT copy of that figure is the user's figure too (AIQ 5906371639, served bdc4ff54: Olumi's 1,500 copied from the
+    // user's 1,500 'Current paying subscribers'); any other value of its own is not (buddy r1 P1-2).
+    const ownValue = typeof os?.value === 'number' && Number.isFinite(os.value);
+    const today = todaysLevelFor(persistedGraph, id);
+    if (usersLevel || (today !== null && (!ownValue || os?.raw_value === today.raw))) continue;
+    out.push({ id, label: typeof part.label === 'string' && part.label.trim() !== '' ? part.label.trim() : id, kind: String(part.kind) });
+  }
+  return out;
+}
+
+/**
+ * What is said INSTEAD of the card: the missing figures asked first, never approximated (the words of
+ * `composeIdentityNotEvaluatedAsk`'s `identity_operand_missing`). A part no control can record a level on
+ * (`IDENTITY_PART_LEVEL_KINDS`) is never asked for, since an answer could not be saved: the limit is said instead.
+ */
+export function identityPartLevelAsk(goalLabel: string, formula: readonly string[], missing: readonly { readonly label: string; readonly kind: string }[]): string {
+  const q = (l: string): string => `‘${l}’`;
+  const and = (xs: readonly string[]): string => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  const as = `${q(goalLabel)} as ${formula.map(q).join(' × ')}`;
+  const askable = missing.filter((m) => IDENTITY_PART_LEVEL_KINDS.some(kind => kind === m.kind));
+  if (askable.length === missing.length) {
+    const one = missing.length === 1;
+    return `To work out ${as}, I need ${and(missing.map((m) => q(m.label)))}: what ${one ? 'is it' : 'are they'} today?`;
+  }
+  const unsaid = missing.filter((m) => !IDENTITY_PART_LEVEL_KINDS.some(kind => kind === m.kind));
+  const one = unsaid.length === 1;
+  return `Olumi can’t work out ${as} yet: ${and(unsaid.map((m) => q(m.label)))} ${one ? 'has' : 'have'} no figure in the model, `
+    + `and Olumi can’t record one for ${one ? 'it' : 'them'} yet, so there is nothing for you to confirm.`;
+}
+
+/**
+ * Whether the STORED model holds a reading whose card may be offered: one to confirm, a base its writer can record, and
+ * every part with a level (`identityPartsWithoutLevel`). The re-offer's predicate (`readingWaiting`), the same as the Run hint's.
+ */
+export function identityCardOfferable(storedGraph: unknown, partLevels?: readonly IdentityPartLevel[],
+  reading?: IdentityProposal, brief?: string | null): boolean {
+  if (reading?.ceiling_stock !== undefined) {
+    return ceilingStockPendingOfferable(storedGraph, reading.ceiling_stock)
+      && (brief === undefined || isDeepStrictEqual(proposeCeilingStock(storedGraph, brief), reading));
+  }
+  const card = proposeProductIdentity(storedGraph);
+  // A route with the canonical brief may discover the new reading; graph-only carries must name their typed pending.
+  if (card === null && brief !== undefined) {
+    const ceiling = proposeCeilingStock(storedGraph, brief);
+    return ceiling !== null && ceilingStockPendingOfferable(storedGraph, ceiling.ceiling_stock);
+  }
+  if (card === null || !identityConfirmBaseIsWritable(storedGraph)) return false;
+  // A card CARRYING the user's typed figures (#4b) is offerable when its Yes would write them: the writer's own
+  // asked-check, then the same part-level write on a copy, then the same no-missing-part predicate the writer applies.
+  if (partLevels === undefined || partLevels.length === 0) return identityPartsWithoutLevel(storedGraph, card.factor_ids).length === 0;
+  if (!isRec(storedGraph) || !Array.isArray(storedGraph.nodes) || !partLevelsWereAsked(storedGraph, card.factor_ids, partLevels)) return false;
+  const withLevels = structuredClone(storedGraph) as Rec & { nodes: unknown[] };
+  for (const level of partLevels) {
+    const part = withLevels.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id);
+    if (part === undefined) return false;
+    const expected = partLevelWrite(part, level);
+    if (expected.scale_frame !== undefined) part.scale_frame = expected.scale_frame;
+    part.observed_state = expected.observed_state;
+  }
+  return identityPartsWithoutLevel(withLevels, card.factor_ids).length === 0;
+}
+
 const refuse = (reason: IdentityConfirmRefusal, detail?: string): IdentityConfirmEditResult =>
   ({ kind: 'refused', reason, ...(detail !== undefined ? { detail } : {}) });
 
+
+function oneOffPostimage(before: Rec): Rec | null {
+  const stock = goalStockAccumulationOf(before);
+  if (stock === null || stock.netZero === null || stock.identity.stated_in_brief === true || goalStockOneOffChoice(before) === null) return null;
+  const removed = new Set([stock.carrier.id, stock.netZero.id]);
+  return { ...structuredClone(before), nodes: (before.nodes as Rec[]).filter(n => !removed.has(n.id)).map(n => {
+    if (n.id !== stock.goal.id) return structuredClone(n);
+    const { nonlinear_identity: _reading, ...plain } = structuredClone(n);
+    const observed = structuredClone(stock.stock.observed_state) as Rec;
+    const cap = readGoalRecord(before, String(stock.goal.id))?.target?.cap ?? observed.cap;
+    if (typeof cap === 'number' && typeof observed.raw_value === 'number') Object.assign(observed, { cap, value: observed.raw_value / cap, baseline: observed.raw_value / cap });
+    return { ...plain, observed_state: observed, goal_stock_reading: 'one_off' };
+  }), edges: (before.edges as Rec[]).filter(e => !removed.has(e.from) && !removed.has(e.to) || e.to === stock.carrier.id && !removed.has(e.from))
+    .map(e => ({ ...structuredClone(e), ...(e.to === stock.carrier.id ? { to: stock.goal.id } : {}) })) };
+}
+
 export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams): IdentityConfirmEditResult {
-  const { outcome_id, factor_ids, words } = params;
+  const { outcome_id, factor_ids, words, part_levels } = params;
   if (typeof words !== 'string' || words.trim() === '' || words.length > WORDS_MAX) return refuse('words_invalid');
   if (typeof params.reading_token !== 'string'
-    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words })) {
+    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_levels, choice: params.choice, ceiling_stock: params.ceiling_stock })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -144,11 +297,44 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   // ── REVISION-SAFE: the analysis revision is the one the card was issued against ──────────────────────────────────
   const hashBefore = computeAnalysisAffectingGraphHash(params.persistedGraph as never);
   if (hashBefore !== params.expected_graph_hash) return refuse('superseded');
+  if (params.ceiling_stock !== undefined) {
+    const p = params.ceiling_stock;
+    const next = ceilingStockPostimage(params.persistedGraph, p, params.brief_text);
+    if (next === null || p.goal_id !== outcome_id || factor_ids.length !== 1 || factor_ids[0] !== p.transformation.carrier_id
+      || words !== ceilingStockWords(params.persistedGraph, p) || params.part_levels !== undefined || params.choice !== undefined) return refuse('reading_not_confirmed');
+    const parsed = GraphV3.safeParse(next);
+    if (!parsed.success || !isDeepStrictEqual(parsed.data.nodes.find(n => n.id === outcome_id)?.nonlinear_identity,
+      next.nodes.find((n: Rec) => n.id === outcome_id)?.nonlinear_identity)) return refuse('invalid_graph');
+    const label = String(next.nodes.find((n: Rec) => n.id === outcome_id)?.label);
+    const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'structural', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+      graph_hash_before: hashBefore, graph_hash_after: computeAnalysisAffectingGraphHash(next as never),
+      safe_summary: 'Confirmed how this quantity is calculated', impact: 'high', rerun_recommended: true,
+    } });
+    return { kind: 'mutated', mutatedGraph: next, graph: parsed.data, handlerFacts: [fact as HandlerFact] };
+  }
 
   const graph = structuredClone(params.persistedGraph) as Rec & { nodes: unknown[]; edges: unknown[] };
   const outcome = graph.nodes.find((n): n is Rec => isRec(n) && n.id === outcome_id);
   if (outcome === undefined) return refuse('outcome_not_found');
   const distinct = [...new Set(factor_ids)];
+  const stock = goalStockAccumulationOf(params.persistedGraph);
+  const stockCard = stock !== null && stock.goal.id === outcome_id && distinct.length === 1
+    && distinct[0] === stock.carrier.id ? proposeProductIdentity(params.persistedGraph) : null;
+  if (stockCard !== null && (stockCard.words !== words || part_levels !== undefined)) return refuse('reading_not_confirmed');
+  if (params.choice !== undefined) {
+    if (params.choice !== 'one_off' || stockCard === null) return refuse('reading_not_confirmed');
+    const plain = oneOffPostimage(params.persistedGraph);
+    const parsed = GraphV3.safeParse(plain);
+    if (plain === null || !parsed.success) return refuse('invalid_graph');
+    const label = String(stock!.goal.label);
+    const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'structural', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+      graph_hash_before: hashBefore, graph_hash_after: computeAnalysisAffectingGraphHash(plain as never),
+      safe_summary: 'Recorded the one-off reading', impact: 'high', rerun_recommended: true,
+    } });
+    return { kind: 'mutated', mutatedGraph: plain, graph: parsed.data, handlerFacts: [fact as HandlerFact] };
+  }
   if (identityConflictsWithScope({ ...outcome, nonlinear_identity: { operation: 'product', factor_ids: distinct } })) {
     return refuse('goal_scope_conflict', 'This product covers a component of the total goal. Correct its scope before confirming an identity.');
   }
@@ -160,16 +346,39 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
     const held = outcome.nonlinear_identity;
     const sameProduct = isRec(held) && held.operation === 'product' && Array.isArray(held.factor_ids)
       && held.factor_ids.length === distinct.length && distinct.every((id) => (held.factor_ids as unknown[]).includes(id));
-    if (!sameProduct) return refuse('carrier_conflict');
-    if (held.stated_in_brief === true) return refuse('already_carried');
+    if (!isRec(held) || !Array.isArray(held.factor_ids)) return refuse('carrier_conflict');
+    if (!sameProduct && stockCard === null) return refuse('carrier_conflict');
+    if (held.stated_in_brief === true && stockCard === null) return refuse('already_carried');
     factorOrder = [...(held.factor_ids as string[])];
   }
 
   // ── THE CONSTRUCTION RULE, on the stored graph ─────────────────────────────────────────────────────────────────────
-  const admitted = admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
+  const admitted = stockCard !== null ? { ok: true as const }
+    : admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
   if (!admitted.ok) return admitted.reason === 'invalid_graph' ? refuse('invalid_graph') : refuse(admitted.reason, admitted.detail);
+  if (part_levels !== undefined) {
+    if (!partLevelsWereAsked(params.persistedGraph, factorOrder, part_levels)) return refuse('part_level_not_asked');
+    for (const level of part_levels) {
+      const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id)!;
+      const expected = partLevelWrite(part, level);
+      if (expected.scale_frame !== undefined) part.scale_frame = expected.scale_frame;
+      part.observed_state = expected.observed_state;
+    }
+  }
+  const unlevelled = identityPartsWithoutLevel(graph, factorOrder);
+  if (unlevelled.length > 0) {
+    const labelOf = (id: string): string => {
+      const n = graph.nodes.find((x): x is Rec => isRec(x) && x.id === id);
+      return typeof n?.label === 'string' && n.label.trim() !== '' ? n.label.trim() : id;
+    };
+    return refuse('operand_level_missing', identityPartLevelAsk(labelOf(outcome_id), factorOrder.map(labelOf), unlevelled));
+  }
 
-  const carrier = { operation: 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
+  const carrier = { operation: stockCard !== null ? 'sum' as const : 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
+  if (stockCard !== null && stock?.netZero !== null && stock?.netZero !== undefined) {
+    const zero = graph.nodes.find((n): n is Rec => isRec(n) && n.id === stock.netZero!.id)!;
+    zero.observed_state = { ...(zero.observed_state as Rec), source: 'user_confirmed' };
+  }
   outcome.nonlinear_identity = carrier;
   for (const id of factorOrder) {
     const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
@@ -212,11 +421,24 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
  * ⛔ ONLY THE ONE CARRIER MAY CHANGE: no other node, no other member of this node, no edge, no top-level field — and,
  * on a confirmed part read at today's level, exactly the range and today level it lacked (`todaysWrite`).
  */
-export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string): boolean {
+export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string, partLevels?: readonly IdentityPartLevel[], ceilingStock?: CeilingStockPending, brief?: string | null): boolean {
+  if (ceilingStock !== undefined) {
+    const expected = ceilingStockPostimage(storedBefore, ceilingStock, brief);
+    return ceilingStock.goal_id === outcomeId && partLevels === undefined && expected !== null && isDeepStrictEqual(projectGraphForPersistence(expected), after);
+  }
   const before = normaliseAbsenceOnly(storedBefore);
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
+  const afterGoal = (after.nodes as Rec[]).find(n => n.id === outcomeId);
+  if (afterGoal?.goal_stock_reading === 'one_off') return isDeepStrictEqual(oneOffPostimage(before), after);
   if (after.nodes.length !== before.nodes.length) return false;
   const restored = structuredClone(after) as Rec & { nodes: unknown[] };
+  const stock = goalStockAccumulationOf(before);
+  if (stock !== null && stock.goal.id === outcomeId && stock.netZero !== null) {
+    const zero = restored.nodes.find((n): n is Rec => isRec(n) && n.id === stock.netZero!.id);
+    const prior = stock.netZero.observed_state as Rec;
+    if (zero === undefined || !isDeepStrictEqual(zero.observed_state, { ...prior, source: 'user_confirmed' })) return false;
+    zero.observed_state = structuredClone(prior);
+  }
   const at = restored.nodes.findIndex((n) => isRec(n) && n.id === outcomeId);
   const was = (before.nodes as unknown[]).find((n) => isRec(n) && n.id === outcomeId);
   if (at < 0 || !isRec(was)) return false;
@@ -224,6 +446,22 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
   if (Object.hasOwn(was, 'nonlinear_identity')) now.nonlinear_identity = structuredClone(was.nonlinear_identity);
   else delete now.nonlinear_identity;
   const confirmed = isRec(after.nodes.find((n) => isRec(n) && n.id === outcomeId)) ? (after.nodes.find((n) => isRec(n) && n.id === outcomeId) as Rec).nonlinear_identity : undefined;
+  if (partLevels !== undefined) {
+    if (!isRec(confirmed) || !Array.isArray(confirmed.factor_ids) || !partLevelsWereAsked(before, confirmed.factor_ids, partLevels)
+      || identityPartsWithoutLevel(after, confirmed.factor_ids).length > 0) return false;
+    for (const level of partLevels) {
+      const part = restored.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id);
+      const prior = before.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id);
+      if (part === undefined || prior === undefined) return false;
+      const expected = partLevelWrite(prior, level);
+      if (!isDeepStrictEqual(part.observed_state, expected.observed_state)
+        || (expected.scale_frame !== undefined && part.scale_frame !== expected.scale_frame)) return false;
+      if (Object.hasOwn(prior, 'observed_state')) part.observed_state = structuredClone(prior.observed_state); else delete part.observed_state;
+      if (expected.scale_frame !== undefined) {
+        if (Object.hasOwn(prior, 'scale_frame')) part.scale_frame = structuredClone(prior.scale_frame); else delete part.scale_frame;
+      }
+    }
+  }
   for (const id of isRec(confirmed) && Array.isArray(confirmed.factor_ids) ? confirmed.factor_ids : []) {
     const part = restored.nodes.find((n): n is Rec => isRec(n) && n.id === id);
     const prior = (before.nodes as unknown[]).find((n): n is Rec => isRec(n) && n.id === id);

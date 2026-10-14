@@ -507,8 +507,12 @@ const NewFactorsSchema = z
   .min(1)
   .refine((specs) => new Set(specs.map((f) => f.key)).size === specs.length, { message: 'duplicate key' });
 
-/** What a new factor may point at: what served agent-lane graphs link a factor to (never an option/decision, never a lever). */
-function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
+/**
+ * What a new factor may point at: what served agent-lane graphs link a factor to (never an option/decision, never a lever).
+ * ⭐ Recovery Batch B (B1): the ONE new-factor target rule — the add-factor door derives its own from this
+ * (`isNewFactorTarget`, add-factor-transaction.ts), so the two doors cannot drift apart on the goal again.
+ */
+export function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
   if (node === undefined) return false;
   if (node.kind === 'goal' || node.kind === 'outcome' || node.kind === 'risk') return true;
   return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
@@ -555,7 +559,7 @@ export function hypothesisEdgeValue(from: string, to: string, direction: 'positi
     exists_probability: DEFAULT_EXISTS_PROBABILITY,
     effect_direction: direction,
     defaulted: true,
-    provenance: { source: 'cee_hypothesis' as const },
+    provenance: { source: 'cee_hypothesis' as const, magnitude: 'olumi_placeholder' as const },
   };
 }
 
@@ -817,12 +821,12 @@ export interface GradedTodayLevel {
   readonly observed_state: Readonly<Record<string, unknown>>;
 }
 
-const STATED_TODAY_KEYS = new Set(['value', 'raw_value', 'cap', 'declared_scale', 'unit', 'source']);
+const STATED_TODAY_KEYS = new Set(['value', 'raw_value', 'cap', 'declared_scale', 'unit', 'source', 'extractionType']);
 const finiteNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
 /**
  * Whether `os` is exactly what `framedObservedState` (`admit-model.ts`) writes for a baseline the user stated: source
- * `brief_extraction`; framed `{ value: raw / cap, raw_value, cap, declared_scale: 'unit_interval' }` on a cap above 1
+ * `brief_extraction` with its attestation `extractionType: 'explicit'` (a hold minted before it may lack it: then the person's by its stamp alone); framed `{ value: raw / cap, raw_value, cap, declared_scale: 'unit_interval' }` on a cap above 1
  * with 0 ≤ raw ≤ cap; or, with no usable range, a bare value already within [0, 1] (a bare amount above 1 would be
  * unanalysable, `baseline_scale_unresolved`). An optional unit. Nothing else — no extra member rides it into the model.
  */
@@ -831,6 +835,8 @@ export function isStatedTodayObservedState(os: unknown): boolean {
   const o = os as Record<string, unknown>;
   if (!Object.keys(o).every((k) => STATED_TODAY_KEYS.has(k))) return false;
   if (o.source !== 'brief_extraction' || !finiteNum(o.value)) return false;
+  // ⛔ POSITIVE ATTESTATION (DL 12 Oct): the door writes `explicit` beside the stamp it verified; nothing else rides here.
+  if (o.extractionType !== undefined && o.extractionType !== 'explicit') return false;
   if (o.unit !== undefined && (typeof o.unit !== 'string' || o.unit.trim() === '')) return false;
   if (o.cap === undefined) {
     return o.raw_value === undefined && o.declared_scale === undefined && o.value >= 0 && o.value <= 1;

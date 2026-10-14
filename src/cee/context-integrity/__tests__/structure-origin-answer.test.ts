@@ -487,7 +487,8 @@ describe('the brief claim is inherited from the producer, never re-decided here'
       // Every DECLARED value must be handled — a declared value we return null
       // for is a gap in this module, not a safe decline.
       expect(answer, `declared provenance "${value}" produced no answer`).not.toBeNull();
-      if (answer!.toLowerCase().includes('your brief')) claimsBrief.push(value);
+      if (value === 'unverified_brief') expect(answer).toBe('Not confirmed from your brief');
+      else if (answer!.toLowerCase().includes('your brief')) claimsBrief.push(value);
     }
     expect(claimsBrief).toEqual(['from_brief']);
   });

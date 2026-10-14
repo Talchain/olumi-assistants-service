@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ACCOUNTS "Invite a colleague to this decision" (DL #85 5947426886; lease 5947474393): a VIEWER MEMBER may READ the
  * graph (and its Run) through THIS route, and nowhere else.
@@ -75,6 +76,7 @@ beforeEach(async () => {
   isScenarioMember.mockResolvedValue(false);
   readRecent.mockResolvedValue([]);
   app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
 });
@@ -162,14 +164,19 @@ describe("the member grant reaches NO other door", () => {
 
   it("POSITIVE CONTROL: the scan sees the source tree (and the route that uses the grant)", () => {
     expect(files.length).toBeGreaterThan(500);
-    expect(rel).toContain("routes/assist.v1.scenario-graph.ts");
+    expect(rel).toContain("plugins/scenario-ownership.ts");
   });
 
   it("only the graph-read route and the store layer name it: no turn, register, versions, save, stop or Run path", () => {
     expect(rel).toEqual([
       "orchestrator-v5/session/store.ts",
       "orchestrator-v5/session/supabase-store.ts",
-      "routes/assist.v1.scenario-graph.ts",
-    ]);
+      "plugins/scenario-ownership.ts",
+    ].sort());
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 import { RUN_ANALYSIS_PROJECTION_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { deriveAnalysisFreshness } from '../../context/freshness.js';
 import { loadScenarioAnalysisFactsForRead } from '../../build-turn-context.js';
@@ -68,6 +74,8 @@ interface MockConfig {
     error?: { message: string; code?: string } | null;
     count?: unknown;
   };
+  /** Successive `.range()` pages (paged reads); falls back to `selectResult` once exhausted. */
+  rangePages?: Array<{ data?: unknown; error?: { message: string; code?: string } | null }>;
 }
 
 function makeClient(cfg: MockConfig = {}): {
@@ -82,6 +90,7 @@ function makeClient(cfg: MockConfig = {}): {
     options?: unknown;
     filters: unknown;
   }> = [];
+  let rangeCalls = 0;
 
   const client = {
     rpc: vi.fn(async (fn: string, args: unknown) => {
@@ -121,6 +130,11 @@ function makeClient(cfg: MockConfig = {}): {
           return filters['eq:handler_id'] === 'edit_graph' && cfg.editSelectPromise !== undefined
             ? cfg.editSelectPromise
             : Promise.resolve((filters['eq:handler_id'] === 'edit_graph' ? cfg.editSelectResult : undefined) ?? cfg.selectResult ?? { data: [], error: null });
+        },
+        range: (from: number, to: number) => {
+          filters.range = [from, to];
+          const pageIndex = rangeCalls++;
+          return Promise.resolve(cfg.rangePages?.[pageIndex] ?? cfg.selectResult ?? { data: [], error: null });
         },
         maybeSingle: () =>
           Promise.resolve(cfg.selectResult ?? { data: null, error: null }),
@@ -1279,6 +1293,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
         expect.objectContaining({
           fact_row_id: runAnalysisRow.id,
           fact_created_at: runAnalysisRow.created_at,
+          evaluated_scenario_revision: null,
           fact: expect.objectContaining({
             fact_type: 'run_analysis',
             noop: false,
@@ -1293,7 +1308,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     expect(selectCalls[0]).toMatchObject({
       table: 'v5_handler_facts',
       cols:
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
       options: { count: 'exact' },
     });
     const filters = selectCalls[0]!.filters as Record<string, unknown>;
@@ -1789,56 +1804,6 @@ describe('SupabaseSessionStore invalidation delegation', () => {
   });
 });
 
-describe('SupabaseSessionStore.storeDraftGraph', () => {
-  const GRAPH = {
-    nodes: [{ id: 'dec_launch', kind: 'decision', label: 'Launch?' }],
-    edges: [{ from: 'dec_launch', to: 'goal_revenue', kind: 'influences', weight: 1 }],
-  };
-
-  it('calls store_draft_graph RPC with p_scenario_id and p_graph', async () => {
-    const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error: null } });
-    const store = new SupabaseSessionStore(
-      client,
-      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-      { defaultReadLimit: 20 },
-    );
-    await store.storeDraftGraph(SCENARIO, GRAPH);
-    expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0].fn).toBe('store_draft_graph');
-    expect(rpcCalls[0].args).toEqual({
-      p_scenario_id: SCENARIO,
-      p_graph: GRAPH,
-    });
-  });
-
-  it('resolves without returning a value on success', async () => {
-    const { client } = makeClient({ rpcResult: { data: null, error: null } });
-    const store = new SupabaseSessionStore(
-      client,
-      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-      { defaultReadLimit: 20 },
-    );
-    await expect(store.storeDraftGraph(SCENARIO, GRAPH)).resolves.toBeUndefined();
-  });
-
-  it('throws StateCommitFailedError with rpc_code on RPC error', async () => {
-    const { client } = makeClient({
-      rpcResult: { error: { message: 'scenario not found', code: 'P0001' } },
-    });
-    const store = new SupabaseSessionStore(
-      client,
-      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-      { defaultReadLimit: 20 },
-    );
-    await expect(store.storeDraftGraph(SCENARIO, GRAPH)).rejects.toBeInstanceOf(
-      StateCommitFailedError,
-    );
-    await expect(store.storeDraftGraph(SCENARIO, GRAPH)).rejects.toMatchObject({
-      rpc_code: 'P0001',
-    });
-  });
-});
-
 describe('SupabaseSessionStore.readMostRecentCoachingState — Stage 2B-1b null-filtered read', () => {
   const WRAPPED = toPreDispatchSnapshot(EMPTY_COACHING_STATE);
 
@@ -1909,15 +1874,20 @@ describe('SupabaseSessionStore.readMostRecentCoachingState — Stage 2B-1b null-
 
 
 describe('readonly existing-scenario snapshot', () => {
-  const row = () => ({ id: SCENARIO, user_id: USER, graph: { nodes: [], edges: [] }, brief_text: 'The brief', analysis_invalidated_at: null });
+  const row = () => ({ id: SCENARIO, user_id: USER, graph: { nodes: [], edges: [] }, brief_text: 'The brief', analysis_invalidated_at: null, created_at: '2026-10-09T10:00:00Z' });
   it('returns one stored row and its restore marker in one query, with no RPC', async () => {
-    const value = { ...row(), analysis_invalidated_at: '2026-10-02T00:00:00.000Z' };
+    const value = { ...row(), analysis_invalidated_at: '2026-10-02T00:00:00.000Z', revision: 7 };
     const { client, selectCalls, rpcCalls } = makeClient({ selectResult: { data: value, error: null } });
     const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
-    expect(await store.readExistingScenario(SCENARIO)).toEqual({ userId: USER, graph: value.graph, briefText: value.brief_text, analysisInvalidatedAt: value.analysis_invalidated_at });
+    expect(await store.readExistingScenario(SCENARIO)).toEqual({ userId: USER, graph: value.graph, briefText: value.brief_text, analysisInvalidatedAt: value.analysis_invalidated_at, revision: 7, createdAt: value.created_at });
     expect(selectCalls).toHaveLength(1);
-    expect(selectCalls[0]).toMatchObject({ table: 'scenarios', cols: 'id, user_id, graph, brief_text, analysis_invalidated_at', filters: { ['eq:id']: SCENARIO } });
+    expect(selectCalls[0]).toMatchObject({ table: 'scenarios', cols: 'id, user_id, graph, brief_text, analysis_invalidated_at, revision, created_at', filters: { ['eq:id']: SCENARIO } });
     expect(rpcCalls).toHaveLength(0);
+  });
+  it.each([undefined, null, 'not-a-timestamp'])('missing or malformed creation date is unavailable, not a failed graph read: %s', async created_at => {
+    const { client } = makeClient({ selectResult: { data: { ...row(), created_at }, error: null } });
+    const snapshot = await new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 }).readExistingScenario(SCENARIO);
+    expect(snapshot).toMatchObject({ userId: USER, graph: row().graph, briefText: row().brief_text, createdAt: null });
   });
   it('distinguishes an absent row from a guest row', async () => {
     const absent = makeClient({ selectResult: { data: null, error: null } });
@@ -2007,5 +1977,98 @@ describe('SupabaseSessionStore.readNewestRunDeliveryFor (0.79, agent lane delive
     const { store } = storeWith({ data: [delivery, constraint], error: null });
     const wrapped = await store.readFactsWithTurnFor(['turn-row-answer', 'turn-row-run']);
     expect(wrapped.map((w) => w.fact.fact_type)).toStrictEqual(['run_delivery', 'add_constraint']);
+  });
+});
+
+describe('SupabaseSessionStore.readStatedObjectionFactsFor (S8: the user\'s stated disagreement, scenario-wide)', () => {
+  const dissentRow = (id: string, createdAt: string, statement: string) => ({
+    id,
+    created_at: createdAt,
+    handler_id: 'finding_dissent',
+    noop: false,
+    payload: {
+      fact_type: 'finding_dissent',
+      fact_version: 1,
+      result: {
+        finding_id: 'finding-price',
+        analysis_id: '0d9c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+        statement,
+        provenance: 'user_set',
+      },
+    },
+  });
+  const storeOf = (selectResult: { data: unknown; error: unknown }) => {
+    const { client, selectCalls } = makeClient({ selectResult: selectResult as never });
+    return {
+      selectCalls,
+      store: new SupabaseSessionStore(
+        client,
+        new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+        { defaultReadLimit: 20 },
+      ),
+    };
+  };
+
+  it('is scenario-scoped, finding_dissent-only, non-noop, newest-first, bounded, and is NOT a conversation read', async () => {
+    const { store, selectCalls } = storeOf({
+      data: [dissentRow('b', '2026-10-10T10:00:00.000Z', 'Newest reason.'), dissentRow('a', '2026-10-09T10:00:00.000Z', 'Older reason.')],
+      error: null,
+    });
+    const facts = await store.readStatedObjectionFactsFor(SCENARIO, 25);
+    expect(selectCalls).toHaveLength(1); // a short page ends the read
+    expect(facts.map((f) => (f as { result: { statement: string } }).result.statement)).toEqual(['Newest reason.', 'Older reason.']);
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.table).toBe('v5_handler_facts');
+    const filters = selectCalls[0]!.filters as Record<string, unknown>;
+    expect(filters['eq:scenario_id']).toBe(SCENARIO);
+    expect(filters['eq:handler_id']).toBe('finding_dissent');
+    expect(filters['eq:noop']).toBe(false);
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+    expect(filters['order:id']).toEqual({ ascending: false });
+    expect(filters.range).toEqual([0, 24]);
+    // No turn-window read: the conversation table is never touched.
+    expect(selectCalls.some((c) => c.table === 'v5_conversation_turns')).toBe(false);
+  });
+
+  it('a clean zero-row read is an empty set; a database error and a malformed row THROW (unknown, never none)', async () => {
+    await expect(storeOf({ data: [], error: null }).store.readStatedObjectionFactsFor(SCENARIO, 25)).resolves.toEqual([]);
+    await expect(storeOf({ data: null, error: { message: 'read unavailable', code: '08006' } }).store.readStatedObjectionFactsFor(SCENARIO, 25))
+      .rejects.toMatchObject({ name: 'SessionReadError', code: '08006' });
+    await expect(storeOf({ data: null, error: null }).store.readStatedObjectionFactsFor(SCENARIO, 25))
+      .rejects.toMatchObject({ name: 'SessionReadError', code: 'stated_objection_corrupt' });
+    const wrongType = { ...dissentRow('c', '2026-10-10T10:00:00.000Z', 'x'), handler_id: 'edit_graph' };
+    await expect(storeOf({ data: [wrongType], error: null }).store.readStatedObjectionFactsFor(SCENARIO, 25))
+      .rejects.toMatchObject({ name: 'SessionReadError', code: 'stated_objection_corrupt' });
+  });
+
+  it('refuses a non-positive limit before any query', async () => {
+    const { store, selectCalls } = storeOf({ data: [], error: null });
+    await expect(store.readStatedObjectionFactsFor(SCENARIO, 0)).rejects.toMatchObject({ code: 'stated_objection_limit_invalid' });
+    expect(selectCalls).toHaveLength(0);
+  });
+
+  it('a finding rewritten many times cannot starve the others: pages until THREE different findings are covered (or rows run out)', async () => {
+    const row = (id: string, finding: string, at: string) => ({
+      ...dissentRow(id, at, `Reason for ${finding} (${id}).`),
+      payload: { ...dissentRow(id, at, `Reason for ${finding} (${id}).`).payload,
+        result: { ...dissentRow(id, at, 'x').payload.result, finding_id: finding, statement: `Reason for ${finding} (${id}).` } },
+    });
+    const pageOfF1 = Array.from({ length: 50 }, (_, i) => row(`f1-${i}`, 'finding-1', `2026-10-10T10:${String(59 - (i % 60)).padStart(2, '0')}:00.000Z`));
+    const page2 = [row('f2-0', 'finding-2', '2026-10-09T10:00:00.000Z'), row('f3-0', 'finding-3', '2026-10-08T10:00:00.000Z')];
+    const { client, selectCalls } = makeClient({ rangePages: [{ data: pageOfF1, error: null }, { data: page2, error: null }] });
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    const facts = await store.readStatedObjectionFactsFor(SCENARIO, 200, 3);
+    const findings = new Set(facts.map((f) => (f as { result: { finding_id: string } }).result.finding_id));
+    expect([...findings].sort()).toEqual(['finding-1', 'finding-2', 'finding-3']);
+    expect(selectCalls).toHaveLength(2);
+    expect((selectCalls[0]!.filters as Record<string, unknown>).range).toEqual([0, 49]);
+    expect((selectCalls[1]!.filters as Record<string, unknown>).range).toEqual([50, 99]);
+    // CONTRAST: three findings already on the first full page → no second query.
+    const mixed = [row('a', 'finding-1', '2026-10-10T10:00:00.000Z'), row('b', 'finding-2', '2026-10-10T09:00:00.000Z'), row('c', 'finding-3', '2026-10-10T08:00:00.000Z'),
+      ...Array.from({ length: 47 }, (_, i) => row(`d-${i}`, 'finding-1', '2026-10-09T10:00:00.000Z'))];
+    const second = makeClient({ rangePages: [{ data: mixed, error: null }] });
+    const s2 = new SupabaseSessionStore(second.client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    await s2.readStatedObjectionFactsFor(SCENARIO, 200, 3);
+    expect(second.selectCalls).toHaveLength(1);
   });
 });
