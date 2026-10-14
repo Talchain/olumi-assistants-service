@@ -156,6 +156,15 @@ describe('GEN #5: a deadline goal typed after the draft opens the revised-draft 
     expect(s.commits()).toBe(1);
   });
 
+  it('the card shows construction\'s whole deliverable, never the tool\'s short trigger (AIE: never truncate the card to it)', async () => {
+    const s = server();
+    const { caps } = lane(s, deliverCandidate);
+    const r = await caps.proposeGoalDeadline!(turn(FX.deliver_turn) as never, { ...deadline, deliverable: 'MVP' }) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.public_label).toContain('(the draft modelled ‘Development speed’): ‘a high-quality MVP’, with the deadline date still to be confirmed.');
+    expect(r.public_label).not.toContain('‘MVP’');
+  });
+
   it('a calendar date typed in the message is not saved by this card: the date is still to be confirmed, on its own card', async () => {
     const s = server();
     const { caps } = lane(s, deliverCandidate);
