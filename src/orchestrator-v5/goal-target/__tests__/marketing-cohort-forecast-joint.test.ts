@@ -82,10 +82,13 @@ describe('marketing: the chance of meeting both targets, from each option’s sa
     expect(notes).toContain(LIMITS_LEFT_OUT);
     expect(notes.filter((n) => n.startsWith('‘Annual marketing spend’ is at most'))).toHaveLength(1);
     const law = notes.find((n) => n.startsWith('These chances rest on a forecast, not on the model’s links'))!;
-    expect(law).toContain('‘Hire marketing manager’ reaches 500 people over the first three months after launch with a ‘Conversion rate’ of 12–18%');
-    expect(law).toContain('the one you said the conversion is as likely to fall inside as outside (the middle half)');
+    expect(law).toContain('‘Hire marketing manager’ reaches 500 people over the first three months after launch with your ‘Conversion rate’ estimates of 12% and 18%');
+    // AIE 6176433015: the user's quartiles are theirs; the Beta curve through them is Olumi's approximation, said as such.
+    expect(law).toContain('Each pair of conversion figures is your own estimate, with about one chance in four below the lower and one in four above the upper');
+    expect(law).toContain('a smooth curve through them (a Beta distribution), with each person converting at that same chance, is Olumi’s approximation');
+    expect(law).not.toMatch(/as likely to fall inside|middle half|even chance/);
     expect(law).not.toContain('read as');
-    expect(law).toContain('the number of people reached is held fixed, so its own uncertainty isn’t included');
+    expect(law).toContain('The number of people reached is held fixed, so its own uncertainty isn’t included');
     expect(law).toContain('‘New customers in first 3 months’ counts the people who convert among those same people, as you said');
     // The model's reasons for the targets describe the links, not this figure: never said beside it.
     expect(notes.filter((n) => n.includes('has no level today') || n.startsWith('‘New customers in first 3 months’ being'))).toEqual([]);

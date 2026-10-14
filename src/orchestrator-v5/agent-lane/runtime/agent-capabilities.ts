@@ -308,9 +308,9 @@ import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type To
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
-import { applyCohortForecastEdit, approvedCohortForecastOf, COHORT_MIDDLE_HALF_QUESTION, cohortForecastCardWords, cohortForecastRecordedWords, percentRangesIn,
-  peopleFiguresIn, SET_COHORT_FORECAST_OP, storedTargetRowsOf, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
-import { cohortTargetsOf, type CohortForecast } from '../../goal-target/cohort-forecast.js';
+import { applyCohortForecastEdit, approvedCohortForecastOf, cohortForecastCardWords, cohortForecastRecordedWords, cohortQuartileQuestion, cohortWindowOf,
+  percentRangesIn, peopleFiguresIn, sameQuestion, SET_COHORT_FORECAST_OP, storedTargetRowsOf, UNDERLYING_RATE_MEANING, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
+import { cohortTargetsOf, isCohortRateRow, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -6026,10 +6026,11 @@ export function createAgentCapabilities(
 
     /**
      * ⭐ AIE SAME-COHORT LAW (science PR-4b; `goal-target/cohort-forecast-write.ts`): ONE option's cohort forecast from the
-     * user's own words, three verified S2 statements: the people it reaches over the goal's window (a point), the range the
-     * conversion is as likely to fall inside as outside (ONLY as the answer to {@link COHORT_MIDDLE_HALF_QUESTION}; any other
-     * range is never read as a middle half, AIE #94 6174707160), and their answer that the count target counts converts among
-     * those same people. Prepares one card; only its press writes (card-only). Nothing is estimated here.
+     * user's own words, three verified S2 statements: the people it reaches over the goal's window (a point), their two
+     * estimates of the underlying conversion rate with about one chance in four below and one in four above (ONLY as their
+     * answer, typed THIS turn, to `cohortQuartileQuestion` for this option and window; any other range is kept as said and never
+     * read as quartiles, AIE #94 6174707160 and 6176433015), and their answer that the count target counts converts among those
+     * same people. Prepares one card; only its press writes (card-only). Nothing is estimated here.
      */
     async proposeCohortForecast(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
@@ -6045,7 +6046,7 @@ export function createAgentCapabilities(
       const option = named[0]!;
       const optionId = String(option.id);
       const targets = storedTargetRowsOf(g.raw);
-      const rate = targets.filter((t) => typeof t.unit === 'string' && t.unit.trim() === '%');
+      const rate = targets.filter(isCohortRateRow);
       const count = targets.filter((t) => !rate.includes(t));
       if (targets.length !== 2 || rate.length !== 1 || count.length !== 1) {
         return { ok: false, mutated: false, refusal: 'targets_not_cohort',
@@ -6055,7 +6056,7 @@ export function createAgentCapabilities(
       const people = verifyStatements([{ ...(isPlainRecord(args?.people) ? args.people : {}), form: 'point' }], texts,
         { subject: { quantity: 'people_reached', option_id: optionId }, unit: 'people', forms: ['point'], figuresIn: peopleFiguresIn });
       const conversion = verifyStatements([{ ...(isPlainRecord(args?.conversion) ? args.conversion : {}), form: 'range' }], texts,
-        { subject: { quantity: 'conversion_middle_half', option_id: optionId }, unit: '%', forms: ['range'], figuresIn: percentRangesIn });
+        { subject: { quantity: 'underlying_conversion_quartiles', option_id: optionId }, unit: '%', forms: ['range'], figuresIn: percentRangesIn });
       const same = verifyStatements([{ quote: isPlainRecord(args?.same_cohort) ? args.same_cohort.quote : undefined, form: 'holds_now' }], texts,
         { subject: { quantity: 'same_cohort' }, unit: '', forms: ['holds_now'], figuresIn: () => [] });
       for (const v of [people, conversion, same]) {
@@ -6064,11 +6065,22 @@ export function createAgentCapabilities(
       const p = (people as Extract<typeof people, { kind: 'verified' }>).statements[0]!;
       const c = (conversion as Extract<typeof conversion, { kind: 'verified' }>).statements[0]!;
       const s = (same as Extract<typeof same, { kind: 'verified' }>).statements[0]!;
-      // ⛔ AIE #94 6174707160: a range is the user's middle half only as their answer to that one question, never by Olumi's reading.
-      if (c.answering !== COHORT_MIDDLE_HALF_QUESTION) {
-        return { ok: false, mutated: false, refusal: 'middle_half_not_asked',
-          detail: `A range is recorded as an even chance only when the user gives it in answer to: "${COHORT_MIDDLE_HALF_QUESTION}" `
-            + 'Ask that, and pass their answer with answering set to those exact words. Their range as they said it is kept, never re-read. Nothing was prepared.' };
+      // ⛔ AIE #94 6174707160 + 6176433015: two figures are the user's quartiles only as their answer, in the message that answers
+      // it, to the one-in-four question for THIS option, cohort and window; never by Olumi's reading of an ordinary range.
+      const window = cohortWindowOf(g.raw);
+      if (window === undefined) {
+        return { ok: false, mutated: false, refusal: 'targets_not_cohort',
+          detail: 'The goal is not measured over a window, so there is no cohort to forecast. Nothing was prepared.' };
+      }
+      const question = cohortQuartileQuestion(String(option.label), window);
+      const answeredNow = verifyStatements([{ ...(isPlainRecord(args?.conversion) ? args.conversion : {}), form: 'range' }], { now: ctx.user_turn_text },
+        { subject: { quantity: 'underlying_conversion_quartiles', option_id: optionId }, unit: '%', forms: ['range'], figuresIn: percentRangesIn });
+      if (!sameQuestion(c.answering, question) || answeredNow.kind !== 'verified') {
+        return { ok: false, mutated: false, refusal: 'quartiles_not_asked',
+          detail: `Two conversion figures are recorded as the user's own estimates only as their answer, in the message that answers it, to exactly: "${question}" `
+            + `(${UNDERLYING_RATE_MEANING}) Pass answering set to that question. A range they gave any other way is kept as they said it and is never read as `
+            + 'these estimates. If they cannot judge those chances, keep their range as they said it and offer to look at the conversion of a comparable past '
+            + 'campaign instead; do not keep asking. Nothing was prepared.' };
       }
       const f: CohortForecast = { people_reached: p.low!, conversion_middle_half_pct: [c.low!, c.high!],
         same_cohort: { rate_target_node_id: String(rate[0]!.node_id), count_target_node_id: String(count[0]!.node_id), stated_by: 'user' },
@@ -6085,21 +6097,19 @@ export function createAgentCapabilities(
           detail: dry.kind === 'unchanged' ? 'That forecast is already held for this option.' : 'This forecast cannot be recorded on the current model. Nothing was prepared.' };
       }
       const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id);
-      const goal = nodes.find((n) => n.kind === 'goal');
-      const basis = goal === undefined ? undefined : goalTargetBasisOf(goal);
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
         operations: [{ op: SET_COHORT_FORECAST_OP, path: optionId, value: { cohort_forecast: f, expected_node: approved.expected_node,
           expected_targets: approved.expected_targets, statements: approved.statements } }],
         provenance: { authored_by: 'user_stated', basis: p.source },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: cohortForecastCardWords(String(option.label), f, approved.statements, labelOf(rate[0]!.node_id), labelOf(count[0]!.node_id),
-          basis === undefined ? '' : ` ${periodWords(basis)}`) });
+          window) });
       for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
         if (proposals.get(pending.proposal_id)?.operations.some((o) => o.op === SET_COHORT_FORECAST_OP && o.path === optionId)) proposals.discard(pending.proposal_id);
       }
       proposals.put(proposal);
       return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
-        cohort_forecast: { option: String(option.label), people_reached: f.people_reached, conversion_middle_half_percent: f.conversion_middle_half_pct },
+        cohort_forecast: { option: String(option.label), people_reached: f.people_reached, conversion_one_in_four_each_side_percent: f.conversion_middle_half_pct },
         note: 'Show the card as it is. Only the user’s press records it; then each option needs its own forecast before the chance of meeting both targets can be said.' };
     },
 

@@ -35,12 +35,19 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { LAUNCH_WINDOW_UNBUILT, launchWindowOf, launchWindowQuestion, periodWords } from '../goal-target/goal-target-basis.js';
 import { readCohortForecast } from '../goal-target/cohort-forecast.js';
-import { COHORT_MIDDLE_HALF_QUESTION } from '../goal-target/cohort-forecast-write.js';
+import { cohortQuartileQuestion, cohortWindowOf, UNDERLYING_RATE_MEANING } from '../goal-target/cohort-forecast-write.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
 /** AIQ's cases (#77 5912882031): (a) no today's level · (b) an unscorable comparator · (c) no quantified path · (d) a target-derived scale. */
 export type TargetCase = 'a' | 'b' | 'c' | 'd';
+
+/**
+ * ⭐ Science PR-4b, AIE 6176433015: the next option's two forecast questions, said once each. The people it reaches, then the
+ * one-in-four question for that option, cohort and window, with the meaning of "underlying conversion rate" beside it.
+ */
+const cohortForecastAsk = (option: string, period: string, window: string | undefined): string | null => window === undefined ? null
+  : `For ‘${option}’: how many people would it reach ${period}? ${cohortQuartileQuestion(option, window)} ${UNDERLYING_RATE_MEANING}`;
 
 export interface TargetTestabilityFailure {
   readonly precondition: TargetPrecondition;
@@ -555,8 +562,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const options = launch === undefined || otherTarget === undefined ? [] : nodes.filter((n) => n.kind === 'option');
   const awaiting = options.filter((n) => readCohortForecast(n) === undefined);
   const cohortQuestion = options.length === 0 ? undefined : awaiting.length === options.length ? launchWindowQuestion(name, launch!, otherTarget)
-    : awaiting.length > 0 ? `For ‘${labelOf(String(awaiting[0]!.id))}’: how many people would it reach ${periodWords(launch!)}, and `
-      + `${COHORT_MIDDLE_HALF_QUESTION[0]!.toLowerCase()}${COHORT_MIDDLE_HALF_QUESTION.slice(1)}` : null;
+    : awaiting.length > 0 ? cohortForecastAsk(labelOf(String(awaiting[0]!.id)), periodWords(launch!), cohortWindowOf(graph)) ?? launchWindowQuestion(name, launch!, otherTarget) : null;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? launch !== undefined

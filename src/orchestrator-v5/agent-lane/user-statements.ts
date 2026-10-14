@@ -115,7 +115,7 @@ export function verifyStatements(raw: unknown, texts: StatementTexts, rules: Sta
     const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
     const qualifier = trimmed(given?.qualifier, 80);
     const conditions = trimmed(given?.conditions, 160);
-    const answering = trimmed(given?.answering, 120);
+    const answering = trimmed(given?.answering, 400);
     const negated = given?.negated === true;
     const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
       ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),

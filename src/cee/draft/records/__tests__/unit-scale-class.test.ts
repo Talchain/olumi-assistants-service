@@ -488,6 +488,7 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
 // The combined carrier and native-intervention changes retain 46 sites across 25 files; the percent-level predicate
 // (#2034) adds one: 47 across 26. A1's switch-level refusal copy (`shownSwitchLevel`) adds one: 48 across 27.
 // RT-18's card points rule (`meetsReading`) adds one: exact '%' reading only, the writer's own rule.
+// Science PR-4b's cohort rate row (`isCohortRateRow`) adds one: exact '%' only, the reader's and the capability's one rule.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
@@ -518,6 +519,9 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "orchestrator-v5/compose/warrant-demotion.ts": 1,
   "orchestrator-v5/context/cqe/compromise-backstop.ts": 1,
   "orchestrator-v5/context/cqe/rules.ts": 1,
+  // `isCohortRateRow` (science PR-4b): the cohort's rate target is a stored unit of exactly '%'. The display classifier would
+  // admit "% of revenue" or "percentage points", which are not a share of the people reached.
+  "orchestrator-v5/goal-target/cohort-forecast.ts": 1,
   "orchestrator-v5/handlers/describe-changeset.ts": 1,
   "orchestrator-v5/label-value-divergence.ts": 1,
   "orchestrator-v5/routing/baseline-answer-mutation.ts": 1,
