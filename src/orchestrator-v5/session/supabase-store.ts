@@ -2107,7 +2107,8 @@ export class SupabaseSessionStore implements SessionStore {
   /**
    * ⭐ B RESTATED GOAL: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`). Scoped at the bytes
    * to the exact scenario; oldest first with a stable tie break; one row past the cap marks the ledger incomplete. Only
-   * the first message's text is returned. A failed or malformed read throws: "unknown", never "nothing written".
+   * the first message's text is returned as the brief; the later ones only as context (`later_user_messages`). A failed or
+   * malformed read throws: "unknown", never "nothing written".
    */
   async readCommittedTurnLedger(scenarioId: string): Promise<CommittedTurnLedger> {
     const { data, error } = await this.client
@@ -2122,6 +2123,7 @@ export class SupabaseSessionStore implements SessionStore {
     const rows = data as Array<Record<string, unknown>>;
     const writes: string[] = [];
     const messages: string[] = [];
+    const later: { turn_id: string; text: string }[] = [];
     let first: string | null = null;
     for (const row of rows.slice(0, COMMITTED_TURN_LEDGER_ROWS)) {
       if (typeof row.turn_id !== 'string' || row.turn_id === '') {
@@ -2132,9 +2134,11 @@ export class SupabaseSessionStore implements SessionStore {
       if (said !== '' && !messages.includes(row.turn_id)) {
         messages.push(row.turn_id);
         if (first === null) first = said;
+        else later.push({ turn_id: row.turn_id, text: said });
       }
     }
-    return { write_turn_ids: writes, user_message_turn_ids: messages, first_user_message: first, complete: rows.length <= COMMITTED_TURN_LEDGER_ROWS };
+    return { write_turn_ids: writes, user_message_turn_ids: messages, first_user_message: first, later_user_messages: later,
+      complete: rows.length <= COMMITTED_TURN_LEDGER_ROWS };
   }
 
   async releaseTurnClaim(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void> {

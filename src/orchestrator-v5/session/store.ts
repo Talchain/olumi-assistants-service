@@ -313,6 +313,11 @@ export interface CommittedTurnLedger {
   readonly user_message_turn_ids: readonly string[];
   /** The first of those messages, trimmed (the brief, on a scenario built from one); `null` when there is none. */
   readonly first_user_message: string | null;
+  /**
+   * The messages after the first, trimmed, oldest first, by turn (whatever their origin: a chip's words are stored as a
+   * user message too). A revised draft reads them as CONTEXT only, never as verified words of the user (PL #94 07:32Z Q1).
+   */
+  readonly later_user_messages?: readonly { readonly turn_id: string; readonly text: string }[];
   /** `false` when the scenario holds more rows than the read covered: the ledger is then not a census. */
   readonly complete: boolean;
 }
