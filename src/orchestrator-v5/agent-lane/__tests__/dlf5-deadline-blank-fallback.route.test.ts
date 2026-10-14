@@ -171,4 +171,29 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
     expect(saved).toEqual(want);
     expect(changes).toBe(1);
   });
+
+  // Buddy review r2 (Codex, read-only, 11dc9f30): a clause joiner other than "and"/"but", and a duration the reader will not place.
+  it('buddy r2: "As of D revenue was 2m whereas our launch deadline is six months" keeps the host reference (D echoed)', async () => {
+    const { saved, detail } = await offerAndApprove('As of 2026-09-01 revenue was 2m whereas our launch deadline is six months.',
+      { deadline_words: 'six months', reference_date: '2026-09-01' });
+    expect(saved).toEqual({ deadline: '2027-04-13', reference: '2026-10-13', stated: 6 });
+    expect(detail).not.toContain('Olumi\u2019s interpretation');
+  });
+  it('buddy r2: "… lease expires in six months, and our launch deadline is in 180 days" quoting the lease → Olumi\u2019s reading', async () => {
+    const { detail } = await offerAndApprove('Our office lease expires in six months, and our launch deadline is in 180 days.',
+      { deadline_words: 'in six months', reference_date: '' });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
+  });
+  it('the exception: a quote that itself names the deadline, in a message naming "deadline" once, stays the user\u2019s', async () => {
+    const { detail, saved } = await offerAndApprove('Our office lease expires in six months, and our launch deadline is in nine months.',
+      { deadline_words: 'launch deadline is in nine months', reference_date: '' });
+    expect(detail).toContain('Your words: \u201claunch deadline is in nine months\u201d.');
+    expect(detail).not.toContain('Olumi\u2019s interpretation');
+    expect(saved).toEqual({ deadline: '2027-07-13', reference: '2026-10-13', stated: 9 });
+  });
+  it('the exception never holds when "deadline" names two things: "lease deadline … launch deadline" → Olumi\u2019s reading', async () => {
+    const { detail } = await offerAndApprove('Our office lease deadline is in six months, and our launch deadline is in nine months.',
+      { deadline_words: 'lease deadline is in six months', reference_date: '' });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
+  });
 });

@@ -4049,10 +4049,13 @@ export function createAgentCapabilities(
   };
 
   /** How many date or duration phrases one message holds: every word start, read by the one reader over the words after
-   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does); overlapping readings are one phrase. */
+   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does), plus any "<count> <unit>" the reader will not
+   * place ("in 180 days", "in 2 years"); overlapping readings are one phrase. An "as of D" reference is not one. */
   const datePhrasesIn = (text: string): number => {
     const plain = text.replace(/(?:^|[^\p{L}\p{N}])as of\s+\d{4}-\d{2}-\d{2}(?=$|[^\p{L}\p{N}])/gu, ' ');
-    const spans: (readonly [number, number])[] = [];
+    const spans: (readonly [number, number])[] = [...plain.matchAll(
+      /(?:\d+(?:[.,]\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen|twenty[- ]four)[ \t-]{1,2}(?:days?|weeks?|months?|years?|quarters?)(?=$|[^\p{L}\p{N}])/gu)]
+      .filter((m) => m.index === 0 || /[^\p{L}\p{N}]/u.test(plain[m.index - 1]!)).map((m) => [m.index, m.index + m[0].length] as const);
     for (const start of plain.matchAll(/\S+/gu)) {
       const tail = plain.slice(start.index);
       for (const word of tail.matchAll(/\S+/gu)) {
@@ -5422,7 +5425,7 @@ export function createAgentCapabilities(
         new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}\\s*,?\\s*as of\\s+${date}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)
         || typed.split(/[.;!?\n]/).some(sentence => {
           const open = new RegExp(`^as of\\s+${date}\\s*,?([^,]*?)(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(sentence.trim());
-          return open !== null && !/(?:^|[^\p{L}])(?:and|but)(?=$|[^\p{L}])/u.test(open[1]!);
+          return open !== null && !/(?:^|[^\p{L}])(?:and|but|or|nor|so|yet|whereas|while|whilst|although|though|because|since|however|unless|if|when|whenever|after|before|until|which|who)(?=$|[^\p{L}])/u.test(open[1]!);
         });
       const asOf = typedAsOfDates.find(date => date === args.reference_date && beside(date));
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
@@ -5438,11 +5441,16 @@ export function createAgentCapabilities(
       // ⛔ DLf5 Codex check (blocking 2): "Our office lease expires in six months, and our launch deadline is in nine months"
       // with the quote "in six months" credited the lease. A message holding MORE THAN ONE date or duration phrase (read by
       // the one reader, as `eventDateSpans` does; an "as of D" reference is not one) offers the card as Olumi's reading.
+      // The one exception: a quote that itself says "deadline", inside one sentence of a message naming "deadline" ONCE, is bound
+      // to the deadline by the user's own words ("…our launch deadline in six months time", Paul's served turn 3).
       const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? [])].reverse().map(plainOf).find(writes) ?? typed;
+      const deadlineWord = /(?:^|[^\p{L}])deadline(?=$|[^\p{L}])/gu;
+      const boundByItsWords = [...plainOf(words).matchAll(deadlineWord)].length === 1 && [...source.matchAll(deadlineWord)].length === 1
+        && !/[.;!?]/.test(plainOf(words).replace(/[.!?]+$/, ''));
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        origin === 'human', datePhrasesIn(source) <= 1);
+        origin === 'human', datePhrasesIn(source) <= 1 || boundByItsWords);
     },
 
     /**
