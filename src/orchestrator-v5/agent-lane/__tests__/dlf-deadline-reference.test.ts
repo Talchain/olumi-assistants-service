@@ -95,6 +95,25 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
     }), expect.any(String));
     expect(w.read()).toEqual(before); expect(w.rows).toHaveLength(0);
   });
+  // ⛔ Served hiring r3 (14 Oct 18:45Z, request 73434864): the AI passed reference_date 2026-02-17, the card counted from the
+  // recorded date, nothing told the AI why, and it withdrew its own card as "an inconsistent reference date".
+  it('(a2) a set-aside model reference is TOLD to the AI in the result, so the card is not withdrawn as inconsistent', async () => {
+    const w = world();
+    const card = await w.offer({ reference_date: '2026-02-17' });
+    expect(card.ok, JSON.stringify(card)).toBe(true);
+    expect(card.public_label).toBe(`Is your deadline 13 April 2027 (6 months from 13 October 2026)? Your words: “${WORDS}”.`);
+    expect(card).toMatchObject({ reference_used: '2026-10-13', reference_set_aside: '2026-02-17' });
+    expect(String(card.note)).toContain('The reference_date you passed (2026-02-17) was not used: Olumi counts this deadline from the '
+      + "scenario's recorded reference date, 13 October 2026, which the card shows. That is deliberate, not an inconsistency: "
+      + 'show the card as it is and do not withdraw it for that reason.');
+    // CONTRAST: no model reference, or the recorded one itself, says nothing about a set-aside reference.
+    for (const args of [{}, { reference_date: '2026-10-13' }]) {
+      const plain = await world().offer(args);
+      expect(plain.ok).toBe(true);
+      expect(plain).not.toHaveProperty('reference_set_aside');
+      expect(String(plain.note)).not.toContain('was not used');
+    }
+  });
   it('(b) approval saves the exact tuple; another process and a next-day clock retain it', async () => {
     const w = world(); await saveDeadline(w);
     expect(w.rows.filter(r => r.write.graph !== undefined)).toHaveLength(1);
