@@ -89,7 +89,6 @@ export function humanItemsAfterTheDraft(raw: unknown): HumanItem[] {
   const byId = new Map(nodes.filter((n) => typeof n.id === 'string').map((n) => [n.id as string, n]));
   const found: HumanItem[] = [];
   const unknown = (words: string): void => { found.push({ words, origin: 'unknown' }); };
-  const goalIds = goalIdsOf(raw);
   for (const n of nodes) {
     const os = rec(n.observed_state) ?? rec(rec(n.data)?.observed_state);
     if (os !== undefined) {
