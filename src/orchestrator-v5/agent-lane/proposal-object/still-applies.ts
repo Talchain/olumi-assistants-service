@@ -90,3 +90,13 @@ export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): bo
   const operations = isRec(proposal) ? proposal['operations'] : undefined;
   return Array.isArray(operations) && heldCardStillApplies({ operations } as Pick<StructuredProposal, 'operations'>, graph);
 }
+
+/**
+ * Whether a held card applies to `graph` NOW, the whole rule in one place (#3024): on the model it was made against, unless
+ * its own subject moved (`heldCardSubjectMoved`); on a moved model, only by its own field-scoped rule (`heldCardStillApplies`).
+ * Read wherever a held card is SHOWN (the turn's cards and fields, a replay, a cold reload), as the press and the lapse read it.
+ */
+export function heldCardAppliesAt(p: Pick<StructuredProposal, 'operations' | 'base_graph_identity_hash'>, graph: unknown, graphHash: string | undefined): boolean {
+  if (graphHash === undefined || graphHash === '') return false;
+  return p.base_graph_identity_hash === graphHash ? !heldCardSubjectMoved(p, graph) : heldCardStillApplies(p, graph);
+}

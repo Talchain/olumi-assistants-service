@@ -86,7 +86,7 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { heldCardStillApplies, heldCardSubjectMoved } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
@@ -2321,14 +2321,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // the current graph pin below still decide whether this target may be offered at all.
         const emittedAt = Date.parse(p.emitted_at_iso);
         const r = proposalRecord(p, read.graph, Number.isFinite(emittedAt) ? emittedAt : Date.now());
-        return r && r.base_graph_hash === read.graphHash ? [r] : [];
+        return r && heldRecordAppliesAt(p, r, read.graph, read.graphHash) ? [r] : [];
       });
-      const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
+      const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && heldRecordAppliesAt(p, r, read.graph, read.graphHash) ? [r] : []; })
         .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
         // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
         .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
-      const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
+      const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers,
+        heldRecordsApplyAt([...currentPending, ...(prior.pending_actions ?? [])], read.graph, read.graphHash));
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       const replayChanceCells = replyChanceCells(state, scenarioId);
       const replayScopedDraftForRun = guidedSizingForRun(state.analysisResult, state.graph);
@@ -5619,7 +5620,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             onReconciled: (write, overCap) => {
               reconciledPending = write.pending_actions ?? [];
               heldRecords = (write.pending_actions ?? []).flatMap(p => {
-                const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
+                const r = proposalRecord(p, readbackGraph); return r && heldRecordAppliesAt(p, r, readbackGraph, graphHash) ? [r] : [];
               });
               overCapAtAppend = overCap;
               // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
@@ -5798,7 +5799,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (`OlumiResponseSchema` is `.strict()`; the UI parser moves an undeclared root key into `__additive__`), bound to
        * this response's `graph_hash`. Absent when nothing is held.
        */
-      ...((): Record<string, unknown> => { const w = proposalFieldsWire(heldRecords, graphHash, issuedTurnIds); return w !== undefined ? { _proposal_fields: w } : {}; })(),
+      ...((): Record<string, unknown> => { const w = proposalFieldsWire(heldRecords, graphHash, issuedTurnIds,
+        heldRecordsApplyAt([...reconciledPending, ...liveHolds], readbackGraph, graphHash)); return w !== undefined ? { _proposal_fields: w } : {}; })(),
       /**
        * ⭐ RT-1: which selected elements this answer was given, route-v2's `_grounded_selection` shape (DGAI
        * `GroundedOnNotice` reads it). A sidecar like `_not_modelled`; absent when nothing was selected or the turn never
