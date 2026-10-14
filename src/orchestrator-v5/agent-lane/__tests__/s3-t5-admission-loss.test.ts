@@ -22,7 +22,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   return { ...actual, log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } };
 });
 
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, type CallStructuredModel, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { goalLevelTheUserWrote } from '../stated-by-user.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -101,7 +101,7 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
   it.each(['D2_r1', 'D2_r2'])('⭐ the served %s answers take an unattested "Feature launch" as the goal: the one retry is asked with the reason, T5\'s recorded retry is still the event, and nothing is saved', async (key) => {
     const { result, stored, next, inputs } = await run(ep(key));
     expect(next).toBe(2);
-    expect(inputs[1]).toContain('The goal \\"Feature launch\\" is an event the brief does not state as its goal');
+    expect(inputs[1]).toContain(UNATTESTED_GOAL_RETRY_ISSUE);
     expect(stored).toBeUndefined();
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
   });

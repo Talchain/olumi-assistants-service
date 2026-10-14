@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief } from '../runtime/build-model.js';
+import { buildModelFromBrief, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import { assessConstructionSize, retryInstruction } from '../construction-size-gate.js';
 
 type Rec = Record<string, any>;
@@ -33,7 +33,8 @@ const attestedLaunch = (brief: string): string => {
   if (variant === brief) throw new Error('PRECONDITION: the attested-launch variant applies');
   return variant;
 };
-const REASON = 'The goal \\"Feature launch\\" is an event the brief does not state as its goal';
+/** The AIE's retry issue (packet 5b8c2f0e), whole: the reason the one retry is asked. */
+const REASON = UNATTESTED_GOAL_RETRY_ISSUE;
 const CONTRAST_BRIEF = attestedLaunch(FX.brief);
 
 /** The real build path: the drafter answers with `drafts` in turn; every request it was sent comes back, with the result. */

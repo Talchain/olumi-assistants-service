@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief } from '../runtime/build-model.js';
+import { buildModelFromBrief, UNATTESTED_GOAL_CLARIFICATION, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import type { CandidateModel } from '../admit-model.js';
 import { briefAttestsEventByDate, unattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 
@@ -81,8 +81,8 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(result.ok, JSON.stringify(result).slice(0, 1500)).toBe(true);
     expect(calls).toHaveLength(2);
     // The retry carries the reason and the brief's own words, with the previous model, and its goal is NOT pinned.
-    expect(calls[1]!.input).toContain(`The goal \\"Urgent launch\\" is an event the brief does not state as its goal (the brief says: \\"${EVENT_WORDS}\\").`);
-    expect(calls[1]!.input).toContain(GOVERNING);
+    // The AIE's retry issue (packet 5b8c2f0e), whole, then both retained-wording clauses: each is a complete statement of the brief.
+    expect(calls[1]!.input).toContain(JSON.stringify(`${UNATTESTED_GOAL_RETRY_ISSUE} Retained event wording: "${EVENT_WORDS}". Retained intent wording: "${GOVERNING}".`).slice(1, -1));
     expect(JSON.stringify(calls[1]!.schema.properties.goal.properties.metric)).not.toContain('Urgent launch');
     const goal = goalOf(graph!);
     expect(goal).toMatchObject({ label: 'Productivity change by launch', goal_direction: '>=', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs' });
@@ -96,8 +96,18 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(calls).toHaveLength(2);
     expect(graph).toBeUndefined();
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
-    expect(result.detail).toBe(`The draft took "Urgent launch" as the goal, but the brief does not state it as the goal ("${EVENT_WORDS}"). `
-      + `Its governing statement is: "${GOVERNING}". Nothing was saved. Ask the user which result the model should measure success by, then draft it again with that goal.`);
+    expect(result.detail).toBe(`${UNATTESTED_GOAL_CLARIFICATION} Retained event wording: "${EVENT_WORDS}". Retained intent wording: "${GOVERNING}".`);
+  });
+
+  it('a retained-wording clause is omitted when its words are not a complete statement of the brief (the core text stays whole)', async () => {
+    const d = draft();
+    d.goal.source_quote = 'an urgent launch date in the next three months';
+    expect(FX.brief.includes(d.goal.source_quote), 'PRECONDITION: verbatim, but only part of the statement').toBe(true);
+    const { result, calls } = await construct([JSON.stringify(d), JSON.stringify(d)]);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.input).toContain(JSON.stringify(`${UNATTESTED_GOAL_RETRY_ISSUE} Retained intent wording: "${GOVERNING}".`).slice(1, -1));
+    expect(String(calls[1]!.input)).not.toContain('Retained event wording');
+    expect(result.detail).toBe(`${UNATTESTED_GOAL_CLARIFICATION} Retained intent wording: "${GOVERNING}".`);
   });
 
   it('a redraft that loses the user\'s figure (≥ 12 % for their 10 %) is not adopted: nothing is saved and the user is asked', async () => {
@@ -218,7 +228,7 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(briefAttestsEventByDate(brief, d.goal as never), 'PRECONDITION: attested').toBe(true);
     expect(unattestedEventGoal(d as unknown as CandidateModel, brief, false)).toBeNull();
     const { graph, result, calls } = await construct([JSON.stringify(d)], brief);
-    expect(calls.every((c) => !String(c.input).includes('is an event the brief does not state as its goal'))).toBe(true);
+    expect(calls.every((c) => !String(c.input).includes(UNATTESTED_GOAL_RETRY_ISSUE))).toBe(true);
     expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
     expect(calls).toHaveLength(1);
     expect(goalOf(graph!)).toMatchObject({ id: 'event_goal', goal_threshold_unit: '% of the app launch', goal_deadline_as_stated: 'by March 2027' });
@@ -231,7 +241,7 @@ describe('an unattested event is never saved as the goal; the one existing retry
       { metric: 'Code quality score', operator: '>=', value: 75, unit: 'score out of 100', provenance: 'explicit', frame: 'level', role: 'target' }];
     expect(unattestedEventGoal(d as unknown as CandidateModel, FX.brief, false)).toBeNull();
     const { graph, result, calls } = await construct([JSON.stringify(d)]);
-    expect(calls.every((c) => !String(c.input).includes('is an event the brief does not state as its goal'))).toBe(true);
+    expect(calls.every((c) => !String(c.input).includes(UNATTESTED_GOAL_RETRY_ISSUE))).toBe(true);
     expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
     expect(calls).toHaveLength(1);
     expect(goalOf(graph!)).toMatchObject({ label: 'Productivity', goal_threshold_raw: 10 });

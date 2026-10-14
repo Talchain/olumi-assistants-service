@@ -1,4 +1,5 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -691,21 +692,22 @@ function keepsTheFirstGoalConditions(first: CandidateModel['goal'], retry: Candi
 }
 
 /**
- * The construction retry's issue for an unattested event goal (`unattestedEventGoal`): the reason, with the brief's own words.
- * The drafter re-chooses the goal from the brief; the event stays as its deadline or condition. (Drafter text: AIE pending.)
+ * The construction retry's issue for an unattested event goal (`unattestedEventGoal`), and the Agent's clarification when the
+ * redraft still holds it: the AIE's texts (packet `AIE-UNATTESTED-GOAL-RETRY-AND-CLARIFICATION-TEXTS-20261014.json`, sha256
+ * 5b8c2f0e…, #94 6163837638), byte for byte, extracted programmatically. Each optional source clause follows the whole core
+ * text only with a COMPLETE verbatim statement of the brief (`wholeStatementIn`); otherwise it is omitted. The event's words
+ * and the drafted question are retained wording, never verified goal ownership (packet quotation_rules 1).
  */
-function unattestedEventIssue(u: UnattestedEventGoal): string {
-  return `The goal "${u.event}" is an event the brief does not state as its goal${u.words !== null ? ` (the brief says: "${u.words}")` : ''}.`
-    + (u.governing !== null ? ` The brief's governing statement is: "${u.governing}".` : '')
-    + ' Choose the goal the brief itself states, with its own quantity, unit, comparator, reference and period; keep the event as its'
-    + ' deadline or condition, and keep every other stated target, limit and condition.';
+export const UNATTESTED_GOAL_RETRY_ISSUE = 'The drafted event goal has not been verified as the brief’s governing aim. Read the complete retained brief and choose its supported governing goal, preserving that goal’s own quantity, unit, comparator, reference, period and conditions. Keep every further target of the same purpose with its AND meaning, and retain all limits, source qualifications and unresolved viewpoints. Preserve the event in its actual stated role, such as a goal deadline, launch reference, measurement or learning window, or separate aim; do not assign it a role the source does not support. A matching figure, unit, comparator, number of targets or copied goal label does not establish quantity identity. If the full meaning is missing, conflicting or ambiguous, retain the original words and unresolved issue instead of inventing a goal or converting a condition into one.';
+export const UNATTESTED_GOAL_CLARIFICATION = 'Olumi could not prepare a draft that faithfully preserves the brief’s governing aim and conditions. This draft was not saved. Read the complete retained brief and explain the specific unresolved meaning or preparation limitation. Ask a focused clarification only if the goal or success reading is genuinely missing, conflicting or ambiguous; do not re-ask a purpose or target that is already clear. When the retained aim is clear but this preparation path cannot preserve it, say so and continue with useful reasoning or evidence review supported by the current model. Offer another draft or approval step only through an actual available permitted preparation path, with the full current source and conditions; do not promise that another attempt will save a model or calculate a chance.';
+const retainedWording = (u: UnattestedEventGoal, brief: string): string =>
+  (u.words !== null && wholeStatementIn(brief, u.words) ? ` Retained event wording: "${u.words}".` : '')
+  + (u.governing !== null && wholeStatementIn(brief, u.governing) ? ` Retained intent wording: "${u.governing}".` : '');
+function unattestedEventIssue(u: UnattestedEventGoal, brief: string): string {
+  return UNATTESTED_GOAL_RETRY_ISSUE + retainedWording(u, brief);
 }
-
-/** When the one redraft still holds an unattested event as the goal: nothing is saved, and the AI asks the user which goal. */
-function unattestedEventClarification(u: UnattestedEventGoal): string {
-  return `The draft took "${u.event}" as the goal, but the brief does not state it as the goal${u.words !== null ? ` ("${u.words}")` : ''}.`
-    + (u.governing !== null ? ` Its governing statement is: "${u.governing}".` : '')
-    + ' Nothing was saved. Ask the user which result the model should measure success by, then draft it again with that goal.';
+function unattestedEventClarification(u: UnattestedEventGoal, brief: string): string {
+  return UNATTESTED_GOAL_CLARIFICATION + retainedWording(u, brief);
 }
 
 export function retrySchemaPinningGoal(
@@ -1939,7 +1941,7 @@ export async function buildModelFromBrief(
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
   const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue),
-    ...(unattested !== null ? [unattestedEventIssue(unattested)] : [])];
+    ...(unattested !== null ? [unattestedEventIssue(unattested, brief)] : [])];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -2137,7 +2139,7 @@ export async function buildModelFromBrief(
   // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
   // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
   if (unattested !== null && stillTheUnattestedEvent(candidate)) {
-    return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested) };
+    return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) };
   }
 
   if (!size.within && !size.user_material_exceeds_limit) {
