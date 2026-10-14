@@ -2730,7 +2730,7 @@ export function createAgentCapabilities(
         const p = settingProvenanceOf(((node?.interventions ?? {}) as Record<string, unknown>)[fid], after!.nodes.find((x) => x.id === fid));
         return p.origin === 'ai' && !p.structural;
       }).map(labelOf);
-      return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
+      return `Added "${String(node?.label ?? id)}", linked from the question and acting on ${factorIds.map(labelOf).join(', ')}.`
         + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });

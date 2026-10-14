@@ -175,7 +175,7 @@ describe('the "Review this decision" press on the live route', () => {
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       // S-B (Codex r1 P2-3 on #2751): the replay says what the live press says today: the typed "can't yet" with its exit.
-      expect(((await press(turnId)).json() as Body).assistant_text, `restart=${restart}`).toBe('I can’t review this decision yet: it needs a current analysis first.');
+      expect(((await press(turnId)).json() as Body).assistant_text, `restart=${restart}`).toBe('I can’t review this model yet: it needs a current analysis first.');
     }
   });
 
@@ -213,7 +213,7 @@ describe('the "Review this decision" press on the live route', () => {
     expect(graphReads).toBeGreaterThan(1);
     // S-B: the press is now re-derived on a read of its own first, so the replacement may be seen there (the typed "can't
     // yet") or at composition (the review's unavailable reply). Either way the replaced Run is never reviewed.
-    expect([RUN_EXPLANATION_UNAVAILABLE_TEXT, 'I can’t review this decision yet: it needs a current analysis first.']).toContain(body.assistant_text);
+    expect([RUN_EXPLANATION_UNAVAILABLE_TEXT, 'I can’t review this model yet: it needs a current analysis first.']).toContain(body.assistant_text);
   });
 
   it('RED (Codex P2): a replay after the Run is replaced offers today\'s presses only, also after a restart', async () => {
@@ -232,7 +232,7 @@ describe('the "Review this decision" press on the live route', () => {
   it('S-B: a Run that is no longer current → a typed "can\'t yet" with the Run as its exit, no model call', async () => {
     runKind = 'complete_stale';
     const body = (await press(randomUUID())).json() as Body;
-    expect(body.assistant_text).toBe('I can’t review this decision yet: it needs a current analysis first.');
+    expect(body.assistant_text).toBe('I can’t review this model yet: it needs a current analysis first.');
     expect(body.assistant_text).not.toContain(ROOT_SENTENCE);
     expect(chips(body)).toEqual([['agent-run-analysis', 'Run analysis']]);
     expect(modelCalls).not.toHaveBeenCalled();

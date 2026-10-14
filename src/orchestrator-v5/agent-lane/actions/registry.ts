@@ -83,7 +83,7 @@ export const ACTION_REGISTRY: Readonly<Record<ActionId, ActionEntry>> = {
   review: {
     label: 'Review', icon: 'ListChecks', group: 'review',
     press: { kind: 'fixed', id: 'agent-next-review-decision' },
-    user_line: 'Review this decision: what should I check before relying on it?',
+    user_line: 'Review this model: what should I check before relying on it?',
     authorities: { eligibility: 'CEE', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: true,
   },
   what_changes: {
