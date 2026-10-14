@@ -1170,7 +1170,7 @@ interface GraphRead {
  * where none is licensed or its C1 was checked down, Olumi's own leader-free record of what changed (`rerunRecordForModel`).
  * Both undefined for a first Run.
  */
-async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: RunDelta | undefined; rerunRecord: ReturnType<typeof rerunRecordForModel> }> {
+async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel> }> {
   const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
   const delta = await selectedRunDeltaForModel(scenarioId, g, g.run_delta);
   const optionNames = optionNameAliasesForCurrentRun(g);
