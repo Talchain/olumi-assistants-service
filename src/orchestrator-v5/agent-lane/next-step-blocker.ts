@@ -13,6 +13,7 @@ import { chanceGoalBlockerOf } from '../goal-target/event-by-date-model.js';
 import { jointBlockerOf, olumiBaseTargetsOf } from '../goal-target/goal-targets-joint.js';
 import { goalTargetMissingBlockerOf, isChanceGoalModel } from './decision-input-ask.js';
 import { oneNextStep, type PressBlocker } from './press-next-step.js';
+import { riskOccurrenceSubject } from './risk-occurrence.js';
 import { staleBlockerOf } from './write-outcome.js';
 
 type Rec = Record<string, unknown>;
@@ -23,6 +24,24 @@ export interface NextStepRead {
   readonly analysis_state: unknown;
   readonly analysis_ready?: unknown;
   readonly analysis_result?: unknown;
+}
+
+/**
+ * ⭐ THE RUN ITSELF IS WITHHELD FOR A MISSING FIGURE (DL 14 Oct; served marketing e2e 0dac5dcc: the Run stayed disabled on the
+ * unvalued risk "Limited marketing experience" while later replies asked "What's today's level of conversion rate?" or offered
+ * "Suggest options"). Readiness's own blocker owns the step, in readiness's own words, ahead of every later-stage ask: no
+ * other answer lets the Run start. Where Olumi's starting-assumption card can exist for it (#3013, `riskOccurrenceSubject`
+ * eligible), the proposing tool is named, so one approval admits the Run.
+ */
+function runWithheldBlockerOf(raw: unknown, analysisReady: unknown): PressBlocker | null {
+  if (!isRec(analysisReady) || analysisReady.status !== 'needs_user_input' || !Array.isArray(analysisReady.blockers)) return null;
+  const gap = analysisReady.blockers.filter(isRec).find((b) => b.blocker_type === 'missing_value'
+    && typeof b.factor_id === 'string' && typeof b.message === 'string' && b.message.trim() !== '');
+  if (gap === undefined) return null;
+  const card = riskOccurrenceSubject(raw, gap.factor_id as string);
+  return { kind: 'missing_input', ask: gap.message as string, ...(card.kind === 'eligible'
+    ? { proposable_by: { tool: 'propose_assumptions', node_id: gap.factor_id as string, field: 'occurrence_range', window_months: card.window_months } }
+    : {}) };
 }
 
 export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null {
@@ -40,6 +59,8 @@ export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null
   const named = (targets?.conditions ?? []).filter((c) => c.role === 'target');
   return oneNextStep([
     goalTargetMissingBlockerOf(read.raw),
+    // Ahead of every later-stage ask (the first producer of a kind wins): only this figure lets the Run start.
+    runWithheldBlockerOf(read.raw, read.analysis_ready),
     staleBlockerOf(read.analysis_state, read.analysis_ready),
     parts === null ? null : targetBlockerOf(parts),
     joint === undefined ? null : jointBlockerOf(Math.max(named.length + (targets?.unsupported_targets?.length ?? 0), 2),
