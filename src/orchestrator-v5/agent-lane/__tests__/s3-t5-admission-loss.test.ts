@@ -181,3 +181,50 @@ describe('GEN #3: the user\'s level for a goal with no target is asked, never dr
     expect(questions.some((q) => q.startsWith('Your brief says') || q.startsWith('Your brief puts'))).toBe(false);
   });
 });
+
+describe('GEN #2 by entity: a drafter question is left out only when it is ABOUT a link Olumi set aside (D3 r2 raw + `unknown_concerns`)', () => {
+  const RAW = ep('D3_noBase_r2');
+  const raw = (): { unknowns: string[]; [k: string]: unknown } => JSON.parse(RAW.calls[0]!.text);
+  const [MRR, , CHURN] = raw().unknowns;
+  const ASIDE_LINK = 'Price per paying customer per month → Customer loss after price rise';
+  const ASIDE_Q = 'Is the provisional estimate of 60 customers lost per £2 rise right?';
+  const ASIDE_NO_FIGURE = 'How sure are we that the price rise drives customer loss?';
+  // The #3000 Codex check's own over-deletions: a figure equal to Olumi's withheld 60, about something else.
+  const CHURN_60 = 'Is 60% churn over a year plausible for this customer base?';
+  const SUPPORT_60 = 'Would a £60 support add-on change anything?';
+  const NEW_60 = 'Could we win 60 new customers in the first month?';
+  /** The raw answer with the drafter's questions and what each is about added, in the shape PROMPT's constructor text asks. */
+  const withConcerns = (extra: readonly string[], tags: Record<string, readonly string[]>): Episode => {
+    const r = raw();
+    r.unknowns = [...r.unknowns, ...extra];
+    r.unknown_concerns = Object.entries(tags).map(([question, concerns]) => ({ question, concerns }));
+    return { ...RAW, calls: [{ ...RAW.calls[0]!, text: JSON.stringify(r) }, ...RAW.calls.slice(1)] };
+  };
+
+  it('⭐ the set-aside link\'s questions are left out, figure or not; every other question is asked, whatever figures it writes', async () => {
+    const { result, questions } = await build(withConcerns([ASIDE_Q, ASIDE_NO_FIGURE, CHURN_60, SUPPORT_60, NEW_60], {
+      [MRR!]: ['monthly recurring revenue'],
+      [CHURN!]: ['Customer loss after price rise'],
+      [ASIDE_Q]: [ASIDE_LINK],
+      [ASIDE_NO_FIGURE]: [ASIDE_LINK],
+      [CHURN_60]: ['Monthly customer churn'],
+      [SUPPORT_60]: [],
+    }));
+    // PRECONDITION: Olumi set that link aside on this build (and two others).
+    expect(((result.set_aside_estimates ?? []) as Rec[]).map((s) => `${s.from}\u0000${s.to}`))
+      .toContain('price_per_paying_customer_per_month\u0000customer_loss_after_price_rise');
+    expect(questions).not.toContain(ASIDE_Q);
+    expect(questions).not.toContain(ASIDE_NO_FIGURE);
+    for (const q of [MRR!, CHURN!, CHURN_60, SUPPORT_60, NEW_60]) expect(questions, q).toContain(q);
+  });
+
+  it('a concern naming no node by its exact label is not about the set-aside link: the question is asked', async () => {
+    const { questions } = await build(withConcerns([ASIDE_Q], { [ASIDE_Q]: ['Price → Loss'] }));
+    expect(questions).toContain(ASIDE_Q);
+  });
+
+  it('CONTRAST: a draft without `unknown_concerns` keeps staging\'s rule until its producer is live (the churn question writes 20)', async () => {
+    const { questions } = await build(RAW);
+    expect(questions).not.toContain(CHURN);
+  });
+});
