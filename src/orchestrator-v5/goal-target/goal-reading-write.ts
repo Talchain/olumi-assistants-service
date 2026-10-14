@@ -84,13 +84,15 @@ export function goalReadingWords(graph: unknown, goalId: string, basis: GoalTarg
   const change = sayGoalChange(target.frame, target.raw, target.unit, (v, u) => sayFigureWithoutRounding(v, u ?? ''), target.comparator);
   const also = basis.also_required ?? [];
   if (change === undefined || also.some((c) => /[\r\n]/.test(c))) return undefined;
-  // The reading's retained conditions are part of what is confirmed (AIE: "preserve ... conditions"), said as outside the target.
+  // The reading's retained conditions are additional requirements of the whole held reading (AIE G.conditions_scope): never
+  // extra numerical targets, never evaluated. The words supply no closing full stop (the card's and receipt's templates do).
+  const conditions = also.join('; ').replace(/\.$/, '');
   return `‘${label}’ ${change} ${periodWords(basis)}${basis.denominator !== undefined ? `, measured against ${basis.denominator}` : ''}`
-    + (also.length > 0 ? GOAL_READING_CONDITIONS_TEMPLATE.replace('{conditions}', () => also.join('; ')) : '');
+    + (also.length > 0 ? `. ${GOAL_READING_CONDITIONS_TEMPLATE.replace('{conditions}', () => conditions).replace(/\.$/, '')}` : '');
 }
 
-/** AIE_TEXT_PENDING (Codex buddy r3): the reading's `also_required`, appended to the card's and the receipt's reading. */
-export const GOAL_READING_CONDITIONS_TEMPLATE = '; also required, not part of this target: {conditions}';
+/** The AIE's words (`AIE-CURRENT-SOURCE-AND-CARD-RULINGS-20261014.json` G.conditions), after the reading's own sentence. */
+export const GOAL_READING_CONDITIONS_TEMPLATE = 'Other stated requirements: {conditions}.';
 
 /**
  * The receipt, the AIE's AMEND byte for byte (`AIE-GOAL-READING-2995-TEXT-RULINGS-20261013.json` receipt): said only after the

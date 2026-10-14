@@ -30,7 +30,7 @@ import type { SessionTurnWrite } from '../../session/store.js';
 import { CONDITIONS_NOT_KEPT } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { answeredBasisOf, applyGoalReadingEdit } from '../goal-reading-write.js';
-import { ALREADY_SAVED_NOTE, heldChangeTargetAnswer, savedGoalMeaningOf } from '../held-change-target.js';
+import { heldChangeTargetAnswer, savedGoalMeaningOf } from '../held-change-target.js';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
 
 type Rec = Record<string, any>;
@@ -43,7 +43,14 @@ const GOAL = 'productivity';
 const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
 /** The card's words, its button and the receipt, exactly (AIE_TEXT_PENDING templates, filled from the stored reading). */
 const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity'
-  + '; also required, not part of this target: maintaining code quality; launch readiness';
+  + '. Other stated requirements: maintaining code quality; launch readiness';
+/** The AIE's partial-match note (AIE-CURRENT-SOURCE-AND-CARD-RULINGS-20261014 G.partial_match_note), a literal. */
+const SAVED_READING = '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity. Other stated requirements: '
+  + 'maintaining code quality';
+const PARTIAL = `The saved reading is ${SAVED_READING}. Only the figure, unit and comparator were compared with this request and matched. The `
+  + 'reference, denominator, period and additional conditions were not compared; this does not confirm that your complete requested reading is saved.';
+const COMPARED = { compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['reference', 'denominator', 'period', 'conditions'] };
+
 /** The AIE's card; its closing full stop is not doubled after the question's own "?" (Codex buddy r3). */
 const CARD = `Confirm this reading of your target: ${READING}. Question being answered: ${QUESTION}`;
 /** The AIE's agent note, verbatim from the ruling (a literal, so reverting the constant turns this red; Codex buddy r3). */
@@ -100,15 +107,13 @@ describe('G14: restating the saved change target is "already saved", never a ref
       label: 'Productivity', target_frame: 'change_abs', target_raw: 10, unit: '%', comparator: '>=',
       reference: 'today', denominator: 'today’s productivity', effect_unit: '% of today’s productivity', period_months: 3, period_kind: 'at_end',
       also_required: ['maintaining code quality'],
-    }, compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['denominator', 'reference', 'period'],
-    saved_reading: '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity; also required, not part of '
-      + 'this target: maintaining code quality', note: ALREADY_SAVED_NOTE });
+    }, ...COMPARED, saved_reading: SAVED_READING, note: PARTIAL });
     expect(proposals.outstanding(String(SAVED.scenario_id), null)).toEqual([]);
   });
 
   it('the held effect unit itself is the same target too ("% of today\'s productivity", either apostrophe)', () => {
     expect(answer(SAVED, { ...AT_LEAST_10, unit: "% of today's productivity" }).p).toMatchObject({ already_saved: true,
-      compared: ['target_frame', 'target_raw', 'unit', 'comparator', 'denominator'], not_compared: ['reference', 'period'] });
+      ...COMPARED });
   });
 
   it.each([
@@ -127,7 +132,7 @@ describe('G14: restating the saved change target is "already saved", never a ref
   it('BOUND (Codex buddy): the user says percentage points but the Agent passes "%" — the tool cannot tell, and says which members it did not compare', () => {
     const { p } = answer(SAVED, AT_LEAST_10, 'I mean 10 percentage points on the productivity score.');
     // "already saved" is a claim about the SAVED target only; the reading it holds rides beside it for the Agent to compare.
-    expect(p).toMatchObject({ already_saved: true, not_compared: ['denominator', 'reference', 'period'],
+    expect(p).toMatchObject({ already_saved: true, not_compared: COMPARED.not_compared,
       saved_goal: { denominator: 'today’s productivity', effect_unit: '% of today’s productivity', reference: 'today', period_months: 3 } });
   });
 

@@ -111,16 +111,12 @@ function writtenAboutTheGoal(graph: { readonly nodes: readonly { readonly label?
 }
 
 /**
- * Which members of the saved meaning the request itself could be compared on (structured, no prose): the request carries a
- * figure, a unit and a comparator only, so the reference and the period are never compared here, and the denominator only
- * when the unit names it. The Agent compares the rest with the user's own words, against `saved_goal`.
+ * Which members of the saved meaning the request was compared on (structured, no prose): the figure, the unit and the
+ * comparator only. The reference, denominator, period and additional conditions are never compared here (AIE G.binding:
+ * unchecked members belong in not_compared), so the partial-match note says exactly that.
  */
-export function comparedMembersOf(raw: unknown, goalId: string, requested: { readonly unit: string }): { readonly compared: readonly string[]; readonly not_compared: readonly string[] } {
-  const basis = goalTargetBasisOf(goalNodeOf(raw, goalId));
-  const denominator = basis !== undefined && unitPhrase(requested.unit) === unitPhrase(basis.effect_unit);
-  return { compared: ['target_frame', 'target_raw', 'unit', 'comparator', ...(denominator ? ['denominator'] : [])],
-    not_compared: [...(denominator ? [] : ['denominator']), 'reference', 'period'] };
-}
+export const COMPARED_MEMBERS = { compared: ['target_frame', 'target_raw', 'unit', 'comparator'],
+  not_compared: ['reference', 'denominator', 'period', 'conditions'] } as const;
 
 /** The card's words, the AIE's AMEND byte for byte (`AIE-GOAL-READING-2995-TEXT-RULINGS-20261013.json` card.replacement). */
 export const CONFIRM_GOAL_READING_LABEL_TEMPLATE = 'Confirm this reading of your target: {reading}. Question being answered: {question}.';
@@ -140,12 +136,17 @@ export const CONFIRM_GOAL_READING_NOTE = 'Nothing has changed yet. This card pro
   + 'proposal id. Use authorise_change only when the user\u2019s bound approval for this shown card permits this proposal_id. It confirms the reading only; '
   + 'it does not change the underlying claim\u2019s authorship or give permission to Run.';
 /**
- * AIE_TEXT_PENDING (DL final ruling 3, 13 Oct): beside `already_saved`, so the reply states the saved reading and never claims
- * that a member the request could not carry (reference, period, denominator) matched what the user meant.
+ * The AIE's partial-match note, byte for byte (`AIE-CURRENT-SOURCE-AND-CARD-RULINGS-20261014.json` G.partial_match_note), beside
+ * `already_saved`: the saved reading as saved, and that only figure, unit and comparator were compared.
  */
-export const ALREADY_SAVED_NOTE = 'Nothing was prepared. The saved target already has this figure, unit and comparator; its saved reading is '
-  + 'saved_reading. Tell the user that saved reading, and that only the figure, unit and comparator were compared: never say its reference, period or '
-  + 'denominator match what the user meant unless their own words say so.';
+export const ALREADY_SAVED_NOTE_TEMPLATE = 'The saved reading is {saved_reading}. Only the figure, unit and comparator were compared with this '
+  + 'request and matched. The reference, denominator, period and additional conditions were not compared; this does not confirm that your '
+  + 'complete requested reading is saved.';
+/** The note, filled; without a sayable reading its first sentence is left out (never a placeholder). */
+export function alreadySavedNote(savedReading: string | undefined): string {
+  const filled = ALREADY_SAVED_NOTE_TEMPLATE.replace('{saved_reading}', () => savedReading ?? '');
+  return savedReading === undefined ? filled.slice(filled.indexOf('Only the figure')) : filled;
+}
 
 /**
  * The answer for a requested target that restates the goal's held change target, or `undefined` when it does not (the
@@ -171,8 +172,8 @@ export function heldChangeTargetAnswer(args: {
   const stored = goal?.goal_target_basis;
   const reading = basis === undefined ? undefined : goalReadingWords(graph.raw, goalId, basis);
   if (basis?.open_question === undefined || basis.open_question === CONDITIONS_NOT_KEPT || !isRec(stored) || reading === undefined) {
-    return { ok: true, mutated: false, already_saved: true, saved_goal: saved, ...comparedMembersOf(graph.raw, goalId, args.requested),
-      ...(reading !== undefined ? { saved_reading: reading } : {}), note: ALREADY_SAVED_NOTE };
+    return { ok: true, mutated: false, already_saved: true, saved_goal: saved, compared: [...COMPARED_MEMBERS.compared],
+      not_compared: [...COMPARED_MEMBERS.not_compared], ...(reading !== undefined ? { saved_reading: reading } : {}), note: alreadySavedNote(reading) };
   }
   // The user's words are the ANSWER only when THIS turn states the target about this goal; an earlier statement that matched
   // never credits an unrelated current turn (the card, pressed, is still the user's choice of the reading it shows).

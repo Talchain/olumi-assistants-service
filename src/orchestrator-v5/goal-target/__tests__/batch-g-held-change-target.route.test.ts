@@ -24,7 +24,6 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { approvalChipIdFor } from '../../agent-lane/approval-chips.js';
-import { ALREADY_SAVED_NOTE } from '../held-change-target.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -37,7 +36,14 @@ const ASKED = read('served-hiring-read-19-after-reopen-20261013T131858Z.json');
 const CLARIFIED = "I mean 10% relative to today's productivity, not percentage points.";
 const QUESTION = 'Does “increase productivity by at least 10%” mean 10% relative to today\'s productivity, or 10 percentage points on a productivity score?';
 const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity'
-  + '; also required, not part of this target: maintaining code quality; launch readiness';
+  + '. Other stated requirements: maintaining code quality; launch readiness';
+/** The AIE's partial-match note (AIE-CURRENT-SOURCE-AND-CARD-RULINGS-20261014 G.partial_match_note), a literal. */
+const SAVED_READING = '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity. Other stated requirements: '
+  + 'maintaining code quality';
+const PARTIAL = `The saved reading is ${SAVED_READING}. Only the figure, unit and comparator were compared with this request and matched. The `
+  + 'reference, denominator, period and additional conditions were not compared; this does not confirm that your complete requested reading is saved.';
+const COMPARED = { compared: ['target_frame', 'target_raw', 'unit', 'comparator'], not_compared: ['reference', 'denominator', 'period', 'conditions'] };
+
 const CARD = `Confirm this reading of your target: ${READING}. Question being answered: ${QUESTION}`;
 /** The AIE's receipt; its closing full stop is not doubled after the answer's own "." (the card's rule). */
 const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”`;
@@ -153,8 +159,7 @@ describe('G14 through the real route: the 07:44 saved goal — the restatement i
     const output = toolOutputs.map((o) => JSON.parse(o) as Rec).find((o) => o.already_saved === true);
     expect(output, toolOutputs.join('\n')).toMatchObject({ ok: true, mutated: false, already_saved: true,
       saved_goal: { target_frame: 'change_abs', target_raw: 10, reference: 'today', denominator: 'today’s productivity', period_months: 3 },
-      saved_reading: '‘Productivity’ up at least 10% from today at three months, measured against today’s productivity; also required, not part of '
-        + 'this target: maintaining code quality', note: ALREADY_SAVED_NOTE });
+      ...COMPARED, saved_reading: SAVED_READING, note: PARTIAL });
     expect((body.suggested_actions as Rec[] ?? []).filter(c => String(c.id).startsWith('agent-approve-proposal:'))).toEqual([]);
     expect(w.graph()).toEqual(SAVED.graph);
   }, ROUTE_MS);
