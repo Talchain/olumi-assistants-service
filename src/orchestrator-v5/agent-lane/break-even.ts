@@ -25,6 +25,7 @@ import { readMoneyTotal, readUnitParts } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { thresholdReasonOf, type ThresholdReason } from '../compose/claim-safety-cage.js';
+import { GOAL_FIGURES_MISSING_CURRENT_LEVEL } from '../../orchestrator/context/option-result-source.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -282,6 +283,19 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
  * turn's goal line (`goalNotCheckedLine`), an explicit Run's typed owed lines, and that Run's replay (DL CHANGES_REQUIRED
  * on #2816: an explicit Run never said it). `null` without a carried reason (pre-#444) or a stated target amount.
  */
+/**
+ * ⭐ SAID ONCE (DL 14 Oct, marketing e2e 25d14238; the #3034 rule): whether the Run's card under the reply already shows the
+ * §(g) cause for a missing current level itself: the carried reason is `missing_goal_baseline` and EVERY option's cell is
+ * withheld with the same Run's typed GOAL_FIGURES_MISSING_CURRENT_LEVEL reason. Then the reply does not say it again; its
+ * next step stays on the action bar (`set_current_level`). Any other carried reason, or one cell without it, keeps the line.
+ */
+export function cardSaysMissingLevel(analysisResult: unknown,
+  cardOptions: readonly { readonly cell: { readonly kind?: unknown; readonly reasons?: unknown } }[] | undefined): boolean {
+  if (thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment)?.reason !== 'missing_goal_baseline') return false;
+  return cardOptions !== undefined && cardOptions.length > 0 && cardOptions.every(({ cell }) => cell.kind === 'withheld'
+    && Array.isArray(cell.reasons) && cell.reasons.some((r) => (r as { code?: unknown } | null)?.code === GOAL_FIGURES_MISSING_CURRENT_LEVEL));
+}
+
 export function thresholdReasonLine(graph: unknown, analysisResult: unknown): string | null {
   const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
   if (carried === null) return null;
