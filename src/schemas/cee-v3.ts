@@ -755,6 +755,26 @@ export const NodeV3 = z.object({
    * retain the stamp. Malformed on read degrades to absence, so the unstamped orphan still blocks.
    */
   relies_on: z.object({ option_id: z.string().regex(CANONICAL_ID_REGEX) }).strict().optional().catch(undefined),
+  /**
+   * ⭐ AIE LAWS RULING, SAME COHORT (option nodes only; science PR-4, `goal-target/cohort-forecast.ts`). This option's forecast
+   * of the goal window's ONE cohort: the people it reaches over the window (a point, its own uncertainty excluded and said so)
+   * and their conversion's likely range, read as the MIDDLE HALF (25th–75th percentile; never a min–max, never a 90% interval).
+   * `same_cohort` is the user's answer that the count target counts converts among those same people the rate target is
+   * measured on, binding both targets by node id (the question names both); without it nothing is sent. `author` is who
+   * gave the figures: Olumi's figures stay Olumi's after the user approves them (MA5). CEE-owned (`field-safety.ts`); in the
+   * analysis hash only when present and well-formed (a change stales a stored Run); a malformed value is absence.
+   */
+  cohort_forecast: z.object({
+    people_reached: z.number().int().min(1).max(10_000_000),
+    conversion_middle_half_pct: z.tuple([z.number().gt(0).lt(100), z.number().gt(0).lt(100)])
+      .refine(([low, high]) => low < high),
+    same_cohort: z.object({
+      rate_target_node_id: z.string().regex(CANONICAL_ID_REGEX),
+      count_target_node_id: z.string().regex(CANONICAL_ID_REGEX),
+      stated_by: z.literal('user'),
+    }).strict(),
+    author: z.enum(['user', 'olumi']),
+  }).strict().optional().catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 

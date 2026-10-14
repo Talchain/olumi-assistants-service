@@ -1,0 +1,203 @@
+{
+  "_source": "Real engine output, not hand-written: ISL Talchain/Inference-Service-Layer@a5725a15 RobustnessAnalyzerV2.analyze (seed 42, 2000 draws) on these inputs per option, then PLoT Talchain/plot-lite-service#450 readTargetForecastResult (the function that maps ISL target_forecast_analysis onto option_comparison[].target_forecast). Conditions are the served marketing graph rows (run-08.json): conversion sent as > 0.15, new customers >= 20. Generated 14 Oct 2026 by the science builder (PR-4).",
+  "inputs": {
+    "carry_on_as_now": {
+      "people_reached": 300,
+      "conversion_middle_half_pct": [
+        8,
+        12
+      ]
+    },
+    "hire_marketing_manager": {
+      "people_reached": 500,
+      "conversion_middle_half_pct": [
+        12,
+        18
+      ]
+    },
+    "use_ai_and_boost_ads": {
+      "people_reached": 800,
+      "conversion_middle_half_pct": [
+        10,
+        16
+      ]
+    },
+    "ai_pilot_with_moderate_ads": {
+      "people_reached": 500,
+      "conversion_middle_half_pct": [
+        11,
+        15
+      ]
+    }
+  },
+  "target_forecast_by_option": {
+    "carry_on_as_now": {
+      "conditions": [
+        {
+          "constraint_id": "agent-lane:conversion_rate:>=",
+          "quantity": "rate",
+          "operator": ">",
+          "threshold": 0.15,
+          "probability": 0.07,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0.005705260730238366
+          }
+        },
+        {
+          "constraint_id": "agent-lane:new_customers_in_first_3_months:>=",
+          "quantity": "count",
+          "operator": ">=",
+          "threshold": 20,
+          "probability": 0.8675,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0.007581020709640621
+          }
+        }
+      ],
+      "joint_probability": 0.07,
+      "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.005705260730238366
+      },
+      "law": {
+        "family": "beta_binomial",
+        "alpha": 10.274740954789651,
+        "beta": 91.03650021734035,
+        "rate_quartiles": [
+          0.08,
+          0.12
+        ],
+        "exposure": 300,
+        "trials": "conditionally independent given the cohort's propensity"
+      }
+    },
+    "hire_marketing_manager": {
+      "conditions": [
+        {
+          "constraint_id": "agent-lane:conversion_rate:>=",
+          "quantity": "rate",
+          "operator": ">",
+          "threshold": 0.15,
+          "probability": 0.507,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0.01117924416049672
+          }
+        },
+        {
+          "constraint_id": "agent-lane:new_customers_in_first_3_months:>=",
+          "quantity": "count",
+          "operator": ">=",
+          "threshold": 20,
+          "probability": 1,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0
+          }
+        }
+      ],
+      "joint_probability": 0.507,
+      "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.01117924416049672
+      },
+      "law": {
+        "family": "beta_binomial",
+        "alpha": 9.725842464111752,
+        "beta": 54.27763116001164,
+        "rate_quartiles": [
+          0.12,
+          0.18
+        ],
+        "exposure": 500,
+        "trials": "conditionally independent given the cohort's propensity"
+      }
+    },
+    "use_ai_and_boost_ads": {
+      "conditions": [
+        {
+          "constraint_id": "agent-lane:conversion_rate:>=",
+          "quantity": "rate",
+          "operator": ">",
+          "threshold": 0.15,
+          "probability": 0.3135,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0.010373469766669204
+          }
+        },
+        {
+          "constraint_id": "agent-lane:new_customers_in_first_3_months:>=",
+          "quantity": "count",
+          "operator": ">=",
+          "threshold": 20,
+          "probability": 0.9995,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0.000499874984371065
+          }
+        }
+      ],
+      "joint_probability": 0.3135,
+      "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.010373469766669204
+      },
+      "law": {
+        "family": "beta_binomial",
+        "alpha": 7.481250163366914,
+        "beta": 49.051346652559936,
+        "rate_quartiles": [
+          0.1,
+          0.16
+        ],
+        "exposure": 800,
+        "trials": "conditionally independent given the cohort's propensity"
+      }
+    },
+    "ai_pilot_with_moderate_ads": {
+      "conditions": [
+        {
+          "constraint_id": "agent-lane:conversion_rate:>=",
+          "quantity": "rate",
+          "operator": ">",
+          "threshold": 0.15,
+          "probability": 0.273,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0.009961701661864804
+          }
+        },
+        {
+          "constraint_id": "agent-lane:new_customers_in_first_3_months:>=",
+          "quantity": "count",
+          "operator": ">=",
+          "threshold": 20,
+          "probability": 1,
+          "precision": {
+            "n_informative": 2000,
+            "standard_error": 0
+          }
+        }
+      ],
+      "joint_probability": 0.273,
+      "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.009961701661864804
+      },
+      "law": {
+        "family": "beta_binomial",
+        "alpha": 16.774954798283556,
+        "beta": 111.23711303135265,
+        "rate_quartiles": [
+          0.11,
+          0.15
+        ],
+        "exposure": 500,
+        "trials": "conditionally independent given the cohort's propensity"
+      }
+    }
+  }
+}

@@ -332,14 +332,16 @@ describe("the live value-bearing contract, adjudicated", () => {
     // +1 LEVEL_SHARED site / +1 ACCEPTED (S4): approved literal goal_horizon_stated_months, like goal_horizon_months.
     // Batch C: ruling 4 — +2 LEVEL_SHARED sites / +2 findings / +2 ACCEPTED (12 Oct): CEE's NodeV3 `goal_target_basis`
     // {target_raw (a staleness key equal to goal_threshold_raw), period_months (months by name, `source: olumi_reading`)}.
-    expect(SITES.length).toBe(59);
-    expect(FINDINGS.length).toBe(43);
+    // Science PR-4 — +1 NONE site / +1 finding / +1 ACCEPTED (14 Oct): CEE's NodeV3 `cohort_forecast.people_reached`, people
+    // by name, attested by the block's REQUIRED `author` and the user's `same_cohort` answer (value-warrant-guard.ts).
+    expect(SITES.length).toBe(60);
+    expect(FINDINGS.length).toBe(44);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(23);
+    expect(report.accepted.length).toBe(24);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(7);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(18);
-    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(25);
+    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(26);
   });
 
   it("S4 stated months has the same duration classification as held horizon months", () => {

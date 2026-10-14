@@ -933,6 +933,19 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "write it (field-safety CEE-owned). It enters the analysis hash inside the whole well-formed basis, only when " +
       "present (graph-hash.ts `projectNode`, Batch C gap 2): a basis-only change stales a stored Run.",
   },
+  // ── UNWARRANTED by token, warranted by its block: an option's same-cohort forecast (14 Oct 2026, science PR-4; AIE laws
+  //    ruling, same cohort) ─────────────────────────────────────────────────────────────────────────────────────────────
+  {
+    id: "unwarranted:cee.NodeV3::cohort_forecast.people_reached",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its UNIT is its name (whole people, `.int().min(1)`): the people an option reaches over the goal's window. " +
+      "Its attestation is the block's REQUIRED `author` (user | olumi; Olumi's figures stay Olumi's after approval, MA5) " +
+      "beside the user's REQUIRED `same_cohort` answer binding the two targets it is read against, the `event_risk` " +
+      "precedent (Science's names, not warrant tokens). Its one reader (`goal-target/cohort-forecast.ts`) sends it to ISL as " +
+      "the same-cohort exposure and says it back in the licence's note with its author; nothing reads it as a node level. " +
+      "CEE-owned (field-safety), and in the analysis hash only when the whole block is well-formed (graph-hash.ts).",
+  },
 ];
 
 // ============================================================================

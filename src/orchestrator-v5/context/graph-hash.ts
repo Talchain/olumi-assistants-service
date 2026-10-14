@@ -99,6 +99,7 @@ export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_de
  *     nonlinear_identity (C46 carrier, as stored),
  *     scale_frame, goal_threshold_frame, goal_direction, quantity_frame, analysis_participation,
  *     goal_target_basis (CEE-local; only when present and well-formed — Batch C gap 2),
+ *     cohort_forecast (CEE-local, option nodes; only when present and well-formed — science PR-4),
  *     interventions: per-factor { value, value_type, encoding_map,
  *                                  target_match: { node_id } },
  *     unresolved_targets: sorted distinct admission gaps from the canonical
@@ -385,6 +386,11 @@ function projectNode(raw: unknown): NodeProjection {
   // when present and well-formed, so every graph without one hashes byte-identically to before.
   const targetBasis = NodeV3.shape.goal_target_basis.safeParse(r.goal_target_basis);
   if (targetBasis.success && targetBasis.data !== undefined) out.goal_target_basis = targetBasis.data;
+
+  // AIE same-cohort law (science PR-4): an option's cohort forecast decides the two-target joint the Run reports, so a change
+  // to it alone stales a stored Run. CEE-local like `relies_on`: present and well-formed only, so other graphs hash unchanged.
+  const cohortForecast = NodeV3.shape.cohort_forecast.safeParse(r.cohort_forecast);
+  if (cohortForecast.success && cohortForecast.data !== undefined) out.cohort_forecast = cohortForecast.data;
 
   const observed = projectObservedState(r.observed_state);
   if (observed !== undefined && Object.keys(observed).length > 0) {

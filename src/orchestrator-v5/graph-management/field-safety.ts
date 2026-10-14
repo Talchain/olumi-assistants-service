@@ -230,6 +230,9 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'analysis_participation',
   // RC3: only a server-validated widen press may leave an option precondition out of the Run.
   'relies_on',
+  // AIE same-cohort law (science PR-4): an option's cohort forecast is written only from the user's stated figures, or Olumi's
+  // approved proposal, by its one writer; a producer that could set it would put a forecast in the user's name.
+  'cohort_forecast',
 ];
 
 /**

@@ -967,6 +967,22 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     status_quo: _singleStatusQuo, notes: _singleNotes,
     ...kept
   } = l;
+  // ⭐ AIE same-cohort law (science PR-4): a block scored on the options' cohort forecasts carries its own notes (the inputs, the
+  // limits left out, whose figures they are). The model's status-quo readings and its census of Olumi's links and values
+  // describe another basis, so none of them is said beside it; it is provisional exactly where it rests on Olumi's figures.
+  if (block.basis === 'same_cohort_forecast') {
+    const { olumi_estimate_link_count: _k, olumi_estimate_value_count: _v, olumi_estimate_settings_by_option: _s, provisional: _p,
+      withheld_option_ids: _w, chance_words: _words, ...base } = kept;
+    const own = { ...(block.notes !== undefined && block.notes.length > 0 ? { notes: [...block.notes] } : {}),
+      ...(block.provisional === true ? { provisional: true as const } : {}) };
+    if (block.joint.status !== 'licensed') return { ...base, ...own, form: 'each', pct_by_option: {}, withheld_option_ids: [...c.option_ids], targets: block };
+    const quoted = block.joint.pct_by_option;
+    const unquoted = c.option_ids.filter((id) => !Object.hasOwn(quoted, id));
+    return { ...base, ...own, form: 'each', pct_by_option: quoted,
+      ...(unquoted.length > 0 ? { withheld_option_ids: unquoted } : {}),
+      ...(block.joint.display_rounding_by_option !== undefined ? { display_rounding_by_option: block.joint.display_rounding_by_option } : {}),
+      chance_words: `chance of ${block.joint.words}`, targets: block };
+  }
   // Amendment 4 does not apply: the joint itself names every condition the Run sent.
   const targetNames = block.conditions.filter((x) => x.role === 'target').map((x) => x.label);
   // ⭐ AIE C clause 3: when the goal's OWN target cannot join the joint (stated as a change), its own licensed chance is kept
