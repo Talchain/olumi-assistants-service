@@ -13,6 +13,7 @@ import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
+import { goalHorizonReplyLead } from '../../goal-target/goal-horizon-detail.js';
 import { goalKindOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { teamShareMoments } from '../../goal-target/event-by-date-share.js';
@@ -253,7 +254,11 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(reload.options).toHaveLength(optionIds(graph).length);
     for (const row of reload.options) expect(row.cell).toMatchObject({ kind: 'withheld',
       reasons: expect.arrayContaining([expect.objectContaining({ code: HORIZON_WITHHOLD, message: detail })]) });
-    expect(body._answer_shape.detail).toContain(detail);
+    // §(ad) amended (AIE #94 6178106849, #3130): the cards carry the marker; the reply leads ONCE with the goal at its point,
+    // and the old why ("…only has today's numbers.") is never said beside it.
+    expect(body._answer_shape.headline).toBe(goalHorizonReplyLead(graph));
+    expect(body._answer_shape.headline).toMatch(/ on 31 March 2027; this Run has not evaluated it at that point\.$/);
+    expect(body.assistant_text).not.toContain(detail);
     expect(body.assistant_text).not.toContain('%');
   }, 60_000);
 
@@ -316,15 +321,17 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(noHorizon.result.enrichment.inference_warnings.some((w: Rec) => w.code === HORIZON_WITHHOLD)).toBe(false);
   }, 60_000);
 
-  it('Q-c Run never two: §(ad) withheld detail occurs once and replaces A7', async () => {
+  it('Q-c Run never two: §(ad)\'s lead occurs once, replaces A7, and the old why is never beside it (AIE 6178106849)', async () => {
     // A money-rate goal has no duration limit, so this row actually exercises A7/detail deduplication.
     graph = clone(B1_GRAPH); goal(graph).goal_horizon_months = 9;
     currentResult = { type: 'analysis_result', summary: 'Awaiting this Run.', enrichment: { option_comparison: [], inference_warnings: [] } };
     const body = await turn();
     const detail = currentFact!.result.enrichment.inference_warnings.find((w: Rec) => w.code === HORIZON_WITHHOLD).say;
     expect(body.assistant_text).not.toContain(CHANCE_FREE_HORIZON_PREFIX);
-    expect(body._answer_shape.detail.split(detail)).toHaveLength(2);
-    expect(body.assistant_text.split(detail)).toHaveLength(2);
+    const lead = goalHorizonReplyLead(graph)!;
+    expect(body._answer_shape.headline).toBe(lead);
+    expect(body.assistant_text.split(lead)).toHaveLength(2);
+    expect(body.assistant_text).not.toContain(detail);
     expect(currentFact!.result.enrichment.inference_warnings.some((w: Rec) => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
   }, 60_000);
 
