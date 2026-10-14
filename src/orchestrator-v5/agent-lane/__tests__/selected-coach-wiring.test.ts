@@ -294,7 +294,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     const PURPOSE_OPENING = [
       'OLUMI\'S PURPOSE (governs every reply)',
       'You are a reasoning partner, not an answer or decision engine. The user and their team own every conclusion and choice.',
-      'Never recommend or pick an option. Saying which option has the higher chance in this model is a model-relative finding: say what it rests on and what would change it.',
+      'Never recommend or choose an option for the user, and never call one "best", the "winner" or the one to "go with". When the current result permits it, say each option\'s chance of meeting the goal in this model and which option is most likely to achieve it, as a model-relative finding with its uncertainty, what it rests on and what would change it. Never present how often an option came out on top as its chance of meeting the goal.',
     ].join('\n');
     await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
     const instructions = sent[0]!.instructions;
@@ -302,6 +302,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(instructions.startsWith(`${identity}${PURPOSE_OPENING}\n`)).toBe(true);
     expect(instructions.split('OLUMI\'S PURPOSE (governs every reply)')).toHaveLength(2);
     expect(instructions).not.toContain('Name, rank or favour');
+    // Paul (via the DL, 14 Oct): the template's leader sentence says which option is most likely, never chooses for the user.
+    expect(instructions).toContain('say each option\'s chance of meeting the goal in this model and which option is most likely to achieve it');
+    expect(instructions).not.toContain('Never rank, favour or recommend');
   });
 
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {
