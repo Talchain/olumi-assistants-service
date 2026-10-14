@@ -21,7 +21,11 @@ import { withoutDisclosure } from '../../agent-lane/disclosure.js';
 
 type Rec = Record<string, any>;
 const F = JSON.parse(readFileSync('tests/fixtures/marketing-withheld-once/run-08.json', 'utf8')) as Rec;
-const MISSING = "Not shown. Conversion rate's current level is missing.";
+/** As served (25d14238), before AIE MA1's launch-window words (`launch-window-coaching.test.ts`): what this spec replaces. */
+const SERVED_MISSING = "Not shown. Conversion rate's current level is missing.";
+/** The goal is measured over the first three months after launch: no level today, so the gap is the window's forecast. */
+const MISSING = 'Not shown. Conversion rate is measured over the first three months after launch, so it has no level today, and the model has no forecast for that period yet.';
+const served = (lines: readonly string[]): string[] => lines.map((l) => l.split(SERVED_MISSING).join(MISSING));
 const CONVERSION = '‘Conversion rate’ being above 15% over the first three months after launch';
 const CUSTOMERS = '‘New customers in first 3 months’ being at least 20 customers over the first three months after launch';
 const PARTS = 'The contributing quantities have links whose sizes are not yet specified. This calculation needs supported contributions in this quantity’s units, or a supported forecast for the quantity.';
@@ -47,7 +51,7 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
   it('PRECONDITION (fidelity): unbound, as served, the reconstruction gives the served card notes exactly, the customer target two reasons', () => {
     const { warning, licence } = licensed(undefined);
     expect(warning).not.toHaveProperty('constraint_ids');
-    expect(licence.targets.notes).toEqual(F.card_notes);
+    expect(licence.targets.notes).toEqual(served(F.card_notes));
     expect(notesFor(licence, CUSTOMERS)).toEqual([`${CUSTOMERS}: ${PARTS}`, `${CUSTOMERS}: ${MISSING}`]);
   });
 
@@ -58,7 +62,7 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
     expect(notesFor(licence, CUSTOMERS)).toEqual([`${CUSTOMERS}: ${PARTS}`]);
     // Every other condition's note is the served one, unchanged.
     expect((licence.targets.notes as string[]).filter((n) => !n.startsWith(`${CONVERSION}: `) && !n.startsWith(`${CUSTOMERS}: `)))
-      .toEqual((F.card_notes as string[]).filter((n) => !n.startsWith(`${CONVERSION}: `) && !n.startsWith(`${CUSTOMERS}: `)));
+      .toEqual(served(F.card_notes).filter((n) => !n.startsWith(`${CONVERSION}: `) && !n.startsWith(`${CUSTOMERS}: `)));
   });
 
   it('RED (a): with the Run\'s card under the reply, the reply says none of the card\'s notes; the card says the cause once', () => {
@@ -69,8 +73,8 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
     expect(saysMissing([...card])).toBe(1);
     expect(reply.filter((l) => card.has(l))).toEqual([]);
     // As served (no card filter before grouping), the group line said the cause again beside the card.
-    expect(saysMissing(goalChanceNotesForAgent({ enrichment: F.enrichment }, F.graph, true))).toBe(1);
-    expect(F.detail).toContain(MISSING);
+    expect(goalChanceNotesForAgent({ enrichment: F.enrichment }, F.graph, true).filter((l) => l.includes(SERVED_MISSING))).toHaveLength(1);
+    expect(F.detail).toContain(SERVED_MISSING);
   });
 
   it('CONTRAST (a): with no card (an Explain), the reply keeps every note, the cause said once', () => {
@@ -88,12 +92,15 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
   it('RED (c): the bound card shows every option withheld for the missing level → the reply\'s §(g) sentence goes, nothing else', () => {
     const result = { enrichment: F.enrichment };
     const line = thresholdReasonLine(F.graph, result)!;
-    expect(line).toBe("Olumi can't show each option's chance of reaching your Conversion rate target yet: the model doesn't have Conversion rate's current level to measure from. The rest of this Run's results still stand.");
-    expect((F.assistant_text as string).split(line)).toHaveLength(2);
+    expect(line).toBe("Olumi can't show each option's chance of reaching your Conversion rate target yet. Conversion rate is measured over the first three months after launch, so it has no level today, and the model has no forecast for that period yet. The rest of this Run's results still stand.");
+    // The served reply carried the pre-MA1 sentence in the same place; it is that place this row removes the line from.
+    const servedLine = "Olumi can't show each option's chance of reaching your Conversion rate target yet: the model doesn't have Conversion rate's current level to measure from. The rest of this Run's results still stand.";
+    const text = (F.assistant_text as string).split(servedLine).join(line);
+    expect(text.split(line)).toHaveLength(2);
     expect(cardSaysMissingLevel(result, F.card_options)).toBe(true);
-    const said = withoutDisclosure(F.assistant_text, line);
+    const said = withoutDisclosure(text, line);
     expect(said).not.toContain(line);
-    expect(said).toBe((F.assistant_text as string).replace(`\n\n${line}`, ''));
+    expect(said).toBe(text.replace(`\n\n${line}`, ''));
   });
 
   it('CONTRAST (c): one cell without that reason, another carried reason, or no bound card → the sentence stays', () => {
@@ -105,6 +112,8 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
       ? { ...w, detail: { reason: 'goal_node_missing' } } : w) } };
     expect(cardSaysMissingLevel(fault, F.card_options)).toBe(false);
     expect(cardSaysMissingLevel(result, undefined)).toBe(false);
-    expect(withoutDisclosure(`${F.assistant_text}\n\n${thresholdReasonLine(F.graph, result)}`, thresholdReasonLine(F.graph, result)!), 'said twice: never guessed which').toContain(thresholdReasonLine(F.graph, result));
+    const servedLine = "Olumi can't show each option's chance of reaching your Conversion rate target yet: the model doesn't have Conversion rate's current level to measure from. The rest of this Run's results still stand.";
+    const text = (F.assistant_text as string).split(servedLine).join(thresholdReasonLine(F.graph, result)!);
+    expect(withoutDisclosure(`${text}\n\n${thresholdReasonLine(F.graph, result)}`, thresholdReasonLine(F.graph, result)!), 'said twice: never guessed which').toContain(thresholdReasonLine(F.graph, result));
   });
 });

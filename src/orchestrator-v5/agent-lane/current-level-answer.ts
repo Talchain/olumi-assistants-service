@@ -8,6 +8,7 @@ import { thresholdReasonOf } from '../compose/claim-safety-cage.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { foldQuotes, sentencesOf } from './reply/compose-reply.js';
+import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 
 export const CURRENT_LEVEL_TOOL = 'propose_goal_current_level';
 type Ask = PendingAction & { action: Extract<PendingAction['action'], { kind: 'elicit_goal_current_level' }> };
@@ -53,6 +54,8 @@ export function goalLevelAskOf(graph: unknown, analysisResult: unknown): { goal:
   const goals = records(rec(graph)?.nodes).filter((n) => n.kind === 'goal');
   const goal = goals.length === 1 ? goals[0]! : undefined;
   if (goal === undefined || typeof goal.label !== 'string' || goal.label.trim() === '' || typeof rec(goal.observed_state)?.raw_value === 'number') return null;
+  // AIE MA1: a goal measured over the window from launch has no level today, so there is none to ask for.
+  if (launchWindowOf(goal) !== undefined) return null;
   // Codex r1 P1-4 (#2816): the answer path reads the unit from the goal's ANCHORED target (goalInState), so without one
   // the ask's unit and the answer's would disagree and the answer could never force the card: no ask, no offer.
   if (typeof goal.goal_threshold_raw !== 'number' || !Number.isFinite(goal.goal_threshold_raw)) return null;

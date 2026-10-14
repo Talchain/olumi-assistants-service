@@ -1,4 +1,5 @@
 import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
+import { launchWindowGapWords, launchWindowOf } from '../../goal-target/goal-target-basis.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
@@ -4087,9 +4088,11 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
   const ownTargets = (Array.isArray(storedConstraints) ? storedConstraints : []).flatMap((r) => r !== null && typeof r === 'object'
     && (r as Record<string, unknown>).role === GOAL_TARGET_ROLE && (r as Record<string, unknown>).node_id === goal.id
     && typeof (r as Record<string, unknown>).constraint_id === 'string' ? [(r as Record<string, unknown>).constraint_id as string] : []);
+  // AIE MA1: a goal measured over the window from launch has no level today; the gap is that window's forecast.
+  const launch = launchWindowOf(goal);
   return withholdOptionGoalFigures(response, new Set(scored), {
     code: GOAL_FIGURES_MISSING_CURRENT_LEVEL, severity: 'warning',
-    message: `Not shown. ${label}'s current level is missing.`,
+    message: launch === undefined ? `Not shown. ${label}'s current level is missing.` : `Not shown. ${launchWindowGapWords(label, launch)}`,
     node_ids: [String(goal.id)], option_ids: scored,
     ...(ownTargets.length > 0 ? { constraint_ids: ownTargets } : {}),
     detail: { reason: 'missing_goal_baseline' },

@@ -40,6 +40,7 @@ import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
+import { launchWindowOf } from '../../goal-target/goal-target-basis.js';
 import { goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
@@ -73,7 +74,7 @@ export const WITHHOLD_FALLBACK_MARKER = 'Not shown yet; why is under More detail
 export const FIRMNESS_MARKER_PREFIX = "May look firmer: uses Olumi's ";
 
 export type FaceDisclosure =
-  | { readonly kind: 'withhold'; readonly cause: 'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'horizon_not_tested' | 'no_target' | 'other'; readonly goalLabel?: string }
+  | { readonly kind: 'withhold'; readonly cause: 'missing_current_level' | 'no_launch_forecast' | 'unconfirmed_identity' | 'unsized_links' | 'horizon_not_tested' | 'no_target' | 'other'; readonly goalLabel?: string }
   | { readonly kind: 'firmness'; readonly figure: string }
   | { readonly kind: 'robustness' };
 
@@ -83,6 +84,8 @@ export function markerForDisclosure(note: FaceDisclosure): string {
   if (note.kind === 'firmness') return `${FIRMNESS_MARKER_PREFIX}${note.figure} as exact`;
   switch (note.cause) {
     case 'missing_current_level': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: ${note.goalLabel}'s current level is missing`;
+    // AIE MA1: a goal measured over the window from launch has no current level; its gap is that window's forecast.
+    case 'no_launch_forecast': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: no forecast yet for ${note.goalLabel} after launch`;
     case 'unconfirmed_identity': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: how ${note.goalLabel} is worked out isn't confirmed`;
     case 'unsized_links': return "Not shown: some relationships aren't sized yet";
     case 'horizon_not_tested': return ZERO_SPREAD_NEEDS_MONTHLY_CHANGES;
@@ -104,7 +107,7 @@ export function withholdDisclosureForCells(graph: unknown, cells: readonly Canon
   const causes = new Set<Extract<FaceDisclosure, { kind: 'withhold' }>['cause']>();
   for (const cell of withheld) for (const reason of cell.reasons) {
     switch (reason.code) {
-      case 'GOAL_FIGURES_MISSING_CURRENT_LEVEL': causes.add('missing_current_level'); break;
+      case 'GOAL_FIGURES_MISSING_CURRENT_LEVEL': causes.add(goals.length === 1 && launchWindowOf(goals[0]) !== undefined ? 'no_launch_forecast' : 'missing_current_level'); break;
       case 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED':
       case 'GOAL_FIGURES_PRODUCT_NOT_READ': causes.add('unconfirmed_identity'); break;
       case 'GOAL_FIGURES_PLACEHOLDER_PATH': causes.add('unsized_links'); break;

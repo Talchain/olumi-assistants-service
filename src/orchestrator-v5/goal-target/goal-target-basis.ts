@@ -395,3 +395,36 @@ export function partialGoalWords(label: string | readonly string[], others: read
 export function estimateOnlyWords(base: number, unit: string): string {
   return `Provisional estimate using Olumi’s assumed starting value: ${sayFigureAsWritten(base, unit)}. That starting value’s own uncertainty is not included.`;
 }
+
+/**
+ * ⭐ SCIENCE (AIE MA1, 13 Oct; Batch 0 amendment 5: "an unlaunched feature has no conversion level today"): a LEVEL target
+ * read OVER a window that starts at launch measures a quantity that does not exist before launch. It has no current level
+ * to ask for; what its chance needs is a forecast for that window. ONE predicate for every surface that would otherwise ask
+ * for "today's level": the stored basis (Olumi's reading, staleness-checked), else `undefined`.
+ */
+export function launchWindowOf(goal: unknown): GoalTargetBasis | undefined {
+  const b = goalTargetBasisOf(goal);
+  return b !== undefined && b.reference === 'launch' && b.period_kind === 'over_period'
+    && b.quantity_frame === 'level' && b.target_frame === 'level' ? b : undefined;
+}
+
+/** Why a launch-window goal has no chance yet, in one sentence: "Conversion rate is measured over the first three months after launch, so it has no level today, and the model has no forecast for that period yet." */
+export function launchWindowGapWords(label: string, basis: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>): string {
+  const name = label === '' ? 'It' : `${label[0]!.toUpperCase()}${label.slice(1)}`;
+  return `${name} is measured ${periodWords(basis)}, so it has no level today, and the model has no forecast for that period yet.`;
+}
+
+/**
+ * The ONE question for a launch-window goal (AIE laws ruling, `same_cohort`: "Before claiming the original full joint,
+ * confirm whether conversion and new customers use the same numerator/cohort"). With another target in the same window,
+ * whether the two count the same people decides how they move together, so it is asked first; alone, the forecast itself.
+ */
+export function launchWindowQuestion(label: string, basis: Pick<GoalTargetBasis, 'reference' | 'period_months' | 'period_kind'>,
+  otherTargetLabel?: string): string {
+  return otherTargetLabel !== undefined
+    ? `Do your ‘${otherTargetLabel}’ come from the same people your ‘${label}’ is measured on?`
+    : `What ${label} do you expect ${periodWords(basis)}? A range is fine.`;
+}
+
+/** What stays unbuilt whatever the answer, for the step's `also_unbuilt` (never promised by the question). */
+export const LAUNCH_WINDOW_UNBUILT = 'the chance of meeting a target measured from launch';
