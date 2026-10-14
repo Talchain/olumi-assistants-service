@@ -611,6 +611,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // The stored goal and limit rows, read once (S5 census: #3070's missing-level binding and the licence share this read).
+    const storedGoalRows = snapshot.goal_constraints;
     // Freeze the read-B identity before dispatch; never consult the store for this Run again (B2).
     const evaluatedScenarioRevision = snapshot.evaluatedScenarioRevision;
     const frozenRevision = typeof evaluatedScenarioRevision === 'number'
@@ -2198,7 +2200,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id);
       // Record the additional typed cause only AFTER the target gate has applied its original P1/P5 outcome rules.
-      response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis, snapshot.goal_constraints);
+      response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis, storedGoalRows);
       if (response !== before) {
         log.info(
           {
@@ -2933,7 +2935,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
-      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun, perLimit: constraintVerdict.perLimit,
+      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.

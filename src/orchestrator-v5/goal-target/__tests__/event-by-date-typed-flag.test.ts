@@ -66,6 +66,20 @@ const normal = (): CandidateModel => ({
 });
 /** Stored arm-mechanism/sealedR-d3.json; original prompt flagged; base 81b77b9f ordinary graph. */
 const SEALED_BRIEF = "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £150,000 monthly recurring revenue within 9 months. Facts: Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.";
+/**
+ * #3045 (Paul's vocabulary, 14 Oct): the decision node SHOWS "Question: <metric>"; its id still slugs from "Decision:". Base
+ * 81b77b9f predates it, so it is the one known decision-node delta: exactly one decision node, its id kept, only the title
+ * word moved back before the byte comparison. Nothing else is touched.
+ */
+const beforeQuestionTitle = <G,>(graph: G): G => {
+  const g = graph as unknown as { nodes: Rec[] };
+  const decisions = g.nodes.filter((n) => n.kind === 'decision');
+  expect(decisions).toHaveLength(1);
+  const d = decisions[0]!;
+  expect(String(d.label).startsWith('Question: ')).toBe(true);
+  expect(String(d.id).startsWith('decision_')).toBe(true);
+  return { ...g, nodes: g.nodes.map((n) => n === d ? { ...n, label: `Decision: ${String(d.label).slice('Question: '.length)}` } : n) } as unknown as G;
+};
 const sealed = (): CandidateModel => {
   // The recorded schema has extension fields (value_kind/unknowns); retain their exact bytes.
   const stored = {
@@ -202,7 +216,9 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       }
       // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
       // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
-      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(admissionBase, sealed(), 'sealedR-d3'))).digest('hex')).toBe('4822ddd3cd04fdbbd132bb88c1e83b7143875147c063e4fce170f282beb5014e');
+      // #2425 (14 Oct, money said as the user writes it): the set-aside link reasons now read "£300 / month", not "300 £/month"
+      // (loss[3], [16], [17], [21], [22], [24], measured against d443cf9b); with the title moved back, nothing else differs.
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(beforeQuestionTitle(admissionBase), sealed(), 'sealedR-d3'))).digest('hex')).toBe('f8ad516a4b97d73ccdbcaf84419aafd2f3fc76a4ca5a785ccd6df8e6e0280c1c');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
@@ -233,7 +249,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       // extractionType inferred + user_material_unverified, provenance from_brief->unverified_brief (and source brief_extraction->cee_inference where it was set).
       // Capacity row 7 re-pin (#3030): a drafter-`explicit` option setting the verifier cannot credit now also carries
       // `user_material_unverified` (UNKNOWN, never Olumi's). Proof: with only that stamp switched off, this pin and the row pass.
-      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrationBase, sealed(), 'sealedR-d3'))).digest('hex'))
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(beforeQuestionTitle(registrationBase), sealed(), 'sealedR-d3'))).digest('hex'))
         .toBe('09518fbbf287c255037d35406b01ad448c453732afa337de307c5620c5d6e60a');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
@@ -399,6 +415,6 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(JSON.stringify(explicitFalse)).toBe(JSON.stringify(a));
     // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
     // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
-    expect(createHash('sha256').update(JSON.stringify(a)).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
+    expect(createHash('sha256').update(JSON.stringify(beforeQuestionTitle(a))).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
   });
 });
