@@ -98,7 +98,7 @@ describe('marketing: each target gets its own withheld reason, said once', () =>
 
   it('CONTRAST (c): one cell without that reason, another carried reason, or no bound card → the sentence stays', () => {
     const result = { enrichment: F.enrichment };
-    const oneWithout = (F.card_options as Rec[]).map((o, i) => i === 0
+    const oneWithout = (F.card_options as { cell: Rec }[]).map((o, i) => i === 0
       ? { ...o, cell: { ...o.cell, reasons: (o.cell.reasons as Rec[]).filter((r) => r.code !== 'GOAL_FIGURES_MISSING_CURRENT_LEVEL') } } : o);
     expect(cardSaysMissingLevel(result, oneWithout)).toBe(false);
     const fault = { enrichment: { ...F.enrichment, inference_warnings: (F.enrichment.inference_warnings as Rec[]).map((w) => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE'
