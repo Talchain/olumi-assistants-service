@@ -91,53 +91,66 @@ const trimmed = (v: unknown, max: number): string | undefined =>
   typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined;
 const figure = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
 
-/** Every statement verified, or the first refusal. A quote must stand verbatim in the user's own typed words. */
-export function verifyStatements(raw: unknown, texts: StatementTexts, rules: StatementRules): StatementsVerdict {
-  const malformed = (detail: string): StatementsVerdict => ({ kind: 'refused', refusal: 'statement_malformed', detail });
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_STATEMENTS) {
-    return malformed(`Give one to ${MAX_STATEMENTS} statements, each the user's exact words with your reading of them. Nothing was prepared.`);
-  }
+export type StatementVerdict =
+  | { readonly kind: 'verified'; readonly statement: UserStatement }
+  | Extract<StatementsVerdict, { kind: 'refused' }>;
+
+/**
+ * ⭐ ONE statement, verified or refused on its own (SYSTEM 1's door and SYSTEM 2's construction map, PROMPT sys2 §2): a quote
+ * must stand as a WHOLE statement in the user's own verified words, and its figure must be one the quote states.
+ */
+export function verifyStatement(given: StatementArgs | null | undefined, texts: StatementTexts, rules: StatementRules): StatementVerdict {
+  const malformed = (detail: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_malformed', detail });
   const same = rules.sameFigure ?? ((_q: string, a: number, b: number) => a === b);
+  const quote = trimmed(given?.quote, 400);
+  const form = STATEMENT_FORMS.find((f) => f === given?.form && rules.forms.includes(f));
+  if (quote === undefined || form === undefined) {
+    return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
+  }
+  // T2A5's one quote check (`wholeStatementIn`): a WHOLE statement of a verified message, this one or an earlier one.
+  const whole = (t: string | null | undefined): boolean => typeof t === 'string' && wholeStatementIn(t, quote);
+  if (!whole(texts.now) && !whole(texts.conversation)) {
+    return whole(texts.unverified)
+      ? { kind: 'refused', refusal: 'origin_unknown', detail: `The words “${quote}” are retained, but their origin is not verified, so nothing was prepared. Ask the user to confirm that figure in their own words.` }
+      : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not a whole statement in the user's own messages, so nothing was prepared. Quote their complete statement, verbatim, from any of their messages.` };
+  }
+  const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
+  const qualifier = trimmed(given?.qualifier, 80);
+  const conditions = trimmed(given?.conditions, 160);
+  const answering = trimmed(given?.answering, 400);
+  const negated = given?.negated === true;
+  const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
+    ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),
+    ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
+    ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
+    ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
+  // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
+  if (form === 'holds_now' || form === 'describes') return { kind: 'verified', statement: base };
+  const stated = rules.figuresIn(quote);
+  if (form === 'range') {
+    const low = figure(given?.low), high = figure(given?.high);
+    if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
+    const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
+    if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+    return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
+  }
+  const value = figure(given?.value);
+  if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
+  const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
+  if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+  return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };
+}
+
+/** Every statement verified, or the first refusal (all or nothing, for a chat card); then one set of conditions only. */
+export function verifyStatements(raw: unknown, texts: StatementTexts, rules: StatementRules): StatementsVerdict {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_STATEMENTS) {
+    return { kind: 'refused', refusal: 'statement_malformed', detail: `Give one to ${MAX_STATEMENTS} statements, each the user's exact words with your reading of them. Nothing was prepared.` };
+  }
   const out: UserStatement[] = [];
   for (const given of raw as StatementArgs[]) {
-    const quote = trimmed(given?.quote, 400);
-    const form = STATEMENT_FORMS.find((f) => f === given?.form && rules.forms.includes(f));
-    if (quote === undefined || form === undefined) {
-      return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
-    }
-    // T2A5's one quote check (`wholeStatementIn`): a WHOLE statement of a verified message, this one or an earlier one.
-    const whole = (t: string | null | undefined): boolean => typeof t === 'string' && wholeStatementIn(t, quote);
-    if (!whole(texts.now) && !whole(texts.conversation)) {
-      return whole(texts.unverified)
-        ? { kind: 'refused', refusal: 'origin_unknown', detail: `The words “${quote}” are retained, but their origin is not verified, so nothing was prepared. Ask the user to confirm that figure in their own words.` }
-        : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not a whole statement in the user's own messages, so nothing was prepared. Quote their complete statement, verbatim, from any of their messages.` };
-    }
-    const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
-    const qualifier = trimmed(given?.qualifier, 80);
-    const conditions = trimmed(given?.conditions, 160);
-    const answering = trimmed(given?.answering, 400);
-    const negated = given?.negated === true;
-    const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
-      ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),
-      ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
-      ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
-      ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
-    // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
-    if (form === 'holds_now' || form === 'describes') { out.push(base); continue; }
-    const stated = rules.figuresIn(quote);
-    if (form === 'range') {
-      const low = figure(given?.low), high = figure(given?.high);
-      if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
-      const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
-      if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-      out.push({ ...base, low: read.low, high: read.high });
-      continue;
-    }
-    const value = figure(given?.value);
-    if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
-    const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
-    if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-    out.push({ ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) });
+    const v = verifyStatement(given, texts, rules);
+    if (v.kind === 'refused') return v;
+    out.push(v.statement);
   }
   const conditionsOf = (s: UserStatement): string => plainQuoteWords(s.conditions ?? '').toLowerCase();
   if (new Set(out.map(conditionsOf)).size > 1) {
