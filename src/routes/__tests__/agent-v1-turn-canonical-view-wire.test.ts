@@ -254,7 +254,7 @@ describe('canonical view on the same-page turn wire', () => {
       "analysis_state": "454aa66dadcb0bdfaf3164ffc3c4c25d23337f6e82ecf074197d8d55eb5ff130",
       "narration": "7ef70f45e42695171732686a79b6e9f550486cd080f07877c4fbd7fbb3c123a9",
       "graph_hash": "912f94dbc24ee95f468d78bd45d466661919975ad99b90349205c103782cd933",
-      "analysis_ready": "6cde1496b47a0b7f7a21b9f8e77aee70dbeae02a56ff9d8a6f1a7486b0420d93",
+      "analysis_ready": "5dbd369fbfc6d4041fb4762fdfb14239527bb43e872db993429be367b93ceb63",
       "draft_graph": "bad2923f6f0eabdecd4e44aa6905fbeb35343415facedcf40c953c7cb507fcd5",
       "_answer_shape": "42480035ce86ad4003eeace38ef517ee7ef4c930be0f5ca48c64e702f4b75b51",
       // USER VOCABULARY (#3042) and OLUMI'S PURPOSE (#3045): the bar's two user lines only ("Review this model: …",

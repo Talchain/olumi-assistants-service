@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { approvalChipsFor } from '../approval-chips.js';
@@ -7,8 +6,8 @@ import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 
-const approved = JSON.parse(readFileSync(new URL('./fixtures/aie-a2-option-level-field-20261013.json', import.meta.url), 'utf8'));
-const basisLine = (basis: string): string => approved.assumption_basis_line.replace('{basis}', basis);
+// The AIE packet's basis line (aie-a2-option-level-field-20261013.json) was replaced by Paul's principle review (#3051, B.md #3013).
+const basisLine = (basis: string): string => `Why Olumi suggests this (not checked against a source unless one is shown): \u201c${basis}\u201d`;
 const ctx = { scenario_id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', authenticated_user_id: 'user-a', request_id: 'r',
   user_text: 'Suggest starting figures.', user_text_complete: false };
 const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
