@@ -11,7 +11,9 @@
  * WIRE-WITNESSED) and the store (in memory, with the register route's compare-and-set rules and the committed turn ledger).
  *
  * The user's words are Paul's own, verbatim. Row 1 places his "deliver a high-quality MVP within 6 months" message as the
- * first after the brief (in his test it came later, after other messages, where the draft gate rightly refuses: row 3).
+ * first after the brief. In his test it came later, after other messages: the current-model caller (PL #94 07:32Z) reads
+ * those as the drafter's context, so that order is offered the card too (row 3); a message whose text the ledger read does
+ * not return still refuses.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -61,13 +63,14 @@ const goalCandidate = (): Rec => ({
   factors: [{ label: 'Team size', role: 'controllable', baseline_known: false, baseline_value: 3, unit: 'people', provenance: 'ai_proposed', plausible_max: 10 }],
 });
 
-function server(opts: { messagesSinceBrief?: string[] } = {}) {
+function server(opts: { messagesSinceBrief?: string[]; laterMessages?: { turn_id: string; text: string }[] } = {}) {
   let graph: Rec = structuredClone(FX.graph);
   let commits = 0;
   const ledger = {
     write_turn_ids: [registrationTurnId(SID, constructionOperationId(SID, FX.brief_text))],
     user_message_turn_ids: [BRIEF_TURN, ...(opts.messagesSinceBrief ?? [])],
     first_user_message: FX.brief_text.trim(), complete: true,
+    ...(opts.laterMessages !== undefined ? { later_user_messages: opts.laterMessages } : {}),
   };
   const identity = () => computeGraphIdentityHash(graph as never)!.value;
   const dispatch: InternalDispatch = async (path, body) => {
@@ -223,7 +226,22 @@ describe('GEN #5: a deadline goal typed after the draft opens the revised-draft 
     expect(s.commits()).toBe(0);
   });
 
-  it('after other messages (Paul\'s real order) the draft gate refuses, naming the deadline goal; nothing written', async () => {
+  it('⭐ after other messages (Paul\'s real order) the card is offered: the earlier message is the drafter\'s context, never the user\'s verified words', async () => {
+    const earlier = 'Can you also look at how fast we can ship?';
+    const s = server({ messagesSinceBrief: ['funding-goal-turn-earlier'], laterMessages: [{ turn_id: 'funding-goal-turn-earlier', text: earlier }] });
+    const inputs: string[] = [];
+    const call = (async (req: { input: string }) => { inputs.push(String(req.input)); return { text: JSON.stringify(deliverCandidate()) }; }) as unknown as CallStructuredModel;
+    const caps = createAgentCapabilities(s.dispatch, new ProposalStore(), call, 'full', undefined, {
+      readCommittedTurnLedger: s.readCommittedTurnLedger, readStatedObjections: async () => [] });
+    const r = await caps.proposeGoalDeadline!(turn(FX.deliver_turn) as never, deadline) as Rec;
+    expect(r.ok, JSON.stringify(r).slice(0, 500)).toBe(true);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.startsWith(`${FX.brief_text.trim()}\n\n${FX.deliver_turn.trim()}\n\n`)).toBe(true);
+    expect(inputs[0]!.endsWith(JSON.stringify([earlier]))).toBe(true);
+    expect(s.commits()).toBe(0);
+  });
+
+  it('after a message whose text the ledger read does not return, the draft gate refuses, naming the deadline goal; nothing written', async () => {
     const s = server({ messagesSinceBrief: ['funding-goal-turn-earlier'] });
     const { caps } = lane(s, deliverCandidate);
     const r = await caps.proposeGoalDeadline!(turn(FX.deliver_turn) as never, deadline) as Rec;

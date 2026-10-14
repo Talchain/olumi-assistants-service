@@ -1066,7 +1066,10 @@ export function firstConstructInput(brief: string, context?: ConstructionContext
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
   const input = notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
-  return context === undefined ? input : `${input}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`;
+  if (context === undefined) return input;
+  return `${input}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`
+    + (context.messages !== undefined && context.messages.length > 0 ? `\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(context.messages)}` : '')
+    + (context.objections !== undefined && context.objections.length > 0 ? `\n\n${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}` : '');
 }
 
 /**
@@ -1076,8 +1079,16 @@ export function firstConstructInput(brief: string, context?: ConstructionContext
  * nothing in the saved model can pass as the user's words. What the user set in it is carried by the caller with its own
  * stamp, never re-authored by this draft. (Drafter text: AIE pending.)
  */
-export interface ConstructionContext { readonly current_model: Record<string, unknown> }
+export interface ConstructionContext {
+  readonly current_model: Record<string, unknown>;
+  /** The conversation's later messages (PL #94 07:32Z Q1): context, never verified words of the user. */
+  readonly messages?: readonly string[];
+  /** The objections the user recorded (S8 `statement`, verbatim): context the revision must not contradict. */
+  readonly objections?: readonly string[];
+}
 export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model, to revise (Olumi\'s record of the model, not the user\'s words; keep its structure and the labels of what you keep):';
+export const LATER_MESSAGES_CONTEXT_LEAD = 'Messages in this conversation after the brief (context only: their origin is not verified, so never quote them as the user\'s words or take a figure from them as stated):';
+export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier findings (context: keep the revised draft consistent with them):';
 
 /** A missing option-to-goal mechanism, read from what admission actually kept. */
 export interface OutcomePathIssue {
