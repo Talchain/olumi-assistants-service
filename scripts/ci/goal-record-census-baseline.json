@@ -1,5 +1,5 @@
 {
-  "source_sha": "b14c27071fd2652f3e4dfe09b4fe67867b50c4c2",
+  "source_sha": "92a7c819023356d7f3baf4b6c732c16c9255187e",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -381,7 +381,6 @@
       "src/orchestrator-v5/admission/target-testability.ts": 3,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 7,
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 1,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 8,
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 1,
@@ -400,6 +399,7 @@
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 7,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 2,
       "src/orchestrator-v5/goal-target/goal-own-constraint-chance.ts": 3,
+      "src/orchestrator-v5/goal-target/goal-target-gap.ts": 1,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 1,
       "src/orchestrator-v5/graph-management/field-safety.ts": 2,
       "src/orchestrator-v5/handlers/describe-changeset.ts": 2,
@@ -570,7 +570,7 @@
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 2,
       "src/orchestrator-v5/agent-lane/current-level-answer.ts": 4,
       "src/orchestrator-v5/agent-lane/current-level-ask-carry.ts": 1,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 2,
+      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-certainty.ts": 1,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 13,
       "src/orchestrator-v5/agent-lane/goal-sense-reading.ts": 3,
@@ -594,6 +594,7 @@
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 2,
       "src/orchestrator-v5/goal-target/goal-record.ts": 2,
       "src/orchestrator-v5/goal-target/goal-target-basis.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-target-gap.ts": 1,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 5,
       "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 2,
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 3,
@@ -758,7 +759,7 @@
       "src/orchestrator-v5/admission/target-testability.ts": 4,
       "src/orchestrator-v5/agent-lane/actions/state.ts": 2,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 1,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 3,
+      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 2,
       "src/orchestrator-v5/agent-lane/goal-coherence.ts": 2,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 2,
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 2,
@@ -772,8 +773,9 @@
     "success_threshold": {
       "src/cee/transforms/schema-v3.ts": 1,
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 2,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 2,
+      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-target-gap.ts": 1,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/tools/handlers/add-constraint.ts": 5,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 1,
@@ -847,12 +849,12 @@
     "resolveGoalThresholdStrict": 13,
     "scoredGoalIdOf": 8,
     "soleGoalOf": 15,
-    "statedGoalTargetOf": 30,
+    "statedGoalTargetOf": 29,
     "success_threshold": 20,
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2475,
+  "total_references": 2474,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

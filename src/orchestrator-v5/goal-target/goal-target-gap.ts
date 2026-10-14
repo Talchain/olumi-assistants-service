@@ -23,7 +23,7 @@ export interface GoalTargetGap {
  * Whether the goal carries a target: any of the fields the goal-target writer sets (a legacy goal's normalised threshold too,
  * which the Run sends as its threshold), or (RT-10 B′ R3) the goal's own limit row, read by the ONE target reader — "at most
  * 400" is a target, so it is never asked for again. Moved verbatim from `decision-input-ask.ts`, which re-exports it: the
- * target ask and this gap decide with ONE predicate (C1 r1 Codex: a legacy `goal_threshold` read as "no target").
+ * target ask and this gap decide with ONE predicate (C1 r1 Codex: a legacy normalised threshold read as "no target").
  */
 export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
   const g = rec(graph);
