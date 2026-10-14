@@ -35,7 +35,8 @@ const S1_ROW = {
   copy: {
     title: 'The comparison rests on a link nobody has sized yet.',
     why: "Until it is sized, Olumi can't compare the options on your goal.",
-    question: 'How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it.',
+    // System 4 row 11: served D1's Run does not rank this link's factor as its most sensitive driver, so no "turns on it" claim.
+    question: 'How much does sprint capacity for AI reporting really change AI reporting module availability?',
   },
   item_ref: { kind: 'link', from_id: AI.from, to_id: AI.to },
 };

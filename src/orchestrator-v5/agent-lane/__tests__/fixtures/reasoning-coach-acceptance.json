@@ -718,7 +718,7 @@
       "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
       "title": "The comparison rests on a link nobody has sized yet.",
       "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it."
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability?"
      }
     ]
    }
@@ -958,7 +958,7 @@
       "item": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
       "title": "The comparison rests on a link nobody has sized yet.",
       "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for integration fix really change integration-step bug resolution? The comparison turns on it."
+      "question": "How much does sprint capacity for integration fix really change integration-step bug resolution?"
      }
     ]
    }
@@ -1199,7 +1199,7 @@
       "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
       "title": "The comparison rests on a link nobody has sized yet.",
       "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it."
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability?"
      }
     ]
    }
@@ -5886,7 +5886,7 @@
       "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
       "title": "The comparison rests on a link nobody has sized yet.",
       "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it."
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability?"
      }
     ]
    }
