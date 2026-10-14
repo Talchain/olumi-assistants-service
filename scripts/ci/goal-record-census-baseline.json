@@ -73,7 +73,7 @@
       "src/graph/inert-risk.ts": 2,
       "src/graph/limit-sink-branch.ts": 1,
       "src/graph/retained-limit.ts": 1,
-      "src/orchestrator-v5/admission/target-testability.ts": 1,
+      "src/orchestrator-v5/admission/target-testability.ts": 2,
       "src/orchestrator-v5/agent-lane/actions/state.ts": 2,
       "src/orchestrator-v5/agent-lane/admit-constraint.ts": 2,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 8,

@@ -404,8 +404,8 @@ export function estimateOnlyWords(base: number, unit: string): string {
  */
 export function launchWindowOf(goal: unknown): GoalTargetBasis | undefined {
   const b = goalTargetBasisOf(goal);
-  return b !== undefined && b.reference === 'launch' && b.period_kind === 'over_period'
-    && b.quantity_frame === 'level' && b.target_frame === 'level' ? b : undefined;
+  // A level target implies a level quantity (`admitGoalTargetBasis`: a change quantity takes only change_abs).
+  return b !== undefined && b.reference === 'launch' && b.period_kind === 'over_period' && b.target_frame === 'level' ? b : undefined;
 }
 
 /** Why a launch-window goal has no chance yet, in one sentence: "Conversion rate is measured over the first three months after launch, so it has no level today, and the model has no forecast for that period yet." */

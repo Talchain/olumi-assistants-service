@@ -542,9 +542,10 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
       + `${question[0]!.toLowerCase()}${question.slice(1)}`;
   // AIE MA1: a goal measured over the window from launch has no level today; (a) is that window's forecast.
   const launch = launchWindowOf(goal);
-  const otherTarget = launch === undefined || !Array.isArray(graph.goal_constraints) ? undefined
-    : graph.goal_constraints.filter(isRec).flatMap((r) => r.role === 'goal_target' && typeof r.node_id === 'string'
-      && r.node_id !== goal.id ? [labelOf(r.node_id)] : [])[0];
+  // The census-counted read: a second stated target row (another node's), named in the cohort question.
+  const rows: unknown = launch === undefined ? undefined : graph.goal_constraints;
+  const otherTarget = !Array.isArray(rows) ? undefined : rows.filter(isRec).flatMap((r) => r.role === 'goal_target'
+    && typeof r.node_id === 'string' && r.node_id !== goal.id ? [labelOf(r.node_id)] : [])[0];
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? launch !== undefined
