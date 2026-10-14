@@ -34,6 +34,7 @@
  * the user, which is the wrong way round.
  */
 import type { AdmittedModel, InferenceClass } from './admit-model.js';
+import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 
 /**
  * The ceiling a first model is gated against — a BACKSTOP to the envelope, not
@@ -112,6 +113,12 @@ export interface ConstructionSizeVerdict {
    * withheld — has lost the limit too.
    */
   readonly brief_stated_keys: { readonly nodes: readonly string[]; readonly edges: readonly string[]; readonly limits: readonly string[] };
+  /**
+   * The host's own links, minted after drafting and NOT counted in `edges` or against the limit: the status quo's repair
+   * links to the factors the other options act on (`admit-model.ts` `wireInertStatusQuo`, `isRepairAuthoredOptionFactorEdge`).
+   * They stay in the model; only the drafter's budget stops paying for them.
+   */
+  readonly host_links_not_counted: number;
   /** One sentence a user could be shown. Empty when within budget. */
   readonly detail: string;
 }
@@ -172,7 +179,13 @@ export function assessConstructionSize(
   limits: ConstructionSizeLimits = COMPACT_LIMITS,
 ): ConstructionSizeVerdict {
   const nodes = admitted.nodes.length;
-  const edges = admitted.edges.length;
+  // ⭐ THE DRAFTER NEVER PAYS FOR THE HOST'S LINKS (DL ruling (b), 14 Oct; T5 D2 r1). Paul's marketing brief registered
+  // nothing 1 time in 2: its first draft came back at 32 links (limit 30), 5 of them the status quo's repair links the host
+  // adds after drafting, and the one retry could not find them in its own `links`. Counted without them it is 27: no retry.
+  const kindById = new Map(admitted.nodes.map((n) => [n.id, String((n as { kind?: unknown }).kind ?? '')]));
+  const counted = admitted.edges.filter((e) => !isRepairAuthoredOptionFactorEdge(e, kindById));
+  const host_links_not_counted = admitted.edges.length - counted.length;
+  const edges = counted.length;
 
   const by_kind: Record<string, number> = {};
   for (const n of admitted.nodes) {
@@ -216,7 +229,7 @@ export function assessConstructionSize(
     for (const id of [endpoint(e, 'from'), endpoint(e, 'to')]) if (nodeIds.has(id)) floorIds.add(id);
   }
   const floor_nodes = floorIds.size;
-  const floor_edges = admitted.edges.filter((e) => isBriefStatedEdge(e) || (floorIds.has(endpoint(e, 'from')) && floorIds.has(endpoint(e, 'to')))).length;
+  const floor_edges = counted.filter((e) => isBriefStatedEdge(e) || (floorIds.has(endpoint(e, 'from')) && floorIds.has(endpoint(e, 'to')))).length;
   const user_material_exceeds_limit = floor_nodes > limits.maxNodes || floor_edges > limits.maxEdges;
   const identityOf = new Map(admitted.nodes.map((n) => [n.id, nodeIdentity(n)]));
   const brief_stated_keys = {
@@ -262,6 +275,7 @@ export function assessConstructionSize(
     floor_nodes,
     floor_edges,
     brief_stated_keys,
+    host_links_not_counted,
     detail,
   };
 }
