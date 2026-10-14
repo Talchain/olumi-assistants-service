@@ -112,13 +112,10 @@ const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
 /**
- * Whose figure a factor's value is — F1's vocabulary of the ONE provenance authority (`cee/provenance/provenance-of.ts`
- * `provenanceOf`): the person's verified figure (`yours`), Olumi's (`olumi_estimate` / `olumi_accepted`), or `unknown`
- * (unestablished, a human figure whose role is unverified, or a structural definition). The census reads the same rule.
+ * Whose figure a factor's value is — F1's vocabulary of the ONE provenance authority (`cee/provenance/provenance-of.ts`):
+ * re-exported, never re-implemented (system 3: one authorship authority).
  */
-export function valueAuthorshipOf(observed: unknown): ValueAuthorship {
-  return valueAuthorshipFromProvenance(observed);
-}
+export { valueAuthorshipFromProvenance as valueAuthorshipOf };
 
 function enrichmentOf(block: unknown): unknown {
   const b = rec(block);
@@ -318,7 +315,7 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
       factors.set(n.id as string, {
         factor_id: n.id as string,
         label: typeof n.label === 'string' ? n.label : (n.id as string),
-        value_authorship: valueAuthorshipOf(n.observed_state),
+        value_authorship: valueAuthorshipFromProvenance(n.observed_state),
         goal_distance: dist.get(n.id as string) ?? 99,
         value_hash: factorValueHash(n),
         has_range: hasStoredRange(n.observed_state),

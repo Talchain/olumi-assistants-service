@@ -783,6 +783,62 @@ export function provenanceOf(subject: ProvenanceSubject): Provenance {
   return linkProvenanceOf(subject.link, subject.context);
 }
 
+// ── SYSTEM 3: the other subjects (DL re-plan 14 Oct 23:0xZ; T1H design approved) ──────────────────────────────────
+/**
+ * ⭐ ONE AUTHORSHIP AUTHORITY FOR EVERY SUBJECT. `provenanceOf` answers whose a value, a setting or a link is; these answer
+ * the same three-tier question (human / unknown / ai) for the other carriers consumers used to read tag by tag:
+ *  · `nodeTag`   — a node's display tag (`from_brief`, `ai_inferred`, `unverified_brief`, `user`, `user_set`);
+ *  · `card`      — a proposal's `authored_by` (`user_stated` / `model_proposed`): the card's words are the user's or Olumi's;
+ *  · `eventRisk` — a risk's `event_risk.occurrence.basis` (`user` / `olumi`);
+ *  · `teamRange` — a held team time's `range_origin`: `olumi_estimate` is Olumi's range around the user's own forecast;
+ *  · `words`     — WHO SAID IT: words verified as the user's typed words are human, a known-unknown source is unknown, an
+ *                  incomplete source is unknown unless the AI declares its own estimate (K3), anything else is Olumi's.
+ * A relayed colleague's estimate the user typed ("My CFO thinks…") is the user's input, human (DL ruling 14 Oct 19:49Z).
+ */
+export type AuthorshipSubject =
+  | ProvenanceSubject
+  | { readonly nodeTag: unknown }
+  | { readonly card: { readonly authored_by?: unknown } | null | undefined }
+  | { readonly eventRisk: unknown }
+  | { readonly teamRange: unknown }
+  | { readonly words: { readonly verified: boolean; readonly unknown: boolean; readonly sourceComplete?: boolean; readonly ownEstimate?: boolean } };
+
+export function authorshipOf(subject: AuthorshipSubject): Provenance {
+  if ('value' in subject || 'setting' in subject || 'link' in subject) return provenanceOf(subject);
+  if ('nodeTag' in subject) {
+    const t = subject.nodeTag;
+    if (t === 'user' || t === 'user_set') return P('human');
+    // The brief's words, by the node's stamp alone: the person's for every gate, labelled where a chance rests on it.
+    if (t === 'from_brief') return P('human', { stampOnly: true });
+    if (t === 'unverified_brief') return P('human', { role: 'unverified' });
+    return t === 'ai_inferred' ? P('ai') : P('unknown');
+  }
+  if ('card' in subject) {
+    const a = subject.card?.authored_by;
+    return a === 'user_stated' ? P('human') : a === 'model_proposed' ? P('ai') : P('unknown');
+  }
+  if ('eventRisk' in subject) {
+    const basis = rec(rec(subject.eventRisk)?.occurrence)?.basis;
+    return basis === 'user' ? P('human') : basis === 'olumi' ? P('ai') : P('unknown');
+  }
+  if ('teamRange' in subject) return subject.teamRange === 'olumi_estimate' ? P('ai') : P('unknown');
+  const w = subject.words;
+  return w.verified ? P('human') : w.unknown || (w.sourceComplete === false && w.ownEstimate !== true) ? P('unknown') : P('ai');
+}
+
+/**
+ * Whether a request's words were TYPED by the user (a composer message, or no source at all: an API caller). A chip's text is
+ * Olumi's, a system event is nobody's typing, and a retry is typed only when its first send was (recorded then). An allowlist:
+ * anything else under-claims.
+ */
+export function requestWasTyped(body: Readonly<Record<string, unknown>>): boolean {
+  const kind = body['kind'];
+  const chip = body['chip'];
+  const source = body['source'];
+  return (kind === undefined || kind === 'message') && (chip === null || chip === undefined)
+    && (source === undefined || source === 'composer');
+}
+
 // ── Starting values ─────────────────────────────────────────────────────────
 
 const UNKNOWN_DISPLAY: ValueAuthorshipDisplay = { source: 'system', provenance: 'unverified_brief' };
