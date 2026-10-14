@@ -1,8 +1,9 @@
 /**
  * ⛔ CAPACITY JUDGE POST3010 ROW 3 (14 Oct; PL #94 6135017311): a zero-spread option's withheld cell said a FUTURE EVENT —
- * "Falls short of 100 tickets per week if today’s figures hold." (AIE packet 247cd85a numeric_scope[2] forbids it). The one
- * fact the cell has is `zeroSpread`: every valid draw gave the option the same goal value, so the model holds no uncertainty
- * for it. The line is stored with each Run, so the served Run is re-said on reopen too (the stored-licence reader).
+ * "Falls short of 100 tickets per week if today’s figures hold." (AIE packet 247cd85a numeric_scope[2] forbids it). The fact
+ * the cell has is `zeroSpread`, true on equal low and high deciles (PL 05:25Z: never "every run the same"). The line is stored
+ * with each Run; on reopen ONLY that retired plain variant, recognised by identity with the Run's own stored target, is said
+ * with the current line. The carrier's rates line and §(o′)'s horizon line stay the historical Run's own.
  *
  * Corpus: the served `/graph` read after turn 01 (`tests/fixtures/zero-spread/…`, verbatim): its stored Run, graph and goal
  * certainty, through the read's own cell projector (`projectCanonicalAnalysisCells`) and the real producer.
@@ -18,8 +19,8 @@ type Rec = Record<string, any>;
 const READ = (JSON.parse(readFileSync('tests/fixtures/zero-spread/served-capacity-post3010-read01-20261014.json', 'utf8')) as Rec).body as Rec;
 const KEEP = 'keep_current_staffing';
 const SERVED_LINE = 'Falls short of 100 tickets per week if today’s figures hold.';
-const LINE = 'Chance not shown: every run of this model gave this option the same result for your goal, so the model holds no '
-  + 'uncertainty for it from which to give a chance. You can review whether the figures this option rests on are really that certain.';
+const LINE = 'Chance not shown: in this model, this option’s low and high typical results for your goal came out the same, '
+  + 'so they give no range from which to show a chance. You can review whether the figures this option rests on are really that certain.';
 const licenceRecord = (result: Rec): Rec => (result.enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_CHANCE_LICENSED)!;
 const cells = (result: Rec) => projectCanonicalAnalysisCells(result as never, READ.graph, READ.analysis_goal_certainty);
 const FUTURE = /falls short|meets\b|if today.s (figures|rates) hold/i;
@@ -47,6 +48,20 @@ describe('capacity post3010 row 3: a zero-spread cell says no future event', () 
     const stored = structuredClone(READ.analysis_result) as Rec;
     licenceRecord(stored).withheld_reason_by_option[KEEP].line = ZERO_SPREAD_NEEDS_MONTHLY_CHANGES;
     expect(cells(stored).find((c) => c.option_id === KEEP)!.cell).toMatchObject({ why: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES });
+  });
+
+  it('CONTRAST: a Run that stored the carrier’s rates line keeps its own figures and period', () => {
+    const stored = structuredClone(READ.analysis_result) as Rec;
+    const rates = 'Falls short of 100 tickets per week by month 3 if today’s rates hold.';
+    licenceRecord(stored).withheld_reason_by_option[KEEP].line = rates;
+    expect(cells(stored).find((c) => c.option_id === KEEP)!.cell).toMatchObject({ why: rates });
+  });
+
+  it('CONTRAST (identity, not a pattern): a plain line that is not this Run’s own target words is kept as stored', () => {
+    const stored = structuredClone(READ.analysis_result) as Rec;
+    const other = 'Falls short of 120 tickets per week if today’s figures hold.';
+    licenceRecord(stored).withheld_reason_by_option[KEEP].line = other;
+    expect(cells(stored).find((c) => c.option_id === KEEP)!.cell).toMatchObject({ why: other });
   });
 
   it('PRODUCER: the served Run’s own records (Keep’s unearned exact 0 restored, as transport stripped it) write the one line', () => {
