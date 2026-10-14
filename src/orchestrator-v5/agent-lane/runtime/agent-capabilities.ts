@@ -3526,6 +3526,8 @@ export function createAgentCapabilities(
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
   /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
   const withdrawnProposals = new Set<string>();
+  /** How many times this turn's draft (by its cache key) was re-issued after a withdrawal: each re-issue's id is fresh. */
+  const reissuedDrafts = new Map<string, number>();
 
   /**
    * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
@@ -3566,6 +3568,7 @@ export function createAgentCapabilities(
       return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
     }
     Object.assign(candidate, limits.replacement);
+    // The drafter's targets are its reading of the user's goal: `limitsKeptBy` stores them `inferred`, never `explicit`.
     const held = targetsHeldBy(candidate);
     if (held.length === 0) {
       return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
@@ -3617,19 +3620,28 @@ export function createAgentCapabilities(
       pending = prepareRevisedDraft(ctx, g, goal);
       revisedDrafts.set(key, pending);
     }
-    const draft = await pending;
+    let draft = await pending;
     if ('refused' in draft) {
       return draft.found === undefined ? draft.refused : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', [{
         words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
-    // ⛔ A WITHDRAWN CARD IS NOT OFFERED AGAIN (served marketing turn 02 on 00a51f7d): the turn's one draft is reused, so a
-    // target call after `withdraw_proposal` returned the withdrawn id as offered, and the reply described a card the user
-    // never saw. Its id is consumed for this turn (`proposalsAwaitingApproval`), so the call says so instead. Only a recorded
-    // withdrawal refuses: a card merely gone from the store (evicted) is this turn's own preparation and is offered again.
-    // AIE_TEXT_PENDING (marketing turn 02): the withdrawn refusal's detail.
+    /**
+     * ⭐ A WITHDRAWN CARD IS RE-ISSUED FRESH, NEVER RETURNED DEAD (served marketing turn 02 on 00a51f7d; Codex
+     * CHECK-3020-45e7c1e3 item 1; DL r2): the turn's one draft is reused, so a target call after `withdraw_proposal` returned
+     * the withdrawn id as offered, and the reply described a card the user never saw. Refusing it (r1) left NO card after
+     * propose → withdraw → propose → withdraw → propose. So the next call issues the SAME prepared card under a FRESH id, bound
+     * to the current revision; the withdrawn id stays consumed by its own `withdraw_proposal` call, so ONE live card ends the
+     * turn. Only a recorded withdrawal re-issues: a card merely gone from the store (evicted) is offered again under its id.
+     */
     if (withdrawnProposals.has(draft.proposal.proposal_id)) {
-      return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'This revised-draft card was withdrawn earlier this turn, so it is not offered and nothing has changed. Never say a card is shown.' };
+      const { proposal_id: _withdrawn, ...content } = draft.proposal;
+      const reissues = (reissuedDrafts.get(key) ?? 0) + 1;
+      reissuedDrafts.set(key, reissues);
+      draft = { proposal: createProposal({ ...content, base_graph_identity_hash: g.graph_hash,
+        provenance: { ...content.provenance, basis: `${content.provenance.basis ?? ''} Offered again after a withdrawal this turn (${reissues}).` } }),
+        held: draft.held };
+      revisedDrafts.set(key, Promise.resolve(draft));
     }
     if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
     /**
@@ -3651,10 +3663,11 @@ export function createAgentCapabilities(
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
         + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
-        // AIE_TEXT_PENDING (marketing turn 02): the 'unknown' sentence, which replaces "NOT in the revised draft" in that case only.
+        // The AIE's exact texts (packet 281e8b3d, #94 6162120876): the 'unknown' note, and the residual for a figure no card
+        // target carries (no value/comparator/unit miss is proof the target is absent from the complete model).
         + (holds === true ? '' : holds === 'unknown'
-          ? ` Whether this target (${targetFigure(target.value, target.unit)}) is the card\u2019s own could not be checked against the user\u2019s words: ask the user to check the targets on the card, and never say it is in the revised draft or that it is not.`
-          : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+          ? ' The requested target could not be verified against the card\u2019s complete meaning. Do not say it is included or excluded. If this reply actually offers the current card, explain the uncertainty and ask the user to check the goal, target, reference, period and conditions before approving.'
+          : ` The host did not find a matching target entry for ${targetFigure(target.value, target.unit)} in this card. Do not claim that the requested target is absent from the complete model unless its full meaning was checked. Explain the limitation and what the current card actually contains.`),
     };
   };
 

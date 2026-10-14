@@ -14,7 +14,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
-import { proposalsAwaitingApproval } from '../approval-chips.js';
+import { approvalChipsFor, proposalsAwaitingApproval } from '../approval-chips.js';
+import { runAgentTurn, type CallModel } from '../runtime/agent-loop.js';
+import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 import { ProposalStore } from '../proposal.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -87,7 +89,23 @@ const pressed = (proposalId: string) => ({ scenario_id: SID, authenticated_user_
 const heldTargets = (graph: Rec) => (graph.goal_constraints as Rec[]).filter((r) => r.role === 'goal_target')
   .map((r) => [r.node_id, r.operator_as_stated ?? r.operator, r.value, r.unit]);
 const BOTH = [['conversion_rate', '>', 15, '%'], ['new_customers_in_first_3_months', '>=', 20, 'customers']];
-const UNKNOWN_NOTE = /could not be checked against the user’s words: ask the user to check the targets on the card/;
+// The AIE's exact texts (packet 281e8b3d): the 'unknown' note and the residual for a figure no card target carries.
+const UNKNOWN_NOTE = /The requested target could not be verified against the card’s complete meaning\. Do not say it is included or excluded\./;
+const NO_TUPLE = (figure: string) => `The host did not find a matching target entry for ${figure} in this card. Do not claim that the requested target is absent`;
+const targetRows = (graph: Rec) => (graph.goal_constraints as Rec[]).filter((r) => r.role === 'goal_target');
+/** A scripted model: each call in order, each withdrawal naming the last proposal id a tool returned (Codex CHECK-3020 probe). */
+type Call = { name: string; args: (last: string | undefined) => Record<string, unknown> };
+const scripted = (calls: Call[]): CallModel => {
+  let at = 0; let last: string | undefined;
+  return (async (req: Rec) => {
+    for (const item of req.input ?? []) {
+      if (item.type === 'function_call_output') { const id = JSON.parse(item.output).proposal_id; if (typeof id === 'string') last = id; }
+    }
+    const c = calls[at++];
+    return c ? { output: [{ type: 'function_call', name: c.name, arguments: JSON.stringify(c.args(last)), call_id: `wire_${at}` }] }
+      : { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Check the revised draft.' }] }] };
+  }) as unknown as CallModel;
+};
 
 describe('marketing turn 02: an unverifiable card target is unknown, never "not in it", and the card reaches the user', () => {
   it('⭐ RED→GREEN: both target calls → ONE card awaiting approval (customers UNKNOWN, never "NOT in") → approve → the cold read holds both', async () => {
@@ -100,23 +118,62 @@ describe('marketing turn 02: an unverifiable card target is unknown, never "not 
     expect(String(b.note)).toMatch(UNKNOWN_NOTE);
     expect(String(b.note)).not.toMatch(/NOT in the revised draft/);
     expect(String(a.public_label)).toContain('‘New customers in first 3 months’ at least 20 customers');
-    expect([...proposalsAwaitingApproval([
-      { name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(a.proposal_id) },
-      { name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(b.proposal_id) }]).keys()]).toEqual([a.proposal_id]);
+    // The two calls' OWN results, as the loop records them (Codex CHECK-3020: never a fabricated summary).
+    expect([...proposalsAwaitingApproval([a, b].map((r) => ({ name: 'propose_goal_target', ok: r.ok === true, mutated: r.mutated === true,
+      proposal_id: String(r.proposal_id) }))).keys()]).toEqual([a.proposal_id]);
     s.said(FX.l20.turn_id);
     const applied = await caps.authoriseChange!(pressed(String(a.proposal_id)) as never, { proposal_id: a.proposal_id } as never) as Rec;
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true });
     expect(heldTargets(structuredClone(s.graph()))).toEqual(expect.arrayContaining(BOTH));
+    // ⭐ #3020 r2 (DL (a)): approving the drafter's reading of the goal is not authorship: both targets are stored `inferred`,
+    // never `explicit`. ⛔ EXPECTATION CHANGED (old: the drafter's `explicit` was stored as the user's).
+    expect(targetRows(s.graph()).map((r) => [r.node_id, r.provenance])).toEqual(expect.arrayContaining([
+      ['conversion_rate', 'inferred'], ['new_customers_in_first_3_months', 'inferred']]));
+    // The AND goal still holds BOTH targets, and the Run receives them exactly as before: only `provenance` differs, which
+    // neither PLoT nor ISL computes on (PR body: their staging reads, with contrasts).
+    const wire = (rows: Rec[]) => (wireGoalConstraints(rows) as Rec[]).map(({ provenance: _p, ...rest }) => rest);
+    expect(wire(targetRows(s.graph()))).toEqual(wire(targetRows(s.graph()).map((r) => ({ ...r, provenance: 'explicit' }))));
+    expect(targetRows(s.graph())).toHaveLength(2);
   });
 
-  it('⭐ RED→GREEN: a card withdrawn this turn is never re-offered as if shown (the served propose → withdraw → propose)', async () => {
-    const { caps, proposals } = lane(server());
+  it('⭐ RED→GREEN: a card withdrawn this turn is re-issued under a FRESH id, never returned dead (the served propose → withdraw → propose)', async () => {
+    const s = server();
+    const { caps, proposals } = lane(s);
     const a = await caps.proposeGoalTarget!(turn as never, customers as never) as Rec;
     expect(await caps.withdrawProposal!(turn as never, { proposal_id: a.proposal_id } as never)).toMatchObject({ ok: true, withdrawn: true });
     const again = await caps.proposeGoalTarget!(turn as never, customers as never) as Rec;
-    expect(again, JSON.stringify(again)).toMatchObject({ ok: false, mutated: false, refusal: 'withdrawn' });
-    expect(again.proposal_id).toBeUndefined();
-    expect(proposals.get(String(a.proposal_id))).toBeUndefined();
+    // ⛔ EXPECTATION CHANGED (Codex CHECK-3020-45e7c1e3 item 1; old: refused `withdrawn`, leaving no card at all).
+    expect(again, JSON.stringify(again)).toMatchObject({ ok: true, mutated: false, revised_draft: { holds_this_target: 'unknown' } });
+    expect(again.proposal_id).not.toBe(a.proposal_id);
+    expect(again.public_label).toBe(a.public_label);
+    expect(proposals.get(String(a.proposal_id)), 'the withdrawn card stays withdrawn').toBeUndefined();
+    expect(proposals.get(String(again.proposal_id))!.base_graph_identity_hash, 'bound to the current revision')
+      .toBe(computeAnalysisAffectingGraphHash(s.graph() as never));
+  });
+
+  it('⭐ RED→GREEN (Codex CHECK-3020 wire probe): propose → withdraw → propose → withdraw → propose through the real loop ends in ONE live card; pressing it saves both targets and the period', async () => {
+    const s = server();
+    const { caps, proposals } = lane(s);
+    const out = await runAgentTurn({ instructions: 'i', message: L20, history: [], ctx: turn, maxHops: 8, maxOutputTokens: 100 } as never, caps,
+      scripted([{ name: 'propose_goal_target', args: () => conversion }, { name: 'withdraw_proposal', args: (id) => ({ proposal_id: id }) },
+        { name: 'propose_goal_target', args: () => customers }, { name: 'withdraw_proposal', args: (id) => ({ proposal_id: id }) },
+        { name: 'propose_goal_target', args: () => customers }]));
+    expect(out.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_goal_target', true], ['withdraw_proposal', true],
+      ['propose_goal_target', true], ['withdraw_proposal', true], ['propose_goal_target', true]]);
+    const live = [...proposalsAwaitingApproval(out.tool_calls).keys()];
+    expect(live).toHaveLength(1);
+    expect(live[0]).toBe(out.tool_calls[4]!.proposal_id);
+    expect(new Set(out.tool_calls.filter((c) => c.name === 'propose_goal_target').map((c) => c.proposal_id)).size, 'three ids').toBe(3);
+    expect(proposals.outstanding(SID, null).map((p) => p.proposal_id), 'ONE stored card').toEqual(live);
+    expect(approvalChipsFor(out.tool_calls).map((c) => c.id)).toContain(`agent-approve-proposal:${live[0]}`);
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange!(pressed(live[0]!) as never, { proposal_id: live[0] } as never) as Rec;
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true });
+    const cold = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, {})).json.graph as Rec;
+    expect(heldTargets(cold)).toEqual(expect.arrayContaining(BOTH));
+    // The period Paul gave ("within the first 3 months") is read back with the targets: on the goal, as stated.
+    expect((cold.nodes as Rec[]).find((n) => n.kind === 'goal')).toMatchObject({ goal_deadline_as_stated: '3 months' });
+    expect(s.commits, 'one write').toHaveLength(1);
   });
 
   it('a card gone from the store WITHOUT a withdrawal is this turn’s own preparation: offered again, same id', async () => {
@@ -132,15 +189,26 @@ describe('marketing turn 02: an unverifiable card target is unknown, never "not 
     const { caps } = lane(server());
     const b = await caps.proposeGoalTarget!({ ...turn, user_turn_text: L20.replace('20 new', '25 new') } as never,
       { ...customers, value: 25 } as never) as Rec;
-    if (b.ok === true) {
-      expect(b.revised_draft?.holds_this_target).toBe(false);
-      expect(String(b.note)).toMatch(/This target \(25 customers\) is NOT in the revised draft/);
-    } else expect(b, JSON.stringify(b)).toMatchObject({ ok: false, mutated: false });
+    // Codex CHECK-3020: the specific branch is required (the card is offered; no card target carries 25 customers).
+    expect(b, JSON.stringify(b)).toMatchObject({ ok: true, revised_draft: { holds_this_target: false } });
+    expect(String(b.note)).toContain(NO_TUPLE('25 customers'));
+    expect(String(b.note)).not.toMatch(/NOT in the revised draft/);
   });
 
   it('NEGATIVE: the card’s same-figure target on ANOTHER quantity is never "held" (relabelled ‘Partner sign-ups’): unknown', async () => {
-    const { caps } = lane(server(), RAW.split('New customers in first 3 months').join('Partner sign-ups'));
+    const s = server();
+    const { caps } = lane(s, RAW.split('New customers in first 3 months').join('Partner sign-ups'));
     const b = await caps.proposeGoalTarget!(turn as never, customers as never) as Rec;
     expect(b, JSON.stringify(b)).toMatchObject({ ok: true, revised_draft: { holds_this_target: 'unknown' } });
+    // ⭐ #3020 r2 (Codex CHECK-3020 item 2): approved, Paul's "20 new customers" is NEVER stored as the user's own target on
+    // another entity: `inferred`, with his typed goal kept as the source on the operation.
+    s.said(FX.l20.turn_id);
+    expect(await caps.authoriseChange!(pressed(String(b.proposal_id)) as never, { proposal_id: b.proposal_id } as never)).toMatchObject({ ok: true, mutated: true });
+    const row = targetRows(s.graph()).find((r) => r.node_id === 'partner_sign_ups');
+    expect(row, JSON.stringify(targetRows(s.graph()))).toBeDefined();
+    expect(row!.provenance).toBe('inferred');
+    // The rows the earlier draft held keep their own origin (carried limits are never re-stamped).
+    const before = new Map((FX.graph.goal_constraints as Rec[]).filter((r) => r.role !== 'goal_target').map((r) => [r.constraint_id, r.provenance]));
+    for (const r of (s.graph().goal_constraints as Rec[]).filter((x) => before.has(x.constraint_id))) expect(r.provenance, r.constraint_id).toBe(before.get(r.constraint_id));
   });
 });

@@ -1,6 +1,6 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "6a1fdbe9-bee4-423b-8f01-4e483070afcd",
+ "operation_id": "63e5dc6b-51c5-4c88-ac4f-99f786c261ba",
  "candidate": {
   "nodes": [
    {
@@ -361,7 +361,7 @@
     "value": 20,
     "label": "New customers",
     "unit": "customers",
-    "provenance": "explicit",
+    "provenance": "inferred",
     "value_frame": "level",
     "role": "goal_target"
    },
@@ -373,7 +373,7 @@
     "value": 15,
     "label": "Conversion rate",
     "unit": "%",
-    "provenance": "explicit",
+    "provenance": "inferred",
     "value_frame": "level",
     "role": "goal_target"
    },

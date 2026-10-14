@@ -242,11 +242,26 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       }
     }
   }
-  const replacement = { ...rec(candidate), nodes, goal_constraints: rows };
+  // The revised draft's own targets are stored `inferred` (`targetsStoredInferred`); its carried limits keep their origin.
+  const replacement = { ...rec(candidate), nodes, goal_constraints: targetsStoredInferred(rows, candidate) };
   // The card's limits are the candidate's own rows as they stand after the carry (a re-spelled row says its earlier unit).
   const candidateLimitIds = new Set(theirs.map((t) => t.constraint_id));
   return { kept, dropped, carried, uncertain, conflict, limits: limitsOf(replacement).filter((r) => candidateLimitIds.has(r.constraint_id)).map(rowOf),
     ...(unresolvedRetainedLimits(replacement).length > 0 ? { withheld: retainedLimitWithheldLine(replacement) } : {}), replacement };
+}
+
+/**
+ * ⭐ APPROVING AN AI REINTERPRETATION IS NOT AUTHORSHIP (Codex CHECK-3020-45e7c1e3 item 2; DL #3020 r2 (a), 14 Oct): the
+ * revised draft's drafter re-reads the user's goal, and its `explicit` on a target is its own claim. Relabelled ‘Partner
+ * sign-ups’, Paul's "20 new customers" was stored `explicit` on another entity. So every target row the candidate holds (each
+ * `goal_target` row and the goal's own row, the rows `targetsHeldBy` reads, in any frame) is stored `inferred` until a
+ * verifier proves the user's own words state it. The rows carried from the earlier draft are limits (`limitsKeptBy`) and keep
+ * their origin; the user's typed goal stays the source on the operation. Applied to the replacement `limitsKeptBy` returns.
+ */
+function targetsStoredInferred(rows: readonly Rec[], candidate: unknown): Rec[] {
+  const goals = goalIdsOf(candidate);
+  return rows.map((c) => ((c.role === 'goal_target' || goals.has(String(c.node_id))) && c.provenance === 'explicit'
+    ? { ...c, provenance: 'inferred' } : c));
 }
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */
