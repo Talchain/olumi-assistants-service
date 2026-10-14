@@ -491,6 +491,13 @@ export type DispatchChipClickRunAnalysisResult =
       readonly analysisReady?: AnalysisReadyPayload;
       /** Snapshot graph for label resolution by central egress sanitiser. */
       readonly graph: GraphV3T | null;
+      /**
+       * THIS Run's run-fact identity, from the run_analysis fact it just committed (present only when that fact succeeded).
+       * The in-process caller (the automatic first analysis) gets `response` BEFORE the finaliser adds `analysis_state`, so
+       * `analysis_state.run_state.computed_at` is never there for it: served capacity e2e c0998b2e turn 01 recorded no
+       * `run_delivery` for its first Run and repeated the card's chance in the reply (judge row 8).
+       */
+      readonly runIdentity?: { readonly graph_hash_at_run: string; readonly computed_at: string };
       /** V5 state-trust freshness derivation. Post-dispatch — uses the
        *  just-produced run_analysis fact and the snapshot graph so the
        *  rerun chip-click wire response carries `freshness === 'fresh'`. */
@@ -2397,6 +2404,9 @@ export async function dispatchChipClickRunAnalysis(
         commitPerformed: true,
         analysisReady,
         graph: snapshotGraph,
+        ...(composedRunFact !== undefined && isSuccessfulRunAnalysisFact(composedRunFact)
+          && typeof composedRunFact.result.graph_hash_at_run === 'string' && typeof composedRunFact.result.computed_at === 'string'
+          ? { runIdentity: { graph_hash_at_run: composedRunFact.result.graph_hash_at_run, computed_at: composedRunFact.result.computed_at } } : {}),
         freshness,
         // D1 — the window `freshness` was derived over, gated exactly as the executor's exit gates it.
         ...(enrichedFacts.some(isSuccessfulRunAnalysisFact) ? { priorFacts: pairFacts } : {}),

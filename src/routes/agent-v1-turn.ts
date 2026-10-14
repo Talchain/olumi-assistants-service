@@ -150,7 +150,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
+import { firstAnalysisRunReceipt, GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_GOAL_PATH_UNSIZED, WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_LEADER_CAUSE_UNRECORDED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -5287,10 +5287,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const out = result.tool_results[i] as { ran?: unknown; run_identity?: unknown } | undefined;
         if (out?.ran === true) return out.run_identity;
       }
-      if (fa?.ran !== true) return undefined;
-      const executed = fa.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as { computed_against_hash?: unknown } | undefined;
-      return { scenario_id: scenarioId, graph_hash_at_run: executed?.computed_against_hash,
-        computed_at: (fa.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
+      // The first pass binds by the ONE first-analysis receipt the run_delivery writer reads: its committed identity (the
+      // in-process response carries no `analysis_state`; capacity e2e c0998b2e row 8), else its block and state.
+      const own = firstAnalysisRunReceipt(fa)?.run_identity;
+      return own === undefined ? undefined : { scenario_id: scenarioId, ...(own as Record<string, unknown>) };
     })();
     const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
       ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
