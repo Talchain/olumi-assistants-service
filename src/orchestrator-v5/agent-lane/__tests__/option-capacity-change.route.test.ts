@@ -265,6 +265,14 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
   });
 
+  it('the share\'s percent family is the unit authority\'s (`classifyUnitScaleClass`): "percent of developer time" is a share; points never are', async () => {
+    const spelled = (unit: string): Rec => { const g = JSON.parse(FX.graph_text) as Rec; node(g, LEGACY_TIME).observed_state.unit = unit; return g; };
+    expect(await offer(world(spelled('percent of developer time')))).toMatchObject({ ok: true });
+    expect(await offer(world(spelled('percent')))).toMatchObject({ ok: true });
+    // CONTRAST: the authority's prefix layer reads "percentage points" as percent; a change in points is not a share of time.
+    expect(await offer(world(spelled('percentage points')))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
+  });
+
   it.each([
     ['words the user never typed', { ...ARGS, statements: [{ quote: 'it would cut legacy work to 10%', form: 'point', value: 10 }] }, PAUL, 'statement_not_found'],
     ['a higher share (frees no time)', { ...ARGS, statements: [{ quote: 'legacy work would go up to 30%', form: 'point', value: 30 }] }, 'legacy work would go up to 30%', 'not_lower'],
