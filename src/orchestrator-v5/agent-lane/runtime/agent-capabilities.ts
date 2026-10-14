@@ -4050,13 +4050,12 @@ export function createAgentCapabilities(
   };
 
   /** How many date or duration phrases one message holds: every word start, read by the one reader over the words after
-   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does), plus any "<count> <unit>" the reader will not
-   * place ("in 180 days", "in 2 years"); overlapping readings are one phrase. An "as of D" reference is not one. */
+   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does); overlapping readings are one phrase. ⛔ DLf5 r2
+   * (Codex on 3e43cebc: "thirteen weeks" was missed): FAIL SAFE, any time-unit word or month name the reader's spans do
+   * not cover ("thirteen weeks", "a fortnight", "in 180 days", "this year") is a phrase of its own. An "as of D" is not one. */
   const datePhrasesIn = (text: string): number => {
     const plain = text.replace(/(?:^|[^\p{L}\p{N}])as of\s+\d{4}-\d{2}-\d{2}(?=$|[^\p{L}\p{N}])/gu, ' ');
-    const spans: (readonly [number, number])[] = [...plain.matchAll(
-      /(?:\d+(?:[.,]\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen|twenty[- ]four)[ \t-]{1,2}(?:days?|weeks?|months?|years?|quarters?)(?=$|[^\p{L}\p{N}])/gu)]
-      .filter((m) => m.index === 0 || /[^\p{L}\p{N}]/u.test(plain[m.index - 1]!)).map((m) => [m.index, m.index + m[0].length] as const);
+    const spans: (readonly [number, number])[] = [];
     for (const start of plain.matchAll(/\S+/gu)) {
       const tail = plain.slice(start.index);
       for (const word of tail.matchAll(/\S+/gu)) {
@@ -4064,6 +4063,11 @@ export function createAgentCapabilities(
         if (end > 80) break;
         if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true }) !== null) spans.push([start.index, start.index + end]);
       }
+    }
+    const read = [...spans];
+    // "may" is a month only beside a number ("1 May", "May 2027"); every other unit word or month name always counts.
+    for (const m of plain.matchAll(/(?<![\p{L}\p{N}])(?:days?|weeks?|fortnights?|months?|quarters?|years?|january|february|march|april|june|july|august|september|october|november|december|(?<=\d\s{0,2})may|may(?=\s{0,2}\d))(?![\p{L}\p{N}])/gu)) {
+      if (!read.some(([from, to]) => m.index >= from && m.index < to)) spans.push([m.index, m.index + m[0].length]);
     }
     let phrases = 0;
     let reach = -1;

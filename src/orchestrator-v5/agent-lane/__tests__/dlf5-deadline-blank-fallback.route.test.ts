@@ -226,4 +226,16 @@ describe('DLf5 on /agent/v1/turn: a blank model date never vetoes the user\u2019
       { deadline_words: 'lease deadline is in six months', reference_date: '' });
     expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
   });
+
+  // ⛔ DLf5 r2 (Codex on 3e43cebc): "thirteen weeks" was missed by a number-word list. The class: the reader's own spans, and
+  // FAIL SAFE any other time-unit word or month name is a phrase of its own, so the card is Olumi's reading to check.
+  it.each([
+    'Our office lease expires in thirteen weeks, and our launch deadline is in nine months.',
+    'Our launch deadline is in nine months, and the review is in a fortnight.',
+    'Our launch deadline is in nine months, but the budget must be signed by March.',
+  ])('r2: "%s" quoting "in nine months" → Olumi\u2019s reading, with the right date', async (message) => {
+    const { detail, saved } = await offerAndApprove(message, { deadline_words: 'in nine months', reference_date: '' });
+    expect(detail).toContain('Olumi\u2019s interpretation; check the date and reference before approving.');
+    expect(saved).toEqual({ deadline: '2027-07-13', reference: '2026-10-13', stated: 9 });
+  });
 });
