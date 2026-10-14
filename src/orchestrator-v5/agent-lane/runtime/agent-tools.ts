@@ -200,7 +200,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'get_canonical_state',
     description:
-      'Read the authoritative persisted decision model for this conversation: its entities, ' +
+      'Read the authoritative persisted model for this conversation: its entities, ' +
       'what each one is, which values are stated and which are unknown, and what the analysis ' +
       'currently says. Call this before describing the model. Never assume its contents.',
     parameters: obj({ reason: { type: 'string', description: 'Why you need it now.' } }, ['reason']),
@@ -251,7 +251,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'run_analysis',
     description:
-      'Run the decision analysis over the persisted model. It may refuse and explain what is ' +
+      'Run the analysis over the persisted model. It may refuse and explain what is ' +
       'missing; report that honestly rather than guessing what the result would have been.',
     parameters: obj({
       reason: { type: 'string' },
@@ -265,12 +265,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'build_model_from_brief',
     description:
-      'Build the decision model from the user\u2019s brief when get_canonical_state reports the ' +
+      'Build the model from the user\u2019s brief when get_canonical_state reports the ' +
       'model is empty. Preserves the user\u2019s own facts, numbers and constraint wording, then ' +
-      'adds the options, factors, risks and causal mechanisms that make the decision reasonable ' +
+      'adds the options, factors, risks and causal mechanisms that make the question reasonable ' +
       'to analyse. Report honestly what it says was left out.',
     parameters: obj({
-      brief: { type: 'string', description: 'The user\u2019s decision in their own words, verbatim.' },
+      brief: { type: 'string', description: 'The user\u2019s brief in their own words, verbatim.' },
       whole_request: WHOLE_REQUEST,
     }, ['brief']),
   },

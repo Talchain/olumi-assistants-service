@@ -12,7 +12,10 @@ import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
-const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
+// USER VOCABULARY (Paul, 14 Oct, agreed; CLAUDE.md §3): the template gains its VOCABULARY section (after STYLE) and three
+// phrases follow it ("qualitative what-ifs", "improve the user's reasoning", "assumption, what-if"): 7,431 → 8,006 bytes
+// (+575). Reversing exactly those four edits on the new template reproduces 170ac5e7….
+const TEMPLATE_SHA = '557b1cf20d5f58cdcf536475937f4691cfe255def6c6b9b816af68e412e0f2f8';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
@@ -77,8 +80,10 @@ const HOST_SHA = 'c716ececa934ccdbff3c7baa660ce804071471244d42f0360cfcc9fc0c62c0
 //   1a6ad616…; swapping in this HOST gives exactly this, and the captured bodies differ only by the five AIE constants.
 // + BYPASS1: the host contract above only: 32,185 → 33,222 bytes; staging's SENT prefix with this HOST swapped in.
 // + T2A5 (#3002): the host contract above only: 33,222 → 33,229 bytes (+7, the AIE's coach sentence); same leaf-diff proof.
-const RENDERED_SHA = 'ce17943464778aad30140ecfaed74790cc6544f3135aadf6d2c58d42b6f7d540';
-const RENDERED_BYTES = 33_229;
+// + USER VOCABULARY (Paul, 14 Oct): the template edits above only: 33,229 → 33,804 bytes (+575). Derived from the SENT
+//   body; reversing exactly those four edits on the SENT prefix reproduces ce179434… and 33,229 bytes.
+const RENDERED_SHA = '125f58683dd0b151cb252b11ff9459710783984bf4f206613f8388bdce9a2aec';
+const RENDERED_BYTES = 33_804;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.
