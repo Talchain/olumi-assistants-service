@@ -23,6 +23,8 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 });
 
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { goalLevelTheUserWrote } from '../stated-by-user.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
@@ -142,7 +144,9 @@ describe('GEN #3: the user\'s level for a goal with no target is asked, never dr
   const D6 = (JSON.parse(readFileSync(new URL('./fixtures/s3-t5-d6-raw-20261012.json', import.meta.url), 'utf8')) as {
     episodes: Record<string, Episode>;
   }).episodes.D6_r1!;
-  const ASK = 'Your brief puts ‘Features completed per week’ at 80 features per week today, but with no target the model holds no level for it. '
+  /** The user's own sentence, verbatim from the brief (the attestation's span, widened to its sentence). */
+  const QUOTE = 'Our team currently completes about 80 features per week';
+  const ASK = `Your brief says “${QUOTE}”, but with no target the model holds no level for ‘Features completed per week’. `
     + 'What level would count as success, and by when?';
 
   it('PRECONDITION: the raw draft gives 80 as today\'s level with no target, and T5 saved no level and asked nothing', () => {
@@ -159,9 +163,21 @@ describe('GEN #3: the user\'s level for a goal with no target is asked, never dr
     expect(goal.goal_threshold_raw ?? null).toBeNull();
   });
 
+  it('the ledger keeps what the user said — value, unit and their sentence — and invents no cap or threshold (real admission)', () => {
+    const candidate = JSON.parse(D6.calls[0]!.text) as CandidateModel;
+    const admitted = admitCandidateModel(candidate, {}, D6.brief, goalLevelTheUserWrote(candidate, D6.brief));
+    const entries = admitted.loss.filter((l) => /\.observed_state\.magnitude_question$/.test(l.field_path));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ before: { value: 80, unit: 'features per week', quote: QUOTE }, after: null, reason: ASK, severity: 'warn' });
+    expect(D6.brief).toContain(QUOTE);
+    const goal = admitted.nodes.find((n) => n.kind === 'goal') as unknown as Rec;
+    expect(goal.goal_threshold_cap ?? null).toBeNull();
+    expect(goal.goal_threshold ?? null).toBeNull();
+  });
+
   it('CONTRAST: a level the brief does not write (the drafter\'s own 80) is not quoted as the user\'s, and nothing is asked', async () => {
     const e: Episode = { ...D6, brief: D6.brief.replace('Our team currently completes about 80 features per week. ', '') };
     const { questions } = await build(e);
-    expect(questions.some((q) => q.startsWith('Your brief puts'))).toBe(false);
+    expect(questions.some((q) => q.startsWith('Your brief says') || q.startsWith('Your brief puts'))).toBe(false);
   });
 });

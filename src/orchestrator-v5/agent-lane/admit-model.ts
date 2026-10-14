@@ -3728,10 +3728,11 @@ function admitOnce(
         const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
         if (!stated) {
           // GEN #3: the user's stated level holds no figure without a target's scale, and is ASKED, never dropped silently.
-          const unscaled = untargetedGoalLevelAsk(model.goal, goalLevelStated);
+          const unscaled = untargetedGoalLevelAsk(model.goal, goalLevelStated, brief);
           if (unscaled !== null) {
-            loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].observed_state.magnitude_question`, before: unscaled.level,
-              after: null, reason: unscaled.question, severity: 'warn' } as RepairEntry);
+            loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].observed_state.magnitude_question`,
+              before: { value: unscaled.value, unit: unscaled.unit, quote: unscaled.quote }, after: null, reason: unscaled.question,
+              severity: 'warn' } as RepairEntry);
           }
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
