@@ -325,8 +325,17 @@ export function shareUnearnedCertaintyLine(graph: unknown, optionId: string, sid
   const target = `${months(share.threshold_raw)}% of ${deliverableOf(share)} by ${sayDate(share.deadline)}`;
   const basis = shareOptionEstimateWords(graph, optionId);
   const rests = basis.startsWith('using ') ? `that rests on ${basis.slice('using '.length)}` : 'that rests on figures Olumi can’t yet confirm';
+  // DL (14 Oct): the step targets what the result rests on. Olumi's hiring estimates → check them; the user's own → whether
+  // they still hold; a capacity change → Olumi's reading of it and when it starts.
+  const parts = sharePartsForOption(graph, optionId);
+  const yours = parts?.extra === undefined ? '' : hiringTimesLabel(activePartsOf(graph as Rec, share, optionId) ?? [], deliverableOf(share));
+  const step = parts?.extra !== undefined
+    ? (yours === '' ? 'Check Olumi’s estimates: how long hiring would take, and how much each hire adds per month.'
+      : 'Worth checking: whether your hiring times, and how much each hire adds per month, still hold.')
+    : parts?.ratio !== undefined ? 'Check Olumi’s reading: how much this option changes the team’s capacity, and from when.'
+      : 'Worth discussing: how much it would speed up the work, and from when.';
   return `No chance is shown for this option: this model has it ${side === 'meets' ? 'reaching' : 'falling short of'} ${target} `
-    + `in every run, but ${rests}. Worth discussing: how much it would speed up the work, and from when.`;
+    + `in every run, but ${rests}. ${step}`;
 }
 
 /** The share goal's deliverable ("next feature launch" from "% of next feature launch"): one read of the goal's unit. */
