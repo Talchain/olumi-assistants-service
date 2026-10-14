@@ -25,6 +25,7 @@ import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { EffectLead } from './effect-lead.js';
+import type { UserStatement } from '../agent-lane/user-statements.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -50,6 +51,11 @@ export interface Statement {
   /** Complete verified words retain their original subject and qualifications, separate from the new pairing. */
   readonly original_source?: { readonly text: string; readonly authored_by: 'user_stated' };
   readonly pairing?: { readonly option_id: string; readonly authored_by: 'model_proposed' };
+  /**
+   * S2 (DL 22:14Z): the user's WHOLE verified sentence holding `quote` (`hiring-start-statement.ts`). `quote` and `form` stay
+   * Olumi's reading of which part of it is this start.
+   */
+  readonly user_statement?: UserStatement;
 }
 export interface PlannedPart { readonly statement: Statement; readonly lead_low: Figure; readonly lead_high: Figure; readonly monthly_share: Figure }
 export interface PlannedOption {
@@ -189,7 +195,7 @@ export type PlanRefusal = { readonly refusal: 'hiring_timings_unusable' | 'relat
   | { readonly refusal: 'hiring_bound_conflict'; readonly quote: string; readonly bound: 'lower' | 'upper'; readonly value: number; readonly source: 'user_stated' | 'model_proposed' };
 
 /** The option's planned parts from the user's starts and Olumi's estimate; the pace split equally. */
-export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number, readings?: readonly { months?: unknown; stated: boolean; original_source?: Statement['original_source']; pairing?: Statement['pairing']; held?: Pick<PlannedPart, 'statement' | 'lead_low' | 'lead_high'> }[]):
+export function planStarts(quotes: readonly string[], estimate: PlannedOption['olumi_estimate'], heldParts: number, readings?: readonly { months?: unknown; stated: boolean; original_source?: Statement['original_source']; pairing?: Statement['pairing']; held?: Pick<PlannedPart, 'statement' | 'lead_low' | 'lead_high'>; user_statement?: UserStatement }[]):
   { readonly parts: PlannedPart[] } | PlanRefusal {
   if (quotes.length === 0 || quotes.length > MAX_STARTS_PER_OPTION) return { refusal: 'too_many_starts' };
   if (quotes.length < heldParts) return { refusal: 'fewer_starts_than_held' };
@@ -245,7 +251,8 @@ export function planStarts(quotes: readonly string[], estimate: PlannedOption['o
     }
     parts.push({ statement: { quote, form: form.kind, ...(reading?.original_source && reading.pairing
       ? { source: 'user_stated' as const, original_source: reading.original_source, pairing: reading.pairing }
-      : !own ? { source: 'model_proposed' as const } : {}) }, lead_low: low, lead_high: high, monthly_share: pace(share) });
+      : !own ? { source: 'model_proposed' as const } : {}),
+      ...(reading?.user_statement !== undefined ? { user_statement: reading.user_statement } : {}) }, lead_low: low, lead_high: high, monthly_share: pace(share) });
   }
   return { parts };
 }

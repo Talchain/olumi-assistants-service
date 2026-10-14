@@ -33,6 +33,7 @@ import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareFor
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, ratioPartOf, withHiringTimes, type ApprovedHiringTimes, type PlannedLead, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { effectLeadFromStatements, effectLeadWords } from '../../goal-target/effect-lead.js';
+import { hiringStartBinding } from '../../goal-target/hiring-start-statement.js';
 import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
@@ -6324,14 +6325,25 @@ export function createAgentCapabilities(
             heldOlumi || (quote === '' && typeof starts[i]?.months === 'number'));
         });
         if (origins.includes('unknown')) return refuse('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
+        // ⭐ S2 (DL 22:14Z): each human start's statement is the user's WHOLE verified sentence; a fragment their own sentence gives to
+        // another option is a swapped binding, refused (`hiring-start-statement.ts`).
+        const optionNodes = g.nodes.filter(n => n.kind === 'option').map(n => ({ id: String(n.id), label: String(n.label) }));
+        const bindings = quotes.map((quote, i) => (origins[i] === 'human' ? hiringStartBinding(texts, quote, { id, label }, optionNodes) : undefined));
+        const swapped = bindings.findIndex(b => b?.kind === 'another');
+        if (swapped >= 0) {
+          const b = bindings[swapped] as Extract<NonNullable<(typeof bindings)[number]>, { kind: 'another' }>;
+          return refuse('start_for_another_option', `In the user's own words (“${b.sentence}”), “${quotes[swapped]}” is about ‘${b.option_label}’, `
+            + `so it was not used for ‘${label}’. Nothing was prepared. Quote each option's own start from their words; do not ask them to repeat it.`);
+        }
         // An empty source plus explicit months is a NEW Olumi estimate, never an old quote relabelled.
         quotes.forEach((quote, i) => { if (quote === '' && origins[i] === 'ai' && typeof starts[i]?.months === 'number') quotes[i] = `in ${starts[i]!.months} months`; });
         const plan = planStarts(quotes, estimate, held.length, quotes.map((quote, i) => {
           const prior = starts[i]?.months === undefined && heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date
             : undefined;
+          const said = bindings[i];
           return { months: starts[i]?.months, stated: origins[i] === 'human' && pairings[i] === undefined,
-            ...pairings[i],
+            ...pairings[i], ...(said !== undefined && said.kind !== 'another' ? { user_statement: said.statement } : {}),
             ...(prior?.figures ? { held: { statement: prior.statement,
               lead_low: prior.figures.lead_low, lead_high: prior.figures.lead_high } } : {}) };
         }));
