@@ -600,8 +600,8 @@ const capacityWireRun = (): Rec => ({ option_comparison: [
   { option_id: 'carry_on', probability_of_goal: 0, probability_of_goal_precision: wilson(0, 0), outcome: { mean: 0.75, std: 0, p10: 0.75, p50: 0.75, p90: 0.75 } },
 ] });
 /** The status quo's typed zero-spread line, its true reading when the frame is unknown: no future event (capacity post3010 row 3). */
-const ZERO_SPREAD_LINE = 'Chance not shown: this option’s simulated results barely vary in this model, because the figures it rests on are fixed, or nearly, '
-  + 'so a chance would only read as certain or impossible. Worth checking: which of those figures you are unsure of; giving them a range can let the Run show a chance.';
+const ZERO_SPREAD_LINE = 'Chance not shown: this result reports a very narrow central range or a very small spread. '
+  + 'That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option.';
 /** The field this Run records for itself (run-analysis.ts: `sentGoalThresholdOf` beside `withGoalChanceLicence`). */
 const recordedField = (run: Rec, g: Rec) => sentGoalThresholdOf(run, g, 'capacity', () => false);
 const wireLicence = (g: Rec = capacityGraph(), run: Rec = capacityWireRun()) => goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {});
