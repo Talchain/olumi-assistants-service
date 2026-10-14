@@ -17,12 +17,6 @@ import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
 const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
-const UNSCOPED = /can.{1,8}t yet test them against your target/u;
-const CONTROL_RESULT = ((): Json => {
-  const r = structuredClone(READ.analysis_result) as Json;
-  r.enrichment.inference_warnings = r.enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE');
-  return r;
-})();
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const store = {
@@ -52,18 +46,25 @@ const NO_TARGET_GRAPH = ((): Json => {
   return g;
 })();
 const CHANCE_LINE = /% chance of meeting your goal, in this model/;
+/** The AIE's two texts (#94 6158232014): Q4 reaches Agent and Explain; the stated-figure rule only calls that offer tools. */
+const Q4 = 'When the supplied, current bound state records a blocker for this turn';
+const STATED_FIGURE = 'When the user supplies a figure that an available proposing tool can faithfully represent';
 const ESTIMATES_FACE = /Olumi's estimates: \d+, see Check estimates\./;
 
 describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts reach the AI', () => {
   let app: FastifyInstance;
   let graph: Json = READ.graph;
+  let state: Json = READ.analysis_state;
   const sent: string[] = [];
+  /** Scripted model outputs, one per provider call; empty → the plain answer below. */
+  let outputs: Record<string, unknown>[][] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
       if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }] }), { status: 200 });
+      const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }];
+      return new Response(JSON.stringify({ output }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -72,17 +73,17 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
-      blocks: [READ.analysis_result], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
+      blocks: [READ.analysis_result], analysis_ready: READ.analysis_ready, analysis_state: state,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
-      graph, graph_hash: READ.graph_hash, analysis_state: READ.analysis_state,
+      graph, graph_hash: READ.graph_hash, analysis_state: state,
       analysis_ready: READ.analysis_ready, analysis_result: READ.analysis_result,
     }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; });
+  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; });
 
   /** DGAI's own Run press (sendTurn → buildV5Payload, e218e3d2: turn_class 'frame', a bound run_analysis chip). */
   const runPress = async (): Promise<Json> => {
@@ -93,30 +94,56 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     return r.json();
   };
 
-  it('NEGATIVE (host-written): the Run press reply keeps every host line (chances, the estimates face line)', async () => {
+  const NO_LEADER_CLOSING = /No single option can be put forward/;
+  const RANKING = 'Open Clifton shop is the best option to choose.';
+
+  it('NEGATIVE (host-written): the Run press is the host\'s reply, so it keeps every host line', async () => {
     const run = await runPress();
+    expect(run._diagnostic_trace.reply_author).toBe('host');
     expect(run.assistant_text).toMatch(CHANCE_LINE);
     expect(run.assistant_text).toMatch(ESTIMATES_FACE);
   });
 
-  it('AI-written Explain: no host chance or estimates lines are added, and the AI was given the chance facts', async () => {
+  it('AI-written Run (a typed "Run it"): the chance face stays, and the step the host no longer asks is in the AI\'s input', async () => {
+    graph = NO_TARGET_GRAPH;
+    outputs = [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
+      [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: 'Run it', source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const b = r.json() as Json;
+    expect((b._agent.tool_calls as { name: string }[]).map((c) => c.name)).toContain('run_analysis');
+    expect(b._diagnostic_trace.reply_author).toBe('ai');
+    expect(b.assistant_text).toMatch(CHANCE_LINE);
+    expect(b.assistant_text).toContain('The analysis ran.');
+    expect(sent[0] ?? '').toContain('goal_target_missing');
+    expect(sent[0] ?? '').toContain(Q4);
+    expect(sent[0] ?? '').toContain(STATED_FIGURE);
+  });
+
+  it('AI-written Explain with a ranking sentence: the gate still drops it (authority), and no host closing is appended', async () => {
+    // The served Run named its leader; here the comparison is withheld (the separation could not be established).
+    state = { ...READ.analysis_state, leader_claim: { permitted: false, separation: 'not_separated', withheld_reason: 'separation_unavailable' } };
     const run = await runPress();
     const chip = (run.suggested_actions as { id: string }[]).find((c) => c.id.startsWith('agent-explain-run:'));
     expect(chip, JSON.stringify(run.suggested_actions)).toBeDefined();
     sent.length = 0;
+    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: `The analysis ran. ${RANKING}` }] }]];
     const e = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
       message: RUN_EXPLANATION_MESSAGE, source: 'chip_click', chip: { id: chip!.id } } });
     expect(e.statusCode, e.body).toBe(200);
     const explain = e.json() as Json;
     expect(explain._diagnostic_trace.fast_path).toBe('explain');
-    expect(explain.assistant_text.startsWith('The analysis ran.')).toBe(true);
-    expect(explain.assistant_text).not.toMatch(CHANCE_LINE);
-    expect(explain.assistant_text).not.toMatch(ESTIMATES_FACE);
-    // The facts those lines carried are in the AI's input (the Explain call's SENT body).
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain('goal_chance_range_display');
-    expect(sent[0]).toContain('When CURRENT MODEL STATE carries a typed blocker for this turn');
+    expect(explain._diagnostic_trace.reply_author).toBe('ai');
+    expect(explain.assistant_text).toContain('The analysis ran.');
+    expect(explain.assistant_text).not.toContain(RANKING);
+    expect(explain.assistant_text).not.toMatch(NO_LEADER_CLOSING);
+    expect(sent[0] ?? '').toContain('goal_chance_range_display');
+    // Tool-less Explain: the next-step rule, never the tool-use rule.
+    expect(sent[0] ?? '').toContain(Q4);
+    expect(sent[0] ?? '').not.toContain(STATED_FIGURE);
   });
 
   it('the typed blocker reaches the AI as a fact: a goal with no target is the ONE step, and no host line says it', async () => {

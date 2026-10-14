@@ -118,7 +118,7 @@ import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizing
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withNarratorCountGuarded, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -832,12 +832,22 @@ export const GOAL_CHANCE_RANKING_INSTRUCTION =
   + 'out options by it. '
   + SELECTED_RUN_SCOPE_INSTRUCTION;
 
+/**
+ * ⭐ HIRING (e) (Paul's funding test 14 Oct: 0 tool calls on a stated capacity effect, per-option staffing and hiring starts).
+ * AIE #94 6158232014 (recovery/codex/AIE-Q4-AND-STATED-FIGURE-INSTRUCTIONS-20261014.json), verbatim. Only where tools are
+ * offered (`AGENT_TOOL_INSTRUCTIONS`): never on the tool-less Explain, a method, risks or widen call.
+ */
+export const STATED_FIGURE_INSTRUCTION =
+  "When the user supplies a figure that an available proposing tool can faithfully represent, prepare the matching proposal in this turn under that tool's current source and permission contract; do not leave it as acknowledgement in prose. Keep the complete relevant words, speaker, subject, quantity, unit, reference, period, conditions and uncertainty. A question, denial, target, ceiling or forecast is not an observed starting value. Use propose_link_effect for supported magnitudes along an existing matching link; propose_model_change can propose a new link under its own contract, not save its numerical effect. Use propose_option_interventions for an option's supported level, propose_hiring_times for starts after the deadline is held, and propose_assumptions or propose_starting_point for eligible starting values. Use propose_starting_point when starting values and option levels need one compatible approval. Additional hires are distinct from total headcount; a hiring start is distinct from full effectiveness. Never silently change quantity, unit or meaning, invent a missing operand, choose a point from a range or change origin. Show the complete returned card before bound approval; a proposal is not a saved change or Run permission. If the matching quantity, writer or prerequisite is absent, state that actual gap and the supported next step. Retain supplied source for that step rather than asking the user to repeat it after the prerequisite is met.";
+
 // Prompt P13 (AIE one-pass packet 94ad9c8f…): MODEL_RELATIVE_NAMING_INSTRUCTION is now the packet's P13 text, which the
 // AIE placed inside HOST_TOOL_CONTRACT's whole replaced entry, so it is sent ONCE there and no longer joined a second time.
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
   [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
 );
+/** The Agent's call that offers its proposing tools: the shared instructions, then the stated-figure rule. */
+const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
 
 /**
  * Read the persisted state back for the response: `graph_hash`, readiness and
@@ -3984,7 +3994,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
               : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
-              : eligibleIntervention === undefined ? AGENT_INSTRUCTIONS : `${AGENT_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
+              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
@@ -4368,11 +4378,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /**
      * ⭐ BYPASS1 (DL, 14 Oct; recovery/codex/BYPASS1.md): the reply is the AI's own words: a model wrote it (`narratorWords`, set
      * only where one did) and no host swap above replaced it. Only then does the host stop restating, in prose, facts the AI
-     * was given (receipts, readiness, the D1 ask, disclosures, the withheld line, screen-line appends, the leader closing,
-     * More-detail folding, the Why? line); the code stays, dormant. A host-written reply keeps every host line. Every
-     * authority check (ranking redaction, the count guard, the final leader egress, the estimate-% binding, the completion-
-     * claim stripper, currentness) runs on both, and lines whose fact the AI lacks (stale, held lapse, goal not checked,
-     * A7, break-even, research-control truth) stay.
+     * was given (receipts, readiness, the post-write and D1 asks, the link ask, owed disclosures, the withheld goal-chance
+     * line, the leader closing, the Why? line); the code stays, dormant. A host-written reply keeps every host line. The
+     * chance and draft faces (the screen's lines, markers, horizon, estimates, widened receipt, their folding) stay on every
+     * Run/Explain/Draft reply: they are the headline, K-pinned. Every authority check (ranking redaction, the count guard,
+     * the final leader egress, the estimate-% binding, the completion-claim stripper, currentness) runs on both, and lines
+     * whose fact the AI lacks (stale, held lapse, goal not checked, A7, break-even, research-control truth) stay.
      */
     const aiWroteReply = narratorWords !== null && hiringConflicts.length === 0
       && text !== RUN_RESULT_UNVERIFIED_TEXT && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT;
@@ -5123,10 +5134,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
       // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
-      // BYPASS1: the AI's reply was given each line's display, driver and notes; only RC4's count guard runs on it.
-      const ranged = hostProse ? withScreenLinesOwed(wireBody.assistant_text, screenLines,
-        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent))
-        : { text: withNarratorCountGuarded(wireBody.assistant_text, screenLines), added: 0 };
+      // BYPASS1 keeps the chance face on every Run/Explain reply (the screen's lines are the headline, K-pinned).
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
+        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent));
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
@@ -5424,32 +5434,30 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult,
         text: reply,
         // A host-only answer did not consume the carrier and keeps its existing bytes.
-        // BYPASS1: on the AI's reply the face host lines it was given (the Why? line, the build's widened receipt and note,
-        // the horizon, what would change, the estimates count, event-risk detail) are not added; the widened-risk marker,
-        // whose fact the AI lacks, stays.
+        // BYPASS1: on the AI's reply the Why? line is not added (the AI has `eligible_intervention.why`). The chance and
+        // draft faces (lines, markers, horizon, what would change, estimates, widened receipt) stay: they are the headline.
         ...(!hostProse || eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
           interventionWhySaid: preReplySelection?.whySaid === true }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
-        ...(!hostProse || widenReceipt === null ? {} : { widenedLine: widenReceipt }),
-        ...(!hostProse || widenNote === null ? {} : { widenedRiskNote: widenNote }),
+        ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),
+        ...(widenNote === null ? {} : { widenedRiskNote: widenNote }),
         ...(runWidenWords.widenedRiskMarker === undefined ? {} : { widenedRiskMarker: runWidenWords.widenedRiskMarker }),
-        ...(!hostProse || horizonLine === null ? {} : { horizonLine }),
-        ...(!hostProse || whatChanges === null ? {} : { whatChanges }),
+        ...(horizonLine === null ? {} : { horizonLine }),
+        ...(whatChanges === null ? {} : { whatChanges }),
         ...(faceContract !== undefined && !runOrExplainTurn ? { notRunOrExplain: true as const } : {}),
-        ...(hostProse && (faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
+        ...((faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
-        detailLines: !hostProse || stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
+        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,
         profile,
         // AI-first N1: on an ordinary model-written turn the AI's answer is the reply. A Draft build keeps its receipt face and
         // a Run/Explain its chance face (the horizon marker stays beside a chance).
-        // BYPASS1: every coaching reply the AI wrote is kept whole (no More-detail folding), Run/Explain/Draft included.
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
           : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const }
-            : profile === 'coaching' && (!hostProse || (!runOrExplainTurn && faceContract !== 'draft')) ? { keepWhole: 'ai_answer' as const } : {}),
+            : profile === 'coaching' && !runOrExplainTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
@@ -5774,6 +5782,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
+        // BYPASS1: who wrote the reply as the route read it ('ai' → host prose for facts the AI has stopped); the served
+        // witness counts host-deleted sentences, double asks and reply length by it.
+        reply_author: hostProse ? 'host' as const : 'ai' as const,
         /**
          * C6 (ChatGPT #70 5857276235 item 4: measurement on served turns before any optimisation). The loop's own split
          * (model, tools, model time inside tools, residual overhead) plus the whole route, so a served turn says where its
