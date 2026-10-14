@@ -1,5 +1,5 @@
 /**
- * ⭐ GEN D4 ITEM A (DL 14 Oct; AIE_TEXT_PENDING, `recovery/prompt/GEN-D4-DRAFTER-TEXT-DRAFT.txt`): THE DERIVED NO-CHANGE
+ * ⭐ GEN D4 ITEM A (DL 14 Oct; the AIE's text, packet fc17c200, #94 6163023819): THE DERIVED NO-CHANGE
  * CHANGE IS THE DRIFT FACTOR'S VALUE. T5-integrated (staging 14b1e544) D4, both runs: the drafter set the drift factor
  * to today's structural 0 and carried the +2 weeks on the definitional link (r2 at 2 per 1, a two-for-one), so the
  * no-change path stayed at 8 weeks. The NO-CHANGE FORECAST paragraph named the +2 but never the field that holds it.

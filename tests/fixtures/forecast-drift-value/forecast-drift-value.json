@@ -1,8 +1,9 @@
 {
  "_source": {
-  "draft": "recovery/prompt/GEN-D4-DRAFTER-TEXT-DRAFT.txt",
-  "draft_sha256": "d32c9b0e8063e0d42ff3bd4602239d275fb4734954ef8809bbecf6266f949a4d",
-  "status": "AIE_TEXT_PENDING: PROMPT's item A, typographic apostrophes; replaced byte for byte from the AIE packet when it answers"
+  "packet": "recovery/codex/AIE-D4-FUTURE-VALUE-CALENDAR-AND-STATUS-QUO-RULINGS-20261014.json",
+  "packet_sha256": "fc17c200c8b67deed2b3a8be418f1c6691f4226400dbf8228b4a02256a64c168",
+  "board": "#94 6163023819",
+  "item": "D4_A.exact_text, extracted programmatically, byte for byte; placement per D4_A.placement (after the signed NO-CHANGE FORECAST paragraph)"
  },
- "drift_value": "Put that derived change in the drift factor’s baseline_value (2 in this example, not today’s structural 0), and link the drift to the goal as a definition: effect_amount 1, effect_per_source_change 1. Never carry the change in the link’s size."
+ "drift_value": "For the existing NO-CHANGE FORECAST representation, put the supported derived future change in the drift factor’s baseline_value, in the same native unit and at the forecast’s stated horizon: 2 weeks for 10 minus 8 in this example, not today’s structural 0. Set baseline_known true only when both operands and their shared quantity, unit, reference, horizon and conditions are supported; this records a supported conditional derivation, not an observed current level or certain future outcome. Mark this interpreted drift item provenance inferred, and leave baseline_evidence null because that field is for a stated current level. Retain the complete original current-level and forecast statements, their sources, horizon and conditions in the existing evidence and question carriers, alongside the derivation. Link this signed drift to the same goal quantity as a definition: definitional true, effect_amount 1, effect_per_source_change 1. Mark the interpreted definition and its size inferred, with their supported derivation in the existing basis; do not claim a newly human-stated link magnitude. Carry the derived change in the factor’s value, never in the link’s size, and count the shared change once. Missing, conflicting or incompatible operands leave the derived value null and baseline_known false; a separately disclosed provisional estimate remains an estimate, never this supported derivation."
 }
