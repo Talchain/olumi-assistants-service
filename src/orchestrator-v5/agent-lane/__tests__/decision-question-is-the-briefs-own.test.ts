@@ -31,7 +31,19 @@ const BRIEF =
   'should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
 const QUESTION = 'should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
 const TITLE = 'Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
-const FALLBACK = 'Decision: MRR';
+// USER VOCABULARY (Paul, 14 Oct; DL item 4): the fallback title says Question, never Decision. Its id still slugs from the
+// old key "Decision: <metric>", so `decision_mrr` is unchanged (`expectFallback` binds it).
+const FALLBACK = 'Question: MRR';
+/**
+ * ⭐ OLUMI'S PURPOSE (Paul's principle, CLAUDE.md §4; DL 14 Oct): the drafter is sent alone, so its instructions open with the
+ * purpose, authorship, used/inferred and coach lines. Written here from principle review E (never read from the module).
+ */
+const PURPOSE_CORE = [
+  'You are a reasoning partner, not an answer or decision engine. The user and their team own every conclusion and choice.',
+  'Olumi proposes; the user authors. Keep what you added or estimated (factors, risks, links, values, options) visibly Olumi\'s, provisional and easy to accept, change or reject. Never justify a change only because it makes the model "more correct".',
+  'Say plainly what you used from the user, what you inferred, and what you left out.',
+  'If you cannot support a claim, say so, then coach: ask for the one input that matters most, or offer a well-founded activity (a pre-mortem, testing the assumption the result rests on). Never invent a number or certainty.',
+];
 
 /** A 300-character question that IS in its brief, so only the length bound can refuse it. */
 const LONG_QUESTION =
@@ -124,6 +136,17 @@ function expectFallback(decision: Node): void {
 }
 
 describe('the decision node carries the brief\'s own question', () => {
+  it('RED (OLUMI\'S PURPOSE): the drafter\'s SENT instructions open with the purpose core lines, once', async () => {
+    const sent: string[] = [];
+    const call = (async (req: { instructions: string }) => { sent.push(req.instructions); return { text: JSON.stringify(pricing(QUESTION)) }; }) as unknown as CallStructuredModel;
+    const d: InternalDispatch = async (path) => path.endsWith('/graph/register')
+      ? { status: 200, json: { model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    await buildModelFromBrief('32323232-3232-4232-8232-323232323232', BRIEF, d, call);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent[0]!.startsWith(`${PURPOSE_CORE.join(' ')} `)).toBe(true);
+    expect(sent[0]!.split(PURPOSE_CORE[1]!)).toHaveLength(2);
+  });
+
   it('RED: Paul\'s brief + the question copied verbatim -> the registered decision node IS that question', async () => {
     const { decision } = await registeredDecision(pricing(QUESTION));
     // The full question, first letter upper-cased and nothing else changed, is the node's text and identity.
@@ -144,15 +167,16 @@ describe('the decision node carries the brief\'s own question', () => {
     expect(decision.provenance).toBe('from_brief');
   });
 
-  it('CONTRAST (mid-market): the same words reworded are not in the brief -> "Decision: Mid-market customers"', async () => {
+  it('CONTRAST (mid-market): the same words reworded are not in the brief -> "Question: Mid-market customers" (its id unchanged)', async () => {
     const reworded = 'how to grow into the mid-market segment within 12 months';
     expect(MIDMARKET_BRIEF.includes(reworded)).toBe(false);
     const { decision } = await registeredDecision(midmarket(reworded), MIDMARKET_BRIEF);
-    expect(decision.label).toBe('Decision: Mid-market customers');
+    expect(decision.label).toBe('Question: Mid-market customers');
+    expect(decision.id).toBe('decision_mid_market_customers');
     expect(decision.provenance).toBe('ai_inferred');
   });
 
-  it('CONTRAST: a paraphrase that is not in the brief -> "Decision: MRR"', async () => {
+  it('CONTRAST: a paraphrase that is not in the brief -> "Question: MRR"', async () => {
     const paraphrase = 'Should we raise the Pro price to £59 when the next feature ships?';
     expect(BRIEF.includes(paraphrase)).toBe(false);
     expect(paraphrase.length).toBeGreaterThanOrEqual(8);
@@ -160,21 +184,21 @@ describe('the decision node carries the brief\'s own question', () => {
     expectFallback((await registeredDecision(pricing(paraphrase))).decision);
   });
 
-  it('CONTRAST: null (the brief asks no question) -> "Decision: MRR"', async () => {
+  it('CONTRAST: null (the brief asks no question) -> "Question: MRR"', async () => {
     expectFallback((await registeredDecision(pricing(null))).decision);
   });
 
-  it('CONTRAST: a candidate from before the key (absent) -> "Decision: MRR"', async () => {
+  it('CONTRAST: a candidate from before the key (absent) -> "Question: MRR"', async () => {
     expectFallback((await registeredDecision(pricing(undefined))).decision);
   });
 
-  it('CONTRAST: a 300-character span that IS in the brief -> "Decision: MRR" (only the length bound refuses it)', async () => {
+  it('CONTRAST: a 300-character span that IS in the brief -> "Question: MRR" (only the length bound refuses it)', async () => {
     expect(LONG_QUESTION).toHaveLength(300);
     expect(LONG_BRIEF.includes(LONG_QUESTION)).toBe(true);
     expectFallback((await registeredDecision(pricing(LONG_QUESTION), LONG_BRIEF)).decision);
   });
 
-  it('CONTRAST: a span under 8 characters that IS in the brief -> "Decision: MRR"', async () => {
+  it('CONTRAST: a span under 8 characters that IS in the brief -> "Question: MRR"', async () => {
     expect(BRIEF.includes('Pro plan')).toBe(true);
     expectFallback((await registeredDecision(pricing('Pro'))).decision);
   });
@@ -193,7 +217,7 @@ describe('the decision node carries the brief\'s own question', () => {
     expect(decision.description).toBe(TITLE);
   });
 
-  it('CONTRAST: verbatim means verbatim — a copy whose case differs from the brief\'s -> "Decision: MRR"', async () => {
+  it('CONTRAST: verbatim means verbatim — a copy whose case differs from the brief\'s -> "Question: MRR"', async () => {
     expectFallback((await registeredDecision(pricing(QUESTION.replace('Pro plan', 'pro plan')))).decision);
   });
 
@@ -204,7 +228,7 @@ describe('the decision node carries the brief\'s own question', () => {
     expect(decision.provenance).toBe('ai_inferred');
   });
 
-  it('SAFETY: a question spelled like another node never merges into it -> "Decision: MRR", both nodes kept', async () => {
+  it('SAFETY: a question spelled like another node never merges into it -> "Question: MRR", both nodes kept', async () => {
     const { decision, nodes } = await registeredDecision(pricing(QUESTION, ['Keep Pro at £49', TITLE]));
     expectFallback(decision);
     expect(nodes.filter((n) => n.kind === 'option').map((n) => n.description ?? n.label)).toContain(TITLE);

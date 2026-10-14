@@ -59,7 +59,7 @@ const CURRENT = { run_state: { kind: 'complete_current', computed_at: AT }, usab
 const READY = { status: 'ready', may_run: true };
 const RESULT = { type: 'analysis_result', computed_against_hash: HASH, data: {} };
 const EXPECTED = [
-  { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?' },
+  { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?' },
   { id: 'agent-next-what-would-change', label: 'What would change this?', message: 'What would most likely change this result?' },
   { id: 'agent-next-strengthen', label: 'Strengthen the model', message: 'What would most strengthen this model?' },
 ];

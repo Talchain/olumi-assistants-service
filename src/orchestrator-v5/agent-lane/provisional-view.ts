@@ -235,7 +235,7 @@ export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
   // Served 27 Sep (pj-timing-2104, pj-dispatch-2106r): the FIRST Run carried a view, and the RERUN after the user's
   // challenge carried none, 2/2 (its output was the answer alone). The user lost Olumi's view just when they had changed
   // the model. The call is made only when the analysis withholds the leader, which is when Paul's ruling wants the view.
-  + 'This call is made only because the analysis cannot put an option forward, so give your view on every such run, including a rerun or after a view you gave earlier: say it again, updated for this run. '
+  + 'This call is made only because the analysis cannot yet say how the options compare, so give your view on every such run, including a rerun or after a view you gave earlier: say it again, updated for this run. '
   + "Set it to null only when the model and the user’s words give you no basis for any view. "
   // ⭐ AIE C5 (#2994 rulings, 13 Oct): Explain is tool-less and does not inherit the Agent's `confirm_step` tool rule.
   + "Choose a confirm_step that the user can actually take and that helps investigate this provisional view or address the recorded blocker. Do not imply that supplying input repairs a missing implementation. When an activity can improve reasoning but cannot unlock this calculation, say so. Do not propose a step that cannot help or favour an option.";

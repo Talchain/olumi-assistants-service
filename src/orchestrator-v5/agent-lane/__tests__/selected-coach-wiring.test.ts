@@ -15,7 +15,10 @@ const sha256 = (text: string | Buffer) => createHash('sha256').update(text).dige
 // USER VOCABULARY (Paul, 14 Oct, agreed; CLAUDE.md §3): the template gains its VOCABULARY section (after STYLE) and three
 // phrases follow it ("qualitative what-ifs", "improve the user's reasoning", "assumption, what-if"): 7,431 → 8,006 bytes
 // (+575). Reversing exactly those four edits on the new template reproduces 170ac5e7….
-const TEMPLATE_SHA = '557b1cf20d5f58cdcf536475937f4691cfe255def6c6b9b816af68e412e0f2f8';
+// OLUMI'S PURPOSE (DL 14 Oct, principle review E contradiction 1): READINESS AND RESULTS' leader sentence says never rank,
+// favour or recommend; a permitted leader is a model-relative finding: 8,006 → 8,165 bytes (+159). Reversing exactly that
+// sentence on the new template reproduces 557b1cf2….
+const TEMPLATE_SHA = '02a249cbea413bdad948de3263b38b714d00990faee9982ac7f0b6a36e80f901';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
@@ -82,8 +85,11 @@ const HOST_SHA = 'c716ececa934ccdbff3c7baa660ce804071471244d42f0360cfcc9fc0c62c0
 // + T2A5 (#3002): the host contract above only: 33,222 → 33,229 bytes (+7, the AIE's coach sentence); same leaf-diff proof.
 // + USER VOCABULARY (Paul, 14 Oct): the template edits above only: 33,229 → 33,804 bytes (+575). Derived from the SENT
 //   body; reversing exactly those four edits on the SENT prefix reproduces ce179434… and 33,229 bytes.
-const RENDERED_SHA = '125f58683dd0b151cb252b11ff9459710783984bf4f206613f8388bdce9a2aec';
-const RENDERED_BYTES = 33_804;
+// + OLUMI'S PURPOSE (DL 14 Oct): the block FIRST in the host's part (+1,453 bytes with its separator) and the template
+//   sentence above (+159): 33,804 → 35,416 bytes. Derived from the SENT body; removing exactly the block and reversing that
+//   sentence on the SENT prefix reproduces 125f5868… and 33,804 bytes.
+const RENDERED_SHA = '524356940db7f94977c1d657bc774d1e586e4290969b88f9247f8d5f3f5f33cf';
+const RENDERED_BYTES = 35_416;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.
@@ -277,6 +283,25 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(modelInput).toContain('do no arithmetic');
     // SHA and byte count are derived from the intercepted request, not estimated from source literals.
     expectCoachInstructions(body);
+  });
+
+  /**
+   * ⭐ OLUMI'S PURPOSE governs every reply (Paul's principle, CLAUDE.md §4; principle review E; DL 14 Oct 12:46Z, with the DL's
+   * line-2 correction). The block is SENT once, FIRST in the host's part: straight after the template's identity paragraph.
+   * Its words are written here from the review (never read from the source module).
+   */
+  it('RED (OLUMI\'S PURPOSE): the block is SENT once, first in the host\'s part, and nothing tells the AI to rank or favour', async () => {
+    const PURPOSE_OPENING = [
+      'OLUMI\'S PURPOSE (governs every reply)',
+      'You are a reasoning partner, not an answer or decision engine. The user and their team own every conclusion and choice.',
+      'Never recommend or pick an option. Saying which option has the higher chance in this model is a model-relative finding: say what it rests on and what would change it.',
+    ].join('\n');
+    await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
+    const instructions = sent[0]!.instructions;
+    const [identity] = SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}');
+    expect(instructions.startsWith(`${identity}${PURPOSE_OPENING}\n`)).toBe(true);
+    expect(instructions.split('OLUMI\'S PURPOSE (governs every reply)')).toHaveLength(2);
+    expect(instructions).not.toContain('Name, rank or favour');
   });
 
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {

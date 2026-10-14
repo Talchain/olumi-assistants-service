@@ -651,8 +651,10 @@ export function decisionEntityFor(
   model: Pick<CandidateModel, 'goal' | 'decision_question'>,
   brief: string | undefined,
   otherLabels: readonly string[],
-): { readonly label: string; readonly provenance: 'explicit' | 'inferred' } {
-  const fallback = { label: `Decision: ${model.goal.metric}`, provenance: 'inferred' as const };
+): { readonly label: string; readonly provenance: 'explicit' | 'inferred'; readonly display?: string } {
+  // USER VOCABULARY (Paul, 14 Oct; DL item 4): the card says "Question: <metric>" (`display`), while `label` stays the id key
+  // "Decision: <metric>", so the node id (`decision_<metric>`) is unchanged.
+  const fallback = { label: `Decision: ${model.goal.metric}`, display: `Question: ${model.goal.metric}`, provenance: 'inferred' as const };
   const copied = model.decision_question;
   if (typeof copied !== 'string' || typeof brief !== 'string') return fallback;
   const span = collapseWhitespace(copied);
@@ -3695,7 +3697,8 @@ function admitOnce(
       || briefWritesFactorFigure(f, brief);
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
-  const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
+  /** `display`, when set, is what the node shows; `label` stays the key its id slugs from and links resolve by. */
+  const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,
       kind: 'goal',
@@ -4003,7 +4006,7 @@ function admitOnce(
   // whose label might slug to the same token.
   const decision = decisionEntityFor(model, brief, entities.map((e) => e.label));
   const DECISION_LABEL = decision.label;
-  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: decision.provenance });
+  entities.unshift({ label: DECISION_LABEL, ...(decision.display !== undefined ? { display: decision.display } : {}), kind: 'decision', provenance: decision.provenance });
 
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
@@ -4017,16 +4020,17 @@ function admitOnce(
     // A factor with NO baseline value gets no observed_state at all — an absent
     // value is the honest record; a zero would be a measurement. (An ESTIMATED
     // value is kept, stamped as Olumi's: `estimatedObservedState`.)
-    const label = shortLabel(e.label);
-    if (label !== e.label) {
+    const shown = e.display ?? e.label;
+    const label = shortLabel(shown);
+    if (label !== shown) {
       loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
         layer: 'cee',
         field_path: `nodes[${id}].label`,
-        before: e.label,
+        before: shown,
         after: label,
         reason:
-          `The label was ${e.label.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
+          `The label was ${shown.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
           'text is preserved on the node description and here.',
         severity: 'info',
       });
@@ -4035,7 +4039,7 @@ function admitOnce(
       id,
       kind: e.kind,
       label,
-      ...(label !== e.label ? { description: e.label } : {}),
+      ...(label !== shown ? { description: shown } : {}),
       provenance: isUnverifiedUserMaterial(e.node?.observed_state)
         ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
