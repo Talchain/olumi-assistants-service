@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUILD_INSTRUCTIONS, buildModelFromBrief } from '../runtime/build-model.js';
+import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 
 type Rec = Record<string, any>;
@@ -57,8 +58,9 @@ async function buildD1(text: string): Promise<{ sent: Rec; questions: string[] }
 
 describe('what the drafter is sent', () => {
   it('1. hiring: the instructions open with the goal as the user\'s governing aim, before the event-by-date rule', async () => {
-    // The instructions are one joined string: the aim sentence opens it, before the event-by-date rule.
-    expect(BUILD_INSTRUCTIONS.startsWith(`${TEXT.goal_is_the_aim} For an EVENT by a date`)).toBe(true);
+    // The instructions are one joined string: Olumi's purpose lines open it (#3045, Paul's principle), then the aim sentence,
+    // before the event-by-date rule.
+    expect(BUILD_INSTRUCTIONS.startsWith(`${OLUMI_PURPOSE_CORE_LINES.join(' ')} ${TEXT.goal_is_the_aim} For an EVENT by a date`)).toBe(true);
     const sent = await firstRequest(HIRING_BRIEF);
     expect(sent.instructions as string).toContain(TEXT.goal_is_the_aim);
     // Contrast in the same request: the event-by-date rule it now governs is still sent.
