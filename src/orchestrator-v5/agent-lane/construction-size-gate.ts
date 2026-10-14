@@ -112,6 +112,12 @@ export interface ConstructionSizeVerdict {
    * withheld — has lost the limit too.
    */
   readonly brief_stated_keys: { readonly nodes: readonly string[]; readonly edges: readonly string[]; readonly limits: readonly string[] };
+  /**
+   * Links the kept options imply, not the drafter's `links`: one from the decision to each option and one from each option
+   * to each factor it acts on (the status quo's to each factor the other options act on). The first-pass budget sentence
+   * counts them the same way (`build-model.ts`); a retry needs them to know how many `links` it may keep (T5 D2 r1).
+   */
+  readonly option_edges: number;
   /** One sentence a user could be shown. Empty when within budget. */
   readonly detail: string;
 }
@@ -216,6 +222,8 @@ export function assessConstructionSize(
     for (const id of [endpoint(e, 'from'), endpoint(e, 'to')]) if (nodeIds.has(id)) floorIds.add(id);
   }
   const floor_nodes = floorIds.size;
+  const kindOf = new Map(admitted.nodes.map((n) => [n.id, String((n as { kind?: unknown }).kind ?? '')]));
+  const option_edges = admitted.edges.filter((e) => ['decision', 'option'].includes(kindOf.get(endpoint(e, 'from')) ?? '')).length;
   const floor_edges = admitted.edges.filter((e) => isBriefStatedEdge(e) || (floorIds.has(endpoint(e, 'from')) && floorIds.has(endpoint(e, 'to')))).length;
   const user_material_exceeds_limit = floor_nodes > limits.maxNodes || floor_edges > limits.maxEdges;
   const identityOf = new Map(admitted.nodes.map((n) => [n.id, nodeIdentity(n)]));
@@ -262,8 +270,25 @@ export function assessConstructionSize(
     floor_nodes,
     floor_edges,
     brief_stated_keys,
+    option_edges,
     detail,
   };
+}
+
+/**
+ * ⭐ THE DRAFTER'S OWN LINKS BUDGET (T5 D2 r1, DL 14 Oct). The totals alone ("32 links, 2 over") left the drafter cutting
+ * nothing: 18 of the 32 were its kept options' own links, which it cannot see in `links`, so its 14 `links` read as
+ * within budget. Over on links only, it is told what `links` may hold: the limit minus the options' links. Still a target,
+ * never a list. How to cut matches the adoption rules: a kept risk keeps its paths (`retainsRiskHypotheses`; the replay's rep 1
+ * cut the options' links into its kept risk and was refused). AIE_TEXT_PENDING (`recovery/prompt/SIZE-RETRY-DRAFT.txt`).
+ */
+function linksBudget(v: ConstructionSizeVerdict): string[] {
+  if (v.over_by.edges === 0) return [];
+  const own = v.edges - v.option_edges;
+  const room = v.limits.maxEdges - v.option_edges;
+  return room > 0
+    ? [`${v.option_edges} of those links come from the options themselves: one from the decision to each option and one for each factor an option acts on (for the option that keeps things as they are, each factor the other options act on). That leaves \`links\` room for ${room}; yours hold ${own}, so remove at least ${own - room} entries from \`links\` that you ADDED beyond the brief. Take them out by removing a node you ADDED, whose links go with it, or a link you ADDED between two nodes you keep; a risk you keep keeps every link into and out of it.`]
+    : [`The options' own links (one from the decision to each option and one for each factor an option acts on) already come to ${v.option_edges}, leaving no room for \`links\`: remove an option or an action you ADDED beyond the brief.`];
 }
 
 /**
@@ -283,6 +308,7 @@ export function retryInstruction(v: ConstructionSizeVerdict): string {
   return [
     `Your previous model was too large: ${v.nodes} nodes and ${v.edges} links${over === '' ? '' : `, ${over} over the limit`}.`,
     `The limit is ${v.limits.maxNodes} nodes and ${v.limits.maxEdges} links.`,
+    ...linksBudget(v),
     'Keep EVERY option, factor, figure, constraint, horizon AND STATED RELATIONSHIP the brief gives — those are not negotiable and must not be dropped or merged.',
     'Remove what you ADDED beyond the brief: speculative options, secondary factors, risks, outcomes and links that are not decision-critical for this question.',
     'Anything you judge material but cannot fit belongs in `unknowns` as a question, NOT as a node.',
