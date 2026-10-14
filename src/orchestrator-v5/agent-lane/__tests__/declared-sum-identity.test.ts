@@ -306,3 +306,52 @@ describe('CONTRASTS', () => {
     for (const g of [plain, withSum]) expect(node(g, PART).nonlinear_identity).toBeUndefined();
   });
 });
+
+/**
+ * ⭐ SERVED AFTER #2981 (DL 13:36Z 14 Oct): on CEE cbcefb47 the drafter, under the sum text, typed the total's 80 `inferred`
+ * (drafter row 7b90af18, byte for byte). The goal held no level, its sum was refused, and capacity asked for "today's level of
+ * Weekly support capacity". The user's own sum (their sentence, their 80, a zero increment) fixes that level: it is theirs.
+ * The rows above typed the goal's 80 `explicit` by hand (`goalLevelAsRun5`); these use the served draft as it is.
+ */
+describe('⭐ SERVED cbcefb47: the total of the user\'s own sum is the user\'s level today', () => {
+  const SERVED13 = JSON.parse(readFileSync(new URL('./fixtures/capacity-cbcefb47-declared-sum-construction.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
+  const draft13 = (): Rec => JSON.parse(SERVED13.raw_text);
+  const part = (c: Rec, label: string): Rec => c.factors.find((f: Rec) => f.label === label);
+
+  it('fixture control: the served draft types the goal\'s 80 inferred, beside the user\'s sum and their stated 80', () => {
+    const c = draft13();
+    expect(SERVED13.brief).toBe(FX.brief);
+    expect(c.goal).toMatchObject({ metric: 'Weekly support capacity', baseline_value: 80, baseline_known: true, baseline_provenance: 'inferred' });
+    expect(c.identities).toEqual([expect.objectContaining({ operation: 'sum', outcome: 'Weekly support capacity', evidence: { quote: SENTENCE } })]);
+    expect(part(c, 'Existing team capacity')).toMatchObject({ baseline_value: 80, provenance: 'explicit' });
+    expect(part(c, 'Additional specialist capacity')).toMatchObject({ baseline_value: 0, provenance: 'inferred', baseline_evidence: null });
+  });
+
+  it('⭐ RED→GREEN: the goal holds the user\'s 80 today, and the user\'s sum is held on it', async () => {
+    const { graph } = await construct(draft13(), SERVED13.brief);
+    expect(node(graph, GOAL).observed_state, 'the goal\'s level today').toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+    expect(node(graph, GOAL).nonlinear_identity).toMatchObject(SUM);
+  });
+
+  it('ADVERSARIAL: the non-zero part is Olumi\'s (no sentence states it) → the goal\'s level stays Olumi\'s, withheld', async () => {
+    const c = draft13();
+    Object.assign(part(c, 'Existing team capacity'), { provenance: 'inferred', baseline_evidence: null, baseline_value: 75 });
+    c.goal.baseline_value = 75;
+    const { graph } = await construct(c, SERVED13.brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+  });
+
+  it('NEGATIVE: the parts do not add up to the drafter\'s level (90 ≠ 80 + 0) → withheld', async () => {
+    const c = draft13();
+    c.goal.baseline_value = 90;
+    const { graph } = await construct(c, SERVED13.brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+  });
+
+  it('NEGATIVE: the sum has no sentence of the brief (Olumi\'s reading) → withheld', async () => {
+    const c = draft13();
+    c.identities[0].evidence = null;
+    const { graph } = await construct(c, SERVED13.brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+  });
+});

@@ -47,11 +47,16 @@ export interface RunDeliveryInput {
   readonly sentBody: Rec;
   /** This turn's run tool results; the Run this turn made carries `run_identity` {graph_hash_at_run, computed_at}. */
   readonly toolResults: readonly unknown[];
-  /** The readback's selected Run (`readbackCurrentRun`), when current and identified. */
-  readonly currentRun: { readonly runId: string; readonly graphHashAtRun: string; readonly computedAt: string } | undefined;
+  /**
+   * The final read, as it came (`readBackState`): its selected Run (`readbackCurrentRun`, when current and identified) and the
+   * graph the reader checks against, from the SAME read.
+   */
+  readonly read: {
+    readonly currentRun?: { readonly runId: string; readonly graphHashAtRun: string; readonly computedAt: string };
+    readonly graph?: unknown;
+  };
   /** The readback's leader licence, and the rosters the reader checks against — a record the reader would refuse is not written. */
   readonly licence: LeaderLicence;
-  readonly graph: unknown;
   readonly analysisReady: unknown;
 }
 
@@ -95,7 +100,7 @@ export function runDeliveryFactFor(input: RunDeliveryInput): RunDeliveryOutcome 
   try {
     const run = thisTurnsRun(input.toolResults);
     if (run === undefined) return omitted('no_run_this_turn');
-    const current = input.currentRun;
+    const current = input.read.currentRun;
     if (current === undefined) return omitted('run_not_current');
     if (current.graphHashAtRun !== run.graphHashAtRun || current.computedAt !== run.computedAt) return omitted('not_this_turns_run');
 
@@ -115,7 +120,7 @@ export function runDeliveryFactFor(input: RunDeliveryInput): RunDeliveryOutcome 
     if (!parsed.success) return omitted('record_refused');
     const record = parsed.data;
     // The reader serves a record only within ITS licence; one it would refuse is not stored.
-    if (!deliveredRecordWithinLicence(record, { licence: input.licence, graph: input.graph, analysisReady: input.analysisReady })) {
+    if (!deliveredRecordWithinLicence(record, { licence: input.licence, graph: input.read.graph ?? null, analysisReady: input.analysisReady })) {
       return omitted('outside_licence');
     }
     const fact = HandlerFactSchema.safeParse({ fact_type: 'run_delivery', fact_version: 1, noop: false, result: { run_id: current.runId, record } });
