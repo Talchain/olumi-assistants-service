@@ -3626,13 +3626,16 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedOptionCapacityChange;
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
-    // The successful commit runs the analysis itself, with its same-Run coaching: never ask the user to Run separately.
-    const done = `‘${a.option_label}’ now acts in the deadline forecast through the time it frees, saved with the user's figure and Olumi's `
-      + 'assumptions distinguished. The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
+    // ⛔ `follow_up` IS WHAT THE USER READS (served 7f5659fd, legacy capture 22:50Z: the agent-facing sentence was shown verbatim,
+    // and the user's sentence, which named "the user's figure", was dropped as agent-addressed). The user's sentence is addressed
+    // to them; the direction for the Agent stays in `note`. The successful commit runs the analysis itself: never ask for a Run.
+    const done = `‘${a.option_label}’ is saved: it now acts in the deadline forecast through the time it frees, with your figure and `
+      + 'Olumi’s assumptions kept distinct.';
+    const note = 'The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
     if (optionCapacityChangeHeld(before.raw, a)) {
       proposals.markApplied(pid, []);
-      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: done };
+      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: done, note };
     }
     if (!optionCapacityChangeStillApplies(a, before.raw)) {
       return notApplied('superseded', `The model changed after this card was offered, so nothing was set for ‘${a.option_label}’. Offer it again only if it still applies.`);
@@ -3660,7 +3663,7 @@ export function createAgentCapabilities(
         source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }]
       : [];
     proposals.markApplied(pid, receipts);
-    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: done };
+    return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts, follow_up: done, note };
   };
 
   /**

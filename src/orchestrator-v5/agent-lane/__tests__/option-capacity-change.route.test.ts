@@ -22,6 +22,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { approvalChipsFor } from '../approval-chips.js';
+import { withoutAgentDirections } from '../write-outcome.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
@@ -96,6 +97,12 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
 
     const done = await press(w, r.proposal_id);
     expect(done, JSON.stringify(done)).toMatchObject({ ok: true, applied: true, mutated: true });
+    // ⛔ What the USER reads (served 7f5659fd: the Agent's direction was shown verbatim, the user's sentence dropped): the
+    // fast path shows `follow_up` through `withoutAgentDirections`; the direction for the Agent rides in `note` only.
+    expect(withoutAgentDirections(String(done.follow_up)).text).toBe('‘Reduce legacy-fix time’ is saved: it now acts in the deadline '
+      + 'forecast through the time it frees, with your figure and Olumi’s assumptions kept distinct.');
+    expect(String(done.follow_up)).not.toMatch(/speak only|state no chance|the user/i);
+    expect(done.note).toBe('The analysis runs on the saved model; speak only to its result, and state no chance before it returns.');
     expect(w.registers).toHaveLength(1); // ONE compare-and-set registration
     const g = w.graph();
     // The canvas reads this graph: the new part and its links are there.
