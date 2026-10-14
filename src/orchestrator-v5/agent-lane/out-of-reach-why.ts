@@ -20,6 +20,7 @@ import { readMoney } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { goalLevelWords, symbolOf } from './goal-level-in-goal-units.js';
 import { readingTermsOf } from './identity-proposal.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -104,9 +105,11 @@ export function outOfReachWhyOf(result: unknown, graph: unknown): OutOfReachWhy 
 
   // W-why: every route from the rate to the volume lowers it, and the ceiling is under the target.
   const rateRoutes = routes(rateId);
-  const target = goal.goal_threshold_raw;
+  // The goal's target, unit and comparator through the one record (S5 census).
+  const held = typeof goal.id === 'string' ? readGoalRecord(graph, goal.id)?.target ?? null : null;
+  const target = held?.raw;
   const level = isRec(volume.observed_state) ? volume.observed_state.raw_value : undefined;
-  const money = readMoney(goal.goal_threshold_unit, label(goal));
+  const money = readMoney(held?.unit, label(goal));
   // An option that sets nothing (the status quo) leaves the rate at today's level.
   const today = isRec(rate.observed_state) ? rate.observed_state.raw_value : undefined;
   const prices = options.map((o) => (isRec(o!.interventions) && isRec(o!.interventions[rateId]) ? o!.interventions[rateId].raw_value
@@ -115,7 +118,7 @@ export function outOfReachWhyOf(result: unknown, graph: unknown): OutOfReachWhy 
     if (rateRoutes.length === 0 || !rateRoutes.every((r) => routeSign(r) < 0)) return undefined;
     // A "less"/"plus" term of the reading (§(i), #2835) moves the goal outside rate × volume: the product is no ceiling.
     if (readingTermsOf(graph).length > 0) return undefined;
-    if (goal.goal_direction !== '>=' || !finite(target) || !finite(level) || level <= 0 || money === null || money.period === null) return undefined;
+    if (held?.comparator !== '>=' || !finite(target) || !finite(level) || level <= 0 || money === null || money.period === null) return undefined;
     if (!prices.every(finite)) return undefined;
     const max = Math.max(...(prices as number[]));
     const ceiling = max * level;
