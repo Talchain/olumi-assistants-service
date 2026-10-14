@@ -70,6 +70,13 @@ export function approvedInterventionTargets(
 }
 
 /** Intent-free door: unchanged resolver inputs cannot acquire a new quantity. */
+/** True when any resolver-readable carrier still has a key for this factor, finite or not. */
+function carrierHolds(option: Dict, factor: string): boolean {
+  const data = option.data as Dict | undefined;
+  return [option.interventions, data?.interventions].some(c => c !== null && typeof c === 'object' && Object.hasOwn(c as Dict, factor))
+    || Object.hasOwn(option, `data/interventions/${factor}`);
+}
+
 export function assertUntouchedLevelQuantities(before: unknown, after: unknown): void {
   if (before === null || before === undefined || after === null || typeof before !== 'object' || typeof after !== 'object') return;
   const base = before as Dict;
@@ -89,7 +96,12 @@ export function assertUntouchedLevelQuantities(before: unknown, after: unknown):
     const oldCells = mergeInterventionSourceObjects(option);
     const newCells = mergeInterventionSourceObjects(current);
     for (const factor of Object.keys(oldCells)) {
-      if (!Object.hasOwn(newCells, factor) || !isDeepStrictEqual(resolverInput(option, factor), resolverInput(current, factor))) continue;
+      if (!Object.hasOwn(newCells, factor)) {
+        // A carrier still holds the level but the engine can no longer read it: the level vanished, not removed.
+        if (carrierHolds(current, factor)) failures.add(`${option.id}::${factor}`);
+        continue;
+      }
+      if (!isDeepStrictEqual(resolverInput(option, factor), resolverInput(current, factor))) continue;
       const was = resolveRawInterventionValue(resolverInput(option, factor), oldScales.get(factor));
       const now = resolveRawInterventionValue(resolverInput(current, factor), newScales.get(factor));
       if (was.codeNotMagnitude || now.codeNotMagnitude) continue;
