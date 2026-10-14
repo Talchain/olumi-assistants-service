@@ -261,6 +261,30 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(count(run.assistant_text as string, DEPENDS_3017)).toBe(1);
   });
 
+  /**
+   * ⛔ EQUAL VALUES ARE NOT THE RUN'S IDENTITY (DL lesson 08:08Z). DGAI binds the card to the SAME turn's view only by a
+   * non-empty `run.run_id` and the block's `computed_against_hash` equal to `run.graph_hash_at_run` (`mapV5Blocks`,
+   * `matchesCanonicalRun(by 'card')`). Hashes that are both absent are equal, and a view with no run id has an equal hash,
+   * but neither card displays the face, so the reply keeps the line.
+   */
+  it('ADVERSARIAL (served 5b6e5eb7 turn 01): the hashes agree but the view names no Run, so no card shows the face; the line stays', async () => {
+    const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
+    delete view.run.run_id;
+    expect(view.run.graph_hash_at_run).toBe(CAPACITY_3017.analysis_result.computed_against_hash);
+    served = { ...CAPACITY_3017, canonical_analysis_view: view };
+    const run = await runPress();
+    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+  });
+
+  it('ADVERSARIAL (served 5b6e5eb7 turn 01): both hashes absent are equal but bind nothing; the line stays', async () => {
+    const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
+    delete view.run.graph_hash_at_run;
+    const { computed_against_hash: _gone, ...result } = CAPACITY_3017.analysis_result as Json;
+    served = { ...CAPACITY_3017, canonical_analysis_view: view, analysis_result: result };
+    const run = await runPress();
+    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+  });
+
   it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
     const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
     view.staleness = { ...view.staleness, stale: true };

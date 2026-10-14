@@ -5184,11 +5184,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // not said again here; what it rests on still is (DL ruling on #3027), and the AI's answer explains it. No such card
       // (an Explain, a view that cannot ship, another or a stale Run): the line stays, the truthful fallback. By the Run's
       // identity and the cell's own face, never by words.
+      // ⛔ The card's own binding, never an equal value (DL lesson 08:08Z): DGAI binds it to this turn's view only by a
+      // non-empty run id and the result's own graph hash equal to that Run's (`mapV5Blocks`, `matchesCanonicalRun` 'card').
       const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
-        ? composedRead.canonicalAnalysisView as { run?: { graph_hash_at_run?: unknown }; staleness?: { stale?: unknown };
-          options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] } : undefined;
-      const cardFaces = new Map(cardView !== undefined && cardView.staleness?.stale === false
-        && cardView.run?.graph_hash_at_run === (analysisResult as { computed_against_hash?: unknown }).computed_against_hash
+        ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown };
+          staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] }
+        : undefined;
+      const resultHash = (analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash;
+      const cardBound = cardView !== undefined && cardView.staleness?.stale === false
+        && typeof cardView.run?.run_id === 'string' && cardView.run.run_id !== ''
+        && typeof resultHash === 'string' && resultHash !== '' && cardView.run.graph_hash_at_run === resultHash;
+      const cardFaces = new Map(cardBound
         ? cardView.options.flatMap(({ option_id, cell }) => (cell.kind === 'figure' || cell.kind === 'range')
           && typeof cell.face === 'string' ? [[option_id, cell.face] as const] : []) : []);
       const onCard = new Set(screenLines.filter((l) => {
