@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
-import { goalChanceLicenceForAgent } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf } from '../../../goal-target/goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
@@ -90,6 +90,38 @@ describe('hiring row 3: the Run records its threshold on the licence it states, 
     const licence = licenceOf(await runServed(FX.brief, graph));
     expect(licence?.pct_by_option, 'the chance itself is still licensed').toEqual(FX.served_licence.pct_by_option);
     expect(licence).not.toHaveProperty('shortfall_note_by_option');
+  });
+
+  /**
+   * The served rows are in the NORMALISED frame this Run recorded (`goal_threshold` 0.1: p10 −0.079 is −7.9% of today's
+   * productivity). The licence read with the Run's own inputs and that recorded threshold, on edited copies of those rows.
+   */
+  const licenceOnRows = (edit: (rows: Rec[]) => void, earned: (id: string, p: 0 | 1) => boolean = () => false): Rec => {
+    const rows = structuredClone(FX.option_comparison) as Rec[]; edit(rows);
+    const goal = (FX.graph.nodes as Rec[]).find((n) => n.id === 'productivity')!;
+    return goalChanceLicenceOf({ option_comparison: rows, inference_warnings: [] }, FX.graph, 'productivity', earned,
+      { value: goal.goal_threshold, field: 'goal_threshold', frame: 'delta' }, FX.graph,
+      { sentRun: { graph: FX.graph, goal_direction: 'maximise' }, brief: FX.brief, effects_timing: 'not_stated' }) as Rec;
+  };
+
+  it('FRAME: a worst 1 in 20 above its own p10 in the recorded frame says no line for that option (it passed by its sign before)', () => {
+    // Tech lead's p05 −0.05 sits ABOVE its p10 −0.079: not a tail. As a raw −5 it was "below" the normalised −0.079.
+    const l = licenceOnRows((rows) => { rows.find((r) => r.option_id === LEAD)!.downside.p05 = -0.05; });
+    expect(l.pct_by_option).toEqual(FX.served_licence.pct_by_option);
+    expect(l.shortfall_note_by_option).toEqual({
+      [TWO]: 'In its worst 1 in 20 runs of this model, ‘Hire Two Developers’ falls short of your target by 25% of today’s productivity or more.' });
+  });
+
+  it('FRAME: an option with an earned 0% says its typical shortfall from its median in the recorded frame, by hand', () => {
+    // Two developers, every run below +10%: median +5% of today's productivity → 10 − 5 = 5 (was 10 − 0.05 = 9.95: two frames).
+    const l = licenceOnRows((rows) => {
+      Object.assign(rows.find((r) => r.option_id === TWO)!, { probability_of_goal: 0,
+        outcome: { p10: -0.02, p50: 0.05, p90: 0.08, mean: 0.05, std: 0.03, n_samples: 10000, n_valid_samples: 10000, validity_ratio: 1,
+          percentiles_source: 'samples' }, downside: { p05: -0.04 } });
+    }, (id, p) => id === TWO && p === 0);
+    expect(l.pct_by_option).toMatchObject({ [TWO]: 0 });
+    expect(l.shortfall_note_by_option?.[TWO]).toBe('In this model, ‘Hire Two Developers’ falls short of your target in almost every run, '
+      + 'typically by about 5% of today’s productivity.');
   });
 
   it('CONTRAST: the same Run with no brief read has no conditional licence, so no figure and no shortfall line (fail-safe)', async () => {

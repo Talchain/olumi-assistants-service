@@ -1151,9 +1151,15 @@ function shortfallNotesOf(
     if (!finite(downside?.p05) || !finite(outcome?.p10)) continue;
     const q05 = downside.p05 * cap;
     if (!finite(q05) || q05 > outcome.p10 + 1e-6 * Math.abs(outcome.p10) || q05 >= raw) continue;
+    // ⛔ Hiring row 3 (14 Oct): the outcome percentiles are in the frame this Run RECORDED (`sent.field`): normalised beside
+    // `goal_threshold`, raw beside `goal_threshold_raw`. The tail must also hold in that frame: a negative change in the
+    // normalised frame passed the line above by its sign alone. The typical figure is read in that frame too (below).
+    const toRaw = sent.field === 'goal_threshold' ? cap : 1;
+    const p10Raw = outcome.p10 * toRaw;
+    if (!finite(p10Raw) || q05 > p10Raw + 1e-6 * Math.abs(p10Raw)) continue;
     const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
     if (typeof label !== 'string' || label.trim() === '' || /[\r\n]/.test(label)) continue;
-    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 : NaN) : q05);
+    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 * toRaw : NaN) : q05);
     if (!finite(difference) || difference <= 0) continue;
     const amount = pct[id] === 0 ? Number(difference.toPrecision(2)) : floorSig2(difference);
     if (!finite(amount) || amount <= 0) continue;
