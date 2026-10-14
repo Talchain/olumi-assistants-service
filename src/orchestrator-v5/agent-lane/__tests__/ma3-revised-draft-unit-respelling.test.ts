@@ -169,16 +169,18 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     }
   });
 
-  it('(c) holds_this_target is staging\'s exact-label binding (DL split ruling): a name the card holds under a longer label reads NOT held — it fails safe', async () => {
+  it('(c) holds_this_target without the AI\u2019s quote: the exact label verifies; a name the card holds under a longer label is UNKNOWN, never "not held"', async () => {
     const s = server();
     const { caps } = lane(s);
     const a = await caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
     const b = await caps.proposeGoalTarget!(turn as never, customers as never) as Rec;
     expect(b.proposal_id).toBe(a.proposal_id);
     expect(a.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
-    // Known gap, kept on purpose: "new customers" vs the card's ‘New customers in first 3 months’. The class fix is the AI
-    // quoting the card's target (generation), never another word matcher. The card itself still shows both targets.
-    expect(b.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: false });
+    // ⛔ CHANGED EXPECTATION (old → new): false → 'unknown'. "new customers" vs the card's ‘New customers in first 3 months’
+    // cannot be verified without the AI's quote, and the card carries that figure on a target, so "not in it" was false and
+    // made the AI withdraw the card (served turn 02 on 00a51f7d). With the quote it is verified:
+    // `marketing-turn02-target-quote.test.ts`. The card itself still shows both targets.
+    expect(b.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: 'unknown' });
     expect(String(b.public_label)).toContain('‘New customers in first 3 months’ at least 20 customers');
   });
 

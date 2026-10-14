@@ -250,7 +250,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, targetTheQuoteStates, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3589,7 +3589,7 @@ export function createAgentCapabilities(
   /** This target call's answer from the turn's one revised draft: the same card, or why this target is not in it. */
   const offerRevisedDraft = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
-    target: { measures: string; value: number; unit: string; comparator: string },
+    target: { measures: string; value: number; unit: string; comparator: string; quote?: unknown },
   ): Promise<ToolResult> => {
     const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}`;
     let pending = revisedDrafts.get(key);
@@ -3603,9 +3603,25 @@ export function createAgentCapabilities(
         words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
-    // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
-    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
-      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    // ⛔ A WITHDRAWN CARD IS NOT OFFERED AGAIN (served marketing turn 02 on 00a51f7d): the turn's one draft is reused, so a
+    // target call after `withdraw_proposal` returned the withdrawn id as offered, and the reply described a card the user
+    // never saw. Its id is consumed for this turn (`proposalsAwaitingApproval`), so the call says so instead.
+    if (proposals.get(draft.proposal.proposal_id) === undefined) {
+      return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'This revised-draft card was withdrawn earlier this turn, so it is not offered and nothing has changed. Never say a card is shown.' };
+    }
+    /**
+     * Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target. The
+     * card holds it when one of its targets carries this figure, comparator and unit AND is this quantity: by the exact
+     * label, or by the AI's `quote` of the user's words verified literally (`targetTheQuoteStates`: the figure once, its own
+     * comparator, the card target's label in that figure's part). A same-figure target that cannot be verified is UNKNOWN,
+     * never "not in the draft" (served marketing turn 02: "20 new customers" read NOT on ‘New customers in first 3 months’,
+     * so the AI withdrew the card). NOT held only when no card target carries the figure at all.
+     */
+    const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
+      && unitsConflict(target.unit, t.unit) === null);
+    const verified = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)
+      || targetTheQuoteStates(target.quote, ctx.user_turn_text ?? '', { figure: t.value, unit: t.unit, operator: t.comparator, label: t.quantity ?? '' }));
+    const holds: boolean | 'unknown' = verified ? true : sameFigure.length > 0 ? 'unknown' : false;
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,
@@ -3615,7 +3631,9 @@ export function createAgentCapabilities(
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
         + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
-        + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+        + (holds === true ? '' : holds === 'unknown'
+          ? ` Whether this target (${targetFigure(target.value, target.unit)}) is the card\u2019s own could not be checked against the user\u2019s words: ask the user to check the targets on the card, and never say it is in the revised draft or that it is not.`
+          : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
   };
 
@@ -5182,7 +5200,7 @@ export function createAgentCapabilities(
       const measures = typeof args.measures === 'string' ? args.measures.trim() : '';
       if (measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
         && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
-        return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
+        return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type], quote: (args as { quote?: unknown }).quote });
       }
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).

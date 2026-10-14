@@ -495,6 +495,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
       measures: { type: 'string', description: 'What the figure is a figure OF, in the user\u2019s own words from this message (for example "conversion rate", "new customers").' },
+      quote: { type: 'string', description: 'The user\u2019s own words that state THIS target, copied character for character from this message: its figure, any comparator they wrote ("over", "at least") and what it measures. When one sentence states two targets, only the words for this one.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       derived_from: obj({
         base: { type: 'number', description: 'The figure the user wrote that the target is derived from, in their units (100000 for "£100,000").' },

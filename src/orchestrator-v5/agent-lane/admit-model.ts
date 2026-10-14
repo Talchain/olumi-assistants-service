@@ -175,11 +175,6 @@ export interface CandidateModel {
      */
     quantity_frame?: 'level' | 'change' | null;
     /**
-     * D3 (T5 strict comparator): the brief's own sentence stating the target, quoted by the drafter and verified literally
-     * (`targetTheQuoteStates`). Optional because the banked contract has no such field: absent means none quoted.
-     */
-    target_quote?: string | null;
-    /**
      * Recovery Batch C (ruling 11): the target's semantics as the drafter states them — reference, denominator, period,
      * effect unit, whether effects are their size at the period's end, what else the goal requires, and an open question
      * when the target reads more than one way. Validated by `admitGoalTargetBasis`; absent = none stated (older candidates).

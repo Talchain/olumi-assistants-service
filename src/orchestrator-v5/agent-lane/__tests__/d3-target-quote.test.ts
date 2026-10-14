@@ -2,10 +2,10 @@
  * ⭐ D3 STRICT COMPARATOR (T5 D3; AIE item 4), on the AI-quote contract (as T2A5): "We want monthly recurring revenue to
  * RISE by at least 15%" lost its held target and `goal_direction` on C r2 and A r2, because `figureTheUserWroteForSpan`
  * gave the figure to another node whose label holds "rise" ("Customers lost to price rise"). The drafter now quotes the
- * target's own sentence (`goal.target_quote`); the host verifies it literally (`targetTheQuoteStates`).
+ * target's own sentence (`goal.source_quote`); the host verifies it literally (`targetTheQuoteStates`).
  *
  * Every row drives the REAL `buildModelFromBrief` with the EXACT T5 raw responses (`fixtures/s3-t5-admission-loss-20261012.json`).
- * "+ quote" adds ONLY `goal.target_quote` to that raw answer: the one field the drafter is now asked for. Nothing else is
+ * "+ quote" adds ONLY `goal.source_quote` to that raw answer: the one field the drafter is now asked for. Nothing else is
  * authored; the model call is faked, nothing is sent.
  */
 import { readFileSync } from 'node:fs';
@@ -66,7 +66,7 @@ const TARGET = 'We want monthly recurring revenue to rise by at least 15% within
 const withQuote = (e: Episode, quote: string, operator?: string): Episode => ({ ...e, calls: e.calls.map((c, i) => {
   if (i !== 0) return c;
   const draft = JSON.parse(c.text) as { goal: Rec };
-  return { ...c, text: JSON.stringify({ ...draft, goal: { ...draft.goal, target_quote: quote, ...(operator === undefined ? {} : { operator }) } }) };
+  return { ...c, text: JSON.stringify({ ...draft, goal: { ...draft.goal, source_quote: quote, ...(operator === undefined ? {} : { operator }) } }) };
 }) });
 const held = (goal: Rec) => ({ source: goal.threshold_source, direction: goal.goal_direction });
 
