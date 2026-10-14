@@ -84,7 +84,12 @@ const asServedNow = (n: Node | undefined): Node | undefined => {
   if (n === undefined) return n;
   const key = SERVED_FACTOR.nodes.includes(n) ? 'served-paul-churn-factor-20260926T032913Z'
     : 'served-paul-churn-outcome-20260926T032916Z';
-  return withVerifiedType(withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n), key);
+  // #3045 (Paul's vocabulary, 14 Oct): the decision node SHOWS "Question: <metric>"; its id still slugs from "Decision:". The
+  // captures predate it: their one known decision-node delta, the title word only.
+  const whole = withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n);
+  const titled = whole.kind === 'decision' && typeof whole.label === 'string' && whole.label.startsWith('Decision: ')
+    ? { ...whole, label: `Question: ${whole.label.slice('Decision: '.length)}` } : whole;
+  return withVerifiedType(titled, key);
 };
 const typedIds = (g: { nodes: Node[] }): string[] => g.nodes
   .filter((n) => (n as Node & { observed_state?: { extractionType?: unknown } }).observed_state?.extractionType === 'explicit')

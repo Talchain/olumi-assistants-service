@@ -119,10 +119,11 @@ describe('what still cannot reach the goal is KEPT and named', () => {
     // these two DID clear the blocker when measured, and was withdrawn because
     // the nodes it deletes are the widener's — the strategic richness this lane
     // is judged on — and the analysis stayed blocked on scale regardless.
+    // #3045 (Paul's vocabulary, 14 Oct): the decision node SHOWS "Question: <metric>" (its id still slugs from "Decision:").
     expect(labels(a.nodes)).toEqual([
-      'Churn constraint breach', 'Decision: Monthly recurring revenue', 'Hold £49 through release',
+      'Churn constraint breach', 'Hold £49 through release',
       'MRR target miss', 'Monthly recurring revenue', 'Next Pro feature release',
-      'Price-change timing', 'Pro plan price', 'Raise at next release',
+      'Price-change timing', 'Pro plan price', 'Question: Monthly recurring revenue', 'Raise at next release',
     ]);
   });
 
