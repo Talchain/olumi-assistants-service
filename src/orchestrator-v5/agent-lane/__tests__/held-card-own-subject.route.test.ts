@@ -34,6 +34,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { heldCardStillApplies } from '../proposal-object/still-applies.js';
+import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
 import { proposalPendingAction } from '../durable-proposal.js';
 import { agentProposals, executableProposalId, readExecutableHeldProposalOffers } from '../held-approval-offers.js';
 import { declineChipIdFor } from '../proposal-object/record.js';
@@ -81,19 +82,25 @@ function world() {
       return { id };
     },
   });
-  const graphWire = () => ({ graph: read(), graph_hash: hash(read()), brief_text: brief, scenario_created_at: STAMP });
+  /** The selected Run, as the real `/graph` read carries it: only beside the graph it was computed against (none before). */
+  let analysis: Rec = {};
+  const graphWire = () => ({ graph: read(), graph_hash: hash(read()), brief_text: brief, scenario_created_at: STAMP,
+    ...(analysis.analysis_result?.computed_against_hash === hash(read()) ? analysis : {}) });
   const versions = () => ({ versions: [{ version_id: 'draft-r1', sequence: 1, created_at: STAMP,
     creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)) } }] });
   const onLatestRow = (chipId: string): boolean => ((latest() as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
-  return { sid, rows, writes, read, graphWire, versions, onLatestRow, replace: (g: Rec) => { bytes = JSON.stringify(g); } };
+  return { sid, rows, writes, read, graphWire, versions, onLatestRow, replace: (g: Rec) => { bytes = JSON.stringify(g); },
+    setAnalysis: (a: Rec) => { analysis = a; } };
 }
 
 let script: Rec[] = [];
 /** The existing Run path's own turn (`runAnalysis` → `/orchestrate/v2/turn`, stage `analyse`): each request, the saved graph it ran on, and the reply. */
 const runTurns: { body: Rec; graphAtRun: Rec }[] = [];
 let runTurnReply: { status: number; json: Rec } = { status: 500, json: {} };
+/** A Run that completes with this result, computed against the hash it ran on; later reads select it. */
+let runResultFor: ((ranOn: string) => Rec) | undefined;
 const apps: FastifyInstance[] = [];
-beforeEach(() => { script = []; runTurns.length = 0; runTurnReply = { status: 500, json: {} }; });
+beforeEach(() => { script = []; runTurns.length = 0; runTurnReply = { status: 500, json: {} }; runResultFor = undefined; });
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
@@ -109,6 +116,10 @@ async function route(w: ReturnType<typeof world>) {
   app.post('/assist/v1/scenarios/:id/versions', async () => w.versions());
   app.post('/orchestrate/v2/turn', async (req, reply) => {
     runTurns.push({ body: req.body as Rec, graphAtRun: w.read() });
+    if (runResultFor !== undefined) {
+      const ran = runResultFor(hash(w.read())); w.setAnalysis(ran);
+      return reply.code(200).send({ analysis_ready: ran.analysis_ready, analysis_state: ran.analysis_state, blocks: [ran.analysis_result] });
+    }
     return reply.code(runTurnReply.status).send(runTurnReply.json);
   });
   await app.register(agentV1TurnRoute); await app.ready();
@@ -402,11 +413,60 @@ describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the e
     const runs = analyseTurns();
     expect(runs, JSON.stringify(runTurns.map((r) => r.body))).toHaveLength(1);
     expect(runs[0]!.body).toMatchObject({ scenario_id: w.sid, stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    expect(runs[0]!.body.chip.parameters, 'no Run when the turn began: no reading to carry').toEqual({ effects_timing: null });
     // Bound to the NEW revision: the Run read the model with the approved links already saved.
     expect(JSON.stringify(runs[0]!.graphAtRun)).not.toBe(before);
     expect(hash(runs[0]!.graphAtRun)).toBe(hash(w.read()));
     expect((pressed.suggested_actions ?? []).some((a: Rec) => a.id === 'agent-run-analysis'), 'it already ran: no Run chip').toBe(false);
   }, 90_000);
+
+  /** A completed Run on the hash it ran on, with each option's chance of meeting the goal licensed (the screen's lines). */
+  const LICENSED = (ranOn: string): Rec => ({
+    analysis_ready: { status: 'ready', may_run: true },
+    analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-14T13:00:00.000Z' } },
+    analysis_result: { type: 'analysis_result', computed_against_hash: ranOn, enrichment: { inference_warnings: [{
+      code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance of meeting your goal is licensed on this Run.', form: 'each',
+      option_ids: ['hire_a_tech_lead', 'hire_two_developers'], pct_by_option: { hire_a_tech_lead: 67, hire_two_developers: 41 },
+      target: { comparator: 'at_least', value: 10, unit: '%' } }] } },
+  });
+
+  it('⭐ C.md: the automatic Run IS this turn’s Run: its reply says each option’s chance, as a Run reply does', async () => {
+    const w = world(); const turn = await route(w);
+    const { links, session } = await bothCards(w, turn);
+    runResultFor = LICENSED;
+    const pressed = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect(analyseTurns()).toHaveLength(1);
+    // Fixture control: this Run's licence gives the screen's chance lines on the saved model.
+    const lines = goalChanceScreenLinesForAgent(LICENSED(hash(w.read())).analysis_result, w.read(), true);
+    expect(lines.map((l) => l.option_id).sort()).toEqual(['hire_a_tech_lead', 'hire_two_developers']);
+    for (const line of lines) expect(String(pressed.assistant_text), line.option_id).toContain(line.chance);
+    // Recorded as this turn's Run, by the Run's own call.
+    expect((pressed._agent.tool_calls as Rec[]).filter((c) => c.name === 'run_analysis')).toEqual([expect.objectContaining({ ok: true, mutated: false })]);
+  }, 90_000);
+
+  it('⭐ 12:57Z: the automatic Run carries the timing reading the Run current at the turn’s start recorded; a change to the goal carries none', async () => {
+    /** The Run current on the model as the turn finds it, its licence recording Olumi's reading. */
+    const priorRun = (w: ReturnType<typeof world>) => w.setAnalysis({
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-14T12:00:00.000Z' } },
+      analysis_result: { type: 'analysis_result', computed_against_hash: hash(w.read()), enrichment: { inference_warnings: [{
+        code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['hire_a_tech_lead', 'hire_two_developers'],
+        effects_timing: 'in_place_by_period', effects_timing_origin: 'olumi' }] } } });
+    runTurnReply = RUN_OK;
+    // The link card changes two factor links: no option, not the goal. The reading is carried.
+    const a = world(); const turnA = await route(a);
+    const cardsA = await bothCards(a, turnA);
+    priorRun(a);
+    await turnA({ message: cardsA.links.message, source: 'chip_click', chip: { id: cardsA.links.id }, agent_session_id: cardsA.session });
+    expect(analyseTurns().map((r) => r.body.chip.parameters)).toEqual([{ effects_timing: 'in_place_by_period' }]);
+    // The deadline card changes the goal's date: the reading's subject moved, so none is carried.
+    runTurns.length = 0;
+    const b = world(); const turnB = await route(b);
+    const cardsB = await bothCards(b, turnB);
+    priorRun(b);
+    await turnB({ message: cardsB.deadline.message, source: 'chip_click', chip: { id: cardsB.deadline.id }, agent_session_id: cardsB.session });
+    expect(goal(b.read()).goal_deadline ?? goal(b.read()).goal_horizon ?? null, 'the deadline was saved').not.toBeNull();
+    expect(analyseTurns().map((r) => r.body.chip.parameters)).toEqual([{ effects_timing: null }]);
+  }, 120_000);
 
   it('CONTRAST: a turn that commits nothing (a typed question; a declined card) runs nothing', async () => {
     const w = world(); const turn = await route(w);
@@ -426,6 +486,8 @@ describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the e
     expect(String(pressed.assistant_text)).toContain('The analysis didn’t run this time. Your model was updated this turn');
     expect(String(pressed.assistant_text)).not.toContain('Nothing in your model changed');
     expect(pressed.analysis_result ?? null).toBeNull();
+    expect(String(pressed.assistant_text)).not.toMatch(/chance of meeting/);
+    expect((pressed._agent.tool_calls as Rec[]).some((c) => c.name === 'run_analysis'), 'a Run that did not complete is not recorded as one').toBe(false);
     expect((pressed.suggested_actions ?? []).some((a: Rec) => a.id === 'agent-run-analysis'), 'the Run is offered to try again').toBe(true);
   }, 90_000);
 });

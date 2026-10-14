@@ -10,6 +10,8 @@ export async function assertIdentityYes(
   graphWrites: () => number,
   readGraph: () => Record<string, any>,
   tools: readonly string[] = ['propose_identity'],
+  // The Yes commits the identity; where the saved model's readiness admits a Run, the route's automatic Run is this turn's Run too.
+  yesTools: readonly string[] = ['authorise_change'],
 ): Promise<Record<string, any>> {
   expect(card._agent?.tool_calls?.map((call: { name: string }) => call.name)).toEqual(tools);
   const approve = card.suggested_actions.find((a: { id: string }) => a.id.startsWith('agent-approve-proposal:'));
@@ -20,7 +22,7 @@ export async function assertIdentityYes(
     factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
   }) })]);
   const yes = await press(approve.id, approve.message);
-  expect(yes._agent?.tool_calls?.map((call: { name: string }) => call.name)).toEqual(['authorise_change']);
+  expect(yes._agent?.tool_calls?.map((call: { name: string }) => call.name)).toEqual(yesTools);
   expect(graphWrites(), `identity Yes response: ${JSON.stringify(yes)}`).toBe(1);
   expect(readGraph().nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity).toEqual({
     operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: true,
