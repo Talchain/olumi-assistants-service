@@ -883,3 +883,26 @@ describe('RE-SCOPE 2 R5-5 — a reading refused for its conditions survives the 
     }
   });
 });
+
+
+describe('T4e K1: cold read never licenses an unknown sampled root as zero', () => {
+  it.each(['risk', 'outcome'])('a stored %s root withholds with the named next step', async (kind) => {
+    const graph = JSON.parse(store(marketing())) as Rec;
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    graph.nodes.push({ id: 'unknown_root', kind, label: 'Delivery disruption' });
+    graph.edges.push({ from: 'unknown_root', to: goal.id, strength: { mean: -0.4, std: 0.1 },
+      exists_probability: 1, effect_direction: 'negative' });
+    const bytes = JSON.stringify(graph);
+    const { AnalysisNotReadyError } = await import('../analysis-ready-core.js');
+    try {
+      await runFromStore(bytes);
+      expect.unreachable('Unknown root must not produce a numerical request');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnalysisNotReadyError);
+      const { assessCanonicalAnalysisReadiness } = await import('../../../../orchestrator/tools/analysis-ready-helper.js');
+      expect(assessCanonicalAnalysisReadiness(JSON.parse(bytes)).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
+        ? 'How likely or how large is "Delivery disruption" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.'
+        : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
+    }
+  });
+});

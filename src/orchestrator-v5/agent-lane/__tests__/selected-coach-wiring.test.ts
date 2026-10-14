@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
+import { STATED_FIGURE_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
 import { NARRATE_LABEL_LINE } from '../runtime/agent-loop.js';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
@@ -31,7 +32,10 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // #2994 AMEND (14 Oct, AIE rulings 1ad7f7b2… Q2): #35 is the AIE's whole replaced entry; staging's three protection
 // sentences it did not see (its pin 0c90d3cc) follow as their own entry, pending the AIE: 21,010 → 21,188 bytes. Replacing
 // that HOST with the previous one on the SENT prefix reproduces 1a6ad616… (below).
-const HOST_SHA = '74f55b0cfd64634c4f9c1bedae675c5beaa8dfe47a349299a93c112d63d80c74';
+// BYPASS1 (14 Oct): the AIE's Q4 next-step rule appended last (#94 6158232014, verbatim): 21,188 → 22,225 bytes. Every
+// captured body differs from staging's only by this HOST and, on the Agent call that offers tools, the stated-figure rule
+// after the shared instructions (10 leaves; 0 unexplained).
+const HOST_SHA = '94d4e35f5fa29a4ba645ba7c03d18438d1540a612d815d3ed9f204e81270be08';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -68,8 +72,19 @@ const HOST_SHA = '74f55b0cfd64634c4f9c1bedae675c5beaa8dfe47a349299a93c112d63d80c
 //   exactly those five pieces with staging's on the SENT body reproduces 96cd8417… and 35,782 bytes.
 // + #2994 AMEND (AIE Q2): the host contract above only: 32,007 → 32,185 bytes. The previous head's SENT prefix reproduces
 //   1a6ad616…; swapping in this HOST gives exactly this, and the captured bodies differ only by the five AIE constants.
-const RENDERED_SHA = '163ff51430cd8d1ac8eea92c852bfd0b64021a78d610fecf54d7ee086238260e';
-const RENDERED_BYTES = 32_185;
+// + BYPASS1: the host contract above only: 32,185 → 33,222 bytes; staging's SENT prefix with this HOST swapped in.
+const RENDERED_SHA = '2896fa86c033bf4ba49b8fafb95e5e91f7e862a855a8998e1c9f6bbf1add6c73';
+const RENDERED_BYTES = 33_222;
+/**
+ * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
+ * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.
+ */
+const expectCoachInstructions = (body: { instructions: string; tools?: unknown[] }): void => {
+  const bytes = Buffer.from(body.instructions);
+  expect(sha256(bytes.subarray(0, RENDERED_BYTES))).toBe(RENDERED_SHA);
+  const tail = bytes.subarray(RENDERED_BYTES).toString('utf8');
+  expect(tail).toBe((body.tools ?? []).length > 0 ? `\n\n${STATED_FIGURE_INSTRUCTION}` : '');
+};
 /** ⛔ CHANGED EXPECTATION (prompt P13): the result-reply rule that replaced "N% of runs supported X", matched as SENT bytes. */
 const NAMING_RULE_FORM = 'Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present.';
 /** G (AIE #94 6133027121): the approved selected-Run scope line, verbatim; SENT once on every coaching path. */
@@ -252,8 +267,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(modelInput).toMatch(/"today_within_limit"\s*:\s*"at_threshold"/);
     expect(modelInput).toContain('do no arithmetic');
     // SHA and byte count are derived from the intercepted request, not estimated from source literals.
-    expect(sha256(body.instructions)).toBe(RENDERED_SHA);
-    expect(Buffer.byteLength(body.instructions)).toBe(RENDERED_BYTES);
+    expectCoachInstructions(body);
   });
 
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {
@@ -263,8 +277,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     await sendTurn('What does the analysis say?', [say('The comparison is provisional.')]);
     expect(sent).toHaveLength(1);
     selected(sent[0]!);
-    expect(Buffer.byteLength(sent[0]!.instructions)).toBe(RENDERED_BYTES);
-    expect(sha256(sent[0]!.instructions)).toBe(RENDERED_SHA);
+    expectCoachInstructions(sent[0]!);
     expect(sent[0]!.instructions).toContain('To change the model you must first call a proposing tool');
     expect(sent[0]!.instructions).toContain('authorise_change');
     // The exported host contract is the one-space join of all 31 approved old entries.
@@ -302,7 +315,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     for (const body of sent) {
       expect(body.model).toBe('gpt-6.1-sol');
       expect(body.max_output_tokens).toBe(3400);
-      expect(sha256(body.instructions)).toBe(RENDERED_SHA);
+      expectCoachInstructions(body);
     }
     // The deciding call stays high; the call after a held proposal only states it and asks for the yes.
     expect(sent[0]!.reasoning?.effort).toBe('high');
@@ -319,7 +332,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent).toHaveLength(1);
     for (const body of sent) {
       expect(body.model).toBe('gpt-6.1-sol');
-      expect(sha256(body.instructions)).toBe(RENDERED_SHA);
+      expectCoachInstructions(body);
     }
     sent.length = 0;
     await explainRun(app, SCENARIO, { statusCode: 200, json: () => response });
@@ -359,7 +372,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
       expect(body.model).toBe('gpt-5.6-terra');
       expect(body.reasoning?.effort).toBe('low');
       expect(body.max_output_tokens).toBe(3400);
-      expect(sha256(body.instructions)).toBe(RENDERED_SHA);
+      expectCoachInstructions(body);
     }
 
     sent.length = 0;

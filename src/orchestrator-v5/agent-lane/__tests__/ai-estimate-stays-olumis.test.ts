@@ -49,7 +49,7 @@ function candidate(extra: Partial<Record<'estimated' | 'zero' | 'absent' | 'stat
       f('Zero tech leads', { baseline_value: 0, plausible_max: 10, ...extra.zero }),
       f('Absent contractors', { ...extra.absent }),
       stated,
-      // No range and nothing the model holds to derive one from.
+      // No supplied range; A3 can derive a coordinate frame from this named-unit estimate.
       f('Unframeable backlog', { baseline_value: 250, unit: 'tickets', plausible_max: null, ...extra.unframeable }),
     ],
     risks: [],
@@ -124,14 +124,17 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     expect(n).not.toHaveProperty('scale_frame');
   });
 
-  it('T5: an estimate that cannot be framed stays missing and adds no blocking issue', async () => {
+  it('A3: a named-unit estimate gets a coordinate frame; a truly absent level still blocks', async () => {
     const withEstimate = await registered(candidate());
     const withoutEstimate = await registered(candidate({ unframeable: { baseline_value: null } }));
     const n = byId(withEstimate, 'unframeable_backlog');
-    expect(n).not.toHaveProperty('observed_state');
-    expect(n).not.toHaveProperty('scale_frame');
-    const blockers = (g: unknown) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}:${i.message}`).sort();
-    expect(blockers(withEstimate)).toEqual(blockers(withoutEstimate));
+    expect(n.observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
+    expect(n.scale_frame).toBe(1000);
+    const blockers = (g: unknown) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}:${i.factor_id}`).sort();
+    expect(blockers(withEstimate)).toEqual(['MISSING_FACTOR_LEVEL:absent_contractors',
+      'MISSING_OPTION_VALUE:absent_contractors', 'MISSING_OPTION_VALUE:stated_headcount', 'MISSING_OPTION_VALUE:unframeable_backlog']);
+    expect(blockers(withoutEstimate)).toEqual(['MISSING_FACTOR_LEVEL:absent_contractors', 'MISSING_FACTOR_LEVEL:unframeable_backlog',
+      'MISSING_OPTION_VALUE:absent_contractors', 'MISSING_OPTION_VALUE:stated_headcount', 'MISSING_OPTION_VALUE:unframeable_backlog']);
   });
 
   it('T5b: an estimate outside its stated range stays missing; the range still travels', () => {
@@ -146,11 +149,13 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     for (const stamp of ['user_override', 'user_stated', 'user_assumption', 'user_specified']) expect(text).not.toContain(stamp);
   });
 
-  it('an estimate never feeds a derived frame: a range derived only from an estimate is not invented', () => {
-    // No stated range, no intervention: the only number is Olumi's guess. A frame
-    // derived from it would let the guess set its own scale.
+  it('A3: the derived coordinate frame discloses its exact value and estimated origin', () => {
+    // No stated range or intervention: the coordinate frame must disclose that its number came from Olumi's estimate.
     const m = admitted(candidate({ unframeable: { baseline_value: 250, plausible_max: null } }));
-    expect(m.loss.filter((l) => l.field_path === 'nodes[unframeable_backlog].observed_state.cap')).toEqual([]);
+    expect(m.loss.filter((l) => l.field_path === 'nodes[unframeable_backlog].observed_state.cap')).toEqual([{
+      field_path: 'nodes[unframeable_backlog].observed_state.cap', before: null, after: 1000, severity: 'warn',
+      reason: 'No range was stated for "Unframeable backlog", and a number above 1 with no range cannot be analysed at all — nor can a range be added afterwards. A range of 0 to 1000 has been used, taken from the largest figure the model already holds for it. That is a unit of measurement, not a forecast or a limit, and the figures it was taken from are Olumi\'s own estimates, not figures you gave, and are stored unchanged beside it.',
+    }]);
   });
 
   it('a defaulted frame over Olumi’s own figures does not call them "your own figures"', () => {

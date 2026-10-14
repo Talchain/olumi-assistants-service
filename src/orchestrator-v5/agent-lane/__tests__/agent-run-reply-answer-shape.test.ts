@@ -124,7 +124,7 @@ type Body = {
   assistant_text: string;
   blocks?: { type?: string }[];
   _answer_shape?: AnswerShape;
-  _diagnostic_trace: { fast_path?: string; leader_claim_enforced?: boolean };
+  _diagnostic_trace: { fast_path?: string; leader_claim_enforced?: boolean; reply_author?: 'ai' | 'host' };
 };
 /** A line's words without its list marker: the synthesiser re-renders the first three bullets as `• `. */
 const unmarked = (line: string) => line.trim().replace(/^[•\-*]\s+/, '');
@@ -146,10 +146,13 @@ const expectRobustnessDisclosure = (b: Body): void => {
 describe('an analysis reply on the Agent route arrives headline first (`_answer_shape`)', () => {
   let app: FastifyInstance;
   let noLeaderSentence: string;
+  /** Every converse body sent to the model (row 10 reads the state the AI was given). */
+  const sentBodies: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       const forced = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
       if (forced) return forced;
+      sentBodies.push(String(init?.body ?? ''));
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -715,16 +718,20 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   /** D1's ask as the host writes it for this goal (`targetAsk`, neutral words: MRR's direction is not read as a floor). */
   const TARGET_ASK = 'What figure should "MRR" reach or stay under? I\'ll propose it as your target.';
 
-  it('10. ordinary tool-enabled turn: the host target ask stays atomic on the face without a Draft/Run contract', async () => {
+  it('10. ordinary tool-enabled turn (BYPASS1): the AI holds the missing target as its ONE next step; the host adds no ask', async () => {
     readbackGraph = noTargetGraph();
+    sentBodies.length = 0;
     const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a14', [runCall], 'Run the analysis and tell me what it says.') as Offered;
     expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
     expect(carriesResult(b), 'the control: the reply carries the result').toBe(true);
-    // A typed run_analysis call alone does not select the contract; this fixture carries no screen/withheld chance.
-    expect(b.assistant_text.split(TARGET_ASK), 'the control: the host appended its target ask, once').toHaveLength(2);
-    expect(b._answer_shape, 'base shipped this whole (a host line was in the text)').toBeDefined();
-    expect(b._answer_shape!.bullets.at(-1), 'the one ask closes the face').toBe(TARGET_ASK);
-    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
+    // Was (staging e7900048): the host appended its target ask, once, and it closed the face. BYPASS1 (DL 14 Oct, #2994
+    // risk 2, the double ask): the reply is the AI's, so the ask is the AI's to make, from the typed step it holds.
+    expect(b._diagnostic_trace.reply_author).toBe('ai');
+    expect(b.assistant_text.split(TARGET_ASK), 'the host adds no target ask to the AI\'s reply').toHaveLength(1);
+    const state = sentBodies.find((body) => body.includes('CURRENT MODEL STATE'));
+    expect(state, 'the converse call carries the state').toBeDefined();
+    expect(state).toContain('next_step_blocker');
+    expect(state).toContain('goal_target_missing');
   });
 
   it('12. HOST STATUS (CODEX on #2517): an unsupported "Saved" claim → the host\'s own status line, kept once (R1: status may sit in detail)', async () => {

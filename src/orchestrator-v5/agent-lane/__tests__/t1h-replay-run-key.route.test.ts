@@ -182,7 +182,12 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     await freshApp();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; rows.length = 0; table.length = 0;
+  // T4 (unknown is never zero): the capture's drafter-added risk `launch_date_missed` has no level, so T4 withholds the Run
+  // and asks. These rows are about replay identity, so the risk carries a stated level, as T4's own valued row does
+  // (`run-reply-unvalued-root.route.test.ts`), and the Run runs.
+  const withRiskLevel = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map((n) => n.id === 'launch_date_missed'
+    ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n) });
+  beforeEach(() => { graph = withRiskLevel(structuredClone(FX.graph)); block = undefined; bodies = []; runs = []; rows.length = 0; table.length = 0;
     rpcCalls.length = 0; STATE.run_state.computed_at = AT; originalLoop = true; rootLineCalls.length = 0;
     narratedMissing = false; selectMissingColumn = false; conditional = false; store.appendIfLatest = undefined; });
 

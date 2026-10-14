@@ -27,24 +27,26 @@ describe('event-risk zero-treatment authority boundary', () => {
     expect.soft(view.treated_as_zero ?? []).not.toContain('Key developer might leave');
     expect.soft(treatedAsZeroLine(view)).toBeNull();
   });
-  it('ER-1b-control: ordinary unvalued root keeps the current sentence', () => {
+  it('ER-1b-control: ordinary unvalued root withholds and names its next step', () => {
     const view = readinessViewOf(graph(false));
-    expect(view.may_run).toBe(true);
-    expect(view.treated_as_zero).toEqual(['Key developer might leave']);
-    expect(treatedAsZeroLine(view)).toBe('No figure is set for "Key developer might leave" yet, so the analysis treats it as zero. How likely or how large is "Key developer might leave" today?');
+    expect(view.may_run).toBe(false);
+    expect(view.treated_as_zero).toBeUndefined();
+    expect(assessCanonicalAnalysisReadiness(graph(false)).blockingIssues.map(i => i.factor_id)).toEqual(['risk_dev']);
+    expect(treatedAsZeroLine(view)).toBeNull();
   });
   it('ER-1b-control: the multiple-root question carries the same named subjects as its disclosure', () => {
     const g = graph(false);
     g.nodes.push({ id: 'risk_supply', kind: 'risk', label: 'Supplier delay' });
     g.edges.push({ from: 'risk_supply', to: 'goal', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
     const view = readinessViewOf(g);
-    expect(view.may_run).toBe(true);
-    expect(view.treated_as_zero).toEqual(['Key developer might leave', 'Supplier delay']);
-    expect(treatedAsZeroLine(view)).toBe('No figures are set for "Key developer might leave" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each of "Key developer might leave" and "Supplier delay" today?');
+    expect(view.may_run).toBe(false);
+    expect(view.treated_as_zero).toBeUndefined();
+    expect(assessCanonicalAnalysisReadiness(g).blockingIssues.map(i => i.factor_id)).toEqual(['risk_dev', 'risk_supply']);
+    expect(treatedAsZeroLine(view)).toBeNull();
   });
   it('ER-1b-authority: only a valid event block exempts the root from unvalued_roots', () => {
-    const unvaluedRoots = (g: unknown) => assessCanonicalAnalysisReadiness(g).analysisReady?.unvalued_roots ?? [];
-    const expected = [{ node_id: 'risk_dev', label: 'Key developer might leave', kind: 'risk', treated_as: 'zero' }];
+    const unvaluedRoots = (g: unknown) => assessCanonicalAnalysisReadiness(g).blockingIssues.map(i => i.factor_id);
+    const expected = ['risk_dev'];
     expect(unvaluedRoots(graph(true))).toEqual([]);
     expect(unvaluedRoots(graph(false))).toEqual(expected);
     const malformed = graph(true);

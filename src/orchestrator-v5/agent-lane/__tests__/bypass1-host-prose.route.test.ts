@@ -1,0 +1,209 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
+/**
+ * ⭐ BYPASS1 THROUGH THE ROUTE (DL, 14 Oct). Harness: target-not-testable-beside-ranges.route.test.ts (served b9-1 readback,
+ * real route, scripted AI, no provider contacted). Was: S2l THROUGH THE ROUTE: what the model is sent when the user presses Explain on the SERVED Wave B9 unseen b9-1 Run
+ * (guest, staging, CEE df15c8c1; `waveB9-unseen1-df15c8c-readback-pre-challenge.json`, the graph read verbatim). Its screen
+ * showed three range lines; its not-testable record (scoped to `carry_on_as_now`) kept the producer's unscoped message,
+ * and the Challenge said "Without sized profit effects, the model cannot test your £24,000 target." Harness copied from
+ * decision-sensitivity-screen-gate.route.test.ts (real route, fixed narrator, no provider contacted).
+ */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+
+type Json = Record<string, any>;
+const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
+const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
+/** Capacity witness (CEE 351eeda0, `JUDGE-capacity-post2996-codex.md` row 4): the served graph read after its second Run. */
+const CAPACITY = ((): Json => {
+  const j = (JSON.parse(readFileSync(new URL('./fixtures/capacity-post2996-run2-read.json', import.meta.url), 'utf8')) as { j: Json }).j;
+  return { ...j, scenario_id: SCENARIO };
+})();
+const count = (text: string, part: string): number => text.split(part).length - 1;
+
+const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
+const store = {
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  readCommittedTurn: vi.fn(async (_sid: string, id: string) => rows.get(id) ?? null),
+  append: vi.fn(async (w: { turn_id: string; request_hash: string }) => {
+    const prior = rows.get(w.turn_id);
+    if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
+    const row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash };
+    rows.set(w.turn_id, row);
+    return { id: row.id };
+  }),
+  readRecent: vi.fn(async () => []),
+  readMostRecentPendingActions: vi.fn(async () => []),
+  readFactsFor: vi.fn(async () => []),
+  readAnalysisInvalidatedAt: vi.fn(async () => null),
+  // The canonical view ships only when the stored scenario still matches the read (`canonicalViewBasisUnchanged`): the
+  // served read's own graph and revision, else no view (as before).
+  readExistingScenario: vi.fn(async () => servedScenario()),
+};
+let servedScenario = (): { revision: unknown; graph: unknown } | null => null;
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
+vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
+  ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
+}));
+
+const NO_TARGET_GRAPH = ((): Json => {
+  const g = structuredClone(READ.graph) as Json;
+  const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
+  for (const k of ['goal_threshold', 'goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold_cap_provenance', 'success_threshold', 'threshold_source']) delete goal[k];
+  return g;
+})();
+const CHANCE_LINE = /% chance of meeting your goal, in this model/;
+/** The AIE's two texts (#94 6158232014): Q4 reaches Agent and Explain; the stated-figure rule only calls that offer tools. */
+const Q4 = 'When the supplied, current bound state records a blocker for this turn';
+const STATED_FIGURE = 'When the user supplies a figure that an available proposing tool can faithfully represent';
+const ESTIMATES_FACE = /Olumi's estimates: \d+, see Check estimates\./;
+
+describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts reach the AI', () => {
+  let app: FastifyInstance;
+  let graph: Json = READ.graph;
+  let state: Json = READ.analysis_state;
+  const sent: string[] = [];
+  /** Scripted model outputs, one per provider call; empty → the plain answer below. */
+  let outputs: Record<string, unknown>[][] = [];
+  /** A served graph read, verbatim (its own canonical view); null → the b9-1 read above. */
+  let served: Json | null = null;
+  beforeAll(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
+      sent.push(typeof init?.body === 'string' ? init.body : '');
+      const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }];
+      return new Response(JSON.stringify({ output }), { status: 200 });
+    }));
+    vi.resetModules();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/orchestrate/v2/turn', async () => ({
+      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: served?.graph_hash ?? READ.graph_hash,
+      blocks: [served?.analysis_result ?? READ.analysis_result], analysis_ready: served?.analysis_ready ?? READ.analysis_ready,
+      analysis_state: served?.analysis_state ?? state,
+    }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => served ?? withCanonicalAnalysisView({
+      graph, graph_hash: READ.graph_hash, analysis_state: state,
+      analysis_ready: READ.analysis_ready, analysis_result: READ.analysis_result,
+    }, SCENARIO));
+    await app.register(agentV1TurnRoute);
+    await app.ready();
+  }, 60_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; served = null; });
+  servedScenario = () => served === null ? null
+    : { revision: (served.canonical_analysis_view as Json | undefined)?.staleness?.revision, graph: served.graph };
+
+  /** DGAI's own Run press (sendTurn → buildV5Payload, e218e3d2: turn_class 'frame', a bound run_analysis chip). */
+  const runPress = async (): Promise<Json> => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
+    expect(r.statusCode, r.body).toBe(200);
+    return r.json();
+  };
+
+  const NO_LEADER_CLOSING = /No single option can be put forward/;
+  const RANKING = 'Open Clifton shop is the best option to choose.';
+
+  it('NEGATIVE (host-written): the Run press is the host\'s reply, so it keeps every host line', async () => {
+    const run = await runPress();
+    expect(run._diagnostic_trace.reply_author).toBe('host');
+    expect(run.assistant_text).toMatch(CHANCE_LINE);
+    expect(run.assistant_text).toMatch(ESTIMATES_FACE);
+  });
+
+  it('AI-written Run (a typed "Run it"): the chance face stays, and the step the host no longer asks is in the AI\'s input', async () => {
+    graph = NO_TARGET_GRAPH;
+    outputs = [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
+      [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: 'Run it', source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const b = r.json() as Json;
+    expect((b._agent.tool_calls as { name: string }[]).map((c) => c.name)).toContain('run_analysis');
+    expect(b._diagnostic_trace.reply_author).toBe('ai');
+    expect(b.assistant_text).toMatch(CHANCE_LINE);
+    expect(b.assistant_text).toContain('The analysis ran.');
+    expect(sent[0] ?? '').toContain('goal_target_missing');
+    expect(sent[0] ?? '').toContain(Q4);
+    expect(sent[0] ?? '').toContain(STATED_FIGURE);
+  });
+
+  it('AI-written Explain with a ranking sentence: the gate still drops it (authority) and says why it cut it', async () => {
+    // The served Run named its leader; here the comparison is withheld (the separation could not be established).
+    state = { ...READ.analysis_state, leader_claim: { permitted: false, separation: 'not_separated', withheld_reason: 'separation_unavailable' } };
+    const run = await runPress();
+    const chip = (run.suggested_actions as { id: string }[]).find((c) => c.id.startsWith('agent-explain-run:'));
+    expect(chip, JSON.stringify(run.suggested_actions)).toBeDefined();
+    sent.length = 0;
+    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: `The analysis ran. ${RANKING}` }] }]];
+    const e = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: RUN_EXPLANATION_MESSAGE, source: 'chip_click', chip: { id: chip!.id } } });
+    expect(e.statusCode, e.body).toBe(200);
+    const explain = e.json() as Json;
+    expect(explain._diagnostic_trace.fast_path).toBe('explain');
+    expect(explain._diagnostic_trace.reply_author).toBe('ai');
+    expect(explain.assistant_text).toContain('The analysis ran.');
+    expect(explain.assistant_text).not.toContain(RANKING);
+    // The gate appends its reason only when it cut a sentence: the reply accounts for the cut (CI on #3001: 9 protected rows).
+    expect(explain.assistant_text).toMatch(NO_LEADER_CLOSING);
+    expect(sent[0] ?? '').toContain('goal_chance_range_display');
+    // Tool-less Explain: the next-step rule, never the tool-use rule.
+    expect(sent[0] ?? '').toContain(Q4);
+    expect(sent[0] ?? '').not.toContain(STATED_FIGURE);
+  });
+
+  it('the typed blocker reaches the AI as a fact: a goal with no target is the ONE step, and no host line says it', async () => {
+    graph = NO_TARGET_GRAPH;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: 'What should I do next?', source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const body = sent.find((b) => b.includes('CURRENT MODEL STATE'));
+    expect(body, 'the converse call carries the state').toBeDefined();
+    const state = JSON.stringify(JSON.parse(body!));
+    expect(state).toContain('next_step_blocker');
+    expect(state).toContain('goal_target_missing');
+    expect(state).toContain('monthly profit');
+    const reply = (r.json() as Json).assistant_text as string;
+    expect(reply.startsWith('The analysis ran.')).toBe(true);
+    // No host target ask: the AI asks it from the fact (the conditional basis, whose sentence the AI lacks, stays).
+    expect(reply).not.toMatch(/as your target\./);
+  });
+
+  /**
+   * ⭐ CAPACITY WITNESS (351eeda0): the Run's card (DGAI `goalChanceDetailLines`, from this response's
+   * `canonical_analysis_view.goal_chance`) says the status quo line and the notes; the reply said them again, so the user
+   * read "Doing nothing: … by assumption." twice. Each is now on screen ONCE: in the card, not repeated in the reply.
+   */
+  it('capacity Run press: the card says the status quo line and the notes, and the reply does not repeat them', async () => {
+    served = CAPACITY;
+    const run = await runPress();
+    const detail = run.canonical_analysis_view?.goal_chance as { status_quo: { line: string }; notes: string[] };
+    expect((run.blocks as { type: string }[])[0]?.type).toBe('analysis_result');
+    expect(detail.status_quo.line).toBe('Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.');
+    expect(detail.notes.length).toBeGreaterThan(0);
+    const reply = run.assistant_text as string;
+    for (const line of [detail.status_quo.line, ...detail.notes]) expect(count(reply, line), line).toBe(0);
+    // The headline stays in the reply: the chance and its shortfall sentence, once each.
+    expect(reply).toMatch(CHANCE_LINE);
+    expect(count(reply, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(1);
+  });
+
+  it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
+    const { canonical_analysis_view: _dropped, ...withoutView } = CAPACITY;
+    served = withoutView;
+    const run = await runPress();
+    expect(run.canonical_analysis_view).toBeUndefined();
+    expect(count(run.assistant_text as string, 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.')).toBe(1);
+  });
+});

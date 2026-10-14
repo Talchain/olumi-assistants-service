@@ -15,6 +15,7 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 import d2 from '../../../../tests/fixtures/deadline-card-d2.json';
 import d1 from '../../../../tests/fixtures/ceiling-stock-t3.json';
+import hiring from '../../../../tests/fixtures/deadline-card-hiring-post3000.json';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool, type ToolResult } from '../runtime/agent-tools.js';
@@ -99,11 +100,20 @@ async function route(w: ReturnType<typeof world>) {
     expect(r.statusCode, r.body).toBe(expectedStatus); return r.json() as Rec;
   };
 }
+/** d2's and d1's brief: the sentence the stored words come from. */
+const D2_SENTENCE = 'Our depot can service at most 1,900 riders without breaking its maintenance targets, and the council wants us to stay under '
+  + 'that ceiling, without turning anyone away, over the next ten months.';
+/**
+ * AMENDED (ruling A, DL 14 Oct; was "…? Your words: “ten months”."): the route card quotes the sentence its words were read from,
+ * and is always Olumi's interpretation to check: that these are the goal's deadline is the drafter's reading, never the user's.
+ */
+const ROUTE_CARD_D2 = `Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months” in “${D2_SENTENCE.slice(0, -1)}”. `
+  + 'Olumi’s interpretation; check the date and reference before approving.';
 function card(body: Rec) {
   const calls = body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
   expect(calls).toHaveLength(1); expect(calls[0].ok).toBe(true);
   const yes = body.suggested_actions.find((c: Rec) => c.id === approvalChipIdFor(calls[0].proposal_id));
-  expect(yes).toMatchObject({ label: 'Yes', detail: 'Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months”.' });
+  expect(yes).toMatchObject({ label: 'Yes', detail: ROUTE_CARD_D2 });
   expect(body.suggested_actions).toContainEqual(DEADLINE_CHANGE_CHIP);
   return { call: calls[0], yes };
 }
@@ -157,8 +167,19 @@ describe('deterministic deadline card on the first Agent turn', () => {
     const done = await w.caps.authoriseChange({ ...w.ctx('Yes'), typed_approval_of: String(out.proposal_id) }, { proposal_id: String(out.proposal_id) });
     expect(done).toMatchObject({ ok: true, applied: true });
     expect(goal(w.read()).goal_horizon.deadline).toBe('2027-04-30');
+    // DLf5 (DL-approved flip, PL AMEND 22:37Z): was `unreadable_deadline`. "ten months" resolves, so the user's phrase owns
+    // the date and a malformed OPTIONAL model date beside it is ignored: the source-first tuple, the user's, nothing written.
     for (const deadline_date of ['2027-02-30', 'tomorrow', 123, null]) {
-      expect(await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', deadline_date, rationale: '' }), w.ctx('ten months'), w.caps, 'full'))
+      const kept = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', deadline_date, rationale: '' }), w.ctx('ten months'), w.caps, 'full');
+      expect(kept, String(deadline_date)).toMatchObject({ ok: true, mutated: false });
+      const proposal = w.proposals.get(String(kept.proposal_id))!;
+      expect(proposal.provenance.authored_by).toBe('user_stated');
+      expect(proposal.operations[0]).toMatchObject({ op: 'set_goal_deadline', value: { deadline: '2027-08-10', reference: R } });
+    }
+    expect(goal(w.read()).goal_horizon.deadline, 'nothing written without approval').toBe('2027-04-30');
+    // Words that do not resolve still refuse a malformed fallback date.
+    for (const deadline_date of ['2027-02-30', 'tomorrow', '2026-01-01']) {
+      expect(await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'after the spring launch', deadline_date, rationale: '' }), w.ctx('after the spring launch'), w.caps, 'full'))
         .toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_deadline' });
     }
   });
@@ -178,22 +199,12 @@ const issueInput = (graph: Rec = structuredClone(d2.graph)): DeadlineIssueInput 
 describe('R3 deterministic authorship and placement guards', () => {
   it('binds both retained goal shapes; typed-owned words also qualify', () => {
     for (const graph of [d2.graph, d1.graph]) expect(deadlineCardToIssue(issueInput(graph)))
-      .toEqual({ goal_id: goal(graph).id, words: 'ten months', reference: R, date: '2027-08-10' });
+      .toMatchObject({ goal_id: goal(graph).id, words: 'ten months', reference: R, date: '2027-08-10', quote: D2_SENTENCE });
     expect(deadlineCardToIssue({ ...issueInput(), storedBrief: '', typedNow: 'My deadline is ten months' })).toBeDefined();
   });
-  it.each([
-    ['invented words', 'We want to keep registered riders under the ceiling.'],
-    ['rival date', 'Our rival wants to keep registered riders under the ceiling over the next ten months.'],
-    ['example date', 'For example, we want to keep registered riders under the ceiling over the next ten months.'],
-    ['other goal date', 'We have 1,400 registered riders. Our revenue goal is to reach £1,900 in ten months.'],
-    ['duration, not deadline', 'We have registered riders. Our staff training lasts ten months.'],
-    ['owner absent', 'Registered riders should stay under the ceiling over the next ten months.'],
-    ['previous-sentence subject (buddy r1 P1)', 'We have registered riders. We must reach revenue of £10,000 in ten months.'],
-    ['course duration, not a deadline (buddy r1 P1)', 'We have registered riders. We keep training staff over ten months as a course duration, not a deadline.'],
-    ['same-sentence duration, not a deadline', 'We keep training registered riders over ten months as a course duration, not a deadline.'],
-    ['same-sentence duration only', 'We keep training registered riders over ten months as a course.'],
-    ['same-sentence "lasts"', 'We keep registered riders onboarded in a programme that lasts ten months.'],
-  ])('%s is silent', (_name, storedBrief) => { expect(deadlineCardToIssue({ ...issueInput(), storedBrief })).toBeUndefined(); });
+  it('invented words (the stored words occur nowhere in the brief) are silent', () => {
+    expect(deadlineCardToIssue({ ...issueInput(), storedBrief: 'We want to keep registered riders under the ceiling.' })).toBeUndefined();
+  });
   it.each([
     'Of course, we want to keep registered riders under the ceiling over the next ten months.',
     'We want to keep registered riders under the ceiling over the next ten months while training takes place.',
@@ -394,7 +405,9 @@ describe('R4 durable first-Agent-turn gate', () => {
         const offer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
         const viaOffer = await offer!.issue(w.ctx('Run'), { deadline_words: offer!.words, rationale: '' }) as Rec;
         const viaDoor = await world(), door = (viaDoor.reference(version, scenario), await viaDoor.caps.proposeGoalDeadline!(viaDoor.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' })) as Rec;
-        expect(viaOffer.public_label, String(version)).toBe(door.public_label);
+        // AMENDED (ruling A; was the whole label): the route card now quotes its sentence and follows #2997's authorship rule, so
+        // the SAME reference is pinned on the question both cards ask.
+        expect(viaOffer.public_label.split('?')[0], String(version)).toBe(door.public_label.split('?')[0]);
         expect(viaOffer.public_label).toContain(version === null ? '9 October 2026' : '10 October 2026');
       }
     });
@@ -557,17 +570,41 @@ describe('R7 attribution on the served share-of-riders goal', () => {
     provenance: 'ai_inferred', goal_threshold_unit: '%', goal_threshold_frame: 'level', goal_deadline_as_stated: 'ten months' };
   const input = (over: Partial<DeadlineIssueInput> = {}): DeadlineIssueInput => ({ graph: { nodes: [served], edges: [] }, storedBrief: brief, typedNow: null,
     reference: R, toolCalls: [], mutated: false, fastPath: 'run', proposalOffered: false, pending: [], priorOffer: false, ...over });
-  it('offers the served goal its ten months, bound to the goal id and verbatim words', () => {
-    expect(deadlineCardToIssue(input())).toEqual({ goal_id: served.id, words: 'ten months', reference: R, date: '2027-08-10' });
+  it('offers the served goal its ten months, bound to the goal id and verbatim words, quoting their sentence', () => {
+    expect(deadlineCardToIssue(input())).toMatchObject({ goal_id: served.id, words: 'ten months', reference: R, date: '2027-08-10',
+      quote: 'Our depot can handle at most 1,900 riders, and we want to stay under that ceiling, without turning anyone away, over the next ten months.' });
   });
-  it('a label-derived subject never attributes a date through a function word ("without") or another subject', () => {
-    const other = 'Our depot can handle at most 1,900 riders. We must finish the migration without downtime in ten months.';
-    expect(deadlineCardToIssue(input({ storedBrief: other }))).toBeUndefined();
-    const noSubject = 'We want to stay under that ceiling, without turning anyone away, over the next ten months.';
-    expect(deadlineCardToIssue(input({ storedBrief: noSubject }))).toBeUndefined();
+  it('the unit-with-letters path is unchanged: "under" is still a subject word there (buddy r2 P3)', () => {
+    const goal = { id: 'under_65_population', kind: 'goal', label: 'Under-65 population', goal_threshold_unit: 'people under 65', goal_deadline_as_stated: 'ten months' };
+    expect(deadlineCardToIssue(input({ graph: { nodes: [goal], edges: [] }, storedBrief: 'We want to increase our under-65 population to 500 in ten months.' })))
+      .toMatchObject({ goal_id: 'under_65_population', words: 'ten months', reference: R, date: '2027-08-10',
+        quote: 'We want to increase our under-65 population to 500 in ten months.' });
   });
-  it('one shared label word never attributes another quantity\'s date or a duration (buddy r2 P2)', () => {
-    for (const text of ['We want to increase customers served to 500 in ten months.', 'We must finish the survey of riders in ten months.',
+});
+
+/**
+ * ⭐ RULING A (DL 14 Oct, hiring-post3000 judge row 2): the route card trusts the construction's attested `goal_deadline_as_stated`
+ * (its only writer); `goalOwnsDeadline` is retired. Every negative it carried becomes a card OFFERED as Olumi's interpretation,
+ * quoting the sentence its words came from: the user approves or declines it, and nothing is saved until they do. Known residual (PR body):
+ * a date the drafter wrongly claims for the goal is offered too. The quote shows what it was read from.
+ */
+describe('RULING A: the route card trusts the attested words; retired negatives are offered as a question, never saved', () => {
+  const RETIRED: ReadonlyArray<readonly [string, string, string?]> = [
+    ['rival date', 'Our rival wants to keep registered riders under the ceiling over the next ten months.'],
+    ['example date', 'For example, we want to keep registered riders under the ceiling over the next ten months.'],
+    ['other goal date', 'We have 1,400 registered riders. Our revenue goal is to reach £1,900 in ten months.', 'Our revenue goal is to reach £1,900 in ten months.'],
+    ['duration, not deadline', 'We have registered riders. Our staff training lasts ten months.', 'Our staff training lasts ten months.'],
+    ['owner absent', 'Registered riders should stay under the ceiling over the next ten months.'],
+    ['previous-sentence subject (buddy r1 P1)', 'We have registered riders. We must reach revenue of £10,000 in ten months.', 'We must reach revenue of £10,000 in ten months.'],
+    ['course duration, not a deadline (buddy r1 P1)', 'We have registered riders. We keep training staff over ten months as a course duration, not a deadline.',
+      'We keep training staff over ten months as a course duration, not a deadline.'],
+    ['same-sentence duration, not a deadline', 'We keep training registered riders over ten months as a course duration, not a deadline.'],
+    ['same-sentence duration only', 'We keep training registered riders over ten months as a course.'],
+    ['same-sentence "lasts"', 'We keep registered riders onboarded in a programme that lasts ten months.'],
+    ['another subject (R7)', 'Our depot can handle at most 1,900 riders. We must finish the migration without downtime in ten months.',
+      'We must finish the migration without downtime in ten months.'],
+    ['no subject (R7)', 'We want to stay under that ceiling, without turning anyone away, over the next ten months.'],
+    ...['We want to increase customers served to 500 in ten months.', 'We must finish the survey of riders in ten months.',
       'We keep riders enrolled in the survey over ten months.', 'We must finish the survey of riders served in ten months.',
       'We want to keep riders served without turning anyone away indefinitely, and finish our depot renovation in ten months.',
       'We want to increase survey responses from riders served to 500 in ten months.',
@@ -579,14 +616,45 @@ describe('R7 attribution on the served share-of-riders goal', () => {
       'We want to increase survey responses from riders served in ten months.',
       'We want to increase survey responses from riders served, ideally to 500, in ten months.',
       'We want to increase survey responses from riders served, ideally, in ten months.',
-      'We want to increase survey responses from 200 to 500, over the next ten months.'])
-      expect(deadlineCardToIssue(input({ storedBrief: text })), text).toBeUndefined();
-    // The served sentence (its date in a bare "over the next ten months" clause) and a comma-free level stance still qualify.
-    expect(deadlineCardToIssue(input())).toMatchObject({ date: '2027-08-10' });
+      'We want to increase survey responses from 200 to 500, over the next ten months.',
+    ].map((brief) => [`shared label word (R7 buddy r2 P2): ${brief}`, brief] as const),
+  ];
+  it.each(RETIRED.map(([name, brief, sentence]) => ({ name, brief, sentence: sentence ?? brief })))('$name', async ({ brief, sentence }) => {
+    const w = world({ graph: d2.graph, brief }), before = w.read();
+    // The capability reads the stored brief itself (route-only authorship: no argument selects the source).
+    const offer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
+    expect(offer?.words).toBe('ten months');
+    const out = await offer!.issue(w.ctx('Run'), { deadline_words: 'ten months', rationale: '' }) as Rec;
+    expect(out).toMatchObject({ ok: true, mutated: false });
+    // The user's words, quoted with their sentence; that they are this goal's deadline is Olumi's interpretation (even one phrase).
+    expect(out.public_label).toBe(`Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: “ten months” in “${sentence.slice(0, -1)}”. `
+      + 'Olumi’s interpretation; check the date and reference before approving.');
+    expect(w.proposals.get(String(out.proposal_id))?.provenance.authored_by).toBe('model_proposed');
+    expect(w.writes).toHaveLength(0);
+    expect(w.read()).toEqual(before);
   });
-  it('the unit-with-letters path is unchanged: "under" is still a subject word there (buddy r2 P3)', () => {
-    const goal = { id: 'under_65_population', kind: 'goal', label: 'Under-65 population', goal_threshold_unit: 'people under 65', goal_deadline_as_stated: 'ten months' };
-    expect(deadlineCardToIssue(input({ graph: { nodes: [goal], edges: [] }, storedBrief: 'We want to increase our under-65 population to 500 in ten months.' })))
-      .toEqual({ goal_id: 'under_65_population', words: 'ten months', reference: R, date: '2027-08-10' });
+
+  it('SERVED hiring-post3000: "We have an urgent launch date in the next three months." is offered on the first turn after the draft (was: no card)', async () => {
+    // Served (CEE d9b6f799): turn 01 built the draft holding "three months" on the sole goal and asked "What is the actual launch
+    // date?"; turn 02 offered no card (`goalOwnsDeadline` refused the sentence), so no date was ever saved.
+    expect(goal(hiring.graph as Rec)).toMatchObject({ id: 'productivity', goal_deadline_as_stated: 'three months', goal_threshold_unit: '%' });
+    expect(goal(hiring.graph as Rec).goal_horizon).toBeUndefined();
+    const w = world(hiring as { graph: Rec; brief: string }); w.reference('2026-10-14T02:14:10Z', '2026-10-14T02:14:10Z');
+    const before = w.read(), turn = await route(w), body = await turn();
+    const calls = body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
+    expect(calls, JSON.stringify(body._agent.tool_calls)).toHaveLength(1);
+    const yes = body.suggested_actions.find((c: Rec) => c.id === approvalChipIdFor(calls[0].proposal_id));
+    expect(yes).toMatchObject({ label: 'Yes',
+      detail: 'Is your deadline 14 January 2027 (3 months from 14 October 2026)? Your words: “three months” in “We have an urgent launch date in the next three months”. '
+        + 'Olumi’s interpretation; check the date and reference before approving.' });
+    const carrier = (w.rows[0] as Rec).pending_actions.find((p: Rec) => p.chip_id === yes.id);
+    expect(carrier.action.inline_patch.agent_proposal, JSON.stringify(carrier)).toMatchObject({ proposal_id: calls[0].proposal_id,
+      provenance: { authored_by: 'model_proposed' },
+      operations: [{ op: 'set_goal_deadline', path: 'productivity', value: { deadline: '2027-01-14', words: 'three months', reference: '2026-10-14' } }] });
+    expect(body.suggested_actions).toContainEqual(DEADLINE_CHANGE_CHIP);
+    expect(w.read(), 'offered, not saved').toEqual(before);
+    // Yes saves the date the card showed.
+    await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: body._agent.session_id });
+    expect(goal(w.read()).goal_horizon).toMatchObject({ deadline: '2027-01-14' });
   });
 });
