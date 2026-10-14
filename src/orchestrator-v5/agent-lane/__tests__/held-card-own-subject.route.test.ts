@@ -82,9 +82,10 @@ function world() {
       return { id };
     },
   });
-  /** The selected Run, as the real `/graph` read carries it once a Run has run (none before). */
+  /** The selected Run, as the real `/graph` read carries it: only beside the graph it was computed against (none before). */
   let analysis: Rec = {};
-  const graphWire = () => ({ graph: read(), graph_hash: hash(read()), brief_text: brief, scenario_created_at: STAMP, ...analysis });
+  const graphWire = () => ({ graph: read(), graph_hash: hash(read()), brief_text: brief, scenario_created_at: STAMP,
+    ...(analysis.analysis_result?.computed_against_hash === hash(read()) ? analysis : {}) });
   const versions = () => ({ versions: [{ version_id: 'draft-r1', sequence: 1, created_at: STAMP,
     creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)) } }] });
   const onLatestRow = (chipId: string): boolean => ((latest() as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
@@ -412,6 +413,7 @@ describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the e
     const runs = analyseTurns();
     expect(runs, JSON.stringify(runTurns.map((r) => r.body))).toHaveLength(1);
     expect(runs[0]!.body).toMatchObject({ scenario_id: w.sid, stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    expect(runs[0]!.body.chip.parameters, 'no Run when the turn began: no reading to carry').toEqual({ effects_timing: null });
     // Bound to the NEW revision: the Run read the model with the approved links already saved.
     expect(JSON.stringify(runs[0]!.graphAtRun)).not.toBe(before);
     expect(hash(runs[0]!.graphAtRun)).toBe(hash(w.read()));
@@ -441,6 +443,30 @@ describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the e
     // Recorded as this turn's Run, by the Run's own call.
     expect((pressed._agent.tool_calls as Rec[]).filter((c) => c.name === 'run_analysis')).toEqual([expect.objectContaining({ ok: true, mutated: false })]);
   }, 90_000);
+
+  it('⭐ 12:57Z: the automatic Run carries the timing reading the Run current at the turn’s start recorded; a change to the goal carries none', async () => {
+    /** The Run current on the model as the turn finds it, its licence recording Olumi's reading. */
+    const priorRun = (w: ReturnType<typeof world>) => w.setAnalysis({
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-14T12:00:00.000Z' } },
+      analysis_result: { type: 'analysis_result', computed_against_hash: hash(w.read()), enrichment: { inference_warnings: [{
+        code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['hire_a_tech_lead', 'hire_two_developers'],
+        effects_timing: 'in_place_by_period', effects_timing_origin: 'olumi' }] } } });
+    runTurnReply = RUN_OK;
+    // The link card changes two factor links: no option, not the goal. The reading is carried.
+    const a = world(); const turnA = await route(a);
+    const cardsA = await bothCards(a, turnA);
+    priorRun(a);
+    await turnA({ message: cardsA.links.message, source: 'chip_click', chip: { id: cardsA.links.id }, agent_session_id: cardsA.session });
+    expect(analyseTurns().map((r) => r.body.chip.parameters)).toEqual([{ effects_timing: 'in_place_by_period' }]);
+    // The deadline card changes the goal's date: the reading's subject moved, so none is carried.
+    runTurns.length = 0;
+    const b = world(); const turnB = await route(b);
+    const cardsB = await bothCards(b, turnB);
+    priorRun(b);
+    await turnB({ message: cardsB.deadline.message, source: 'chip_click', chip: { id: cardsB.deadline.id }, agent_session_id: cardsB.session });
+    expect(goal(b.read()).goal_deadline ?? goal(b.read()).goal_horizon ?? null, 'the deadline was saved').not.toBeNull();
+    expect(analyseTurns().map((r) => r.body.chip.parameters)).toEqual([{ effects_timing: null }]);
+  }, 120_000);
 
   it('CONTRAST: a turn that commits nothing (a typed question; a declined card) runs nothing', async () => {
     const w = world(); const turn = await route(w);
