@@ -17,12 +17,19 @@ import Fastify, { type FastifyInstance } from 'fastify';
 // on the same one would replay as already applied.
 let n = 0;
 let SCENARIO = '';
+const BRIEF = 'Should we grow the team or improve tooling to raise delivery velocity?';
 const nextScenario = () => { n += 1; SCENARIO = `5e0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d1c${String(n).padStart(2, '0')}`; };
 /** Records committed answer rows by (scenario, turn), so a same-turn_id retry takes the REAL replay path. */
 // The durable row carries `pending_actions` exactly as the store persists them, JSON round-tripped
 // the way the JSONB column would be.
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[] }>();
+/** The committed turn ledger (`readCommittedTurnLedger`); null → the read fails, as with no ledger. */
+let ledger: { write_turn_ids: string[]; complete: boolean } | null = null;
 const store = {
+  readCommittedTurnLedger: vi.fn(async () => {
+    if (ledger === null) throw new Error('ledger unavailable');
+    return { ...ledger, user_message_turn_ids: [], first_user_message: null };
+  }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
@@ -83,6 +90,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       return {
         graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }, { id: 'f2', kind: 'factor', label: 'Tooling' }], edges },
         graph_hash: `h${edges.length}`,
+        brief_text: BRIEF,
         analysis_ready: readiness,
         analysis_state: runs > 0 ? { ...analysisState, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } } : analysisState,
         ...(runs > 0 ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } } } : {}),
@@ -127,7 +135,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; ledger = null; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -437,6 +445,41 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(wire.status).toBe('pending');
       expect(uiKeeps(wire, 'the-preceding-run'), 'the UI shows this Run\'s reply').toBe(true);
       expect(uiKeeps({ ...wire, status: 'ready' }, 'the-preceding-run'), 'CONTRAST: a "ready" press is dropped whole').toBe(false);
+    });
+
+    /**
+     * ⭐ KEYED TO THE COMMITTED CHANGE, not to a preceding Run (PL #94 19:41): a change committed before any Run is still a
+     * change. Its Run is coached; only the comparison needs a prior Run, so there is none.
+     */
+    it('RED: the first Run after a committed change (no preceding Run) → ONE interpreting call, coaching with no comparison', async () => {
+      runStampedAt = RUN_AT;
+      const { constructionOperationId } = await import('../runtime/build-model.js');
+      const { registrationTurnId } = await import('../../graph-registration/registration-identity.js');
+      ledger = { write_turn_ids: [registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF)), 'canvas-edit-turn'], complete: true };
+      const b = await press();
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls, 'one interpreting call').toHaveLength(1);
+      expect(String(calls[0]!['instructions']), 'no comparison without a prior Run').not.toContain('Run record:');
+      expect(b.assistant_text).toContain(COACHING);
+      expect(b.narration?.status).toBe('pending');
+    });
+
+    it('CONTRAST: the first Run with no committed change since the model was built (the construction\'s write only) → no call', async () => {
+      runStampedAt = RUN_AT;
+      const { constructionOperationId } = await import('../runtime/build-model.js');
+      const { registrationTurnId } = await import('../../graph-registration/registration-identity.js');
+      ledger = { write_turn_ids: [registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF))], complete: true };
+      const b = await press();
+      const { RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+    });
+
+    it('CONTRAST: a ledger that is not a census is no evidence of a change → no call', async () => {
+      runStampedAt = RUN_AT;
+      ledger = { write_turn_ids: ['canvas-edit-turn'], complete: false };
+      await press();
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
     });
 
     it('CONTRAST: a re-run with nothing changed (C0_identical) → no interpreting call; the ready line stays', async () => {
