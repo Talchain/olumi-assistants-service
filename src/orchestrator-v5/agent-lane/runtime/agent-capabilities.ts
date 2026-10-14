@@ -2325,8 +2325,11 @@ const LINK_SET_THIRD_PARTY_AGENT_NOTE = 'Some proposed links were left out as at
 /** The user's line when a link set's save cannot be confirmed: the AIE's exact text (packet 2b19ae59, `card_receipt`). */
 export const LINK_SET_SAVE_NOT_CONFIRMED = 'The save could not be confirmed. Check the current model before retrying.';
 
-/** A revised-draft card that withholds a result for a carried limit says so itself: the reply points to it, said once. */
-export const CARD_OWNS_WITHHELD_NOTE = 'The card itself says which result is withheld and why. Do not restate that reason in your reply; point to the card for it instead.';
+/**
+ * A revised-draft card that withholds a result for a carried limit says the full reason itself; the reply points to it once,
+ * and this turn's AI keeps its facts. The AIE's exact text (#94 6178720067, AMEND of #3132).
+ */
+export const CARD_OWNS_WITHHELD_NOTE = 'This revised-draft card contains the full withheld-result reason for its carried limit. When presenting this same complete card in this turn, point to that reason once instead of repeating it in the reply. Keep the card’s actual result, limit, source, scope and reason in your reasoning. Preserve other distinct blockers and unresolved questions; do not claim approval, a save or an available result.'
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -3888,7 +3891,9 @@ export function createAgentCapabilities(
       + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
       // ⛔ SAID ONCE (SCIENCE's marketing capture, judge row 2, 14 Oct): the card states the withheld result for a carried
       // limit, and the reply restated the same cause in its own words. The card owns it; the reply points to it.
-      + (draft.withheld === undefined ? '' : ` ${CARD_OWNS_WITHHELD_NOTE}`);
+      // Only when that reason is on the complete current card (a reissued card keeps its words); the card itself, with the
+      // reason, reaches this turn's AI as `public_label`, so the facts stay in its working input (AIE #94 6178720067).
+      + (draft.withheld !== undefined && draft.proposal.public_label.includes(draft.withheld) ? ` ${CARD_OWNS_WITHHELD_NOTE}` : '');
     /**
      * ⭐ A WITHDRAWN CARD IS RE-ISSUED FRESH, NEVER RETURNED DEAD (served marketing turn 02 on 00a51f7d; Codex
      * CHECK-3020-45e7c1e3 item 1; DL r2): the turn's one draft is reused, so a target call after `withdraw_proposal` returned
