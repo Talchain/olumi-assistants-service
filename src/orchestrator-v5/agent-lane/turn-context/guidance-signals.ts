@@ -47,7 +47,7 @@ export interface GoalPathFactor {
   /** 12-hex hash of the factor's stored value (`observed_state` value, raw value, unit, baseline, cap). */
   readonly value_hash: string;
   /** The stored value carries a range (`observed_state.range` present): RC-OUTSIDE-VIEW asks only about a single figure. */
-  readonly has_range: boolean;
+  readonly has_range?: boolean;
 }
 
 export type DecisionSensitivitySignal =
