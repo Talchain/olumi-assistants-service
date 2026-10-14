@@ -325,9 +325,36 @@ export function statusQuoAssumptionWords(labels: string | readonly string[], bas
   return `This assumes carrying on as now leaves ${list} unchanged${through}; each option is measured against that.`;
 }
 
-/** Amendment 1: the status quo row's own line. Never a Monte Carlo figure or interval. */
-export function statusQuoRowWords(label: string): string {
-  return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+/** A level goal's held level today against its stated target, in the target's own unit (the status quo row's facts). */
+export interface StatusQuoLevel {
+  readonly today: number;
+  /** The held comparator (`>=`, `>`, `<=`, `<`). */
+  readonly comparator: string;
+  readonly target: number;
+  readonly unit: string;
+}
+
+/**
+ * Amendment 1: the status quo row's own line, for the Run's recorded same-draw reference (`status_quo_by_assumption`) only.
+ * Never a Monte Carlo figure, an interval or a chance, and never a forecast: a held reference value is named as recorded,
+ * never compared with the target as a future event.
+ * ⭐ AIE #94 6160089127 (`recovery/codex/AIE-STATUS-QUO-REFERENCE-AND-NEXT-STEP-RULING-20261014.json`; capacity judge row 3):
+ * the two exact lines, byte for byte. The LEVEL line only where the caller holds the same Run's level and target in one
+ * unit; every other case the generic line.
+ */
+export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string {
+  const bound = level === undefined ? undefined : COMPARATOR_WORDS[level.comparator];
+  if (level === undefined || bound === undefined || !Number.isFinite(level.today) || !Number.isFinite(level.target)
+    || level.unit.trim() === '') {
+    return `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference, by assumption. `
+      + `Its own chance of meeting the recorded target is not shown. `
+      + `You can review what could make ‘${label}’ change if you carried on as now.`;
+  }
+  const say = (v: number): string => sayFigureAsWritten(v, level.unit);
+  return `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference. `
+    + `The model's held reference value is ${say(level.today)}; the target for this Run is ${bound} ${say(level.target)}. `
+    + `This option's own chance of meeting that target is not shown. `
+    + `You can review what could make ‘${label}’ change if you carried on as now.`;
 }
 
 /**

@@ -17,6 +17,16 @@ import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-est
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { withholdOptionLimitScores } from '../../../orchestrator/context/constraint-feasibility.js';
 
+/**
+ * AMENDED (AIE #94 6160089127; were "Doing nothing: no change to ‘<goal>’ in this model, by assumption."): the status-quo row's
+ * two exact lines. Hiring's ‘Productivity’ is a CHANGE goal: the generic line. ‘Development capacity’ is a LEVEL goal holding
+ * today's 75% and a target of at least 85% in one unit: the LEVEL line, naming both as recorded values (never "meets").
+ */
+const SQ_GENERIC_PRODUCTIVITY = 'Carrying on as now: this Run uses ‘Productivity’ as its unchanged reference, by assumption. Its own '
+  + 'chance of meeting the recorded target is not shown. You can review what could make ‘Productivity’ change if you carried on as now.';
+const SQ_LEVEL_CAPACITY = 'Carrying on as now: this Run uses ‘Development capacity’ as its unchanged reference. The model\'s held '
+  + 'reference value is 75%; the target for this Run is at least 85%. This option\'s own chance of meeting that target is not shown. '
+  + 'You can review what could make ‘Development capacity’ change if you carried on as now.';
 type Rec = Record<string, unknown>;
 
 // ── Hiring: productivity, % change from today; +10 by month three ─────────────────────────────────────────────────────
@@ -68,7 +78,7 @@ describe('hiring — a change of +10% from today has its ruled sentence (ruling 
     const l = goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
     expect(l.withheld_option_ids).toEqual(['carry_on']);
     expect(l.pct_by_option).not.toHaveProperty('carry_on');
-    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘Productivity’ in this model, by assumption.' });
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: SQ_GENERIC_PRODUCTIVITY });
     expect(l.notes).toContain('This assumes carrying on as now leaves ‘Productivity’ unchanged through month three; each option is measured against that.');
   });
 
@@ -376,7 +386,7 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
     expect(byId.hire_two_developers).toMatchObject({ kind: 'figure', display: 'about 31%',
       face: '‘Hire two developers’: about 31% chance of ‘Productivity’ being at least 10% higher than today at three months, in this model.' });
     expect(byId.carry_on).toMatchObject({ kind: 'withheld', face: 'No change, by assumption',
-      why: 'Doing nothing: no change to ‘Productivity’ in this model, by assumption.' });
+      why: SQ_GENERIC_PRODUCTIVITY });
   });
 });
 
@@ -632,7 +642,7 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     const l = wireLicence()!;
     expect(l.pct_by_option).toEqual({ lead: 46, two: 31 });
     expect(l.withheld_option_ids).toEqual(['carry_on']);
-    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
+    expect(l.status_quo).toEqual({ option_id: 'carry_on', line: SQ_LEVEL_CAPACITY });
     expect(l.notes).toContain('This assumes carrying on as now leaves ‘Development capacity’ unchanged; each option is measured against that.');
     // The option's sentence is exactly today's: "about N% chance of meeting your goal, in this model".
     expect(l.chance_words).toBeUndefined();
@@ -642,7 +652,7 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     expect(faces.get('lead')).toBe('‘Hire a tech lead’: about 46% chance of meeting your goal, in this model.');
     const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
     expect(cells.carry_on).toMatchObject({ kind: 'withheld', face: 'No change, by assumption',
-      why: 'Doing nothing: no change to ‘Development capacity’ in this model, by assumption.' });
+      why: SQ_LEVEL_CAPACITY });
   });
 
   it('CONTROL: a level status quo whose draws SPREAD was not held unchanged — no "no change" line or assumption is said of it', () => {
@@ -1000,7 +1010,7 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
 
   it('CONTROL (assumed): ordinary anchored capacity and hiring\'s change quantity keep the assumption line, with no interval', () => {
     // D2: capacity on wire-shaped rows, in the Run's recorded frame; hiring's change quantity is 0 today by construction.
-    expect(wireLicence()!.status_quo?.line).toBe('Doing nothing: no change to ‘Development capacity’ in this model, by assumption.');
+    expect(wireLicence()!.status_quo?.line).toBe(SQ_LEVEL_CAPACITY);
     const g = hiringGraph();
     expect(goalChanceLicenceOf(hiringRun(), g, 'productivity', () => false, undefined, g, hiringConstraints(g))!.status_quo?.option_id).toBe('carry_on');
     // Hiring's status quo whose change is NOT 0 disagrees with its own reference: withheld with that reason.
@@ -1121,7 +1131,8 @@ describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the R
     expect(l.status_quo).toBeUndefined();
     expect(l.withheld_option_ids).toContain('carry_on');
     expect(l.withheld_reason_by_option).toEqual({ carry_on: { reason: 'reference_moved', line: MOVED('Annual spend') } });
-    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change/);
+    // AMENDED (AIE #94 6160089127): the single-target status-quo line now reads "…unchanged reference…"; still neither is said.
+    expect(JSON.stringify(l)).not.toMatch(/Doing nothing: no change|unchanged reference/);
   });
 
   it('RED on e58b8dbd: every condition — both targets and the paired limit — on the same-draw reference: the line names all three, no figure', () => {
