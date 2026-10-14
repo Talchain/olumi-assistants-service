@@ -1,8 +1,8 @@
 /** S2a Run-only frame attestation and per-option mathematical licence input. */
 import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolvedEventOptionIds } from './event-by-date-model.js';
 import { goalDeadlineFromRecord, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
-import { timeBetween, todayInLondon } from './deadline-date.js';
-import { capacityRatioScale, extrasOf, gate, MAX_RANGED_PARTS, rangedPartCount, type ExtraShare, type ShareGate, type ShareParts } from './event-by-date-share.js';
+import { sayDate, timeBetween, todayInLondon } from './deadline-date.js';
+import { capacityRatioScale, exactChance, extrasOf, gate, MAX_RANGED_PARTS, rangedPartCount, type ExtraShare, type ShareGate, type ShareParts } from './event-by-date-share.js';
 import { hiringTimesLabel } from './hiring-times.js';
 import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
 
@@ -270,3 +270,28 @@ export const CAPACITY_RATIO_COMPARISON_NOTE = 'Which option comes out ahead most
 /** PL L3: what a capacity-ratio chance leaves out, said once beside it. */
 export const CAPACITY_RATIO_ASSUMPTION_NOTE = 'For an option worked out from the team’s own capacity, the chance leaves out any slowdown '
   + 'while the change beds in.';
+
+/**
+ * PL 6135017311 item 1 (bounds beat the tail): a capacity-ratio option whose BEST case (the team's soonest stated time, at
+ * the window's scale k) still finishes short of the target cannot reach it in this model. The Normal approximation would
+ * still give a small tail chance there; that figure is an artefact, so no chance is shown and the arithmetic is said.
+ */
+export function capacityRatioOutOfReach(graph: unknown, optionId: string): string | null {
+  const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
+  if (share === null || parts === null || parts.ratio === undefined || parts.team.quantity !== 'months_to_finish') return null;
+  const threshold = share.threshold_raw / 100;
+  let exact: number;
+  try { exact = exactChance(parts, threshold); } catch { return null; }
+  if (exact > 0) return null;
+  const { D, low } = parts.team, k = parts.ratio;
+  const part = activePartsOf(graph as Rec, share, optionId)?.[0];
+  const lead = part?.observed_state?.extra_share_by_date?.lead_low;
+  const deliverable = String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
+  const best = Math.floor(Math.min(1, (k * D) / low) * 100);
+  const oneDp = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 1 });
+  const arithmetic = lead === 0
+    ? ` (${months(low)} months of work at ${Math.round(k * 100)}% of today’s capacity is still about ${oneDp(low / k)} months, past the ${oneDp(D)} months to the deadline)`
+    : '';
+  return `No chance is shown for this option: on your own soonest estimate it can’t reach ${months(share.threshold_raw)}% of ${deliverable} `
+    + `by ${sayDate(share.deadline)}. Even at ${months(low)} months, it gets about ${best}% done by then${arithmetic}.`;
+}

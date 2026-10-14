@@ -9,7 +9,7 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
-import { capacityRatioOptionIds, CAPACITY_RATIO_COMPARISON_NOTE, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { capacityRatioOptionIds, capacityRatioOutOfReach, CAPACITY_RATIO_COMPARISON_NOTE, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -171,7 +171,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
   for (const row of readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? []) {
     const id = row.option_id ?? row.id;
     if (typeof id !== 'string') continue;
-    const failure = shareChanceInputFailure(graph, id);
+    // PL 6135017311 item 1: the user's own bound beats the Normal tail; an unreachable ratio option says the arithmetic.
+    const failure = shareChanceInputFailure(graph, id) ?? capacityRatioOutOfReach(graph, id);
     if (failure !== null) inputScopedEnvelope = withholdOptionGoalFigures(inputScopedEnvelope, new Set([id]), {
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: failure,
     }, { keepOutcome: true, keepOrdering: true });

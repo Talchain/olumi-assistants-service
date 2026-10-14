@@ -251,7 +251,7 @@ pin(declarations('leaderPermission').map((n) => n.initializer),
 const projections = nodes.filter((n) => ts.isCallExpression(n) && n.expression.getText(source) === 'projectClaimSafety');
 pin(projections, 'projectClaimSafety(constraintVerdict)', 'constraint verdict derivation');
 const writes = properties('constraint_verdict');
-pin(writes, `constraint_verdict: keptOlumiProvisional
+pin(writes, `constraint_verdict: keptOlumiProvisional || ratioOptionCompared
   || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
   ? { ...leaderPermission, may_name_leading_option: false } : leaderPermission`, 'claim-safety single writer');
 const candidates = declarations('factCandidate');

@@ -79,8 +79,9 @@ describe('2.579 wiring — the handler actually consumes the intake axis', () =>
     expect(permission).toContain('applyIntakeToLeaderPermission(');
     expect(permission).toContain('projectClaimSafety(constraintVerdict)');
     const stamp = source.slice(source.indexOf('constraint_verdict:'));
-    expect(stamp.slice(0, 200)).toContain('keptOlumiProvisional');
-    expect(stamp.slice(0, 200)).toContain('leaderPermission');
+    // The stamp's own expression (the remove-only gates, then the composed permission): #3100 added one gate, so 240 chars.
+    expect(stamp.slice(0, 240)).toContain('keptOlumiProvisional');
+    expect(stamp.slice(0, 240)).toContain('leaderPermission');
   });
 
   it('POSITIVE CONTROL — these checks can see a change', () => {
