@@ -35,6 +35,18 @@ function currencyWordsAsCodes(unit: string | null | undefined): string | null | 
     ? CURRENCY_WORD_TO_CODE[word.toLowerCase()]! : word);
 }
 
+/**
+ * ⭐ GEN #5 CLASS FIX (Codex FAIL 3023 r1: the verb list above has no "ready to pilot", and any drafted event satisfied a
+ * request for another deliverable). The AI names the deliverable (`propose_goal_deadline.deliverable`); the host checks only
+ * that those words stand VERBATIM in the given text (case, typography and spacing normalised, nothing else) — the user's own
+ * message to attest it, and a drafted event's own deliverable to bind it by identity. No verb list, no word match.
+ */
+export function deliverableWrittenIn(text: unknown, words: unknown): boolean {
+  const plain = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
+  return typeof text === 'string' && typeof words === 'string' && plain(words) !== '' && plain(text).includes(plain(words));
+}
+
 /** Every event sentence/clause scan shares this boundary: a dot between digits never splits a number or version. */
 const EVENT_SENTENCE_BOUNDARY = /[!?;\n]|(?<!\d)\.|\.(?!\d)/u;
 function eventBriefParts(brief: string, clauses = false, protectedSpans: readonly { start: number; end: number }[] = []): { text: string; start: number; end: number }[] {

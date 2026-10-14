@@ -176,13 +176,50 @@ describe('GEN #5: a deadline goal typed after the draft opens the revised-draft 
     expect(s.commits()).toBe(0);
   });
 
-  it('KNOWN GAP (3): Paul\'s own goal words ("ready to pilot … within 6 months") name no event the brief reader attests → not offered, nothing written', async () => {
+  it('⭐ Codex 3023 r1 probe 1 (3): Paul\'s own goal words ("ready to pilot … within 6 months") → ONE card holding that MVP event, though no verb list knows "pilot"', async () => {
     const s = server();
-    const { caps } = lane(s, goalCandidate);
-    const r = await caps.proposeGoalDeadline!(turn(FX.goal_turn) as never,
-      { ...deadline, deliverable: 'an MVP version of our product ready to pilot with initial customers' }) as Rec;
-    expect(r.ok).toBe(false);
-    expect(r.refusal).toBe('revised_draft_has_no_target');
+    const { caps, proposals } = lane(s, goalCandidate);
+    const MVP = 'an MVP version of our product ready to pilot with initial customers';
+    expect(FX.goal_turn, 'PRECONDITION: the deliverable is verbatim in Paul\'s message').toContain(MVP);
+    const r = await caps.proposeGoalDeadline!(turn(FX.goal_turn) as never, { ...deadline, deliverable: MVP }) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.revised_draft).toEqual({ replaces_goal: 'Development speed', holds_deadline_goal: true });
+    expect(r.public_label).toContain(`‘${MVP}’, with the deadline date still to be confirmed.`);
+    expect(draftedTeamPartOf((proposals.get(r.proposal_id)!.operations[0]!.value as Rec).candidate)?.deliverable).toBe(MVP);
+    expect(s.commits()).toBe(0);
+  });
+
+  it('Codex 3023 r1 probe 2: the MVP asked for, the agency\'s website drafted → no card, nothing written (another event is not this deliverable)', async () => {
+    const s = server();
+    const message = 'How do these options change our ability to deliver our MVP within 6 months and the agency\'s website within 2 months?';
+    const website = (): Rec => ({ ...deliverCandidate(), goal: { ...deliverCandidate().goal, deliverable: 'the agency\'s website',
+      metric: 'the agency\'s website', unit: '% of the agency\'s website', horizon_months: 2 } });
+    const { caps } = lane(s, website);
+    const r = await caps.proposeGoalDeadline!(turn(message) as never, { ...deadline, deliverable: 'MVP' }) as Rec;
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_has_no_target' });
+    expect(r.detail).toContain('‘MVP’ by its deadline');
+    expect(s.commits()).toBe(0);
+  });
+
+  it('a revised draft holding a figure target but not the MVP asked for → no card for the MVP, nothing written', async () => {
+    const s = server();
+    const speed = (): Rec => ({ ...deliverCandidate(), goal: { ...deliverCandidate().goal, deliverable: 'the agency\'s website',
+      metric: 'the agency\'s website', unit: '% of the agency\'s website' },
+      constraints: [{ metric: 'Development speed', operator: '>=', value: 5, unit: 'milestones per month', provenance: 'explicit', frame: 'level', role: 'target' }] });
+    const { caps } = lane(s, speed);
+    const r = await caps.proposeGoalDeadline!(turn(FX.deliver_turn) as never, deadline) as Rec;
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_has_no_target' });
+    expect(r.detail).toContain('‘a high-quality MVP’ by its deadline');
+    expect(s.commits()).toBe(0);
+  });
+
+  it('a deliverable the user did not write in this message (the AI\'s "prototype" for Paul\'s MVP) opens no card and drafts nothing', async () => {
+    const s = server();
+    let drafted = 0;
+    const { caps } = lane(s, () => { drafted += 1; return deliverCandidate(); });
+    const r = await caps.proposeGoalDeadline!(turn(FX.deliver_turn) as never, { ...deadline, deliverable: 'a working prototype' }) as Rec;
+    expect(r.revised_draft).toBeUndefined();
+    expect(drafted).toBe(0);
     expect(s.commits()).toBe(0);
   });
 

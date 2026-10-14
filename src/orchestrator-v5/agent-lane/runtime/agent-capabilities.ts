@@ -10,7 +10,7 @@ import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goa
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
-import { draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
+import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
@@ -3530,8 +3530,13 @@ export function createAgentCapabilities(
    * (`runPreparingDraftReplacement`: nothing is written), check it keeps every limit the draft holds, and offer it as
    * ONE card whose words are the candidate's own: what replaces the goal, what is kept, and what is not carried.
    */
+  /** The revised draft does not hold the deliverable the user asked about (GEN #5, by identity): nothing is offered. */
+  const noDeliverableDetail = (deliverable: string): string => `The revised draft does not hold \u2018${deliverable}\u2019 by its deadline, `
+    + 'so nothing was offered and the model is unchanged. Tell the user plainly that this goal is not yet in the model.';
   const prepareRevisedDraft = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
+    /** GEN #5: the user's deliverable, verified verbatim in this message; attests the event and binds it by identity. */
+    deliverable?: string,
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
     const found = await unreviewedDraftGate(ctx, g, []);
@@ -3545,7 +3550,7 @@ export function createAgentCapabilities(
     let out: ToolResult;
     try {
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
-        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured)));
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, callStructured, undefined, deliverable)));
     } catch {
       out = { ok: false, mutated: false };
     }
@@ -3567,9 +3572,14 @@ export function createAgentCapabilities(
     const held = targetsHeldBy(candidate);
     // ⭐ GEN #5 (Paul's funding test, 13 Oct): a deliverable done by its deadline (the event-by-date model) is a goal the user
     // stated, as a figure target is; it holds no target row, so it is recognised by its own definition.
-    const event = draftedTeamPartOf(candidate);
+    // ⛔ BY IDENTITY (Codex FAIL 3023 r1): the drafted event counts only when it IS the deliverable the user asked about — its own
+    // deliverable holds those words verbatim. "The agency's website" never answers a request for the MVP; a figure target's
+    // call holds no deliverable, so an event alone never answers it either.
+    const drafted = draftedTeamPartOf(candidate);
+    const event = drafted !== null && deliverableWrittenIn(drafted.deliverable, deliverable) ? drafted : null;
     if (held.length === 0 && event === null) {
-      return notOffered('revised_draft_has_no_target', 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
+      return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
+        : 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
     }
     const nodesOf = (raw: unknown) => ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []);
     const basis = goalTargetBasisOf(nodesOf(candidate).find((n) => n?.kind === 'goal'));
@@ -3618,10 +3628,11 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
     target: { measures: string; value: number; unit: string; comparator: string } | { deliverable: string },
   ): Promise<ToolResult> => {
-    const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}`;
+    const deliverable = 'deliverable' in target ? target.deliverable : undefined;
+    const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}\u0000${deliverable ?? ''}`;
     let pending = revisedDrafts.get(key);
     if (pending === undefined) {
-      pending = prepareRevisedDraft(ctx, g, goal);
+      pending = prepareRevisedDraft(ctx, g, goal, deliverable);
       revisedDrafts.set(key, pending);
     }
     const draft = await pending;
@@ -3635,13 +3646,15 @@ export function createAgentCapabilities(
       + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
       + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.';
     if ('deliverable' in target) {
+      // (c) No card unless the revised draft holds THIS deliverable by its deadline (identity, `prepareRevisedDraft`).
+      if (draft.event === null) return { ok: false, mutated: false, refusal: 'revised_draft_has_no_target', detail: noDeliverableDetail(target.deliverable) };
       return {
         ok: true, mutated: false,
         proposal_id: draft.proposal.proposal_id,
         public_label: draft.proposal.public_label,
         base_revision: g.graph_hash,
-        revised_draft: { replaces_goal: goal.label, holds_deadline_goal: draft.event !== null },
-        note: offered + (draft.event !== null ? '' : ' This deadline goal is NOT in the revised draft: say so plainly, and never say it will be set.'),
+        revised_draft: { replaces_goal: goal.label, holds_deadline_goal: true },
+        note: offered,
       };
     }
     // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
@@ -5546,7 +5559,9 @@ export function createAgentCapabilities(
        */
       const deliverable = typeof args?.deliverable === 'string' ? args.deliverable.trim() : '';
       const goals = g.nodes.filter((n) => n.kind === 'goal');
-      if (deliverable !== '' && writes(typed) && goals.length === 1 && draftedTeamPartOf(g.raw) === null && !isEventShareForecast(g.raw)) {
+      // (a) The AI's deliverable is the user's only where its words stand VERBATIM in this message (no verb list, no word match).
+      if (deliverable !== '' && deliverableWrittenIn(ctx.user_turn_text, deliverable) && writes(typed) && goals.length === 1
+        && draftedTeamPartOf(g.raw) === null && !isEventShareForecast(g.raw)) {
         return offerRevisedDraft(ctx, g, goals[0]!, { deliverable });
       }
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
