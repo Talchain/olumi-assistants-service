@@ -456,6 +456,19 @@ describe('T2A3 ruling: the AI quoting the user\u2019s whole message credits none
 
 // ⭐ T2A5 (AIE 6157593360): the host's mechanical checks on the AI's quote, one row each (a quote that fails is never Olumi's).
 describe('T2A5: the AI quotes the user\u2019s complete statement, the host verifies it', () => {
+  // ⭐ #3002 r2 (DL three tiers, PL #94 05:12Z): Olumi's estimate is an EXPLICIT claim with Olumi's own basis; anything less is
+  // unknown. And a quote that does not verify is never Olumi's, even with truncated history (Codex CHECK-3002 item 3).
+  it('user_stated false WITHOUT a basis is not Olumi\u2019s authorship: unknown, nothing prepared', async () => {
+    await expectUnknown('Quality', { user_stated: false, basis: undefined }, 'Please suggest a strength.', { user_turn_text: 'Please suggest a strength.' });
+  });
+  it('CONTROL: user_stated false WITH Olumi\u2019s own basis is Olumi\u2019s estimate', async () => {
+    const result = await journey('Quality', { user_stated: false, basis: 'Quality shifts MRR only through churn in this model.' }, 'Please suggest a strength.', { user_turn_text: 'Please suggest a strength.' });
+    expect(author(result)).toBe('model_proposed');
+  });
+  it('truncated history + a quote of an earlier estimate the host cannot see: unknown, never "Olumi\u2019s estimate"', async () => {
+    await expectUnknown('Price', { user_stated: true, from_words: 'Price has a weak effect on MRR.' }, 'Please record the links.',
+      { user_turn_text: 'Please record the links.', user_text_complete: false });
+  });
   it('a FRAGMENT of the user\u2019s own sentence is not a receipt: origin unknown, nothing prepared', async () => {
     const words = 'Price has a weak effect on MRR, and our evidence is strong.';
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR' }, words, { user_turn_text: words });
