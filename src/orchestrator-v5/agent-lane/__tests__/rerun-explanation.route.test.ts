@@ -123,6 +123,10 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     ] };
     modelText = WHY;
     const first = (await runTurn(randomUUID())).json() as Body;
+    // #3099: a re-run after a change is interpreted on the press itself, with the same code lines.
+    expect(modelCalls).toBe(1);
+    for (const line of ['The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis.',
+      'The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.']) expect(first.assistant_text).toContain(line);
     const id = randomUUID();
     const response = await explainTurn(id, first);
     expect(response.statusCode).toBe(200);
@@ -135,23 +139,27 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     }
     expect(explained.assistant_text).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
     expect(explained.assistant_text).not.toContain('Nothing else changed.');
-    expect(modelCalls).toBe(1);
+    expect(modelCalls).toBe(2);
     const replay = (await explainTurn(id, first)).json() as Body;
     expect(replay.assistant_text).toBe(explained.assistant_text);
-    expect(modelCalls, 'replay serves the recorded explanation').toBe(1);
+    expect(modelCalls, 'replay serves the recorded explanation').toBe(2);
   });
 
   it('RED: the model claims "rose" with no prior figures → the wire says RC\'s fallback; no stored row holds "rose"; a replay re-serves the fallback', async () => {
     const first = (await runTurn(randomUUID())).json() as Body;
+    // #3099: the press interprets this re-run too, through the same claim check.
+    expect(modelCalls, 'the model really answered the press').toBe(1);
+    expect(first.assistant_text).toContain(FALLBACK);
+    expect(first.assistant_text).not.toMatch(/\brose\b/);
     const e1 = randomUUID();
     const explained = (await explainTurn(e1, first)).json() as Body;
-    expect(modelCalls, 'the model really answered').toBe(1);
+    expect(modelCalls, 'the model really answered').toBe(2);
     expect(explained.assistant_text).toContain(FALLBACK);
     expect(explained.assistant_text).not.toMatch(/\brose\b/);
     expect(rows.length, 'the control: rows were written').toBeGreaterThan(0);
     expect(JSON.stringify(rows)).not.toMatch(/\brose\b/);
     const replay = (await explainTurn(e1, first)).json() as Body;
-    expect(modelCalls, 'a replay calls no model').toBe(1);
+    expect(modelCalls, 'a replay calls no model').toBe(2);
     expect(replay.assistant_text).toContain(FALLBACK);
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });

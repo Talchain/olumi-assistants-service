@@ -4260,7 +4260,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const pressedRunIdentity = fastPath === 'run' && runPressResult?.ran === true
       ? (runPressResult as { run_identity?: unknown }).run_identity : undefined;
     const interpretRunIdentity = autoRunIdentity ?? pressedRunIdentity;
-    let pressedRunNarration: 'ready' | 'unavailable' | undefined;
     // A Run with no identity to bind is never interpreted, and costs no read.
     if (interpretRunIdentity !== undefined) {
       const autoRead = await readBackState(readingDispatch, scenarioId);
@@ -4282,11 +4281,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const said = interpretedRun.interpreted?.answer
           ?? interpretedRun.rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true });
         // A pressed Run's coaching replaces its ready line ("…or ask me to explain them"), which it now answers.
-        // As on the Explain press: the AI's words are the narrator's, and the Run's narration is ready (or unavailable).
+        // As on the Explain press, the AI's words are the narrator's. ⛔ The Run's narration stays request 1's own status
+        // (pending/unavailable): DGAI takes the latest Run's key only from those, and drops the WHOLE message of a "ready"
+        // narration whose key is not the latest (narrationTurn.ts `namesALatestRun`/`isForeignExplanation`), so "ready"
+        // here hid this Run's reply.
         if (pressedAfterChange) {
           runInterpreted = true; text = said;
           if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
-          pressedRunNarration = interpretedRun.explanationReady ? 'ready' : 'unavailable';
         }
         else text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
         result = { ...result,
@@ -5193,8 +5194,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * below edits the text a replay returns, not only the text this request returns.
      */
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
-    if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = pressedRunNarration ?? (explanationChip !== null
-      && resultFirstRunCompleted ? 'pending' : 'unavailable');
+    if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = explanationChip !== null
+      && resultFirstRunCompleted ? 'pending' : 'unavailable';
     if (runPress && fastPath !== 'run' && resultFirstRunCompleted) narrationStatus = explanationChip !== null
       && result.stopped_reason === 'answered' && result.assistant_text.trim() !== '' ? 'ready' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
