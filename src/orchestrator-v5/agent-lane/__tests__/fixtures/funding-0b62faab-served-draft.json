@@ -1,0 +1,470 @@
+{
+ "source": {
+  "draft": "olumi-debug-0b62faab-20261013.json payloads.cee_response.draft_graph (nodes, edges verbatim)",
+  "draft_sha256": "71984bf1296d85c62af6784de62c95b30f716213ca7439e1e1da14df829a30a0",
+  "turns": "olumi-debug-5ba822db-20261014.json recent_conversation_turns (user_message verbatim)",
+  "cee": "ef3790e"
+ },
+ "scenario_id": "0677d1f3-189a-4cf3-b69c-6504fed37af2",
+ "brief_text": "How do we determine the right amount of funding to accelerate the development of our AI startup? At the moment, we're asking for 1.3 million, which should give us a runway of 12 months if we run lean. In today's competitive market, it would be better to build a bigger team and move faster, but I need to understand the risks and issues with raising more money at pre-seed.",
+ "goal_turn": "Our goal is to have an MVP version of our product ready to pilot with initial customers within 6 months.",
+ "deliver_turn": "Apologies, that wasn't clear. What I'm trying to understand is how these options change our ability to deliver a high-quality MVP within 6 months. \n\nThe way I'm thinking about it is the fact that the different funding amounts would result in hiring a different number of developers:  \n\\- Option 1 would be 2 developers hired.  \n\\- Option 2 would mean we could hire 3 developers.  \n\\- Option 3: 4 developers.  \n\\- Option 4: we'd bring in a tech lead while we secured the full funding.",
+ "graph": {
+  "nodes": [
+   {
+    "id": "how_do_we_determine_the_right_amount_of_funding_to_accelerate_the_development_of_our_ai_startup",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "How do we determine the right amount of funding to accelerate the development…",
+    "provenance": "from_brief",
+    "description": "How do we determine the right amount of funding to accelerate the development of our AI startup?"
+   },
+   {
+    "id": "development_speed",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Development speed",
+    "provenance": "ai_inferred",
+    "goal_threshold_unit": "development milestones/month",
+    "goal_threshold_frame": "level",
+    "goal_deadline_as_stated": "12 months"
+   },
+   {
+    "id": "lean_1_3m_raise",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Lean £1.3m Raise",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "moderate_1_8m_raise",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Moderate £1.8m Raise",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "pre_seed_funding_ask": {
+      "unit": "£ million",
+      "value": 0.36,
+      "source": "cee_hypothesis",
+      "raw_value": 1.8,
+      "target_match": {
+       "node_id": "pre_seed_funding_ask",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "larger_2_5m_raise",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Larger £2.5m Raise",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "pre_seed_funding_ask": {
+      "unit": "£ million",
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "raw_value": 2.5,
+      "target_match": {
+       "node_id": "pre_seed_funding_ask",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "pre_seed_funding_ask",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Pre-seed funding ask",
+    "category": "controllable",
+    "provenance": "unverified_brief",
+    "observed_state": {
+     "cap": 5,
+     "unit": "£ million",
+     "value": 0.26,
+     "source": "cee_inference",
+     "raw_value": 1.3,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "team_size",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Team size",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 30,
+    "observed_state": {
+     "unit": "people",
+     "value": 0.13333333333333333,
+     "source": "cee_inference",
+     "raw_value": 4,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "runway",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Runway",
+    "category": "observable",
+    "provenance": "unverified_brief",
+    "observed_state": {
+     "cap": 36,
+     "unit": "months",
+     "value": 0.3333333333333333,
+     "source": "cee_inference",
+     "raw_value": 12,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "hiring_and_onboarding_pace",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "Hiring and onboarding pace",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 6,
+    "observed_state": {
+     "unit": "hires/month",
+     "value": 0.16666666666666666,
+     "source": "cee_inference",
+     "raw_value": 1,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "pre_seed_dilution",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Pre-seed dilution",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "team_coordination_drag",
+    "ref": "R2",
+    "kind": "risk",
+    "label": "Team coordination drag",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "fundraising_distraction",
+    "ref": "R3",
+    "kind": "risk",
+    "label": "Fundraising distraction",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "to": "lean_1_3m_raise",
+    "from": "how_do_we_determine_the_right_amount_of_funding_to_accelerate_the_development_of_our_ai_startup",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "moderate_1_8m_raise",
+    "from": "how_do_we_determine_the_right_amount_of_funding_to_accelerate_the_development_of_our_ai_startup",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "larger_2_5m_raise",
+    "from": "how_do_we_determine_the_right_amount_of_funding_to_accelerate_the_development_of_our_ai_startup",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pre_seed_funding_ask",
+    "from": "moderate_1_8m_raise",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pre_seed_funding_ask",
+    "from": "larger_2_5m_raise",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pre_seed_funding_ask",
+    "from": "lean_1_3m_raise",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "team_size",
+    "from": "pre_seed_funding_ask",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "basis": "An additional £0.5m is provisionally modelled as funding about 1.5 more team members over the runway.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1.5,
+      "amount_unit": "people",
+      "strength_mean": 0.5,
+      "per_source_change": 0.5,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£ million"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "runway",
+    "from": "pre_seed_funding_ask",
+    "strength": {
+     "std": 0.41666666666666663,
+     "mean": 0.8333333333333333
+    },
+    "defaulted": true,
+    "provenance": {
+     "basis": "The stated £1.3m lean raise is expected to provide 12 months of runway; additional funding is provisionally assumed to extend runway.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 3,
+      "amount_unit": "months",
+      "strength_mean": 0.8333333333333333,
+      "per_source_change": 0.5,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£ million"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "pre_seed_dilution",
+    "from": "pre_seed_funding_ask",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "fundraising_distraction",
+    "from": "pre_seed_funding_ask",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "hiring_and_onboarding_pace",
+    "from": "team_size",
+    "strength": {
+     "std": 0.25,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -0.1,
+      "amount_unit": "hires/month",
+      "strength_mean": -0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "people"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "development_speed",
+    "from": "team_size",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "team_coordination_drag",
+    "from": "team_size",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "development_speed",
+    "from": "runway",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "development_speed",
+    "from": "hiring_and_onboarding_pace",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "development_speed",
+    "from": "pre_seed_dilution",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "development_speed",
+    "from": "team_coordination_drag",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "development_speed",
+    "from": "fundraising_distraction",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ]
+ }
+}
