@@ -51,6 +51,7 @@
 
 import { GraphV3, type NodeV3T } from '../../../../schemas/cee-v3.js';
 import { withoutPreconditionRisks } from '../../../../graph/inert-risk.js';
+import { withoutUnsizedOlumiRisks } from '../../../agent-lane/unsized-risk.js';
 // The estate's ONE owner of "what frame is this factor on?" (a leaf module),
 // and the reader that already answers "where is this factor today" for the
 // no-op validator. Consulted, never re-derived — two consumers holding private
@@ -100,7 +101,7 @@ export function buildCounterfactualModel(
 ): BuiltCounterfactualModel | null {
   // RC3 a′: this is a separate compute reader from Run. Read eligibility on the original identity-bearing graph,
   // before parsing/projection, so an excluded no-value risk cannot suppress the card or enter ISL as an extra root.
-  const parsed = GraphV3.safeParse(withoutPreconditionRisks(graphForTurn));
+  const parsed = GraphV3.safeParse(withoutUnsizedOlumiRisks(withoutPreconditionRisks(graphForTurn), graphForTurn));
   if (!parsed.success) return null;
   const graph = parsed.data;
 

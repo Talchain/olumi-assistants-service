@@ -3,6 +3,7 @@
  * eligibility (a risk ROOT with no level, one goal with a period), the window (the goal's own period), the stale gate (the node
  * as the card showed it), the scoped postimage (that risk's `event_risk` only) and the verified no-op on a retry.
  */
+import { unsizedOlumiRiskLine } from '../unsized-risk.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardHolds, riskOccurrenceGoalSubject, riskOccurrencePostimageIsScoped,
@@ -237,7 +238,13 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
   });
 
   it('AIE readiness copy: the eligible event path asks the occurrence within the window; an ineligible risk keeps its question, never promising a card', () => {
-    const ask = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
+    // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214): Olumi's own unsized risk (`ai_inferred`) is left out of the Run and never
+    // asked as a blocker. The readiness copy below is the path for a risk that is NOT positively Olumi's: here, one with no origin
+    // stamp (never Olumi's by a missing stamp), so the copy keeps its own row.
+    const olumis = (((buildCanonicalAnalysisReadyFromGraph(G) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.factor_id === RISK);
+    expect(olumis).toEqual([]);
+    const unstamped = (g: Rec): Rec => { const c = structuredClone(g); delete riskOf(c).provenance; return c; };
+    const ask = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(unstamped(g)) as Rec).readiness_issues ?? []) as Rec[])
       .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message);
     expect(ask(G)).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers '
       + 'until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
@@ -282,9 +289,11 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
 
   it('RED→GREEN: their words → ONE card quoting them → the press → the risk holds now as THEIRS (occurrence 1, basis user); its gap closes', async () => {
     const w = world();
-    // Before: readiness offers the held-state reading first, then the AIE occurrence ask.
-    expect(asks(w.graph())).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ '
-      + 'to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
+    // Before (AMENDED, DL 15 Oct 23:19Z): Olumi's unsized risk is left out of the Run, so readiness does not ask; the host's line
+    // offers the held-state reading first, then the AIE occurrence ask, as coaching.
+    expect(asks(w.graph())).toEqual([]);
+    expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toContain('To include it: is ‘Code quality deterioration’ already true now? If not: '
+      + 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months?');
     const card = await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
     expect(card).toMatchObject({ ok: true, risk_holds_now: { risk: 'Code quality deterioration', quote: SAID, within_months: 3 } });
     expect(card.public_label).toBe(`From your message: ‘${SAID}’ Do you want to record that ‘Code quality deterioration’ is already true now? `

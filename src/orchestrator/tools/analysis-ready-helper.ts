@@ -39,6 +39,7 @@ import {
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk, unsizedEventOptions } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
+import { unsizedOlumiRiskIds } from "../../orchestrator-v5/agent-lane/unsized-risk.js";
 import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceIsCurrent, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
@@ -1267,7 +1268,8 @@ function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReady
     ...options.flatMap((option) => (isPlainObject(option.interventions) ? Object.keys(option.interventions) : [])),
   ]);
   const excluded = graph.nodes.filter(isRetainedExcluded).map((node) => node.id);
-  return excluded.some((id) => refusing.has(id)) ? new Set() : new Set(excluded);
+  // An unsized Olumi risk is left out by the Run's own compute projection (`withoutUnsizedOlumiRisks`), whatever the guard does.
+  return new Set([...(excluded.some((id) => refusing.has(id)) ? [] : excluded), ...unsizedOlumiRiskIds(rawGraph)]);
 }
 
 function goalRootsWithoutStatusQuoLevel(
