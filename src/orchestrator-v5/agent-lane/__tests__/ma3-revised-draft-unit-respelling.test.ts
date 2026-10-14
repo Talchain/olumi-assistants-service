@@ -177,6 +177,11 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     expect(a.revised_draft).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
     expect(b.revised_draft, JSON.stringify(b)).toEqual({ replaces_goal: 'product feature launch', holds_this_target: true });
     expect(String(b.note)).not.toContain('is NOT in the revised draft');
+    // The card's own window in the user's words, with the article (Codex buddy r2): still the card's target.
+    const window = 'We want at least 20 new customers in the first 3 months.';
+    const w = await caps.proposeGoalTarget!({ ...turn, turn_id: 'turn-window', user_turn_text: window, user_text: `${FX.brief_text}\n${window}` } as never,
+      { ...customers, measures: 'new customers in the first 3 months', rationale: window } as never) as Rec;
+    expect(w, JSON.stringify(w)).toMatchObject({ ok: true, revised_draft: { holds_this_target: true } });
     // CONTRAST (AIE 0452 AMEND 2): the same figure named as another of the card's quantities is not this target.
     const other = await caps.proposeGoalTarget!(turn as never, { ...customers, measures: 'conversion rate' } as never) as Rec;
     expect(other.proposal_id).toBe(a.proposal_id);
