@@ -1,4 +1,4 @@
-import { bandTheUserWrote, clausesOf, factorTheUserNamed, linkEffectQuoteContextMiss, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { bandTheUserWrote, clausesOf, factorTheUserNamed, linkEffectQuoteContextMiss, quoteSpansIn, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 
 type Entity = { readonly id: string; readonly label: string };
@@ -190,4 +190,27 @@ export function linkBandTheUserStated(
   band: InfluenceBand, verifiedText: string | readonly string[] | undefined, nodes: readonly Entity[], from: string, to: string,
 ): boolean {
   return latestLinkBands(verifiedText, nodes, from, to)?.includes(band) ?? false;
+}
+
+/** One spelling for a quote and the message it is checked against: typographic quotes plain, runs of space single. */
+const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[ \t]+/g, ' ').trim();
+
+/**
+ * T2A5 check (b), exported for every quote check (HIRING's relation and level checks reuse it): `quote` is a WHOLE statement
+ * of `message`, verbatim in one spelling (`plainQuote`). It starts at the message's start or after . ! ? ; or a line, and
+ * ends at the message's end or before one. A colon does not end a statement ("Alice says: …" keeps its speaker), so a
+ * substring that drops "Alice says …", "Olumi suggested …" or "I disagree" is not whole.
+ */
+export function wholeStatementIn(message: string, quote: unknown): boolean {
+  const said = typeof quote === 'string' ? plainQuote(quote) : '';
+  const text = plainQuote(message);
+  return said !== '' && quoteSpansIn(text, said).some((at) =>
+    /(?:^|[.!?;\n])\s*$/.test(text.slice(0, at)) && (/[.!?;]$/.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length))));
+}
+
+/** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */
+export function namesBothEnds(text: string, nodes: readonly Entity[], from: string, to: string): boolean {
+  const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  return [labelOf(from), labelOf(to)].every((end) =>
+    factorTheUserNamed(end, text, { options: [], others: nodes.map((n) => n.label).filter((x) => x !== end) }));
 }

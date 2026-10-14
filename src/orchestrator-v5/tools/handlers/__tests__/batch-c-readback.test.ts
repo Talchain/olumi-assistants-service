@@ -558,11 +558,13 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(licence.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
     // D2 CONTRAST (DL ruling A, 12 Oct, Batch D): a change target on a level quantity never records the frame it scored in
     // (its threshold is a change, its samples are levels), so carrying on is read on no frame: no "no change, by assumption"
-    // and no "doesn't match today". It keeps its existing typed zero-spread line, verbatim, never a blank or a new withhold.
+    // and no "doesn't match today". It keeps its typed zero-spread reason and side, with the one line that says no future
+    // event (capacity post3010 row 3), never a blank or a new withhold.
     expect(licence.status_quo).toBeUndefined();
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'zero_spread', side: 'falls_short',
-      line: 'Falls short of 10% if today’s figures hold.' });
+      line: 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+        + 'You can review whether the model reflects the uncertainties that matter for this option.' });
     expect(JSON.stringify(licence)).not.toMatch(/by assumption|doesn’t match/);
     // Its row is the Run's own, intervals kept: none is removed for an assumption that is not claimed.
     expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome)

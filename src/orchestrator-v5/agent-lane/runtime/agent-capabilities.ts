@@ -38,7 +38,7 @@ import { parseDrawnLinkPress } from '../drawn-link-press.js';
 import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { chatRiskPreconditionFor } from '../../routing/chat-risk-precondition.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
-import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { goalChanceWithheldForAgent, identityAskLineFor, SAY_SHOWN_NOTE, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { guidedSizingProgressLine } from '../guided-sizing.js';
 import { runExplanationKeyForRecord } from '../run-explanation.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -394,9 +394,17 @@ function withIdentityCard(hint: { readonly available: true; readonly note: strin
   return hint === undefined ? {} : { identity_card: hint };
 }
 
-function withGoalChance(result: unknown, graph?: unknown): { goal_chance?: GoalChanceWithheld } {
+/**
+ * `sayShown`: only the build's first pass and a Run, whose reply the host ends with `say` (SAY-SHOWN, `SAY_SHOWN_NOTE`), and
+ * never where the identity ask owns that cause (`identity_ask_say` or the confirm card: the route then says the ask instead).
+ * Nor for a `say` that asks (Codex #3018 r1, served d4): the reply's one composer makes its question the ask (on the face)
+ * and its reason detail, and the never-re-ask egress drops a question already asked, so it is never shown as one line.
+ * The AIE's rule: the note goes only where the same bound line survives final egress (packet 6e52e896).
+ */
+function withGoalChance(result: unknown, graph?: unknown, sayShown = false): { goal_chance?: GoalChanceWithheld } {
   const withheld = goalChanceWithheldForAgent(result, graph);
-  return withheld !== undefined ? { goal_chance: withheld } : {};
+  if (withheld === undefined) return {};
+  return { goal_chance: sayShown && !withheld.say.includes('?') ? { ...withheld, say_shown: SAY_SHOWN_NOTE } : withheld };
 }
 
 /** A raw graph-read body as the goal-certainty rule reads it: the same fields `readGraph` keeps. */
@@ -8842,11 +8850,12 @@ export function createAgentCapabilities(
           const executed = outcome.ran ? outcome.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
           const certainty = goalCertaintyForAgent(executed ?? read.analysis_result,
             { scenario_id: ctx.scenario_id, analysis_state: outcome.ran ? outcome.analysisState : undefined }, certaintyReadOf(read));
-          firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
-            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result, read.graph),
-          ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
           // The read route's own model and revision (the same read as the permission): `graph` / `graph_hash`.
-          ...withIdentityCard(identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash, brief_text: typeof read.brief_text === 'string' ? read.brief_text : null })) };
+          const card = identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash, brief_text: typeof read.brief_text === 'string' ? read.brief_text : null });
+          firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
+            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result, read.graph, card === undefined),
+          ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+          ...withIdentityCard(card) };
         }
         if (outcome.ran) {
           firstAnalysisThisRequest = {
@@ -10496,6 +10505,9 @@ export function createAgentCapabilities(
         ? { scenario_id: ctx.scenario_id, graph_hash_at_run: runHash, computed_at: runAt } : undefined;
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
+      // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
+      const identityAskSay = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw, postRunRead.brief_text) : null;
+      const identityCard = result !== undefined ? identityCardFor(ctx, postRunRead) : undefined;
       return {
         ok: r.status === 200,
         mutated: false,
@@ -10523,16 +10535,12 @@ export function createAgentCapabilities(
         claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct, evaluatedForProduct),
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
-        ...withGoalChance(result, graphForProduct ?? postRunRead?.raw),
+        ...withGoalChance(result, graphForProduct ?? postRunRead?.raw, identityAskSay === null && identityCard === undefined),
         // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
-        ...(() => {
-          // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
-          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw, postRunRead.brief_text) : null;
-          return say !== null ? { identity_ask_say: say } : {};
-        })(),
+        ...(identityAskSay !== null ? { identity_ask_say: identityAskSay } : {}),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
         // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
-        ...(result !== undefined ? withIdentityCard(identityCardFor(ctx, postRunRead)) : {}),
+        ...withIdentityCard(identityCard),
       };
     },
   };

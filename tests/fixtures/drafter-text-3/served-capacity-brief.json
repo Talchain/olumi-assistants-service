@@ -1,0 +1,8 @@
+{
+ "_source": {
+  "brief": "recovery/live/runs/2026-10-14T041420Z-capacity-post3010/capacity/brief.txt, stripped",
+  "sha256_of_file": "f59ea335a51b710c24fb88dc95ba236e58ebfb6057b1bc962925da2dca61e2b9",
+  "note": "the served capacity brief (the 825be021 / 70c179df shape: today's level stated as the existing team's capacity)"
+ },
+ "brief": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline."
+}

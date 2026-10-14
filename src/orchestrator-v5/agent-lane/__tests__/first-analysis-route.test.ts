@@ -25,6 +25,8 @@ import { asSent } from './helpers/as-sent.js';
 import { RUN_RESULT_READY_TEXT, RUN_EXPLANATION_PREFIX } from '../run-explanation.js';
 import { readMoneyTotal } from '../same-unit.js';
 import { sayFigure } from '../say-figure.js';
+import { goalFigureCoHoldOf } from '../withheld-leader-fail-closed.js';
+import { valueChangeDisclosures } from '../disclosure.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -72,6 +74,15 @@ let knobs: {
   cardKind?: string;
 } = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
 
+/** SAY-SHOWN's one exception: an unknown current state, as another tool's failed readback reports it to its ONE reader. */
+const { stateFactsKnob } = vi.hoisted(() => ({ stateFactsKnob: { unknown: false } }));
+vi.mock('../turn-state-facts.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../turn-state-facts.js')>();
+  return { ...actual, collectTurnStateFacts: (r: Parameters<typeof actual.collectTurnStateFacts>[0]) => {
+    const facts = actual.collectTurnStateFacts(r);
+    return stateFactsKnob.unknown ? { ...facts, current_state_unknown: true } : facts;
+  } };
+});
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
 vi.mock('../../handlers/chip-click-dispatch.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -173,7 +184,9 @@ async function buildApp(): Promise<FastifyInstance> {
     if (b.chip?.action_type === 'run_analysis') {
       s.injectRuns += 1;
       s.injectRunHashes.push(hashOf(s));
-      return { assistant_text: 'Ran.', blocks: [{ type: 'analysis_result', summary: 'x' }], analysis_ready: { status: 'ready' }, analysis_state: { leader_claim: knobs.leaderClaim } };
+      // SAY-SHOWN's Run carries its served warnings, computed against the model it ran on (as the first pass's block).
+      return { assistant_text: 'Ran.', blocks: [{ type: 'analysis_result', summary: 'x', ...(knobs.analysisResultExtra === undefined ? {}
+        : { computed_against_hash: hashOf(s), ...knobs.analysisResultExtra }) }], analysis_ready: { status: 'ready' }, analysis_state: { leader_claim: knobs.leaderClaim } };
     }
     if (b.kind === 'system_event') {
       s.forwarded += 1;
@@ -826,5 +839,133 @@ describe('F3: the first reply names the goal it could not check', () => {
   it('CONTRAST: without the typed reason the build turn adds nothing about the goal', async () => {
     const b = await buildTurn(app);
     expect(b.assistant_text).not.toContain('is not checked yet');
+  });
+});
+
+/**
+ * ⭐ SAY-SHOWN (capacity post3010 row 4; PL 03:51Z / 04:44Z; AIE packet 6e52e896; DL 14 Oct). Served capacity turn 1: the AI
+ * explained the withheld cause in its own words, then the host's line said the same cause again. The first pass's
+ * `goal_chance` now tells the AI that its `say` is shown once, word for word (`say_shown`, the AIE's text), and the route
+ * keeps that promise on the actual returned reply. The served capacity model and its run's warnings, verbatim
+ * (`fixtures/served-capacity-post3010-turn1.json`, `_source`); the real route, builder and first-analysis runner.
+ */
+const CAPACITY = JSON.parse(readFileSync(new URL('./fixtures/served-capacity-post3010-turn1.json', import.meta.url), 'utf8')) as
+  { draft_graph: typeof READY_GRAPH; inference_warnings: unknown[]; served_assistant_text: string };
+const SAY_SHOWN_AIE = (JSON.parse(readFileSync('tests/fixtures/say-shown/aie-say-shown-text.json', 'utf8')) as { text: string }).text;
+const timesIn = (text: string, line: string): number => text.split(line).length - 1;
+
+describe('SAY-SHOWN: the first pass tells the AI its `say` is shown, and the returned reply shows it exactly once', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    installFetch(); installRunStub();
+    process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await buildApp();
+  }, 120_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    nextScenario(); installRunStub(); script = []; modelBodies = [];
+    knobs = { graph: structuredClone(CAPACITY.draft_graph), coachingHash: 'readback', runStateKind: 'complete_current', canonicalHash: true,
+      leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' },
+      analysisResultExtra: { enrichment: { inference_warnings: structuredClone(CAPACITY.inference_warnings) } } };
+  });
+  /** The build turn, narrated by the AI with `words`. */
+  const narrated = (words: string) => {
+    script = [callTool('build_model_from_brief', { brief: BRIEF }), say(words)];
+    return turn(app, { message: BRIEF });
+  };
+
+  /** The bound `say` the AI was handed, by identity: the first pass's own `goal_chance`, as its next request carries it. */
+  const boundSay = (): string => buildOutputSeenByModel()!.first_analysis.goal_chance.say as string;
+
+  it('RED: the SENT first pass carries the AIE\'s note beside `say`, and that `say` is the served capacity host line', async () => {
+    await narrated('I built the comparison around Weekly support capacity.');
+    const chance = buildOutputSeenByModel()?.first_analysis?.goal_chance;
+    expect(chance).toMatchObject({ withheld: true, say_shown: SAY_SHOWN_AIE });
+    // Bound to the served words, not the author's: the served reply ended with exactly this line.
+    expect(CAPACITY.served_assistant_text).toContain(chance.say);
+    expect(chance.say).toMatch(/^The chance isn.t shown yet: /);
+  });
+
+  it('RED: the AI leaves the reason out (as told) → the returned reply carries that bound `say` exactly once', async () => {
+    const b = await narrated('I built the comparison around Weekly support capacity. Adding a specialist is the lever to look at next.');
+    expect(timesIn(b.assistant_text, boundSay())).toBe(1);
+    expect(b.assistant_text).toContain('Adding a specialist is the lever to look at next.');
+  });
+
+  it('the AI copies `say` word for word anyway → still exactly once (its copy is the once)', async () => {
+    script = [callTool('build_model_from_brief', { brief: BRIEF })];
+    await turn(app, { message: BRIEF });
+    const line = boundSay();
+    nextScenario(); modelBodies = [];
+    const b = await narrated(`I built the comparison. ${line}`);
+    expect(timesIn(b.assistant_text, line)).toBe(1);
+  });
+
+  it('RED (the promise): the AI\'s reply holds the leader gate\'s own reason → the host still shows `say` once (before: silent)', async () => {
+    script = [callTool('build_model_from_brief', { brief: BRIEF })];
+    const first = await turn(app, { message: BRIEF });
+    const line = boundSay();
+    const gate = goalFigureCoHoldOf(first.blocks, CAPACITY.draft_graph);
+    expect(gate?.why, 'PRECONDITION: the run carries the gate\'s own goal-figure reason').toEqual(expect.any(String));
+    nextScenario(); modelBodies = [];
+    const b = await narrated(`I built the comparison. ${gate!.why}.`);
+    expect(timesIn(b.assistant_text, line)).toBe(1);
+  });
+
+  /** The latest Run's `goal_chance` as the AI's next request carried it (the Run tool's output, by its `ran`). */
+  const sentRunChance = (): Record<string, any> | undefined => modelBodies.flatMap((body) => (Array.isArray(body.input) ? body.input : []) as
+    { type?: string; output?: unknown }[]).filter((item) => item?.type === 'function_call_output')
+    .map((item) => JSON.parse(String(item.output)) as Record<string, any>).filter((out) => out.ran === true && out.goal_chance !== undefined).at(-1)?.goal_chance;
+  /** The build, then a Run the AI narrates with `words`. */
+  const ranRun = async (words: string) => {
+    await narrated('I built the comparison.');
+    modelBodies = [];
+    script = [callTool('run_analysis', { reason: 'The user requested a run.', effects_timing: null }), say(words)];
+    return turn(app, { message: 'Run the analysis please.' });
+  };
+
+  it('RED (a Run): the AI leaves the reason out → the bound `say` once, its own answer once, each typed action once', async () => {
+    const b = await ranRun('Compare the staffing assumptions with your team.');
+    const chance = sentRunChance();
+    expect(chance).toMatchObject({ withheld: true, say_shown: SAY_SHOWN_AIE });
+    expect(timesIn(b.assistant_text, chance!.say)).toBe(1);
+    expect(timesIn(b.assistant_text, 'Compare the staffing assumptions with your team.')).toBe(1);
+    const ids = (b.suggested_actions ?? []).map((a: { id: string }) => a.id);
+    expect(ids.length, 'contrast: the Run offers typed actions').toBeGreaterThan(0);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('RED (a Run that ranks): the gate drops the ranking and adds no reason of its own → the same reply as without it', async () => {
+    const unranked = await ranRun('Compare the staffing assumptions with your team.');
+    nextScenario(); modelBodies = [];
+    const ranked = await ranRun('Add one specialist is the best option. Compare the staffing assumptions with your team.');
+    const chance = sentRunChance();
+    expect(chance).toMatchObject({ say_shown: SAY_SHOWN_AIE });
+    expect(ranked.assistant_text).not.toContain('is the best option');
+    expect(ranked.assistant_text).toBe(unranked.assistant_text);
+    expect(timesIn(ranked.assistant_text, chance!.say)).toBe(1);
+  });
+
+  it('THE ONE EXCEPTION (DL ruling 14 Oct): an unknown current state still wins → its line, and no `say`', async () => {
+    stateFactsKnob.unknown = true;
+    try {
+      const b = await narrated('I built the comparison around Weekly support capacity.');
+      const line = boundSay();
+      expect(buildOutputSeenByModel()?.first_analysis?.goal_chance).toMatchObject({ say_shown: SAY_SHOWN_AIE });
+      for (const unknownLine of valueChangeDisclosures({ rescaled: [], ranges_added: [], ranges_not_attached: [], current_state_unknown: true })) {
+        expect(b.assistant_text).toContain(unknownLine);
+      }
+      expect(timesIn(b.assistant_text, line)).toBe(0);
+    } finally { stateFactsKnob.unknown = false; }
+  });
+
+  it('CONTROL: an ordinary later turn (CURRENT MODEL STATE) carries the withheld `goal_chance` but never the note', async () => {
+    await narrated('I built the comparison around Weekly support capacity.');
+    modelBodies = [];
+    script = [callTool('get_canonical_state', {}), say('Here is where it stands.')];
+    await turn(app, { message: 'Where does the model stand now?' });
+    const sent = JSON.stringify(modelBodies);
+    expect(sent, 'contrast: the state still carries the withheld chance').toContain('\\"withheld\\":true');
+    expect(sent).not.toContain('say_shown');
   });
 });
