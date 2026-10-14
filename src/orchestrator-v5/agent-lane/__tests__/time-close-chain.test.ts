@@ -26,6 +26,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { constructionOperationId } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { ProposalStore } from '../proposal.js';
+import { deadlineCardSubjectOf } from '../proposal-object/still-applies.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
@@ -182,7 +183,8 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
-      value: { deadline: '2027-04-09', expected_deadline: null, words: 'within 6 months', reference: R, stated_months: 6 } }]);
+      value: { deadline: '2027-04-09', expected_deadline: null, words: 'within 6 months', reference: R, stated_months: 6,
+        expected_goal: deadlineCardSubjectOf(before, goal(before).id) } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
     expect(w.read()).toEqual(before);
     expect(w.writes).toEqual([]);
@@ -211,7 +213,8 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
-      value: { deadline, expected_deadline: null, words: 'within 6 months', reference, stated_months: 6 } }]);
+      value: { deadline, expected_deadline: null, words: 'within 6 months', reference, stated_months: 6,
+        expected_goal: deadlineCardSubjectOf(before, goal(before).id) } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
     expect(w.read()).toEqual(before); expect(w.writes).toEqual([]);
     expect(await w.caps.authoriseChange({ ...context, typed_approval_of: String(offered.proposal_id), user_text: 'Yes', user_turn_text: 'Yes' },
@@ -231,7 +234,8 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     expect(offered.public_label).toBe('Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “within 6 months”.');
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toEqual([{ op: 'set_goal_deadline', path: goal(before).id,
-      value: { deadline: '2027-04-09', expected_deadline: null, words: 'within 6 months', reference: R, stated_months: 6 } }]);
+      value: { deadline: '2027-04-09', expected_deadline: null, words: 'within 6 months', reference: R, stated_months: 6,
+        expected_goal: deadlineCardSubjectOf(before, goal(before).id) } }]);
     expect(proposal.provenance).toEqual({ authored_by: 'user_stated', basis: '' });
     expect(w.read()).toEqual(before); expect(w.writes).toEqual([]);
   });
@@ -330,7 +334,8 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', rationale: 'The user stated this deadline.' });
     expect(offered).toMatchObject({ ok: true, public_label: 'Is your deadline 1 August 2027 (6 months from today)? Your words: “within 6 months”. Basis supplied for this interpretation: The user stated this deadline.' });
     const operation = w.proposals.get(String(offered.proposal_id))!.operations[0]!;
-    expect(operation.value).toEqual({ deadline: '2027-08-01', expected_deadline: null, words: 'within 6 months' });
+    expect(operation.value).toEqual({ deadline: '2027-08-01', expected_deadline: null, words: 'within 6 months',
+      expected_goal: deadlineCardSubjectOf(before, goal(before).id) });
     expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ ok: true, applied: true });
     const after = w.read(), expected = structuredClone(before); goal(expected).goal_horizon = { deadline: '2027-08-01' };
     expect(after).toEqual(expected);

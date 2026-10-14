@@ -11,8 +11,9 @@
  *  · a hiring-times card: its parts, carriers and deadline stand (`hiringTimesStillApply`);
  *  · a deadline card: the goal's COMPLETE projection (`goalReadingProjectionOf`: label, target, horizon, period, reading; DL 14 Oct,
  *    the PL's "reuse the complete current goal/reading") is exactly the one the card was made against, so ANY change to the goal
- *    lapses it (conservative) and an unrelated link edit does not. A retry after the card's own write landed holds the card's
- *    date, with the rest of the projection unchanged. A card made before its subject was recorded keeps the whole-model rule.
+ *    lapses it (conservative) and an unrelated link edit does not. A retry after the card's own write landed is the writer's
+ *    own landed-retry contract (the write may relabel an event goal with its date). A card made before its subject was
+ *    recorded keeps the whole-model rule.
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
  * Any other card keeps the whole-model rule.
  */
@@ -28,7 +29,6 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 /** As the stored card carries it (a JSON round trip drops absent members). */
 const asStored = (v: unknown): unknown => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-const withoutHorizon = (projection: unknown): unknown => (isRec(projection) ? { ...projection, horizon: null } : projection);
 
 /** The deadline card's subject at hold time: the goal's complete projection, recorded on the card's own operation. */
 export function deadlineCardSubjectOf(graph: unknown, goalId: string): unknown {
@@ -50,8 +50,10 @@ export function deadlineSubjectHolds(op: StructuredProposal['operations'][number
   const heldNow = goalDeadlineFromRecord(graph, op.path) ?? null;
   // Not yet written: the goal is exactly the one the card was made against, its date included.
   if (heldNow === v.expected_deadline) return isDeepStrictEqual(now, v.expected_goal);
-  // A retry of the card's own write that landed: the card's date, and nothing else about the goal moved.
-  if (heldNow === v.deadline) return isDeepStrictEqual(withoutHorizon(now), withoutHorizon(v.expected_goal));
+  // A retry of the card's own write that landed: its date is held, and the writer's own landed-retry contract decides
+  // (`applyGoalHorizonEdit` / `goalHorizonLandedWriteIsScoped`). The write itself may relabel the goal (an event goal's label
+  // takes the date, `withEventShareDate`), so the projection is not compared here.
+  if (heldNow === v.deadline) return true;
   return false;
 }
 
