@@ -24,6 +24,7 @@ import { getRuntimeEnvResolution } from '../../config/env-resolver.js';
 import { log } from '../../utils/telemetry.js';
 import type { CallStructuredModel } from '../agent-lane/runtime/build-model.js';
 import { DRAFTER_RAW_TABLE, drafterRawRow, recordingDrafter, type DrafterCallRecord, type DrafterRawRow } from './record.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 export { DRAFTER_RAW_TABLE, DRAFTER_RAW_MAX_BYTES, capRawResponse, truncationMarker } from './record.js';
 export type { DrafterRawRow, DrafterCallRecord } from './record.js';
@@ -69,6 +70,7 @@ export function getDrafterRawStore(): DrafterRawStorePort | null {
   if (!url || !serviceRoleKey) return null;
   cachedStore = new SupabaseDrafterRawStore(createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedSupabaseFetch() },
   }));
   return cachedStore;
 }

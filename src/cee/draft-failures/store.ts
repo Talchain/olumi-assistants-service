@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { config, isProduction } from '../../config/index.js';
 import { log } from '../../utils/telemetry.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 type DraftFailureRow = {
   id: string;
@@ -105,6 +106,7 @@ function getClient(): SupabaseClient | null {
       autoRefreshToken: false,
       persistSession: false,
     },
+    global: { fetch: boundedSupabaseFetch() },
   });
   return _client;
 }

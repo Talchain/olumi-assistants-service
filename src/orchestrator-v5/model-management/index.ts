@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 
 import { ModelManagementService } from './service.js';
 import { SupabaseModelVersionStore } from './store-adapter.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 let cachedInstance: ModelManagementService | null = null;
 
@@ -33,6 +34,7 @@ export function getModelManagementService(): ModelManagementService {
   }
   const client = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedSupabaseFetch() },
   });
   cachedInstance = new ModelManagementService({
     store: new SupabaseModelVersionStore(client),

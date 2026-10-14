@@ -16,6 +16,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { commitModelChange } from '../persist-graph-write.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 export type GuestCopyOutcome =
   | { readonly kind: 'copied'; readonly scenarioId: string; readonly created: boolean }
@@ -135,7 +136,7 @@ export function getGuestCopyStore(): GuestCopyStorePort {
     throw new Error('GuestCopy: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set before calling getGuestCopyStore()');
   }
   cachedInstance = new SupabaseGuestCopyStore(
-    createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } }),
+    createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: boundedSupabaseFetch() } }),
   );
   return cachedInstance;
 }

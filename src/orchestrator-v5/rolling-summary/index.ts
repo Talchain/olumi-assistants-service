@@ -19,6 +19,7 @@ import { AnthropicSummariserModel } from './summariser.js';
 import type { SummariserModel } from './summariser.js';
 import { SupabaseRollingSummaryStore } from './store-adapter.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 let cachedStore: RollingSummaryStorePort | null = null;
 let cachedModel: SummariserModel | null = null;
@@ -36,6 +37,7 @@ export function getRollingSummaryStore(): RollingSummaryStorePort {
   }
   const client = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedSupabaseFetch() },
   });
   cachedStore = new SupabaseRollingSummaryStore(client);
   return cachedStore;

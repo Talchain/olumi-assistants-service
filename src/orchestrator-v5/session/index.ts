@@ -28,6 +28,7 @@ import { SessionLRUCache } from './cache.js';
 import { SupabaseSessionStore, type AnalysisRunDerivationPort } from './supabase-store.js';
 import type { SessionStore } from './store.js';
 import { config as appConfig } from '../../config/index.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 interface ResolvedConfig {
   readonly url: string;
@@ -61,6 +62,7 @@ export function getSessionStore(): SessionStore {
   const config = readConfig();
   const client = createClient(config.url, config.serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedSupabaseFetch() },
   });
   const cache = new SessionLRUCache({
     maxScenarios: config.cacheMaxScenarios,

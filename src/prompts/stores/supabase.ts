@@ -33,6 +33,7 @@ import type {
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 import {
   PROMPT_OBSERVATION_CAPABILITY,
   type ObservationType,
@@ -364,6 +365,7 @@ export class SupabasePromptStore
           autoRefreshToken: false,
           persistSession: false,
         },
+        global: { fetch: boundedSupabaseFetch() },
       });
 
       // Verify connection with a simple query (count helps distinguish empty vs inaccessible)

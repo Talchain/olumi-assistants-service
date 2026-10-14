@@ -33,6 +33,7 @@ import { chatWithToolsAnthropic } from '../../adapters/llm/anthropic.js';
 import { SupabaseReplacementStateStore } from './supabase-state-store.js';
 import type { ChatWithToolsLike } from './agent-loop.js';
 import type { ReplacementStateStore } from './turn-entry.js';
+import { boundedSupabaseFetch } from '../../utils/supabase-bounded-fetch.js';
 
 let override: ReplacementStateStore | null = null;
 let cached: ReplacementStateStore | null = null;
@@ -70,6 +71,7 @@ export function getReplacementStateStore(): ReplacementStateStore | null {
   cached = new SupabaseReplacementStateStore(
     createClient(url, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: boundedSupabaseFetch() },
     }),
   );
   return cached;

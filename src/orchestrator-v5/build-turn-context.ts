@@ -1,5 +1,6 @@
 import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
 import { ANALYSIS_REREAD_TIMEOUT_MS } from './session/analysis-read-deadline.js';
+import { withAnalysisReadDeadline } from './session/analysis-read-deadline.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
@@ -2126,10 +2127,14 @@ async function fetchScenarioAnalysisFacts(
   }
 
   try {
-    const page = await store.readScenarioRunAnalysisFactsFor(
+    // ⛔ BOUNDED (served 14 Oct 14:19Z, b7b77ba2): this request never reached the database and stalled 109.8 s, inside a
+    // Run that then took 139 s; Paul's 16:18Z draft hung on the same read. On a path with no enclosing read scope (a v2
+    // Run) nothing bounded it. A read cut by its deadline takes the existing degraded path below: unavailable, never
+    // "no Run". Inside an enclosing scope (the graph read) it shares that scope's budget, unchanged.
+    const page = await withAnalysisReadDeadline(() => store.readScenarioRunAnalysisFactsFor!(
       scenarioId,
       SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
-    );
+    ));
     return {
       status: 'ok',
       scenario_id: scenarioId,
