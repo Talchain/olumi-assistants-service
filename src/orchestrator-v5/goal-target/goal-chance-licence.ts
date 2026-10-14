@@ -1151,10 +1151,10 @@ function shortfallNotesOf(
     if (!finite(downside?.p05) || !finite(outcome?.p10)) continue;
     const q05 = downside.p05 * cap;
     if (!finite(q05) || q05 > outcome.p10 + 1e-6 * Math.abs(outcome.p10) || q05 >= raw) continue;
-    // ⛔ Hiring row 3 (14 Oct): the outcome percentiles are in the frame this Run RECORDED (`sent.field`): normalised beside
-    // `goal_threshold`, raw beside `goal_threshold_raw`. The tail must also hold in that frame: a negative change in the
+    // ⛔ Hiring row 3 (14 Oct): the outcome percentiles are in the frame this Run RECORDED (`sent.field`): raw beside the raw
+    // threshold field, normalised beside the normalised one. The tail must also hold in that frame: a negative change in the
     // normalised frame passed the line above by its sign alone. The typical figure is read in that frame too (below).
-    const toRaw = sent.field === 'goal_threshold' ? cap : 1;
+    const toRaw = sent.field.endsWith('_raw') ? 1 : cap;
     const p10Raw = outcome.p10 * toRaw;
     if (!finite(p10Raw) || q05 > p10Raw + 1e-6 * Math.abs(p10Raw)) continue;
     const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
