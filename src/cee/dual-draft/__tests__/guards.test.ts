@@ -33,7 +33,7 @@ function readyGraph(): GraphV3T {
       // A status-quo level (between the options' 0.2 and 0.8): since #2164 an unvalued goal root is a factor-scoped
       // `MISSING_FACTOR_LEVEL`, so without it this graph is `needs_user_input` and no longer structurally READY.
       { id: 'fac_price', kind: 'factor', label: 'Price point', observed_state: { value: 0.5 } },
-      { id: 'risk_churn', kind: 'risk', label: 'Customer churn' },
+      { id: 'risk_churn', kind: 'risk', label: 'Customer churn', observed_state: { value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred' } },
     ],
     edges: [
       {
@@ -229,7 +229,7 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     expect(optionSurfaceUnchanged(before, after)).toBe(false);
   });
 
-  it('no-downgrade passes when a risk node is added to a ready graph', () => {
+  it('no-downgrade allows adding an unknown risk but admission still asks for its level', () => {
     const before = readyGraph();
     const after = readyGraph();
     after.nodes.push({ id: 'risk_new', kind: 'risk', label: 'New risk' });
@@ -243,7 +243,7 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     const res = checkReadinessNoDowngrade(before, after);
     expect(res.ok).toBe(true);
     expect(res.before_status).toBe('ready');
-    expect(res.after_status).toBe('ready');
+    expect(res.after_status).toBe('needs_user_input');
   });
 
   it('no-downgrade FAILS when a value-less option node lands in a ready graph (the defer-policy case)', () => {

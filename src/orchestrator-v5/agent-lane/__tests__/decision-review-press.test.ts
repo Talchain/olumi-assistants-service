@@ -14,7 +14,7 @@ import {
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
 import { goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
-import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroReplyLine, treatedAsZeroUnnamedMany } from '../root-line.js';
+import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany, treatedAsZeroReplyLine, missingRootUnnamedLine } from '../root-line.js';
 
 type Rec = Record<string, unknown>;
 const json = (p: string): Rec => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8')) as Rec;
@@ -103,7 +103,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     const turn = decisionReviewFor(SCENARIO, readOf({ graph: G2_GRAPH, enrichment: { inference_warnings: [gap] } }));
     expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ROOT_SENTENCE}`]);
     expect(turn.reply.split(ROOT_SENTENCE)).toHaveLength(2);
-    expect(turn.reply.split('Demand shortfall')).toHaveLength(3); // The disclosure and its own question both name it.
+    expect(turn.reply.split('Demand shortfall')).toHaveLength(3); // The saved treatment and its ask both name the risk.
   });
 
   it('RED (Codex r2 P2): an unnamed risk root (F1) and an unnamed default-0 factor (F2) are counted as two, in one sentence', () => {
@@ -121,9 +121,9 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
       edges: [...(G2_GRAPH.edges as Rec[]), { from: 'supply_delay', to: 'goal', strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }] };
   };
   it.each([
-    ['one root, label ""', withRoots({ demand_shortfall: '' }), TREATED_AS_ZERO_UNNAMED_ONE],
-    ['one root, label of spaces', withRoots({ demand_shortfall: '   ' }), TREATED_AS_ZERO_UNNAMED_ONE],
-    ['two roots, the first quoted label blank', withRoots({ demand_shortfall: ' ' }, true), treatedAsZeroUnnamedMany(2)],
+    ['one root, label ""', withRoots({ demand_shortfall: '' }), missingRootUnnamedLine(1)],
+    ['one root, label of spaces', withRoots({ demand_shortfall: '   ' }), missingRootUnnamedLine(1)],
+    ['two roots, the first quoted label blank', withRoots({ demand_shortfall: ' ' }, true), missingRootUnnamedLine(2)],
   ])('RED (Codex r3 P2): a blank root label is never quoted as "" — the label-free form with the typed count (%s)', (_n, graph, line) => {
     expect(treatedAsZeroReplyLine(graph, COMPARATIVE)).toBe(line);
     const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings: [] } }));
@@ -139,7 +139,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
 
   it('CONTROL (F1): two named roots keep their labels', () => {
     expect(treatedAsZeroReplyLine(withRoots({}, true), COMPARATIVE)).toBe(
-      'No figures are set for "Demand shortfall" and "Supply delay" yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supply delay" today?');
+      'How likely or how large is "Demand shortfall" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review. How likely or how large is "Supply delay" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.');
   });
 
   it('RED (Codex r2 P2): a goal-figure reason the editors would rewrite says the withhold in the reader\'s own opening', () => {

@@ -60,7 +60,7 @@ const GRAPH: GraphStateIngress = {
   nodes: [
     { id: 'decision', kind: 'decision', label: 'Choose' },
     { id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 },
-    { id: 'factor', kind: 'factor', label: 'Synthetic factor' },
+    { id: 'factor', kind: 'factor', label: 'Synthetic factor', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     { id: 'option-a', kind: 'option', label: 'Option A', interventions: { factor: 1 } },
     { id: 'option-b', kind: 'option', label: 'Option B', interventions: { factor: 0 } },
   ],

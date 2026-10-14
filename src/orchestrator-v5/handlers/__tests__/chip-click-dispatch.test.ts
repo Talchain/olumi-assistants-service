@@ -114,7 +114,7 @@ const READY_SNAPSHOT_GRAPH = {
   nodes: [
     { id: 'dec_x', kind: 'decision' as const, label: 'Choose an option' },
     { id: 'goal_x', kind: 'goal' as const, label: 'Outcome', goal_threshold: 0.8 },
-    { id: 'fac_delivery', kind: 'factor' as const, label: 'Delivery reliability' },
+    { id: 'fac_delivery', kind: 'factor' as const, label: 'Delivery reliability', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     {
       id: 'opt_a',
       kind: 'option' as const,

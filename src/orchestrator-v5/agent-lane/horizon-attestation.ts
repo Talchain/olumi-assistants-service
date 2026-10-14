@@ -55,7 +55,19 @@ const PAST_OR_RANGE_BEFORE = /(?:\b(?:last|past|previous|prior)\s+|\d\s*[-–]\s
 /** Words just after that make it a past period. */
 const PAST_AFTER = /^\s+ago\b/i;
 
-interface Span { readonly months: number; readonly wording: string; readonly index: number }
+/** Words just after a span that make it time allotted to the goal: "two months to learn", "six months from today". */
+const ALLOTTED_AFTER = /^\s+(?:to\s+\p{L}|from\s+(?:now|today)\b)/iu;
+/**
+ * A forward lead-in just before a span, "the first" included ("within the first 3 months", marketing's L20): the span's
+ * form as a deadline. The held wording stays the span's own (`LEAD` above), so "3 months" is held as before.
+ */
+const LED_BEFORE = new RegExp(String.raw`\b(?:within|in|over|during|for|by)\s+(?:the\s+)?(?:(?:next|coming|following|first)\s+)?$`, 'i');
+
+/**
+ * `led`: the brief writes it as a deadline, forward-led ("within 12 months", "over the next ten months") or allotted ("two
+ * months to learn"), not as the bare length of something else ("a runway of 12 months if we run lean").
+ */
+interface Span { readonly months: number; readonly wording: string; readonly index: number; readonly led: boolean }
 
 function forwardDurations(brief: string): Span[] {
   const spans: Span[] = [];
@@ -65,11 +77,12 @@ function forwardDurations(brief: string): Span[] {
     const before = brief.slice(Math.max(0, figureAt - 16), figureAt);
     const after = brief.slice((m.index ?? 0) + m[0].length);
     if ((lead === '' && PAST_OR_RANGE_BEFORE.test(before)) || PAST_AFTER.test(after)) continue;
-    spans.push({ months: Number(m[2]) * MONTHS_PER[m[3]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0 });
+    spans.push({ months: Number(m[2]) * MONTHS_PER[m[3]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0,
+      led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, figureAt - 32), figureAt)) || ALLOTTED_AFTER.test(after) });
   }
   for (const m of brief.matchAll(SPELLED_DURATION)) {
     if (PAST_AFTER.test(brief.slice((m.index ?? 0) + m[0].length))) continue;
-    spans.push({ months: MONTHS_PER[m[1]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0 });
+    spans.push({ months: MONTHS_PER[m[1]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0, led: true });
   }
   return spans.sort((a, b) => a.index - b.index);
 }
@@ -92,9 +105,19 @@ export function attestHorizon(
   // plan to launch six months from today." with a 6 typed was saved as "three months": the first span won, whatever the
   // claim. A forward span equal to the claim is taken; otherwise the first, exactly as before.
   const countOf = (p: RegExpExecArray): number => countWords[(p[1] ?? p[2]!).toLowerCase()] ?? Number(p[1] ?? p[2]);
+  /**
+   * ⛔ A BARE LENGTH IS NOT A DEADLINE (Paul's funding brief, 13 Oct 23:12Z: "a runway of 12 months if we run lean" was
+   * held as the goal's deadline and asked as "the deadline your brief sets"). Only the candidate's claim attests a span
+   * (exactly its count, below). Without one, the brief shows a deadline only by its form: a calendar point ("by Q3"), a
+   * month point ("month 9"), a forward-led span ("within 12 months", "over the next ten months") or time allotted ("we
+   * have two months to learn"), never the bare length of something else ("a runway of 12 months", "twelve months of runway").
+   */
+  const forwardLed = (index: number): boolean => LED_BEFORE.test(brief.slice(Math.max(0, index - 32), index));
+  const deadlineForm = (p: RegExpExecArray): boolean => p[1] !== undefined || forwardLed(p.index)
+    || ALLOTTED_AFTER.test(brief.slice(p.index + p[0].length));
   const proposed = proposals.find((p) => countOf(p) === claimed
     && !PAST_OR_RANGE_BEFORE.test(brief.slice(Math.max(0, p.index - 16), p.index))
-    && !PAST_AFTER.test(brief.slice(p.index + p[0].length))) ?? proposals[0] ?? null;
+    && !PAST_AFTER.test(brief.slice(p.index + p[0].length))) ?? proposals.find(deadlineForm) ?? null;
   if (proposed !== null) {
     const count = proposed[1] ?? proposed[2]!;
     const months = countWords[count.toLowerCase()] ?? Number(count);
@@ -112,6 +135,6 @@ export function attestHorizon(
     if (match !== undefined) return { months: claimed, wording: match.wording, status: 'attested' };
   }
   const calendar = [...brief.matchAll(CALENDAR_POINT)].map((m) => ({ wording: m[0].trim(), index: m.index ?? 0 }));
-  const first = [...calendar, ...durations].sort((a, b) => a.index - b.index)[0];
+  const first = [...calendar, ...durations.filter((d) => d.led)].sort((a, b) => a.index - b.index)[0];
   return first === undefined ? absent : { months: null, wording: first.wording, status: 'unresolved' };
 }

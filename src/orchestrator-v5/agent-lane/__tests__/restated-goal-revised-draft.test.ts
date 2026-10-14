@@ -344,8 +344,20 @@ async function expectStoredRunAndReopen(s: ReturnType<typeof server>, rows: Rec[
 }
 
 describe('MA2 original 13:18Z evidence, kept separate from the scripted revised-draft continuation', () => {
-  it('replays the captured saved old model through Run: both exact unscored-limit reasons persist, and no absent AND target is invented', async () => {
-    const { payload, outcome } = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318);
+  it('the captured saved old model: its Run on a placeholder zero is withheld (T4); with that risk stated, both exact unscored-limit reasons persist, and no absent AND target is invented', async () => {
+    // AMENDED (T4, 14 Oct; was: the captured model ran through Run). That Run itself rested on a placeholder zero: the
+    // capture's own recorded engine warning names `campaign_execution_risk` (a drafter-added risk with no level, no prior,
+    // reaching the goal through `campaign_readiness`) as defaulted to 0.0. T4 withholds such a Run and asks: unknown is
+    // never zero. Only that root is named.
+    const recorded = JSON.stringify(CAPTURE_1318.enrichment);
+    expect(recorded).toContain("root ancestor(s) 'campaign_execution_risk' carry no observed value or ParameterUncertainty and defaulted to 0.0");
+    const refused = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318).then(() => null, (e: unknown) => e as Rec);
+    expect((refused?.verdict?.issues as Rec[] | undefined)?.filter((i) => i.code === 'MISSING_FACTOR_LEVEL').map((i) => i.factor_id))
+      .toEqual(['campaign_execution_risk']);
+    // MA2's own protections, unchanged, on the same capture once that risk states a level (T4's valued shape).
+    const stated = { ...CAPTURE_1318.graph, nodes: (CAPTURE_1318.graph.nodes as Rec[]).map((n) => n.id === 'campaign_execution_risk'
+      ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n) };
+    const { payload, outcome } = await runFromStore(JSON.stringify(stated), true, CAPTURE_1318);
     expect(payload.goal_constraints).toEqual(CAPTURE_1318.graph.goal_constraints);
     expect(outcome.handler_facts[0].result.constraint_verdict.per_limit).toEqual(CAPTURE_1318.limit_verdicts.per_limit);
     expect(goalChanceLicenceForAgent(outcome.handler_facts[0].result)).toBeUndefined();

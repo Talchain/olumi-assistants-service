@@ -24,6 +24,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 // The drafter-raw recorder writes its own table; it is a recorder, not logic, so it passes the build straight through.
 vi.mock('../../drafter-raw/index.js', () => ({
@@ -182,7 +183,7 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     expect(String(b.public_label)).toContain('‘New customers in first 3 months’ at least 20 customers');
   });
 
-  it('(d) real path: card → approve → the saved model holds both targets and both limits → cold read → the PLoT body', async () => {
+  it('(d) real path: card → approve → the saved model holds both targets and both limits → cold read → withheld for its one unvalued risk; valued, the PLoT body', async () => {
     const s = server();
     const { caps } = lane(s);
     const a = await caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
@@ -201,8 +202,21 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
       .toEqual([['founder_time_on_campaign', 25, '%', undefined], ['founder_marketing_time', 25, '%', 'original']]);
     const again = await lane(server(stored)).caps.proposeGoalTarget!({ ...turn, turn_id: 'later-turn' } as never, conversion as never) as Rec;
     expect(again.refusal).not.toBe('revised_draft_not_prepared');
-    // The Run's own body carries the budget as GBP/year.
-    const body = await plotBodyFromStore(stored);
+    // AMENDED (T4 #2999, DL ruling; old expectation: a PLoT body from these bytes). The saved revised draft holds
+    // ‘Campaign execution risk’ on the goal path with no level and no cause. The drafter (f81dfd89) gave the risk no value,
+    // and its two incoming links carried no effect (`effect_amount: null`), so none was saved; every other root holds a
+    // level. The engine would sample it at 0 (unknown treated as zero), so the real Run loader withholds and asks.
+    const RISK = 'campaign_execution_risk';
+    expect((stored.nodes as Rec[]).find((n) => n.id === RISK)).toEqual({ id: RISK, kind: 'risk', label: 'Campaign execution risk', provenance: 'ai_inferred' });
+    expect((stored.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
+    expect((stored.edges as Rec[]).filter((e) => e.from === RISK).map((e) => e.to)).toEqual(['conversion_rate']);
+    const issues = assessCanonicalAnalysisReadiness(stored).blockingIssues;
+    expect(issues.map((i) => [i.code, i.factor_id])).toEqual([['MISSING_FACTOR_LEVEL', RISK]]);
+    expect(issues[0]!.message).toContain('How likely or how large is "Campaign execution risk" today?');
+    await expect(plotBodyFromStore(stored)).rejects.toThrow(/MISSING_FACTOR_LEVEL/);
+    // The Run's own body carries the budget as GBP/year once that risk has a level (the original assertion, unchanged).
+    const valued = { ...stored, nodes: (stored.nodes as Rec[]).map((n) => (n.id === RISK ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n)) };
+    const body = await plotBodyFromStore(valued);
     expect((body.goal_constraints as Rec[]).filter((c) => c.constraint_id === SPEND_ID).map((c) => [c.value, c.unit, c.operator]))
       .toEqual([[100000, 'GBP/year', '<=']]);
   });
