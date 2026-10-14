@@ -145,6 +145,7 @@ beforeEach(() => {
 import { agentProposals, HELD_OFFER_ROWS_READ_CAP } from '../../orchestrator-v5/agent-lane/held-approval-offers.js'
 import { createProposal, computeProposalId, hasCardOnlyOperations, ProposalStore, MAX_PROPOSALS, type ProposalOperation, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js'
 import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js'
+import { deadlineCardSubjectOf } from '../../orchestrator-v5/agent-lane/proposal-object/still-applies.js'
 import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js'
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js'
 import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js'
@@ -551,6 +552,65 @@ describe('S-D reload: proposal_fields on the opt-in graph read', () => {
     } finally { await app.close(); latest = []; }
   });
 });
+
+/**
+ * ⭐ COLD RELOAD (#3024 follow-up, Codex r2): a held Agent card is projected on the opt-in read by the ONE rule
+ * (`heldCardAppliesAt`), never by the whole-graph hash. After an unrelated change it is still the card the user can press;
+ * once its own goal moved (here a rename, which leaves the hash unchanged) it is not served, although no turn has run since.
+ */
+describe('COLD RELOAD: a held deadline card on the opt-in graph read follows its own subject, not the whole-graph hash', () => {
+  const GOAL_GRAPH = { ...GRAPH_NO_LAYOUT, nodes: [...GRAPH_NO_LAYOUT.nodes, { id: 'g1', label: 'Ship on time', kind: 'goal' }] }
+  /** An unrelated change: a new factor linked to another factor (the goal untouched). */
+  const unrelated = <G extends typeof GOAL_GRAPH>(g: G) => ({ ...g, nodes: [...g.nodes, { id: 'n3', label: 'Salary', kind: 'factor' }],
+    edges: [...g.edges, { from: 'n3', to: 'n2', strength: { mean: 0.5, std: 0.125 } }] })
+  const deadlineHold = () => {
+    const base = computeAnalysisAffectingGraphHash(GOAL_GRAPH)!
+    const proposal = createProposal({ scenario_id: SCENARIO, user_id: OWNER, base_graph_identity_hash: base,
+      operations: [{ op: 'set_goal_deadline', path: 'g1',
+        value: { deadline: '2027-01-14', expected_deadline: null, expected_goal: deadlineCardSubjectOf(GOAL_GRAPH, 'g1') } }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Set the deadline',
+    })
+    const card = { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Set the deadline', message: 'Yes, set that date.', detail: '14 January 2027' }
+    const hold = parsePendingAction(proposalPendingAction(proposal, card, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() }))!
+    expect(hold).not.toBeNull()
+    return { proposal, hold }
+  }
+  const fieldsOn = async (graph: unknown) => {
+    const { proposal, hold } = deadlineHold()
+    latest = [hold]; table = [answerRow(hold)]
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: 'Should I take the job?' })
+    const body = await heldRead()
+    return { id: proposal.proposal_id, ids: (body.proposal_fields?.proposals ?? []).map((p: { proposal_id: string }) => p.proposal_id), body }
+  }
+
+  it('CONTROL: on the model it was made against, the card is projected', async () => {
+    const r = await fieldsOn(GOAL_GRAPH)
+    expect(r.ids).toEqual([r.id])
+  })
+
+  it('RED→GREEN: after an UNRELATED change (the hash moved), the waiting card is still projected, on the current hash', async () => {
+    const moved = unrelated(GOAL_GRAPH)
+    expect(computeAnalysisAffectingGraphHash(moved)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(moved)
+    expect(r.ids).toEqual([r.id])
+    expect(r.body.proposal_fields.graph_hash).toBe(computeAnalysisAffectingGraphHash(moved))
+  })
+
+  it('NEGATIVE: its goal RENAMED (the hash unchanged, no turn since) → the card is not served', async () => {
+    const renamed = { ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) }
+    expect(computeAnalysisAffectingGraphHash(renamed)).toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(renamed)
+    expect(r.ids).not.toContain(r.id)
+  })
+
+  it('NEGATIVE: an unrelated change AND its goal renamed → not served', async () => {
+    const both = unrelated({ ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) })
+    expect(computeAnalysisAffectingGraphHash(both)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(both)
+    expect(r.ids).not.toContain(r.id)
+  })
+})
 
 vi.mock('../../utils/supabase-user-jwt.js', async () => ({
   looksLikeJwt: () => true,
