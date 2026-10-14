@@ -119,11 +119,11 @@ describe('GEN #2: a question is never deleted for a figure the USER wrote that e
   });
 
   it('CONTRAST: a drafter question quoting Olumi\'s own set-aside figure (60, which the user never wrote) is still not shown', async () => {
-    const e = structuredClone(ep('D3_noBase_r2'));
-    const raw = JSON.parse(e.calls[0]!.text) as { unknowns: string[] };
+    const base = ep('D3_noBase_r2');
+    const raw = JSON.parse(base.calls[0]!.text) as { unknowns: string[] };
     const olumis = 'Is the provisional estimate of 60 customers lost per £2 rise right?';
     raw.unknowns.push(olumis);
-    e.calls[0]!.text = JSON.stringify(raw);
+    const e: Episode = { ...base, calls: [{ ...base.calls[0]!, text: JSON.stringify(raw) }, ...base.calls.slice(1)] };
     const { questions } = await build(e);
     expect(questions).not.toContain(olumis);
     expect(questions).toContain(unknowns(ep('D3_noBase_r2'))[2]);

@@ -57,6 +57,11 @@ const PAST_AFTER = /^\s+ago\b/i;
 
 /** Words just after a span that make it time allotted to the goal: "two months to learn", "six months from today". */
 const ALLOTTED_AFTER = /^\s+(?:to\s+\p{L}|from\s+(?:now|today)\b)/iu;
+/**
+ * A forward lead-in just before a span, "the first" included ("within the first 3 months", marketing's L20): the span's
+ * form as a deadline. The held wording stays the span's own (`LEAD` above), so "3 months" is held as before.
+ */
+const LED_BEFORE = new RegExp(String.raw`\b(?:within|in|over|during|for|by)\s+(?:the\s+)?(?:(?:next|coming|following|first)\s+)?$`, 'i');
 
 /**
  * `led`: the brief writes it as a deadline, forward-led ("within 12 months", "over the next ten months") or allotted ("two
@@ -73,7 +78,7 @@ function forwardDurations(brief: string): Span[] {
     const after = brief.slice((m.index ?? 0) + m[0].length);
     if ((lead === '' && PAST_OR_RANGE_BEFORE.test(before)) || PAST_AFTER.test(after)) continue;
     spans.push({ months: Number(m[2]) * MONTHS_PER[m[3]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0,
-      led: lead !== '' || ALLOTTED_AFTER.test(after) });
+      led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, figureAt - 32), figureAt)) || ALLOTTED_AFTER.test(after) });
   }
   for (const m of brief.matchAll(SPELLED_DURATION)) {
     if (PAST_AFTER.test(brief.slice((m.index ?? 0) + m[0].length))) continue;
@@ -107,7 +112,7 @@ export function attestHorizon(
    * month point ("month 9"), a forward-led span ("within 12 months", "over the next ten months") or time allotted ("we
    * have two months to learn"), never the bare length of something else ("a runway of 12 months", "twelve months of runway").
    */
-  const forwardLed = (index: number): boolean => new RegExp(`${LEAD}$`, 'i').test(brief.slice(Math.max(0, index - 32), index));
+  const forwardLed = (index: number): boolean => LED_BEFORE.test(brief.slice(Math.max(0, index - 32), index));
   const deadlineForm = (p: RegExpExecArray): boolean => p[1] !== undefined || forwardLed(p.index)
     || ALLOTTED_AFTER.test(brief.slice(p.index + p[0].length));
   const proposed = proposals.find((p) => countOf(p) === claimed

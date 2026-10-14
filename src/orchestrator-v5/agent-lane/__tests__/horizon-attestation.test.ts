@@ -142,6 +142,11 @@ describe('attestHorizon: the brief confirms the drafter\'s month count, or it is
     expect(attestHorizon(FUNDING, { horizon_months: 12 })).toEqual({ months: 12, wording: '12 months', status: 'attested' });
   });
 
+  it('CONTRAST (marketing L20, verbatim): the goal\'s own "within the first 3 months" is still its deadline, held in its own words', () => {
+    const L20 = 'I have two goals: For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months.';
+    expect(attestHorizon(L20, { horizon_months: null })).toEqual({ months: null, wording: '3 months', status: 'unresolved' });
+  });
+
   it('absence-tolerant: no brief, no goal, or an older candidate with no horizon', () => {
     expect(attestHorizon(undefined, { horizon_months: 12 }).status).toBe('absent');
     expect(attestHorizon(BRIEF, null).status).toBe('unresolved');
