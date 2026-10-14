@@ -1769,6 +1769,9 @@ export function goalPathsCarryTheUsersFigures(graph: { readonly nodes: readonly 
   }));
 }
 
+/** What a revised draft over the link limit says, once, in plain words (DL 14 Oct). */
+export const REVISED_DRAFT_MORE_LINKS = 'This model has more links than usual, because it tracks everything your goals depend on.';
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -1787,6 +1790,8 @@ export async function buildModelFromBrief(
    * user's message). Written verbatim in this brief text too, it attests the event-by-date reading in place of the verb list.
    */
   attestedDeliverable?: string,
+  /** A revised draft (`prepareRevisedDraft`): a prepare-only card the user accepts before anything changes. */
+  revisedDraft?: boolean,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = {
@@ -1976,7 +1981,17 @@ export async function buildModelFromBrief(
   let leftOut: { kind: string; label: string }[] = [];
   // An option the FIRST draft had withheld as indistinct, which an adopted retry then dropped: still said.
   let carriedWithheld: readonly WithheldOption[] = [];
-  const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
+  /**
+   * ⭐ A REVISED DRAFT OVER THE LINK LIMIT ONLY IS ADMITTED AS DRAFTED (DL 14 Oct, Paul's marketing L20: "conversion rate of over
+   * 15% and … 20 new customers"). Its two goals' chain came to 35 links (16 nodes; 4 of them Olumi's), the size retry
+   * fitted but demoted "25% of my time" and "over 15%" to Olumi's estimates, so it was rightly rejected and the user's goals
+   * were never saved (125 s). The link cap is a backstop for an over-widened FIRST model; a revised draft is a card the user
+   * accepts first. So no retry runs (it is that retry which loses the user's figures) and the draft is admitted, said once.
+   * The node limit still refuses, and a first model takes today's path.
+   */
+  const revisedDraftOverLinksOnly = revisedDraft === true && !size.within && !size.user_material_exceeds_limit
+    && size.nodes <= size.limits.maxNodes;
+  const needsSizeRetry = !size.within && !size.user_material_exceeds_limit && !revisedDraftOverLinksOnly;
   // A missing risk mechanism, and an option × factor (or acted-on baseline) with no
   // level (c22, `findCoverageGaps`), ask the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
@@ -2036,7 +2051,7 @@ export async function buildModelFromBrief(
   const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue),
     ...(unattested !== null ? [unattestedEventIssue(unattested, brief)] : [])];
   let trace: ConstructionTrace = { retried: false };
-  if (needsSizeRetry || asked.length > 0) {
+  if ((needsSizeRetry || asked.length > 0) && !revisedDraftOverLinksOnly) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
     const reasons = {
@@ -2254,7 +2269,7 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) };
   }
 
-  if (!size.within && !size.user_material_exceeds_limit) {
+  if (!size.within && !size.user_material_exceeds_limit && !revisedDraftOverLinksOnly) {
     return {
       ok: false,
       mutated: false,
@@ -2706,7 +2721,10 @@ export async function buildModelFromBrief(
   // ⭐ B RESTATED GOAL (`draft-replacement-context.ts`): a revised draft of an unreviewed scaffold is PREPARED, never
   // written here. The caller offers these exact bytes as one card and registers them on approval, with compare-and-set
   // on the base it read; so the empty-model guard and the create-only registration below are not this call's.
-  if (preparingDraftReplacementFor(scenarioId)) return { ok: true, mutated: false, prepared_graph: graph };
+  if (preparingDraftReplacementFor(scenarioId)) {
+    return { ok: true, mutated: false, prepared_graph: graph,
+      ...(revisedDraftOverLinksOnly && !size.within ? { admitted_over_limit_because: REVISED_DRAFT_MORE_LINKS } : {}) };
+  }
   // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   if (stillEmpty.status === 200) {
@@ -2803,7 +2821,7 @@ export async function buildModelFromBrief(
     construction_retried: constructionRetried,
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
-      : {}),
+      : revisedDraftOverLinksOnly && !size.within ? { admitted_over_limit_because: REVISED_DRAFT_MORE_LINKS } : {}),
     options: admitted.nodes.filter((n) => n.kind === 'option').length,
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),

@@ -296,7 +296,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
-import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
@@ -3685,7 +3685,7 @@ export function createAgentCapabilities(
         ...(gate.messages.length > 0 ? { messages: gate.messages } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : undefined;
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
         // No widening for a revised draft (prepare-only card): it stays exactly as served before the arms were restored.
-        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context, deliverable)));
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context, deliverable, true)));
     } catch {
       out = { ok: false, mutated: false };
     }
@@ -3767,6 +3767,8 @@ export function createAgentCapabilities(
       + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
         : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
       + againstCurrent
+      // Said once: a revised draft admitted over the link limit (build-model.ts `revisedDraftOverLinksOnly`).
+      + ((out as { admitted_over_limit_because?: unknown }).admitted_over_limit_because === REVISED_DRAFT_MORE_LINKS ? `${REVISED_DRAFT_MORE_LINKS} ` : '')
       + 'Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
