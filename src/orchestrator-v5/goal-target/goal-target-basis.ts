@@ -346,8 +346,10 @@ export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string
     || level.unit.trim() === '') return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
   const { today, comparator: c, target } = level;
   const meets = c === '>=' ? today >= target : c === '>' ? today > target : c === '<=' ? today <= target : today < target;
-  return `Carrying on as now: ‘${label}’ stays at ${sayFigureAsWritten(today, level.unit)} in this model, which `
-    + `${meets ? 'meets' : 'does not meet'} your target of ${bound} ${sayFigureAsWritten(target, level.unit)}, by assumption. `
+  // The shared formatter's rate separator (" / month") is the panel's; a sentence says the period in words, as the face does.
+  const say = (v: number): string => sayFigureAsWritten(v, level.unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
+  return `Carrying on as now: ‘${label}’ stays at ${say(today)} in this model, which `
+    + `${meets ? 'meets' : 'does not meet'} your target of ${bound} ${say(target)}, by assumption. `
     + 'If it would change anyway, without any of these options, tell me what would change it and by how much, and Olumi '
     + 'can add that to the model.';
 }
