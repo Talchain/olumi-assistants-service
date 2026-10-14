@@ -9,7 +9,7 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
-import { shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
+import { capacityRatioOptionIds, CAPACITY_RATIO_COMPARISON_NOTE, shareByDateGoalForChanceOf, shareChanceInputFailure, sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -199,7 +199,26 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       message: `Not shown. This forecast can use at most two uncertain hiring starts for ‘${label}’ at once. Say which two it should model.`,
     }, { keepOutcome: true, keepOrdering: true });
   }
-  return out;
+  return withoutCapacityRatioComparison(out, graph);
+}
+
+/** Typed record that a capacity-ratio option's comparison was withheld (not a goal-figure withhold: every chance stays). */
+export const CAPACITY_RATIO_COMPARISON_WITHHELD = 'CAPACITY_RATIO_COMPARISON_WITHHELD';
+
+/**
+ * ⛔ L4 (DL ruling (A) condition 2): a capacity-ratio option's link is drawn beside the team part, not as the same draw, so
+ * its run-by-run comparison with any other option is distorted. Every share, the leader and the flips go; every option's
+ * chance stays (each is exact in its moments). The licence note says why on the card (`CAPACITY_RATIO_COMPARISON_NOTE`).
+ */
+export function withoutCapacityRatioComparison<E>(envelope: E, graph: unknown): E {
+  const ratioIds = capacityRatioOptionIds(graph);
+  if (ratioIds.length === 0 || !isRec(envelope)) return envelope;
+  const ids = new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
+    const id = r.option_id ?? r.id; return typeof id === 'string' && ratioIds.includes(id) ? [id] : [];
+  }));
+  return withholdOptionGoalFigures(envelope, ids, {
+    code: CAPACITY_RATIO_COMPARISON_WITHHELD, severity: 'info', option_ids: [...ids], message: CAPACITY_RATIO_COMPARISON_NOTE,
+  }, { keepGoalFigures: true });
 }
 
 /**

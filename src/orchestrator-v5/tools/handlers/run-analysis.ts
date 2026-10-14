@@ -221,7 +221,7 @@ import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThres
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
 import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
-import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
+import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
@@ -2729,7 +2729,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
       );
     }
-    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
+    // ⛔ L4 (DL condition 2): a compared capacity-ratio option's run-by-run comparison is distorted (its link is drawn beside
+    // the team part), so no leader or win share is said; the licence's note says why (`CAPACITY_RATIO_COMPARISON_NOTE`).
+    const ratioOptionCompared = capacityRatioOptionIds(snapshot.rawPersistedGraph ?? snapshot.graph).some(id => analysedOptionIds.has(id));
+    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared
       ? null : buildAnalysisResultHeadline(headlineInput);
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
@@ -3204,7 +3207,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
         // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
         // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
-        constraint_verdict: keptOlumiProvisional
+        constraint_verdict: keptOlumiProvisional || ratioOptionCompared
           || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
           ? { ...leaderPermission, may_name_leading_option: false }
           : leaderPermission,

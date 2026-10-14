@@ -372,6 +372,10 @@ export interface EventCapacityRatio {
   /** The identity's outcome (the capacity), and each factor's value today and with the option. */
   readonly capacity: string;
   readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number }[];
+  /** True only when the drafter typed the identity as stated in the brief; otherwise it is Olumi's reading. */
+  readonly identity_stated: boolean;
+  /** The option's own settings the ratio rests on, each with whether it is Olumi's proposal. */
+  readonly settings: readonly { readonly label: string; readonly value: number; readonly unit: string | null; readonly olumis: boolean }[];
 }
 
 const sameLabel = (a: unknown, b: unknown): boolean => typeof a === 'string' && typeof b === 'string'
@@ -423,7 +427,10 @@ export function eventCapacityRatios(candidate: CandidateModel): ReadonlyMap<numb
     const ratio = product(withOption) / product(today as number[]);
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) return;
     out.set(index, { ratio, capacity: String(identity.outcome),
-      factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]! })) });
+      factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]! })),
+      identity_stated: identity.provenance === 'explicit',
+      settings: settings.map(iv => ({ label: String(iv.factor_label), value: iv.value as number,
+        unit: typeof iv.unit === 'string' ? iv.unit : null, olumis: iv.provenance !== 'explicit' })) });
   });
   return out;
 }
@@ -487,7 +494,8 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
       // the team-time writer); until then the link stays explicitly defaulted, never an estimate of extra share.
       nodes.push({ id: sw, kind: 'factor', category: 'controllable', label: `${o.label} changes ${r.capacity}`, provenance: 'ai_inferred',
         observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: { capacity_ratio: r.ratio,
-          ratio_basis: { capacity: r.capacity, factors: r.factors }, lead_low: 0, lead_high: 0, unit: `${unit} per month` } } });
+          ratio_basis: { capacity: r.capacity, factors: r.factors, identity_stated: r.identity_stated, settings: r.settings },
+          lead_low: 0, lead_high: 0, unit: `${unit} per month` } } });
       edges.push({ from: sw, to: 'event_goal', exists_probability: 1, effect_direction: 'positive',
         strength: { mean: 0.5, std: 0.125 }, defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
       nodes.find(n => n.id === id)!.interventions[sw] = { value: 1 };
@@ -522,6 +530,37 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
     inference_classes: Object.fromEntries(nodes.map(n => [n.id, n.provenance === 'from_brief' ? 'brief_stated' : 'builder_inferred'])) };
   // forbidden-exempt: deterministic admission builds the canonical share-by-date shape as plain records; every field is pinned by s-e-goals-s2b rows and S2a recognition
   return withEventNumberLoss(model as unknown as AdmittedModel, brief);
+}
+
+/**
+ * L3 (DL ruling (A), 14 Oct): each capacity-ratio carrier is sized from the team part's own share moments (m, sd), so the
+ * option's goal has EXACTLY the mean (r·m) and variance (r²·sd²) of "r × the same team draw": link mean (r−1)·m and sd
+ * √(r²−1)·sd. Without the team's moments (no time held, or a single estimate with no spread on the node) the link stays
+ * explicitly defaulted and the option shows no chance. A ratio below 1 is never sized (admission already refused it).
+ */
+export function withRatioCarrierSizes(graph: Rec): Rec {
+  const carrier = eventShareCarrierOf(graph)?.provenance?.share_by_date;
+  if (!carrier || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return graph;
+  const team = graph.nodes.find((n: Rec) => n.id === carrier.team_id)?.observed_state;
+  const m = team?.value, sd = team?.std;
+  const held = typeof m === 'number' && Number.isFinite(m) && m >= 0 && typeof sd === 'number' && Number.isFinite(sd) && sd >= 0;
+  for (const edge of graph.edges.filter((e: Rec) => e.to === carrier.goal_id)) {
+    const c = graph.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
+    if (!c || typeof c.capacity_ratio !== 'number') continue;
+    const r = c.capacity_ratio;
+    if (!held || !Number.isFinite(r) || r < 1) {
+      edge.strength = { mean: 0.5, std: 0.125 }; edge.defaulted = true; delete c.ratio_sizing;
+      if (edge.provenance) delete edge.provenance.natural_effect;
+      continue;
+    }
+    const mean = (r - 1) * m, std = Math.sqrt(r * r - 1) * sd;
+    edge.strength = { mean, std };
+    delete edge.defaulted;
+    c.ratio_sizing = { team_mean: m, team_sd: sd, rule: 'marginal_exact' };
+    edge.provenance = { ...(edge.provenance ?? {}), natural_effect: { amount: mean * 100, amount_unit: graph.nodes.find((n: Rec) => n.id === carrier.goal_id)?.goal_threshold_unit,
+      per_source_change: 1, per_source_change_unit: 'switch', strength_mean: mean, strength_mean_frame: 'edge_strength' } };
+  }
+  return graph;
 }
 
 /** A held S1 date materialises only this definition's forecast carriers. Pure clone; all other graph fields survive. */
@@ -564,5 +603,5 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
     edge.provenance.natural_effect = { amount: m.mean * 100, amount_unit: unit, per_source_change: 1,
       per_source_change_unit: 'switch', strength_mean: m.mean, strength_mean_frame: 'edge_strength' };
   }
-  return out;
+  return withRatioCarrierSizes(out);
 }

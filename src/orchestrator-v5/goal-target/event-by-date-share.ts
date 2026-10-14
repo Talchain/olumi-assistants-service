@@ -18,7 +18,14 @@ export interface ExtraShare {
 }
 /** `extra` is the option's first added part; `furtherExtras` its later starts (E5: "two developers" is two parts, each
  * with its own lead range and pace). Parts are independent, so their means and variances add. */
-export interface ShareParts { readonly team: TeamShare; readonly extra?: ExtraShare; readonly furtherExtras?: readonly ExtraShare[] }
+export interface ShareParts {
+  readonly team: TeamShare; readonly extra?: ExtraShare; readonly furtherExtras?: readonly ExtraShare[];
+  /**
+   * L3/L4 (DL ruling (A)): the option scales the team's own share by this capacity ratio (≥ 1), from the brief's capacity
+   * chain, with no lead. One mechanism per option: never beside `extra`. Exact law: P(r·share ≥ t) = the team tail at t/r.
+   */
+  readonly ratio?: number;
+}
 export function extrasOf(parts: ShareParts): readonly ExtraShare[] {
   return parts.extra === undefined ? [] : [parts.extra, ...(parts.furtherExtras ?? [])];
 }
@@ -123,6 +130,10 @@ export function rangedPartCount(extras: readonly ExtraShare[]): number {
 export function exactChance(parts: ShareParts, threshold: number): number {
   momentsOfTeam(parts.team);
   if (!Number.isFinite(threshold)) throw new RangeError('Invalid threshold');
+  if (parts.ratio !== undefined) {
+    if (!Number.isFinite(parts.ratio) || parts.ratio < 1 || extrasOf(parts).length > 0) throw new RangeError('Invalid capacity ratio');
+    return teamTail(parts.team, threshold / parts.ratio);
+  }
   const extras = extrasOf(parts);
   for (const x of extras) extraShareMoments(x.monthlyShare, x.D, x.leadLow, x.leadHigh);
   const ranged = extras.filter(isRanged);
@@ -162,6 +173,14 @@ export function normalChance(parts: ShareParts, threshold: number): number {
   // ISL draws both the team part and its held +1 coefficient independently.
   // Var(C*T) = Var(T) + Var(C) * E[T²], for E[C]=1 and held sd(C)=0.01.
   const heldCoefficientVariance = 0.01 ** 2 * (team.mean ** 2 + team.sd ** 2);
+  if (parts.ratio !== undefined) {
+    if (!Number.isFinite(parts.ratio) || parts.ratio < 1 || extrasOf(parts).length > 0) throw new RangeError('Invalid capacity ratio');
+    // The ratio link (`withRatioCarrierSizes`): mean (r−1)·m, sd √(r²−1)·sd, drawn beside the team part, so the option's goal
+    // has mean r·m and variance r²·sd² (+ the team link's held coefficient), exactly "r × the same team draw" in moments.
+    const r = parts.ratio, ratioMean = team.mean + (r - 1) * team.mean;
+    const ratioSd = Math.sqrt(team.sd ** 2 + (r * r - 1) * team.sd ** 2 + heldCoefficientVariance);
+    return ratioSd === 0 ? (ratioMean >= threshold ? 1 : 0) : normalTail((threshold - ratioMean) / ratioSd);
+  }
   const mean = team.mean + extraMean, sd = Math.sqrt(team.sd ** 2 + extraVariance + heldCoefficientVariance);
   return sd === 0 ? (mean >= threshold ? 1 : 0) : normalTail((threshold - mean) / sd);
 }

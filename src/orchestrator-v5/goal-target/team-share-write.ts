@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { EditGraphHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { draftedTeamPartOf, eventShareCarrierOf } from './event-by-date-model.js';
+import { draftedTeamPartOf, eventShareCarrierOf, withRatioCarrierSizes } from './event-by-date-model.js';
 import { goalDeadlineFromRecord, isShareCalendarDate } from './goal-kind.js';
 import { sayDate, timeBetween } from './deadline-date.js';
 import { cappedTeamShareMean, teamShareMoments } from './event-by-date-share.js';
@@ -455,6 +455,8 @@ export function applyTeamShareEdit(graph: unknown, a: ApprovedTeamTime, expected
   // deletes the team part's level; a range is the level.
   if (a.low_months === a.high_months) carrier.stated_time = os;
   else { team.observed_state = os; delete carrier.stated_time; }
+  // The team's moments size every capacity-ratio carrier (L3), in the same write, before the postimage hash.
+  withRatioCarrierSizes(out);
   const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false,
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
       affected_entities: [{ kind: 'factor', label: part.team.label.slice(0, 120) }],
