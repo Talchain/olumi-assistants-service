@@ -1822,10 +1822,12 @@ describe('Science §(ad) time-bound goal reply details', () => {
       ] }],
       horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });
     expect(c.shape, c.reason).not.toBeNull();
-    expect(c.shape!.headline).toBe(note);
-    expect(c.text.split(note)).toHaveLength(2);
+    // AIE #94 6178106849's exact lead: the goal's quantity AT its point ("MRR at month 9", never "9-month MRR").
+    expect(c.shape!.headline).toBe('Your goal is MRR at month 9; this Run has not evaluated it at that point.');
+    expect(c.text.split('this Run has not evaluated it')).toHaveLength(2);
     expect(c.text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
-    expect(c.shape!.detail).not.toContain(note);
+    expect(c.text).not.toContain(note);
+    expect(c.text).not.toMatch(/\d+-month MRR/);
     expect(c.text).not.toContain(HORIZON_MARKER);
     expect(c.text).not.toContain("This model doesn't yet say");
     expect(c.text).not.toContain('%');

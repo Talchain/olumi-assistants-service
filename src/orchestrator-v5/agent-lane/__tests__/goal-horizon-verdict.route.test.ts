@@ -342,9 +342,10 @@ describe('Science §(ad) through the producer and reply route', () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     const body = await turn(); // turn asserts deep equality on the real same-id replay, without a model call.
     expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    // §(ad) amended: the reply leads with the why, once; the cards keep the marker.
-    expect(body._answer_shape).toMatchObject({ headline: "Your goal is for month 9, and this model only has today's numbers.", bullets: [] });
-    expect(body._answer_shape!.detail).not.toContain("Your goal is for month 9, and this model only has today's numbers.");
+    // §(ad) amended (AIE #94 6178106849): the reply leads with the goal at its point, once; the cards keep the marker.
+    const goalLabel = String(goal(graph).label);
+    expect(body._answer_shape).toMatchObject({ headline: `Your goal is ${goalLabel} at month 9; this Run has not evaluated it at that point.`, bullets: [] });
+    expect(body.assistant_text).not.toContain("Your goal is for month 9, and this model only has today's numbers.");
     expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
   }, 60_000);
 

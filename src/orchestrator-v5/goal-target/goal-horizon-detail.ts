@@ -26,6 +26,19 @@ function horizonGoal(graph: unknown): { goal: Rec; nodes: Rec[]; month: number |
 }
 
 /**
+ * ⭐ AIE #94 6178106849 (§(ad) amended, Paul pricing): the reply's lead when the result cards already carry the horizon marker.
+ * The goal's own quantity AT its point ("MRR at month 12": a monthly rate then, never receipts accumulated over the period),
+ * and that this Run has not evaluated it there. The canonical cells stay withheld; this sentence opens nothing.
+ */
+export function goalHorizonReplyLead(graph: unknown): string | null {
+  const held = horizonGoal(graph);
+  const label = typeof held?.goal.label === 'string' ? held.goal.label.trim() : '';
+  if (held === undefined || label === '') return null;
+  const point = held.month !== undefined ? `at month ${held.month}` : `on ${sayDate(held.deadline!)}`;
+  return `Your goal is ${label} ${point}; this Run has not evaluated it at that point.`;
+}
+
+/**
  * The carrier's positional operands are [count today, leave share per month, additions per month]. No label or unit
  * text assigns a role. Without that typed carrier, the factual opening stands alone rather than guessing missing slots.
  */
