@@ -22,7 +22,7 @@
  * are not proven uncalled; G1's stamps are the backstop for a human edit through any of them.
  */
 import { RETAINED_LIMIT_QUESTION, RETAINED_LIMIT_QUANTITY_QUESTION, unresolvedRetainedLimits, retainedLimitWithheldLine } from '../../../graph/retained-limit.js';
-import { readGoalRecord } from '../../goal-target/goal-record.js';
+import { GOAL_RECORD_PRECEDENCE, readGoalRecord } from '../../goal-target/goal-record.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from './build-model.js';
 import { edgeReviewedByUser, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
@@ -178,6 +178,8 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
   const uncertain: { previous: HeldRow; proposed: HeldRow[] }[] = [];
   const nodes = [...recs(rec(candidate)?.nodes)];
   const rows = [...rowsOf(candidate)];
+  /** The rows carried from the earlier draft, by identity: they keep their own origin (`targetsStoredInferred`). */
+  const carriedRows = new Set<Rec>();
   let conflict = false;
   for (const c of limitsOf(base)) {
     const row = rowOf(c);
@@ -206,7 +208,9 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       && ratePeriodOf(row.unit) !== null && unitPhraseTail(row.unit).split(' ').filter((w) => w !== '' && w !== 'per').length === 1
       && unitPhraseTail(unitOf(sameId)) === ''
       && figure(row.value, unitOf(sameId)) === figure(row.value, head)) {
-      rows[rows.indexOf(sameId)] = structuredClone(c);
+      const respelled = structuredClone(c);
+      rows[rows.indexOf(sameId)] = respelled;
+      carriedRows.add(respelled);
       kept.push(row);
       continue;
     }
@@ -226,10 +230,12 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
     const marker = { state: 'unscored', reason: 'retained_limit_equivalence_unresolved',
       previous_constraint_id: c.constraint_id, proposed_constraint_ids: proposedRows.map((r) => r.constraint_id),
       question: RETAINED_LIMIT_QUESTION };
-    rows.push({ ...structuredClone(c), ...(proposedRows.length > 0
+    const carriedRow: Rec = { ...structuredClone(c), ...(proposedRows.length > 0
       ? { retained_unresolved_limit: { ...marker, role: 'original' } }
       : existing === undefined ? { retained_unresolved_limit: { ...marker, role: 'original',
-        reason: 'retained_limit_quantity_unresolved', question: RETAINED_LIMIT_QUANTITY_QUESTION } } : {}) });
+        reason: 'retained_limit_quantity_unresolved', question: RETAINED_LIMIT_QUANTITY_QUESTION } } : {}) };
+    rows.push(carriedRow);
+    carriedRows.add(carriedRow);
     // An isolated proposed interpretation is retained for this SAME unanswered question, not made a causal factor.
     // Connected proposed quantities remain independently modelled; only the isolated question carrier is unscored.
     for (const proposedRow of proposedRows) {
@@ -242,11 +248,44 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       }
     }
   }
-  const replacement = { ...rec(candidate), nodes, goal_constraints: rows };
+  // The revised draft's own targets are stored `inferred` (`targetsStoredInferred`); its carried limits keep their origin.
+  const replacement = { ...rec(candidate), nodes: goalTargetStampsInferred(nodes, candidate),
+    goal_constraints: targetsStoredInferred(rows, candidate, carriedRows) };
   // The card's limits are the candidate's own rows as they stand after the carry (a re-spelled row says its earlier unit).
   const candidateLimitIds = new Set(theirs.map((t) => t.constraint_id));
   return { kept, dropped, carried, uncertain, conflict, limits: limitsOf(replacement).filter((r) => candidateLimitIds.has(r.constraint_id)).map(rowOf),
     ...(unresolvedRetainedLimits(replacement).length > 0 ? { withheld: retainedLimitWithheldLine(replacement) } : {}), replacement };
+}
+
+/**
+ * ⭐ APPROVING AN AI REINTERPRETATION IS NOT AUTHORSHIP (Codex CHECK-3020-45e7c1e3 item 2; DL #3020 r2 (a), 14 Oct): the
+ * revised draft's drafter re-reads the user's goal, and its `explicit` on a target is its own claim. Relabelled ‘Partner
+ * sign-ups’, Paul's "20 new customers" was stored `explicit` on another entity. So every target row the candidate holds (each
+ * `goal_target` row and the goal's own row, the rows `targetsHeldBy` reads, in any frame) is stored `inferred` until a
+ * verifier proves the user's own words state it. The rows carried from the earlier draft are limits (`limitsKeptBy`) and keep
+ * their origin; the user's typed goal stays the source on the operation. Applied to the replacement `limitsKeptBy` returns.
+ */
+function targetsStoredInferred(rows: readonly Rec[], candidate: unknown, carried: ReadonlySet<Rec>): Rec[] {
+  const goals = goalIdsOf(candidate);
+  return rows.map((c) => (!carried.has(c) && (c.role === 'goal_target' || goals.has(String(c.node_id))) && c.provenance === 'explicit'
+    ? { ...c, provenance: 'inferred' } : c));
+}
+
+/**
+ * The same rule on the candidate's GOAL node (#3020 r2 buddy): its target source (the goal record's `source` field) is the host's
+ * attestation that the brief wrote the drafter's figure (`holdStatedGoalAttributes`), which checks the figure, never which
+ * quantity it is on, so "20 new customers" attested a goal relabelled ‘Partner sign-ups’. Any source but a definitional one is
+ * removed (not attested, as when nothing grounds it); a definitional one is not authorship and is kept. The goal's figure,
+ * comparator and period stay, so the Run reads the same target. Carried nodes are the earlier draft's limit nodes, never a goal.
+ */
+function goalTargetStampsInferred(nodes: readonly Rec[], candidate: unknown): Rec[] {
+  const goals = goalIdsOf(candidate);
+  const [field] = GOAL_RECORD_PRECEDENCE.source;
+  return nodes.map((n) => {
+    if (!goals.has(String(n.id)) || n[field] === undefined || n[field] === 'definitional') return n;
+    const { [field]: _userSource, ...rest } = n;
+    return rest;
+  });
 }
 
 /** The candidate's targets for the goal: each `goal_target` row and the goal's own row, with the comparator as stated. */
