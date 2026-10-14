@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SupabaseSessionStore } from '../supabase-store.js';
 import { SessionLRUCache } from '../cache.js';
 import type { SessionTurnWrite } from '../store.js';
+import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { guidanceHistoryOf, guidanceOnAnswer, parseAnswerGuidance } from '../../agent-lane/turn-context/guidance-history.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -61,6 +62,30 @@ describe('content-free guidance on the existing answer', () => {
     await expect(fresh().append(write())).rejects.toThrow(/RPC failed/);
     expect(rpc).toHaveBeenCalledOnce();
     expect(evict).not.toHaveBeenCalled();
+  });
+
+  // 0.79 SD-1 (CEE #2657): the wrapper admits ONE run_delivery beside guidance (migration 20261006070522); the store
+  // guard is its twin, so a write the DB would take is never refused here, and one it would refuse never leaves.
+  const delivery = HandlerFactSchema.parse({ fact_type: 'run_delivery', fact_version: 1, noop: false, result: { run_id: 'run_1',
+    record: { record_version: 1, run_id: 'run_1', graph_hash: 'a'.repeat(16), phase3_blocks: [] } } });
+  it('⭐ RED: a guidance answer carrying ONE run_delivery is sent in ONE RPC, in the wrapper\'s serialised shape', async () => {
+    const { fresh, rpc } = setup();
+    expect(await fresh().append({ ...write(), handler_facts: [delivery] })).toEqual({ id: 'row1' });
+    expect(rpc).toHaveBeenCalledOnce();
+    expect(rpc).toHaveBeenCalledWith('append_agent_answer_with_guidance', expect.objectContaining({
+      p_agent_guidance: meta(),
+      p_handler_facts: [{ handler_id: 'run_delivery', action_type: 'run_delivery', noop: false,
+        payload: { fact_type: 'run_delivery', fact_version: 1, result: delivery.result } }],
+    }));
+  });
+
+  it('every OTHER fact set on a guidance answer is refused before any RPC (two deliveries; any other fact)', async () => {
+    const { fresh, rpc } = setup();
+    const other = { ...delivery, fact_type: 'run_analysis' } as unknown as HandlerFact;
+    for (const facts of [[delivery, delivery], [other], [delivery, other]]) {
+      await expect(fresh().append({ ...write(), handler_facts: facts })).rejects.toThrow(/final Agent answer/);
+    }
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('rejects attaching metadata to graph or internal claim writes before any RPC', async () => {

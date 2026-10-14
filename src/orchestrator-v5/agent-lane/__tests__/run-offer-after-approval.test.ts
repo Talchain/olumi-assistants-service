@@ -63,8 +63,6 @@ describe('the explicit Run is offered after a change the canonical readiness adm
    */
   let failReadbackAfterWrite = false;
   let postWriteReads = 0;
-  let graphReads = 0;
-  let approvalReads = 0;
   /** Scripted model outputs for an agent-loop turn, consumed in order before the default behaviour. */
   let script: Record<string, unknown>[] = [];
   /** The Run response's own stamp (its result's graph hash, its `computed_at`); null → an unstamped Run, as before. */
@@ -79,7 +77,6 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const a = Fastify({ logger: false });
     a.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
-      graphReads += 1;
       if (edges.length > 0) postWriteReads += 1;
       if (failReadbackAfterWrite && postWriteReads >= 2) return reply.code(500).send({ error: 'read failed' });
       return {
@@ -129,7 +126,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; graphReads = 0; approvalReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -137,9 +134,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const approve = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'the control: a real proposal was offered').toBeDefined();
     lastApproveId = approve!.id;
-    const beforeApproval = graphReads;
     const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: approve!.message, source: 'chip', chip: { id: approve!.id }, ...(approveTurnId ? { turn_id: approveTurnId } : {}) } });
-    approvalReads = graphReads - beforeApproval;
     expect(t2.statusCode).toBe(200);
     return t2.json() as { suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } };
   }

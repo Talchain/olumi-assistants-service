@@ -53,12 +53,13 @@ function goalSubjectOf(graph: unknown): unknown {
 
 /**
  * The reading the automatic Run sends: the turn-start Run's recorded reading while the saved model keeps its subject, else
- * `null` (the Run's existing "no reading" input). `before` is the model as the turn found it, with the result its read
- * selected (a read carries a result only for its own graph, so this is the Run that was current on it).
+ * `null` (the Run's existing "no reading" input). `before` is the turn-start graph read as it came (`turnStartRead`): the
+ * model as the turn found it, with the result that read selected (a read carries a result only for its own graph, so this is
+ * the Run that was current on it).
  */
-export function carriedEffectsTiming(before: { readonly graph: unknown; readonly analysisResult: unknown } | undefined, saved: unknown): EffectsTiming | null {
+export function carriedEffectsTiming(before: { readonly graph?: unknown; readonly analysis_result?: unknown } | undefined, saved: unknown): EffectsTiming | null {
   if (before === undefined) return null;
-  const reading = recordedEffectsTimingOf(before.analysisResult);
+  const reading = recordedEffectsTimingOf(before.analysis_result);
   if (reading === undefined) return null;
   const goalBefore = goalSubjectOf(before.graph);
   if (goalBefore === undefined || !isDeepStrictEqual(goalBefore, goalSubjectOf(saved))) return null;

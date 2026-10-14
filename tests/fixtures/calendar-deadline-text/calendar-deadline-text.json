@@ -1,0 +1,9 @@
+{
+ "_source": {
+  "packet": "recovery/codex/AIE-D4-FUTURE-VALUE-CALENDAR-AND-STATUS-QUO-RULINGS-20261014.json",
+  "packet_sha256": "fc17c200c8b67deed2b3a8be418f1c6691f4226400dbf8228b4a02256a64c168",
+  "board": "#94 6163023819",
+  "item": "D4_B.exact_text, byte for byte. Ships ONLY with HIRING's calendar admission/clarification consumer (D4_B.dependency)."
+ },
+ "calendar_deadline": "When the goal’s deadline is a calendar point, such as the end of next quarter, by Q3 or by March, do not convert it to a guessed number of months. Until a compatible duration is actually supported, leave goal.horizon_months null; leave basis.period_months null when its measurement horizon depends on that unresolved point, while preserving any separately stated measurement window. Keep the complete applicable words in goal.source_quote, including the earlier words that identify ‘that quarter’, and retain the forecast’s horizon and conditions in their existing carriers. Use the existing deadline clarification for the date or calendar information that is genuinely missing; do not re-ask a retained date or turn a launch reference, runway or learning window into a goal deadline."
+}

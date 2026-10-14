@@ -31,49 +31,49 @@ describe('the automatic Run carries the AI’s timing reading only while its sub
   });
 
   it.each(['in_place_by_period', 'not_stated', 'later_or_partial'] as const)('the licence’s reading %s is carried over an unrelated edit', (reading) => {
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed(reading) }, linkEdited())).toBe(reading);
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed(reading) }, linkEdited())).toBe(reading);
   });
 
   it('the period-end withhold’s recorded reading is carried too', () => {
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: withheld('later_or_partial') }, linkEdited())).toBe('later_or_partial');
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: withheld('later_or_partial') }, linkEdited())).toBe('later_or_partial');
   });
 
   it('NEGATIVE: an option changed (its setting) → none', () => {
     const saved = linkEdited();
     saved.nodes.find((n: Rec) => n.id === 'hire_two_developers').interventions.mid_weight_developers = { unit: 'people', value: 0.3, raw_value: 3 };
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed('in_place_by_period') }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('in_place_by_period') }, saved)).toBeNull();
   });
 
   it('NEGATIVE: a link from an option changed → none', () => {
     const saved = clone();
     const fromOption = saved.edges.find((e: Rec) => e.from === 'hire_a_tech_lead');
     fromOption.strength = { mean: 0.9, std: 0.05 };
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed('in_place_by_period') }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('in_place_by_period') }, saved)).toBeNull();
   });
 
   it('NEGATIVE: an option added → none', () => {
     const saved = clone();
     saved.nodes.push({ id: 'contract_a_team', kind: 'option', label: 'Contract a team' });
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed('in_place_by_period') }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('in_place_by_period') }, saved)).toBeNull();
   });
 
   it('NEGATIVE: the goal’s period changed → none', () => {
     const saved = clone();
     const goal = saved.nodes.find((n: Rec) => n.kind === 'goal');
     goal.goal_target_basis = { ...goal.goal_target_basis, period_months: 6 };
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed('in_place_by_period') }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('in_place_by_period') }, saved)).toBeNull();
   });
 
   it('NEGATIVE: no reading recorded, a null reading, an unknown origin, or two readings that disagree → none', () => {
     const saved = linkEdited();
     expect(carriedEffectsTiming(undefined, saved)).toBeNull();
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: undefined }, saved)).toBeNull();
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: withheld(null) }, saved)).toBeNull();
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed('in_place_by_period', 'user') }, saved)).toBeNull();
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: licensed('soon') }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: undefined }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: withheld(null) }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('in_place_by_period', 'user') }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('soon') }, saved)).toBeNull();
     const both = licensed('in_place_by_period');
     both.enrichment.inference_warnings.push(withheld('later_or_partial').enrichment.inference_warnings[0]);
     expect(recordedEffectsTimingOf(both)).toBeUndefined();
-    expect(carriedEffectsTiming({ graph: clone(), analysisResult: both }, saved)).toBeNull();
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: both }, saved)).toBeNull();
   });
 });
