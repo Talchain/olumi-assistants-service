@@ -181,7 +181,7 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
     expect(r.kind).toBe('committed');
     expect(w.writes).toHaveLength(1);
     expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(attested()).horizon_basis);
-    expect(w.writes[0]!.assistantMessage).toBe('Recorded as your judgement: ‘Service quality’ stays about the same over 9 months unless you act. Then run the analysis again.');
+    expect(w.writes[0]!.assistantMessage).toBe('Recorded as your judgement: ‘Service quality’ stays about the same over 9 months unless you act.');
     expect(horizonSteadyAttested(w.read())).toBe(true);
     expect(goalOf(g)).not.toHaveProperty('horizon_basis');
     expect(goalSteadyPostimageIsScoped(g, w.read(), { goal_id: 'goal', months: 9 }, SCENARIO)).toBe(true);

@@ -218,7 +218,9 @@ describe('steady horizon: one held card through the existing approved batch door
     expect(commitOptionLevelsInProcess).toHaveBeenCalledWith(expect.objectContaining({
       scenario_id: SCENARIO, links: [], levels: [], goal_steady: { goal_id: goalOf(jsonbGraph()).id, months: 9 },
     }), expect.any(String));
-    expect(reply.assistant_text).toContain('Recorded as your judgement. Then run the analysis again.');
+    // Since the route analyses a committed change itself (Paul #94 6166259456), the receipt no longer tells the user to run.
+    expect(reply.assistant_text).toContain('Recorded as your judgement.');
+    expect(reply.assistant_text).not.toContain('Then run the analysis again.');
     expect(horizonSteadyAttested(jsonbGraph())).toBe(true);
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(computeAnalysisAffectingGraphHash(jsonbGraph() as never)).not.toBe(baseHash);
@@ -308,7 +310,7 @@ describe('steady horizon: one held card through the existing approved batch door
     expect(reply._agent.tool_calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'not_confirmed' }),
     ]));
-    expect(reply.assistant_text).not.toContain('Recorded as your judgement. Then run the analysis again.');
+    expect(reply.assistant_text).not.toContain('Recorded as your judgement.');
     expect(agentProposals.isApplied(card.id.split(':')[1]!)).toBe(false);
   });
   it.each(['stale', 'refused', 'unconfirmed'] as const)('door %s maps to the existing refusal', async mode => {

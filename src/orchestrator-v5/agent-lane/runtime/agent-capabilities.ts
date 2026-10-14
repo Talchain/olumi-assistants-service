@@ -3921,7 +3921,7 @@ export function createAgentCapabilities(
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(parent.proposal_id, receipts);
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
-      follow_up: 'Recorded as your judgement. Then run the analysis again.' };
+      follow_up: 'Recorded as your judgement.' };
   };
 
   /**
