@@ -91,7 +91,7 @@ const record = (v: unknown): v is RecordLike => typeof v === 'object' && v !== n
  * The sentence of `source` that holds `words` (whole words), verbatim and trimmed: what the card says the date is read from.
  * Sentences end at ".", "!", "?" or a line break; a figure's own full stop ("1.5") does not end one.
  */
-function sentenceHolding(words: string, source: string): string | undefined {
+export function sentenceHolding(words: string, source: string): string | undefined {
   return source.split(/(?<=[.!?])\s+|\n+/).map(t => t.trim()).find(t => t !== '' && whole(words, t));
 }
 export interface DeadlineIssueInput {

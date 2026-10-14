@@ -120,13 +120,17 @@ function card(body: Rec) {
   return { call: calls[0], yes };
 }
 describe('deterministic deadline card on the first Agent turn', () => {
-  it('A2 keeps full source, qualifiers and interpretation in the existing rationale on the approval card', async () => {
+  it('A2 keeps full source, qualifiers and interpretation on the approval card: the user\'s sentence verbatim, the rationale in provenance', async () => {
     const w = world();
     const source = 'We hope to launch within ten months, provided the evidence supports it; this is not a firm commitment and hiring completion is a separate milestone.';
     const rationale = `${source} The source is the current human message; Olumi interprets ten months from the known draft reference.`;
     const out = await w.caps.proposeGoalDeadline!(w.ctx(source), { deadline_words: 'ten months', rationale }) as Rec;
     expect(out).toMatchObject({ ok: true, mutated: false });
-    expect(out.public_label).toContain(rationale);
+    // AMENDED (served hiring e2e 8f52bfd5, DL 14 Oct "one true thing"): the user's own sentence, verbatim, carries the source and
+    // its conditions; the AI's account of it ("Olumi interprets …") is kept with the proposal, not shown beside the date.
+    expect(out.public_label).toBe(`Is your deadline 10 August 2027 (10 months from 10 October 2026)? Your words: \u201cten months\u201d in \u201c${source.replace(/\.$/, '')}\u201d.`);
+    expect(out.public_label).toContain('provided the evidence supports it; this is not a firm commitment');
+    expect(w.proposals.get(String(out.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: rationale });
     expect(out.deadline.words).toBe('ten months');
   });
   it('R1 Run-chip offers exactly one bound card using draft R; no graph change', async () => {
@@ -430,7 +434,7 @@ describe('R4 durable first-Agent-turn gate', () => {
   });
   it('Change date follow-up can still propose THIS newly typed deadline through the model door', async () => {
     const w = world(); const out = await w.caps.proposeGoalDeadline!(w.ctx('My deadline is eleven months'), { deadline_words: 'eleven months', rationale: '' });
-    expect(out).toMatchObject({ ok: true, public_label: 'Is your deadline 10 September 2027 (11 months from 10 October 2026)? Your words: “eleven months”.' });
+    expect(out).toMatchObject({ ok: true, public_label: 'Is your deadline 10 September 2027 (11 months from 10 October 2026)? Your words: “eleven months” in “My deadline is eleven months”.' });
   });
 });
 

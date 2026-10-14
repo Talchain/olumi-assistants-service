@@ -404,7 +404,8 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       const hold = (await store.readMostRecentPendingActions(SCENARIO)) as any[];
       const proposal = hold.find(h => h.action?.inline_patch?.agent_proposal)?.action.inline_patch.agent_proposal;
       expect(proposal?.provenance.authored_by).toBe('user_stated');
-      expect(proposal?.public_label).toContain(`Your words: “${words}”.`);
+      // The verified earlier message is quoted as the source (#3069 fix-forward).
+      expect(proposal?.public_label).toContain(`Your words: “${words}” in “Our deadline is ${words}”.`);
     } else {
       expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
         detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });

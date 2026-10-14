@@ -4,7 +4,7 @@ import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource } from '../../goal-target/input-claim-context.js';
-import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
@@ -4528,7 +4528,9 @@ export function createAgentCapabilities(
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
     dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true,
     /** The sentence the words were read from, quoted on the card (the route's card, ruling A). */
-    readFrom?: string): Promise<ToolResult> => {
+    readFrom?: string,
+    /** The user's own sentence holding the words (this turn or a verified message), quoted on a card their words set. */
+    userSentence?: string): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4591,10 +4593,13 @@ export function createAgentCapabilities(
       // 14 October 2026)? … Basis supplied for this interpretation: … No calendar reference date was supplied, so this retains
       // the relative three-month timing rather than converting it to a date."). The AI's rationale is the basis of an
       // INTERPRETATION, so the card shows it only when the card is Olumi's interpretation (`model_proposed`). When the user's
-      // own words resolve to this date against the shown reference, the card says that alone; the rationale stays in provenance.
+      // own words resolve to this date against the shown reference, the card quotes the user's own sentence instead, verbatim,
+      // so its conditions stay in view (A2: "…within ten months, provided the evidence supports it; this is not a firm
+      // commitment…"); the rationale stays in provenance.
       const sourceDetail = authoredBy !== 'model_proposed' || rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
-      const quoted = readFrom === undefined || readFrom.trim() === stated.words.trim() ? '' : ` in “${readFrom.trim().replace(/[.!?]+$/, '')}”`;
+      const from = readFrom ?? (authoredBy === 'user_stated' ? userSentence : undefined);
+      const quoted = from === undefined || from.trim() === stated.words.trim() ? '' : ` in “${from.trim().replace(/[.!?]+$/, '')}”`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -5977,10 +5982,14 @@ export function createAgentCapabilities(
       // The message the words came from (verified messages, newest first); words from no message are counted alone.
       const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse().map(plainOf)
         .find(writes) ?? plainOf(words);
+      // The user's own sentence holding the words, verbatim (this turn first, then their verified messages, newest first).
+      const ownMessage = writes(typed) ? ctx.user_turn_text ?? '' : [...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse()
+        .find((m) => writes(plainOf(m)));
+      const userSentence = origin === 'human' && ownMessage !== undefined ? sentenceHolding(words, ownMessage) : undefined;
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        origin === 'human', !echoedAsOfSetAside && datePhrasesIn(source) <= 1);
+        origin === 'human', !echoedAsOfSetAside && datePhrasesIn(source) <= 1, undefined, userSentence);
     },
 
     /**
