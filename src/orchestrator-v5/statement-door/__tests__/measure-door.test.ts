@@ -78,6 +78,32 @@ describe('M3a: the measure statement is read on the door, against the HELD targe
   });
 });
 
+describe('M3a, TWO-BRIEF RULE (property across the other served briefs): a measure on a target that is not a % change from today', () => {
+  /** The first graph in a served capture (its nodes and edges), whatever envelope holds it. */
+  const graphIn = (v: unknown): Rec | undefined => {
+    if (v === null || typeof v !== 'object') return undefined;
+    const r = v as Rec;
+    if (Array.isArray(r.nodes) && Array.isArray(r.edges) && (r.nodes as Rec[]).some((n) => n?.kind === 'goal')) return r;
+    for (const x of Object.values(r)) { const g = graphIn(x); if (g !== undefined) return g; }
+    return undefined;
+  };
+  const F = 'src/orchestrator-v5/agent-lane/__tests__/fixtures/';
+  const BRIEFS: readonly [string, string, string][] = [
+    ['capacity-post2996-run2-read.json', 'We measure weekly support capacity as tickets closed per week.', 'tickets closed per week'],
+    ['marketing-17c98e69.json', 'We measure the launch as features shipped to customers.', 'features shipped to customers'],
+    ['pricing-e2e-2a35ff31-read02-after-reopen.json', 'We measure MRR as monthly recurring revenue from paying accounts.', 'monthly recurring revenue from paying accounts'],
+  ];
+  it.each(BRIEFS)('%s: a level target is refused with its reason, the words kept, and nothing is written', (file, said, words) => {
+    const g = graphIn(JSON.parse(readFileSync(F + file, 'utf8')))!;
+    const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    const subject: DoorSubject = { kind: 'goal', id: String(goal.id), field: 'measure' };
+    const v = readStatement(g, subject, String(goal.label), [{ quote: said, reading_words: words }], { now: said } as never);
+    expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
+    expect((v as Rec).detail).toMatch(/Keep the user’s words exactly as they said them/);
+    expect(recordedMeasureOf(goal)).toBeUndefined();
+  });
+});
+
 describe('M3a: ONE press moves only the two members, and records the user’s words on the goal in the same commit', () => {
   it('the postimage: denominator and effect unit in the measure, reference and everything else unchanged, the statement kept', () => {
     const before = goalOf(R4).goal_target_basis as Rec;
