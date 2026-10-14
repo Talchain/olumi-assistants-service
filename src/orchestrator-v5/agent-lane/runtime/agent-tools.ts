@@ -979,7 +979,11 @@ export interface AgentCapabilities {
     /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
     stated_operator?: '<' | '<=' | '>' | '>=';
   }): Promise<ToolResult>;
-  runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }): Promise<ToolResult>;
+  /**
+   * `afterCommittedChange` is the ROUTE's own automatic Run after a committed change (Paul, #94 6166259456). The Agent's
+   * `run_analysis` tool never passes it (`runAgentTool` hands over `(ctx, args)` only).
+   */
+  runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }, opts?: { readonly afterCommittedChange?: boolean }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.

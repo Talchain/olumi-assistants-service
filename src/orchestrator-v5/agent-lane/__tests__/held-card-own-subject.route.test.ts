@@ -36,6 +36,7 @@ import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { proposalPendingAction } from '../durable-proposal.js';
 import { agentProposals, executableProposalId, readExecutableHeldProposalOffers } from '../held-approval-offers.js';
+import { declineChipIdFor } from '../proposal-object/record.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -88,8 +89,11 @@ function world() {
 }
 
 let script: Rec[] = [];
+/** The existing Run path's own turn (`runAnalysis` → `/orchestrate/v2/turn`, stage `analyse`): each request, the saved graph it ran on, and the reply. */
+const runTurns: { body: Rec; graphAtRun: Rec }[] = [];
+let runTurnReply: { status: number; json: Rec } = { status: 500, json: {} };
 const apps: FastifyInstance[] = [];
-beforeEach(() => { script = []; });
+beforeEach(() => { script = []; runTurns.length = 0; runTurnReply = { status: 500, json: {} }; });
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
@@ -103,6 +107,10 @@ async function route(w: ReturnType<typeof world>) {
   const app = Fastify({ logger: false }); apps.push(app);
   app.post('/assist/v1/scenarios/:id/graph', async () => w.graphWire());
   app.post('/assist/v1/scenarios/:id/versions', async () => w.versions());
+  app.post('/orchestrate/v2/turn', async (req, reply) => {
+    runTurns.push({ body: req.body as Rec, graphAtRun: w.read() });
+    return reply.code(runTurnReply.status).send(runTurnReply.json);
+  });
   await app.register(agentV1TurnRoute); await app.ready();
   return async (over: Rec, steps: Rec[] = []): Promise<Rec> => {
     script = [...steps];
@@ -376,4 +384,48 @@ describe('the one rule (`heldCardStillApplies`), read at press, at lapse and by 
     expect(refused).toMatchObject({ ok: false, mutated: false });
     expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   });
+});
+
+describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the existing Run, once, in the same turn', () => {
+  const analyseTurns = () => runTurns.filter((r) => r.body.stage === 'analyse');
+  const RUN_OK = { status: 200, json: { analysis_ready: { status: 'ready', may_run: true }, analysis_state: { run_state: 'complete_current' },
+    blocks: [{ type: 'analysis_result', data: { results: [] } }] } };
+
+  it('⭐ approving the link card COMMITS it → the existing Run runs ONCE, after the save, on the saved model; no Run chip is offered', async () => {
+    const w = world(); const turn = await route(w);
+    const { links, session } = await bothCards(w, turn);
+    expect(analyseTurns(), 'offering cards commits nothing, so nothing ran').toEqual([]);
+    const before = JSON.stringify(w.read());
+    runTurnReply = RUN_OK;
+    const pressed = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect((pressed._agent.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change')).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    const runs = analyseTurns();
+    expect(runs, JSON.stringify(runTurns.map((r) => r.body))).toHaveLength(1);
+    expect(runs[0]!.body).toMatchObject({ scenario_id: w.sid, stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    // Bound to the NEW revision: the Run read the model with the approved links already saved.
+    expect(JSON.stringify(runs[0]!.graphAtRun)).not.toBe(before);
+    expect(hash(runs[0]!.graphAtRun)).toBe(hash(w.read()));
+    expect((pressed.suggested_actions ?? []).some((a: Rec) => a.id === 'agent-run-analysis'), 'it already ran: no Run chip').toBe(false);
+  }, 90_000);
+
+  it('CONTRAST: a turn that commits nothing (a typed question; a declined card) runs nothing', async () => {
+    const w = world(); const turn = await route(w);
+    const { deadline, session } = await bothCards(w, turn);
+    runTurnReply = RUN_OK;
+    await turn({ message: 'What does the deadline card do?', source: 'composer', agent_session_id: session }, [say('It sets the goal’s date.')]);
+    await turn({ message: 'Not now.', source: 'chip_click', chip: { id: declineChipIdFor(String(deadline.id).slice('agent-approve-proposal:'.length)) }, agent_session_id: session });
+    expect(analyseTurns()).toEqual([]);
+  }, 90_000);
+
+  it('A FAILED Run says so, borrows no result, and the saved change stands: the Run chip is offered to try again', async () => {
+    const w = world(); const turn = await route(w);
+    const { links, session } = await bothCards(w, turn);
+    runTurnReply = { status: 500, json: {} };
+    const pressed = await turn({ message: links.message, source: 'chip_click', chip: { id: links.id }, agent_session_id: session });
+    expect(analyseTurns()).toHaveLength(1);
+    expect(String(pressed.assistant_text)).toContain('The analysis didn’t run this time. Your model was updated this turn');
+    expect(String(pressed.assistant_text)).not.toContain('Nothing in your model changed');
+    expect(pressed.analysis_result ?? null).toBeNull();
+    expect((pressed.suggested_actions ?? []).some((a: Rec) => a.id === 'agent-run-analysis'), 'the Run is offered to try again').toBe(true);
+  }, 90_000);
 });

@@ -209,7 +209,7 @@ describe('steady horizon: one held card through the existing approved batch door
     expect(runs).toBe(1);
     expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
   });
-  it('JOINED: B2 nine-month Run → card → approved door → attested read-back → follow-up; no implicit Run', async () => {
+  it('JOINED: B2 nine-month Run → card → approved door → attested read-back → follow-up → the automatic Run (adopted, Paul #94); a replay runs nothing more', async () => {
     const baseHash = computeAnalysisAffectingGraphHash(jsonbGraph() as never);
     const card = cardOf(await run());
     const tid = randomUUID();
@@ -222,13 +222,15 @@ describe('steady horizon: one held card through the existing approved batch door
     expect(horizonSteadyAttested(jsonbGraph())).toBe(true);
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(computeAnalysisAffectingGraphHash(jsonbGraph() as never)).not.toBe(baseHash);
-    expect(runs).toBe(1);
+    // Adopted (Paul #94 6166259456): the committed answer is analysed by the route's automatic Run, once; no Run chip.
+    expect(runs).toBe(2);
     expect(reply._agent.tool_calls).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'authorise_change', ok: true })]));
-    expect(reply.suggested_actions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'agent-run-analysis', action_type: 'run_analysis' })]));
+    expect((reply.suggested_actions as Chip[]).some(c => c.id === 'agent-run-analysis')).toBe(false);
     await press(card, { turn_id: tid });
     expect(graphWrites.get(SCENARIO)).toBe(1);
+    expect(runs, 'the replayed press runs nothing more').toBe(2);
     const rerun = await run();
-    expect(runs).toBe(2);
+    expect(runs).toBe(3);
     expect((rerun.suggested_actions as Chip[]).some(c => c.label === STEADY_HORIZON_ANSWER)).toBe(false);
 
   });

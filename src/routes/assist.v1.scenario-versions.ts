@@ -53,6 +53,10 @@ import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
+import { randomUUID } from "node:crypto";
+import { config } from "../config/index.js";
+import { internalHeaders } from "../orchestrator-v5/agent-lane/internal-headers.js";
+import { AGENT_RUN_ANALYSIS_CHIP_ID } from "../orchestrator-v5/handlers/agent-chip-ids.js";
 
 /** Wire schema discriminators. Frozen — the UI lane builds against these. */
 export const MODEL_VERSIONS_LIST_SCHEMA = "model_versions_list.v2" as const;
@@ -258,6 +262,29 @@ function summaryV2(row: ModelVersionSummary): ModelVersionSummaryV2Local | null 
     analysis_affecting_hash: row.analysis_affecting_hash,
   });
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * ⭐ AN UNDO IS A COMMITTED CHANGE, SO ITS RESTORED STATE IS ANALYSED (Paul, #94 6166259456: "analyse the restored state
+ * after Undo"). The EXISTING Run path (the Agent lane's own run turn, `runAnalysis`), once, on the restored revision, before
+ * its analysis is read for this response. The run turn keeps its own readiness and identity; a Run that fails or is withheld
+ * leaves the restored state honestly unanalysed (never an older result), and the restore itself stands either way.
+ */
+async function analyseRestoredState(app: FastifyInstance, scenarioId: string, authorization: string | undefined): Promise<void> {
+  try {
+    await app.inject({
+      method: "POST",
+      url: "/orchestrate/v2/turn",
+      headers: internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? "", authorization),
+      payload: {
+        kind: "message", turn_id: randomUUID(), scenario_id: scenarioId, stage: "analyse", turn_class: "decide", source: "chip_click",
+        message: "Analyse the model as just restored.",
+        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: "run_analysis", parameters: { effects_timing: null } },
+      },
+    });
+  } catch (err) {
+    log.warn({ scenario_id: scenarioId, err: String(err).slice(0, 300) }, "Scenario versions — the restored state could not be analysed");
+  }
 }
 
 export default async function route(app: FastifyInstance) {
@@ -1025,6 +1052,8 @@ export default async function route(app: FastifyInstance) {
       }
 
       const replayed = restored.value.replayed;
+      // A replayed restore committed nothing new: its revision was analysed when it first landed.
+      if (!replayed) await analyseRestoredState(app, ctx.scenarioId, typeof req.headers.authorization === "string" ? req.headers.authorization : undefined);
       const analysis = await readScenarioAnalysis({
         scenarioId: ctx.scenarioId,
         graph: restored.value.graph,

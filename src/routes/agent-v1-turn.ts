@@ -4117,6 +4117,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       briefReadingOpen = false;
     }
 
+    /**
+     * ⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456: "run analysis and science-based AI coaching after every
+     * implemented change"; supersedes the explicit-Run-only rule for this flow). A change this turn COMMITTED (a tool result
+     * `ok && mutated`: an approval, an edit) runs the EXISTING Run path once, on the saved revision, when that revision's
+     * readiness admits a Run. Its blocks and coaching ride this same response through `lastRun`, bound to the final read
+     * below like any Run. Never on a draft or a held proposal (nothing committed), a refusal, or a failed or unconfirmed
+     * save (`ok` false); never twice (a Run press, the Agent's own Run or the first analysis already ran). The construction
+     * keeps its own first analysis. A Run that fails says so (`interpretationUnavailableText`) and borrows no older result:
+     * the final read binds only a Run current for its graph.
+     */
+    let autoRun: Awaited<ReturnType<typeof capabilities.runAnalysis>> | undefined;
+    const committedChange = result.tool_calls.some((c, i) => c.name !== 'build_model_from_brief'
+      && result!.tool_results[i]?.ok === true && result!.tool_results[i]?.mutated === true);
+    const analysedThisTurn = runPress || result.tool_results.some((r) => r?.ran === true)
+      || result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')
+      || firstAnalysis?.outcome.ran === true || firstAnalysis?.outcome.reason === 'already_ran_for_construction';
+    if (committedChange && !analysedThisTurn && admitsRunOffer((await readBackState(readingDispatch, scenarioId)).analysisReady)) {
+      autoRun = await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.', effects_timing: null },
+        { afterCommittedChange: true });
+    }
     const runPressFailed = runPress && runPressResult?.refusal === 'run_failed';
     // Preserve the existing typed engine refusal/failure on a Run press, even if the model invents another cause.
     if (runPress && !result.tool_results.some(r => r.ran === true)) {
@@ -4132,6 +4152,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? hopLimitText(result)
         : result.assistant_text);
+    // The automatic Run that did not complete says so, in the existing words for a turn that changed the model: the change
+    // itself stays saved (`RUN_FAILED_TEXT`'s "Nothing in your model changed" would be false here).
+    if (autoRun !== undefined && autoRun.ran !== true) {
+      text = `${text}\n\n${interpretationUnavailableText({ ran: false, ...(autoRun.refusal !== 'run_failed' ? { refusal: autoRun.refusal } : {}),
+        what_is_missing: (autoRun as { what_is_missing?: unknown }).what_is_missing }, true)}`;
+    }
     // The AIE conflict copy is a source-owned limitation, not a narration to paraphrase.
     const hiringConflicts = result.tool_results.filter(r => r.refusal === 'hiring_bound_conflict' && typeof r.detail === 'string');
     if (hiringConflicts.length > 0) text = hiringConflicts.map(r => r.detail).join(' ');
@@ -4512,7 +4538,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (by the Agent's run, or by the first analysis), and only when the canonical readiness in
     // THIS response admits a run. A first analysis stopped only by the turn's time was admitted on
     // this same revision, so the same readiness offers Run beside Olumi's sentence.
-    const offerRun = (runPress && !runPressConsumed) || runPressFailed || (result.mutated
+    const offerRun = (runPress && !runPressConsumed) || runPressFailed || (result.mutated && autoRun?.ran !== true
       // A Run the server refused because this request's approval applied a change analysed nothing:
       // it must not suppress the Run the refusal tells the user to press.
       && !result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')

@@ -4,10 +4,10 @@ import { explainRun } from './fixtures/run-explanation-follow-up.js';
  * ⭐ THE EXPLICIT RUN AFTER AN OPENAI APPROVAL (RC #63; Codex 5805970015: "served Agent
  * approval calls approvalChipsFor after authorise_change and that helper returns no chips").
  *
- * Fast path 2 applies the approved values and — by design — runs nothing. Without an offer
- * the user had no Run to press on the Agent route. After a change, and ONLY when the
- * canonical readiness in the SAME response admits a run, the reply offers one typed Run chip;
- * clicking it takes fast path 3. Nothing runs implicitly.
+ * ⭐ ADOPTED (Paul, #94 6166259456, confirmed 14 Oct): after a COMMITTED change, and ONLY when the canonical readiness
+ * of the saved revision admits a run, the existing Run runs ONCE, automatically, in the same turn, and no Run chip is
+ * offered (it already ran). This supersedes "fast path 2 runs nothing; one typed Run chip is offered". The negatives
+ * stand: no admission → no Run and no chip; a replay never runs again; a refused approval runs nothing.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -122,23 +122,23 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     return t2.json() as { suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } };
   }
 
-  it('RED: approval applied and the canonical readiness admits a run → ONE typed Run chip, and nothing ran', async () => {
+  it('⭐ (adopted, Paul #94) approval applied and the canonical readiness admits a run → the Run runs ONCE in the same turn; no Run chip', async () => {
     readiness = { status: 'needs_user_input', may_run: true };
     const b = await proposeThenApprove();
     expect(b._diagnostic_trace.fast_path).toBe('approve');
     expect(edges, 'the approval really applied').toHaveLength(1);
-    expect(approvalReads, 'Accept retains both existing graph reads').toBe(2);
-    expect(postWriteReads).toBe(1);
-    expect(b.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([
-      expect.objectContaining({ id: 'agent-run-analysis', label: 'Run analysis', action_type: 'run_analysis' }),
-    ]);
-    expect(runs, 'the offer runs nothing').toBe(0);
+    expect(runs, 'the existing Run, once, after the commit').toBe(1);
+    // The Run moves the analysis, so the final read is a fresh read after it (the capability's own check + that one).
+    expect(postWriteReads).toBe(2);
+    expect(b.suggested_actions.filter((c) => c.action_type === 'run_analysis'), 'it already ran: no Run chip').toEqual([]);
   });
 
-  it('the offered chip, echoed as the UI sends it, enters the loop — one run and same-turn interpretation', async () => {
+  it('the Run chip, pressed as the UI sends it, still enters the loop — one run and same-turn interpretation', async () => {
     readiness = { status: 'ready', may_run: true };
-    const b = await proposeThenApprove();
-    const run = b.suggested_actions.find((c) => c.action_type === 'run_analysis')!;
+    await proposeThenApprove();
+    const { RUN_OFFER_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    const run = { ...RUN_OFFER_CHIP } as Chip;
+    runs = 0;
     modelBodies = [];
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: run.message, source: 'chip', chip: { id: run.id, action_type: run.action_type },
@@ -198,10 +198,11 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       .some((a) => a.id === 'agent-suggest-what-it-needs'), 'a carried chip follows the same rule').toBe(offered);
   });
 
-  it('CONTROL: approval applied and a run is admitted → Run, and NOT the next-step chip', async () => {
+  it('CONTROL: approval applied and a run is admitted → it RAN, and neither a Run chip nor the next-step chip is offered', async () => {
     readiness = { status: 'ready', may_run: true };
     const b = await proposeThenApprove();
-    expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-run-analysis']);
+    expect(runs).toBe(1);
+    expect(b.suggested_actions.map((c) => c.id)).toEqual([]);
   });
 
   it('OPPOSITE CONTROL (C6 turnReadCache): after a VERIFIED commit the route answers from that verified read — it makes no second post-write read that could fail', async () => {
@@ -214,7 +215,13 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const b = await proposeThenApprove() as unknown as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
     expect(edges, 'the approval really committed').toHaveLength(1);
     expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'the approval reports it applied').toBe(true);
-    expect(postWriteReads, 'ONE post-write read: the capability\'s own check, reused by the final readback').toBe(1);
+    // Adopted (Paul #94): the automatic Run follows the commit, so the final readback is a second post-write read after
+    // it (the capability's own check is still reused up to the Run). That read is refused here: the reply still never
+    // claims a ready model is blocked, and borrows no result.
+    expect(runs, 'the automatic Run ran on the verified commit').toBe(1);
+    // The capability's own check; the Run's own post-run read (refused here, so it is not kept); the final readback's
+    // one retry of it (refused too). A read that fails is never answered from an older one.
+    expect(postWriteReads, 'the capability\'s check, the Run\'s post-run read, the final read').toBe(3);
     expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), 'a ready model is never given a blocked claim').toBe(false);
   });
 
@@ -285,17 +292,18 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       return r.json() as { suggested_actions: Chip[]; _agent: { replayed?: boolean }; _provider_calls: unknown[] };
     };
 
-    it('RED: approve with a stable turn_id, lose the response, retry → the same ONE Run chip, zero runs, no model call, no extra write', async () => {
+    it('approve with a stable turn_id (it ran once), lose the response, retry → the replay runs NOTHING more, no Run chip, no model call, no extra write', async () => {
       readiness = { status: 'needs_user_input', may_run: true };
       const T = '11111111-2222-4333-8444-555555555555';
       const first = await proposeThenApprove(T);
-      expect(first.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toHaveLength(1);
+      expect(runs, 'the approving turn ran the analysis once').toBe(1);
+      expect(first.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toHaveLength(0);
       const writesBefore = edges.length; const callsBefore = modelBodies.length;
       // The retry is byte-identical to the first request (the UI resends it).
       const again = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Yes, make that change.', source: 'chip', chip: { id: lastApproveId }, turn_id: T });
       expect(again._agent.replayed, 'the real replay path').toBe(true);
-      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([expect.objectContaining({ id: 'agent-run-analysis' })]);
-      expect(runs, 'the replay runs nothing').toBe(0);
+      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([]);
+      expect(runs, 'the replay runs nothing more').toBe(1);
       expect(modelBodies.length - callsBefore, 'no model call').toBe(0);
       expect(edges.length - writesBefore, 'no second write').toBe(0);
     });
@@ -377,17 +385,18 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       } finally { await fresh.close(); }
     };
 
-    it('RED: approve, lose the response, the process restarts, retry → the SAME Run offer from the durable row; 0 runs, 0 model calls, 0 writes', async () => {
+    it('approve (it ran once), lose the response, the process restarts, retry → no Run offer was persisted and none is invented; no second run, 0 model calls, 0 writes', async () => {
       readiness = { status: 'needs_user_input', may_run: true };
       const T = '61111111-2222-4333-8444-555555555555';
       await proposeThenApprove(T);
+      expect(runs, 'the approving turn ran the analysis once').toBe(1);
       const row = rows.get(`${SCENARIO}:${T}`)!;
-      expect(row.pending_actions, 'the offer was persisted with the answer row').toEqual([expect.objectContaining({ chip_id: 'agent-run-analysis', action: { kind: 'run_analysis' } })]);
+      expect((row.pending_actions as { chip_id?: string }[]).some((p) => p.chip_id === 'agent-run-analysis'), 'it ran: no Run offer persisted').toBe(false);
       const writes = edges.length; const calls = modelBodies.length;
       const again = await onFresh(approveBody(T));
       expect(again._agent.replayed, 'the real replay path, on a fresh instance').toBe(true);
-      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([expect.objectContaining({ id: 'agent-run-analysis' })]);
-      expect(runs).toBe(0);
+      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([]);
+      expect(runs).toBe(1);
       expect(modelBodies.length - calls).toBe(0);
       expect(edges.length - writes).toBe(0);
     });
