@@ -253,9 +253,11 @@ export function capacityRatioWords(part: Rec | undefined): string {
   if (basis?.relation === 'freed_time' && basis.source !== null && typeof basis.source === 'object' && typeof c.capacity_ratio === 'number') {
     const s = basis.source as Rec;
     const when = typeof c.lead_low === 'number' && c.lead_low > 0 ? `from ${months(c.lead_low)} months in` : 'from now';
+    const rest = (x: unknown): string => `${months(100 - Number(x))}%`;
     return `your figure of ${withUnit(s.withOption, s.unit)} for ${q(s.label)} with this option (${withUnit(s.today, s.unit)} today), `
-      + `Olumi’s reading that the time freed goes to ${q(basis.capacity)}, so the team’s capacity for it is about ${Math.round(c.capacity_ratio * 100)}% `
-      + `of today’s, and Olumi’s provisional assumption that delivery pace changes in proportion to that capacity ${when}`;
+      + `Olumi’s assumption that all the rest of the team’s time (${rest(s.today)} today, ${rest(s.withOption)} with this option) goes to ${q(basis.capacity)}, `
+      + `so the team’s capacity for it is about ${Math.round(c.capacity_ratio * 100)}% of today’s, and Olumi’s provisional assumption that delivery pace `
+      + `changes in proportion to that capacity ${when}`;
   }
   if (!basis || !Array.isArray(basis.factors)) return '';
   const identity = `${q(basis.capacity)} = ${basis.factors.map((f: Rec) => q(f.label)).join(' × ')}`;
@@ -343,8 +345,9 @@ export function shareUnearnedCertaintyLine(graph: unknown, optionId: string, sid
       : 'Worth checking: whether your hiring times, and how much each hire adds per month, still hold.')
     : parts?.ratio !== undefined ? 'Check Olumi’s reading: how much this option changes the team’s capacity, and from when.'
       : 'Worth discussing: how much it would speed up the work, and from when.';
-  return `No chance is shown for this option: this model has it ${side === 'meets' ? 'reaching' : 'falling short of'} ${target} `
-    + `in every run, but ${rests}. ${step}`;
+  // PL (14 Oct): one analysis, said as one (no count of runs). What it rests on makes how likely it is unknowable yet.
+  return `No chance is shown for this option: in this analysis it ${side === 'meets' ? 'reaches' : 'falls short of'} ${target}, `
+    + `but ${rests}, so how likely that is can’t be said yet. ${step}`;
 }
 
 /** The share goal's deliverable ("next feature launch" from "% of next feature launch"): one read of the goal's unit. */

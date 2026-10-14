@@ -16,6 +16,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { unresolvedEventOptionIds, withCompiledCapacityRatios } from './event-by-date-model.js';
 import { deliverableOf, shareByDateGoalForChanceOf } from './share-by-date-run.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
+import { coordinateClausesOf } from '../agent-lane/link-effect-option-statement.js';
+import { factorTheUserNamed } from '../agent-lane/stated-by-user.js';
+import { effectLeadWords, type EffectLead } from './effect-lead.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -40,6 +43,8 @@ export interface ApprovedOptionCapacityChange {
   readonly deadline: string;
   readonly reference_date: string;
   readonly statements: readonly UserStatement[];
+  /** The timing the user's words give (session 4's ONE lead reader, `effect-lead.ts`); absent = Olumi's "from now". */
+  readonly lead?: EffectLead;
   /** The option's switches as stored when the card was made. */
   readonly expected_interventions: Rec;
 }
@@ -53,7 +58,10 @@ export type OptionCapacityTarget =
 function shareToday(factor: Rec | undefined): { readonly value: number; readonly unit: string; readonly total: number } | undefined {
   const os = factor?.observed_state, raw = num(os?.raw_value), unit = typeof os?.unit === 'string' ? os.unit.trim() : '';
   const total = num(os?.cap) ?? 100;
-  return raw !== undefined && unit.startsWith('%') && total === 100 && raw > 0 && raw < total ? { value: raw, unit, total } : undefined;
+  // The freed-time reading is about the team's TIME: a plain "%" or a "% of" a whole of time ("% of developer time"), never
+  // "% of budget" (PL 14 Oct: the share's population is bound, not assumed).
+  const ofTime = unit === '%' || /^%\s*of\b.*\b(?:time|hours?|capacity|effort|working week|days?)\b/i.test(unit);
+  return raw !== undefined && ofTime && total === 100 && raw > 0 && raw < total ? { value: raw, unit, total } : undefined;
 }
 
 /** The option (one this forecast holds unresolved) and the one share of time it already changes in the model. */
@@ -84,11 +92,36 @@ export function optionCapacityTarget(graph: unknown, optionId: string, factorId?
   return { kind: 'target', option, factor: chosen, deliverable, goal_id: String(share.goal.id), deadline: share.deadline, reference_date: reference };
 }
 
-/** Every percentage figure the quote writes ("from 25% to 15%" → 25, 15), only when it writes a percentage at all. */
-export function shareFiguresIn(quote: string): { low: number; high: number }[] {
-  if (!/%|\bper ?cent\b/i.test(quote)) return [];
-  return [...quote.matchAll(/(?<![\d.])(\d{1,3}(?:\.\d+)?)(?![\d.])/g)].map((m) => Number(m[1])).filter((v) => v > 0 && v < 100)
-    .map((v) => ({ low: v, high: v }));
+/** The percentage figures a clause writes: "25%", "15 per cent", and the first end of "from 25 to 15%". Never a bare count. */
+export function sharePercentsIn(clause: string): number[] {
+  const out = [...clause.matchAll(/(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*(?:%|per ?cent\b)/gi)].map((m) => Number(m[1]));
+  for (const m of clause.matchAll(/\bfrom\s+(\d{1,3}(?:\.\d+)?)\s+(?:down\s+)?to\s+\d{1,3}(?:\.\d+)?\s*(?:%|per ?cent\b)/gi)) out.push(Number(m[1]));
+  return [...new Set(out)].filter((v) => v > 0 && v < 100);
+}
+const words = (t: string): string[] => t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2);
+
+/**
+ * ⛔ PL (14 Oct, #3142, wrong-number class): the figures a statement gives for THIS share, bound through S2's figure reader.
+ * QUANTITY: a percentage only ("in 3 months" is timing, handed to the lead reader, never a 3%). SUBJECT: from the clauses that
+ * name the share (the lane's label reader, scoped to the model's other shares), else from clauses with no timing in them.
+ * POPULATION: a "% of …" that names a different whole ("15% of revenue") is not this share's figure.
+ */
+export function shareFiguresFor(factorLabel: string, unit: string, otherShares: readonly string[]): (quote: string) => { low: number; high: number }[] {
+  const whole = words(unit.replace(/^%\s*(?:of)?/i, '')).concat(words(factorLabel));
+  return (quote: string) => {
+    const clauses = coordinateClausesOf(quote);
+    const naming = clauses.filter((c) => factorTheUserNamed(factorLabel, c, { options: [], others: otherShares }));
+    const pool = naming.length > 0 ? naming : clauses.filter((c) => !/\b(?:days?|weeks?|months?|years?)\b/i.test(c));
+    return pool.flatMap((c) => sharePercentsIn(c).filter((v) => {
+      const of = new RegExp(`(?<![\\d.])${v}\\s*(?:%|per ?cent)\\s+of\\s+([^,.;:!?]{1,40})`, 'i').exec(c)?.[1];
+      return of === undefined || words(of).some((w) => whole.includes(w));
+    })).map((v) => ({ low: v, high: v }));
+  };
+}
+
+/** The model's other kept-out shares an option could mean (the label reader's scope). */
+export function otherSharesOf(graph: Rec, factorId: string): string[] {
+  return graph.nodes.filter((n: Rec) => n.id !== factorId && n.kind === 'factor' && shareToday(n) !== undefined).map((n: Rec) => String(n.label));
 }
 
 /** The capacity carrier's id: the option's own slot, or the next free one. */
@@ -109,11 +142,13 @@ export type OptionCapacityPlan =
  * The plan from the verified statement (form `point`, its figure the user's new share). Any other figure the quote writes must
  * be today's share as the model holds it ("from 25% to 15%"); a different one is a disagreement Olumi asks about, never picks.
  */
-export function planOptionCapacityChange(graph: Rec, target: Extract<OptionCapacityTarget, { kind: 'target' }>, statements: readonly UserStatement[]): OptionCapacityPlan {
+export function planOptionCapacityChange(graph: Rec, target: Extract<OptionCapacityTarget, { kind: 'target' }>, statements: readonly UserStatement[],
+  lead?: EffectLead): OptionCapacityPlan {
   const share = shareToday(target.factor)!;
   const point = statements.find((s) => s.form === 'point' && s.negated !== true && num(s.low) !== undefined);
   const to = num(point?.low)!;
-  const others = new Set(statements.flatMap((s) => shareFiguresIn(s.quote).map((f) => f.low)).filter((v) => v !== to));
+  const figures = shareFiguresFor(String(target.factor.label), share.unit, otherSharesOf(graph, String(target.factor.id)));
+  const others = new Set(statements.flatMap((s) => figures(s.quote).map((f) => f.low)).filter((v) => v !== to));
   const label = String(target.factor.label), optionLabel = String(target.option.label);
   if ([...others].some((v) => v !== share.value)) {
     return { kind: 'refused', refusal: 'not_today', detail: `The user's words give ${[...others].join(' and ')}${share.unit.startsWith('%') ? '%' : ''} as today's figure, but the model holds ‘${label}’ at ${share.value}${share.unit} today. Ask which one holds before changing ‘${optionLabel}’. Nothing was prepared.` };
@@ -127,6 +162,7 @@ export function planOptionCapacityChange(graph: Rec, target: Extract<OptionCapac
     factor_id: String(target.factor.id), factor_label: label, unit: share.unit, today: share.value, to, total: share.total,
     carrier_id, carrier_label: `${optionLabel} frees time for ${target.deliverable}`, deadline: target.deadline, reference_date: target.reference_date,
     statements, expected_interventions: structuredClone(rec(target.option.interventions) ? target.option.interventions : {}),
+    ...(lead !== undefined ? { lead } : {}),
   } };
 }
 
@@ -138,7 +174,10 @@ export function withOptionCapacityChange(graph: unknown, a: ApprovedOptionCapaci
   const g = structuredClone(graph) as Rec;
   g.nodes.push({ id: a.carrier_id, kind: 'factor', category: 'controllable', label: a.carrier_label, provenance: 'ai_inferred',
     observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: {
-      capacity_ratio: freedTimeRatio(a), lead_low: 0, lead_high: 0, unit: `% of ${a.deliverable} per month`,
+      capacity_ratio: freedTimeRatio(a), unit: `% of ${a.deliverable} per month`,
+      // The timing the user's words gave, as session 4's reader holds it (whose each part is); else Olumi's "from now".
+      ...(a.lead !== undefined ? { lead_low: a.lead.lead_low, lead_high: a.lead.lead_high, lead_statements: a.lead.lead_statements.map((st) => structuredClone(st)),
+        lead_reading: structuredClone(a.lead.lead_reading) } : { lead_low: 0, lead_high: 0 }),
       deadline: a.deadline, reference_date: a.reference_date,
       ratio_basis: { capacity: a.deliverable, relation: 'freed_time', source: { label: a.factor_label, unit: a.unit, today: a.today, withOption: a.to } },
       // `factor_ids` names this carrier, which holds no figure: a compiler without the freed-time branch (a revert) reads it as
@@ -164,6 +203,8 @@ export function optionCapacityChangeHeld(graph: unknown, a: ApprovedOptionCapaci
     || c.ratio_source?.complement_of?.source_id !== a.factor_id || c.ratio_source_unreadable === true) return false;
   const stored = (Array.isArray(c.statements) ? c.statements : []).map(userStatementOf);
   if (stored.length !== a.statements.length || !stored.every((s, i) => s !== undefined && isDeepStrictEqual(s, userStatementOf(a.statements[i])))) return false;
+  if (a.lead !== undefined ? !(c.lead_low === a.lead.lead_low && c.lead_high === a.lead.lead_high && isDeepStrictEqual(c.lead_reading, a.lead.lead_reading))
+    : !(c.lead_low === 0 && c.lead_high === 0)) return false;
   if (!graph.edges.some((e: Rec) => e.from === a.carrier_id && e.to === a.goal_id)) return false;
   const options = graph.nodes.filter((n: Rec) => n.kind === 'option');
   return options.every((o: Rec) => o.interventions?.[a.carrier_id]?.value === (o.id === a.option_id ? 1 : 0)
@@ -174,17 +215,24 @@ export function optionCapacityChangeHeld(graph: unknown, a: ApprovedOptionCapaci
 /** The card stands while what it was offered against does: the option still unresolved with the same switches, the share unchanged. */
 export function optionCapacityChangeStillApplies(a: ApprovedOptionCapacityChange, graph: unknown): boolean {
   const target = optionCapacityTarget(graph, a.option_id, a.factor_id);
-  return target.kind === 'target' && shareToday(target.factor)?.value === a.today
+  if (target.kind !== 'target') return false;
+  const share = shareToday(target.factor);
+  // ⛔ PL (14 Oct): the card's MEANING, not only its bytes: the goal and deliverable, the deadline and reference, the share's
+  // unit and whole, and the relation (the option still changes this share). Any change refreshes the card; nothing is written.
+  return target.goal_id === a.goal_id && target.deliverable === a.deliverable && target.deadline === a.deadline
+    && target.reference_date === a.reference_date && share?.unit === a.unit && share?.total === a.total && share?.value === a.today
     && isDeepStrictEqual(rec(target.option.interventions) ? target.option.interventions : {}, a.expected_interventions)
     && !(graph as Rec).nodes.some((n: Rec) => n.id === a.carrier_id);
 }
 
-/** The one card, in plain words: the user's figure, Olumi's reading and timing assumption, and what the model gains. */
+/** The one card, in plain words: the user's figure, Olumi's two assumptions and its timing, and what the model gains. */
 export function optionCapacityChangeCard(a: ApprovedOptionCapacityChange): string {
   const quotes = a.statements.map((s) => `“${s.quote}”`).join(', then ');
   const pct = Math.round(freedTimeRatio(a) * 100);
   const unit = a.unit.startsWith('%') ? a.unit : ` ${a.unit}`;
+  const timing = a.lead !== undefined ? effectLeadWords(a.lead) : 'Olumi assumes this takes effect from now; say if it would start later.';
   return `Use this for ‘${a.option_label}’? You said ${quotes}. Olumi reads this as: the option sets ‘${a.factor_label}’ to ${a.to}${unit} `
-    + `(${a.today}${unit} today), and the time freed goes to ${a.deliverable}, so the team’s capacity for it becomes about ${pct}% of today’s. `
-    + `Olumi assumes this takes effect from now; say if it would start later. The model gains one part, ‘${a.carrier_label}’, linked to the goal.`;
+    + `(${a.today}${unit} today). Olumi also assumes that all the rest of the team’s time (${a.total - a.today}% today) goes to ${a.deliverable}, `
+    + `so freeing ${a.today - a.to} points raises the team’s capacity for it to about ${pct}% of today’s. ${timing} `
+    + `The model gains one part, ‘${a.carrier_label}’, linked to the goal.`;
 }

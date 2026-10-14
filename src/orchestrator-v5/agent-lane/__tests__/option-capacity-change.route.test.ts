@@ -16,6 +16,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { unresolvedEventOptionIds } from '../../goal-target/event-by-date-model.js';
 import { unsupportedEventOptionWhy } from '../../goal-target/goal-chance-range.js';
+import { optionCapacityChangeStillApplies, shareFiguresFor, sharePercentsIn, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
 import { capacityRatioOutOfReach, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -83,9 +84,9 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const r = await offer(w);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.public_label).toBe('Use this for ‘Reduce legacy-fix time’? You said “it would cut legacy work from 25% to 15%”. Olumi reads this as: the option '
-      + 'sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today), and the time freed goes to next feature launch, so the '
-      + 'team’s capacity for it becomes about 113% of today’s. Olumi assumes this takes effect from now; say if it would start later. The model gains '
-      + 'one part, ‘Reduce legacy-fix time frees time for next feature launch’, linked to the goal.');
+      + 'sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today). Olumi also assumes that all the rest of the team’s time '
+      + '(75% today) goes to next feature launch, so freeing 10 points raises the team’s capacity for it to about 113% of today’s. Olumi assumes this takes '
+      + 'effect from now; say if it would start later. The model gains one part, ‘Reduce legacy-fix time frees time for next feature launch’, linked to the goal.');
     expect(w.registers).toHaveLength(0); // nothing is written by the offer
     const chips = approvalChipsFor([{ name: 'propose_option_capacity_change', ok: true, mutated: false, proposal_id: r.proposal_id }] as never,
       (id: string) => ({ proposal: w.proposals.get(id), result: r }) as never);
@@ -111,8 +112,9 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(sharePartsForOption(g, LEGACY)?.ratio).toBeCloseTo(85 / 75, 12);
     expect(g.edges.find((e: Rec) => e.from === CARRIER && e.to === 'event_goal').defaulted).toBeUndefined();
     expect(shareOptionEstimateWords(g, LEGACY)).toBe('using your figure of 15% of developer time for ‘Legacy-code fixing time’ with this option '
-      + '(25% of developer time today), Olumi’s reading that the time freed goes to ‘next feature launch’, so the team’s capacity for it is about 113% '
-      + 'of today’s, and Olumi’s provisional assumption that delivery pace changes in proportion to that capacity from now');
+      + '(25% of developer time today), Olumi’s assumption that all the rest of the team’s time (75% today, 85% with this option) goes to ‘next feature '
+      + 'launch’, so the team’s capacity for it is about 113% of today’s, and Olumi’s provisional assumption that delivery pace changes in proportion to '
+      + 'that capacity from now');
     // On his own 7–8 months the user's bound decides (PL 6135017311 item 1): out of reach, with the arithmetic, never a tail figure.
     expect(shareChanceInputFailure(g, LEGACY)).toBeNull();
     expect(capacityRatioOutOfReach(g, LEGACY)).toMatch(/^No chance is shown for this option: on your own soonest estimate it can’t reach 100% of next feature launch by 14 April 2027\. Even at 7 months, it gets about 97% done by then/);
@@ -194,6 +196,61 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const gated = withShareByDateChanceGate(run, m, 'event_goal') as Rec;
     const licence = goalChanceLicenceOf(gated, m, 'event_goal')!;
     expect(licence.pct_by_option[LEGACY]).toBe(55);
+  });
+
+  // ⛔ PL (14 Oct, #3142 first pass, wrong-number class): a timing in the same sentence is the option's LEAD, never a figure of the share.
+  it('⛔ "in 3 months, cut legacy from 25% to 15%" → 25→15 with a 3-month lead (session 4\'s reader), never a conflicting 3%', async () => {
+    const SENTENCE = 'in 3 months, cut legacy from 25% to 15%';
+    const share = shareFiguresFor('Legacy-code fixing time', '% of developer time', []);
+    expect(share(SENTENCE)).toEqual([{ low: 25, high: 25 }, { low: 15, high: 15 }]);
+    // CONTRAST: every numeral (the reading the PL found) would have taken the 3.
+    expect([...SENTENCE.matchAll(/\d+/g)].map((m) => Number(m[0]))).toContain(3);
+    const w = world();
+    const r = await offer(w, { option_id: LEGACY, statements: [{ quote: SENTENCE, form: 'point', value: 15 }] }, SENTENCE);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.public_label).toContain('sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today)');
+    expect(r.public_label).toContain('Full effect 3 months from now: your start in 3 months');
+    expect(r.public_label).not.toMatch(/\b3%/);
+    await press(w, r.proposal_id);
+    const extra = node(w.graph(), CARRIER).observed_state.extra_share_by_date;
+    expect(extra).toMatchObject({ lead_low: 3, lead_high: 3, lead_reading: { start: { low: 3, high: 3, role: 'stated' } } });
+    expect(extra.capacity_ratio).toBeCloseTo(85 / 75, 12);
+    expect(shareOptionEstimateWords(w.graph(), LEGACY)).toMatch(/in proportion to that capacity from 3 months in$/);
+  });
+
+  it('⛔ population: a "% of" another whole is not this share\'s figure; a bare count never is', () => {
+    const share = shareFiguresFor('Legacy-code fixing time', '% of developer time', []);
+    expect(share('cut legacy to 15% of revenue')).toEqual([]);
+    expect(share('cut legacy to 15% of their time')).toEqual([{ low: 15, high: 15 }]);
+    expect(sharePercentsIn('3 developers at 25%')).toEqual([25]);
+  });
+
+  it('⛔ staleness is about MEANING: a changed deliverable, deadline, reference, unit or whole refreshes the card; nothing is written', async () => {
+    const w = world();
+    const r = await offer(w);
+    const a = w.proposals.get(r.proposal_id)!.operations[0]!.value as ApprovedOptionCapacityChange;
+    expect(optionCapacityChangeStillApplies(a, w.graph())).toBe(true);
+    for (const [what, moved] of [['deliverable', { ...a, deliverable: 'a different launch' }], ['deadline', { ...a, deadline: '2027-06-30' }],
+      ['reference', { ...a, reference_date: '2026-09-01' }], ['unit', { ...a, unit: '% of budget' }], ['whole', { ...a, total: 50 }]] as const) {
+      expect(optionCapacityChangeStillApplies(moved as ApprovedOptionCapacityChange, w.graph()), what).toBe(false);
+    }
+    // The goal's deadline moved after the card was offered (outside the analysis hash, so only the card's own meaning gate sees
+    // it): the press writes nothing under the old reading.
+    const g = w.graph();
+    node(g, 'event_goal').goal_horizon = { ...node(g, 'event_goal').goal_horizon, deadline: '2027-06-30' };
+    const moved = world(g);
+    const p = w.proposals.get(r.proposal_id)!;
+    moved.proposals.put(p);
+    const before = JSON.stringify(moved.graph());
+    const out = await press(moved, r.proposal_id);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(out.expected, 'the analysis hash did not move: the meaning gate refused it').toBeUndefined();
+    expect(moved.registers).toHaveLength(0);
+    expect(JSON.stringify(moved.graph())).toBe(before);
+    const budget = w.graph();
+    node(budget, LEGACY_TIME).observed_state.unit = '% of budget';
+    // CONTRAST: offered on a share of budget, no card is made at all (not a share of the team's time).
+    expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
   });
 
   it.each([

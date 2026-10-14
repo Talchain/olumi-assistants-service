@@ -33,7 +33,8 @@ import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareFor
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { optionCapacityChangeCard, optionCapacityChangeHeld, optionCapacityChangeStillApplies, optionCapacityTarget, planOptionCapacityChange,
-  shareFiguresIn, withOptionCapacityChange, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
+  otherSharesOf, shareFiguresFor, withOptionCapacityChange, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
+import { effectLeadFromStatements } from '../../goal-target/effect-lead.js';
 import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
@@ -3625,7 +3626,9 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedOptionCapacityChange;
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
-    const done = `‘${a.option_label}’ now acts in the deadline forecast through the time it frees. Run the analysis to see its chance.`;
+    // The successful commit runs the analysis itself, with its same-Run coaching: never ask the user to Run separately.
+    const done = `‘${a.option_label}’ now acts in the deadline forecast through the time it frees, saved with the user's figure and Olumi's `
+      + 'assumptions distinguished. The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
     if (optionCapacityChangeHeld(before.raw, a)) {
       proposals.markApplied(pid, []);
@@ -6423,10 +6426,19 @@ export function createAgentCapabilities(
       const factorId = typeof args?.factor_id === 'string' && args.factor_id !== '' ? args.factor_id : undefined;
       const target = optionCapacityTarget(g.raw, optionId, factorId);
       if (target.kind === 'refused') return refuse(target.refusal, target.detail);
-      const verdict = verifyStatements(args?.statements, { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text },
-        { subject: { quantity: 'share_of_time', node_id: String(target.factor.id), option_id: optionId }, unit: '%', forms: ['point'], figuresIn: shareFiguresIn });
+      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text };
+      const share = target.factor.observed_state as { unit: string };
+      const verdict = verifyStatements(args?.statements, texts,
+        { subject: { quantity: 'share_of_time', node_id: String(target.factor.id), option_id: optionId }, unit: '%', forms: ['point'],
+          figuresIn: shareFiguresFor(String(target.factor.label), share.unit, otherSharesOf(g.raw as Record<string, unknown>, String(target.factor.id))) });
       if (verdict.kind === 'refused') return refuse(verdict.refusal, verdict.detail);
-      const plan = planOptionCapacityChange(g.raw as Record<string, unknown>, target, verdict.statements);
+      // ⛔ PL (14 Oct): a timing in the same words ("in 3 months, …") is the option's LEAD, read by session 4's ONE lead reader
+      // (`effect-lead.ts`), never a figure of the share. A timing it cannot read prepares nothing and keeps its ask.
+      const quotes = verdict.statements.map((st) => st.quote);
+      const timed = quotes.some((q) => /\b(?:days?|weeks?|months?|years?)\b/i.test(q));
+      const lead = timed ? effectLeadFromStatements(texts, optionId, quotes) : undefined;
+      if (lead?.kind === 'refused') return refuse(lead.refusal, lead.detail);
+      const plan = planOptionCapacityChange(g.raw as Record<string, unknown>, target, verdict.statements, lead?.lead);
       if (plan.kind === 'refused') return refuse(plan.refusal, plan.detail);
       const a = plan.approved;
       // The postimage must hold exactly what the card says before it is offered, never only after the press.

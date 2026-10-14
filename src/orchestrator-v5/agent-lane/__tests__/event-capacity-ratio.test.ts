@@ -466,9 +466,9 @@ describe('DL (14 Oct): the hire WITH a pace read "Chance not shown yet" with no 
     { option_id: LEGACY, probability_of_goal: 0.3, outcome: { p10: 0.75, p50: 0.9, p90: 1.02, std: 0.1 } },
     { option_id: HIRE, probability_of_goal: 1, ...hire }], inference_warnings: [] as Rec[] });
   const spread = { outcome: { p10: 1.2350859803491727, p50: 1.3259448831432001, p90: 1.4178740146926914, std: 0.07113488512172908 } };
-  const LINE = 'No chance is shown for this option: this model has it reaching 100% of next feature launch by 14 April 2027 in every run, '
+  const LINE = 'No chance is shown for this option: in this analysis it reaches 100% of next feature launch by 14 April 2027, '
     + 'but that rests on Olumi’s estimates of hiring time (2–4 months) and of the additional progress from the hires (8% of next feature '
-    + 'launch per month). Check Olumi’s estimates: how long hiring would take, and how much each hire adds per month.';
+    + 'launch per month), so how likely that is can’t be said yet. Check Olumi’s estimates: how long hiring would take, and how much each hire adds per month.';
 
   it('⭐ RED→GREEN: the unearned 1 stays withheld (rule unchanged) and carries its reason, what it rests on and one step', async () => {
     const g = await saved(5, 7);
@@ -491,7 +491,8 @@ describe('DL (14 Oct): the hire WITH a pace read "Chance not shown yet" with no 
     const ratioRun = run(spread);
     Object.assign((ratioRun.option_comparison as Rec[])[1], { probability_of_goal: 1, ...spread });
     const ratioLine = goalChanceLicenceOf(ratioRun, g, 'event_goal')!.withheld_reason_by_option?.[LEGACY]?.line;
-    expect(ratioLine).toMatch(/^No chance is shown for this option: this model has it reaching 100% of next feature launch by 14 April 2027 in every run, but that rests on Olumi’s reading that /);
+    expect(ratioLine).toMatch(/^No chance is shown for this option: in this analysis it reaches 100% of next feature launch by 14 April 2027, but that rests on Olumi’s reading that /);
+    expect(ratioLine).not.toMatch(/every run/);
     expect(ratioLine).toMatch(/ Check Olumi’s reading: how much this option changes the team’s capacity, and from when\.$/);
   });
 });
