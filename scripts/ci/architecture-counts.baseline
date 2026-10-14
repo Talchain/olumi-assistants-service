@@ -1,0 +1,11 @@
+# Shrink-only (Paul 14 Oct 2026). Patterns: scripts/ci/architecture-counts.sh. Lower a value when its count falls; a rise needs the DL's report to Paul.
+# drafter_fields 11→12 at #3152 (statements[], SYSTEM 2; it retires 6 per-field carriers in steps 2–6, which lowers drafter_node_fields).
+agent_tools=29
+user_statement_tools=6
+user_statement_args=2
+cas_door_members=19
+door_write_members=9
+drafter_fields=12
+drafter_node_fields=35
+drafter_option_fields=6
+drafter_link_fields=10
