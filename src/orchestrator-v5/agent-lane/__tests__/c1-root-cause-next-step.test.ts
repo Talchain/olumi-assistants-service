@@ -48,6 +48,16 @@ describe('C1: with no goal target, the missing target is the one next step', () 
     expect(projectCanonicalAnalysisCells(FX.result, withTarget(FX.graph))).toEqual(FX.served.cells);
   });
 
+  it('(c) contrast: a Run that carries a goal-chance licence had a target, so a legacy goal (normalised threshold only) keeps its own reasons', () => {
+    const options = (FX.served.cells as Rec[]).map((c) => c.option_id);
+    const licensed = { ...FX.result, enrichment: { ...FX.result.enrichment, inference_warnings: [...FX.result.enrichment.inference_warnings,
+      { code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each', option_ids: options, withheld_option_ids: options }] } };
+    const legacy = { ...FX.graph, nodes: (FX.graph.nodes as Rec[]).map((n) => n.id === GOAL ? { ...n, goal_threshold: 0.7 } : n) };
+    const cells = projectCanonicalAnalysisCells(licensed, legacy);
+    expect(cells.every((c) => !(c.cell as Rec).reasons?.some((r: Rec) => r.code === 'goal_target_missing'))).toBe(true);
+    expect(cells).toEqual(projectCanonicalAnalysisCells(licensed, withTarget(FX.graph)));
+  });
+
   it('(d) no sizing is offered without a target: no guided sizing, so no link-size chips', () => {
     // Served: guided sizing and six link-size chips, three of them not even into the goal.
     expect(FX.served.guided_sizing).toBeTruthy();

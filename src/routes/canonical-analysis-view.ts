@@ -170,8 +170,9 @@ export function projectCanonicalAnalysisCells(
   }));
   // C1 (Paul's funding test, 14 Oct): with no goal target no option can have a chance of meeting it, so the missing target
   // is the ONE root reason, ahead of placeholder and horizon reasons. The standing gap's own reader and words
-  // (`goal-target-gap.ts`, which `modelGapOf` and the action bar's "Set target" read).
-  const gap = goalTargetGapOf(graph);
+  // (`goal-target-gap.ts`, which `modelGapOf` and the action bar's "Set target" read). The Run agrees: a Run that
+  // carries a goal-chance licence had a target, so its cells keep their own reasons.
+  const gap = licence === undefined ? goalTargetGapOf(graph) : null;
   const targetMissing = gap === null ? undefined : { code: GOAL_TARGET_MISSING, message: gap.question };
   const compared = rec(rec(result)?.enrichment)?.option_comparison;
   // The roster belongs to the served Run, not today's graph or a refused attempt.

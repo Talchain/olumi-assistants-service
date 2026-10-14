@@ -19,7 +19,7 @@ export interface GoalTargetGap {
   readonly question: string;
 }
 
-/** The goal the graph names: `goal_node_id` when it is a goal node, else the ONE goal node; undefined otherwise. */
+/** The goal the graph names (its named goal id when that is a goal node), else the ONE goal node; undefined otherwise. */
 function namedGoalOf(raw: Rec): Rec | undefined {
   const goals = (Array.isArray(raw.nodes) ? raw.nodes.map(rec) : []).filter((n): n is Rec => n?.kind === 'goal');
   const named = raw.goal_node_id;
@@ -28,8 +28,8 @@ function namedGoalOf(raw: Rec): Rec | undefined {
 }
 
 /**
- * The named goal holds no stated target (`statedGoalTargetOf`), or null. A chance goal takes no target quantity (the
- * goal-kind registry, #2742 S1): its one question is S1's deadline ask, never this one.
+ * The named goal holds no stated target (the one stated-target reader), or null. A chance goal takes no target quantity
+ * (the goal-kind registry, #2742 S1): its one question is S1's deadline ask, never this one.
  */
 export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
   const raw = rec(graph);
