@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
-import { unresolvedEventOptionIds, withEventShareDate, withRatioCarrierSizes } from '../../goal-target/event-by-date-model.js';
+import { eventByDateAdmissionRefusal, unresolvedEventOptionIds, withEventShareDate, withRatioCarrierSizes } from '../../goal-target/event-by-date-model.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { CAPACITY_RATIO_COMPARISON_WITHHELD, withoutCapacityRatioComparison, withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, capacityRatioOutOfReach, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
@@ -368,6 +368,23 @@ describe('DL (14 Oct): a stated deadline keeps its forecast whatever options the
     // #3092's reason names the kept-out part the option changes, then the coaching step.
     expect(why('event_option_2')).toBe('No chance is shown for this option yet: it changes ‘Legacy-code fix time share’, which this deadline '
       + "forecast doesn't use yet. Worth discussing: how much it would speed up the work, and from when.");
+  });
+
+  // DL ruling C (14 Oct): "whatever options" only with a capacity basis from the brief. Measured on recorded real drafts:
+  // all 6 of Paul's state the team (6 developers / 25% of their time, quoted); none of T5 D2's 7 marketing-launch drafts
+  // (first, served retry, reps 6–10) does, so they keep their ordinary model and its outcome goals.
+  it('⭐ ruling C measure: Paul\'s 6 drafts are admitted; T5 D2\'s 7 marketing drafts (deadline stated, no capacity basis) are refused', () => {
+    for (const d of PROBE.drafts) expect(eventByDateAdmissionRefusal(JSON.parse(d.raw_text) as never), d.id).toBeNull();
+    const first = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-r1.json', 'utf8')) as Rec;
+    const reps = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-v3-retries.json', 'utf8')) as Rec;
+    const d2: [string, unknown][] = [['draft_call1', first.draft_call1], ['draft_call2', first.draft_call2],
+      ...Object.keys(reps).filter((k) => k.startsWith('retry_rep')).map((k): [string, unknown] => [k, reps[k]])];
+    expect(d2).toHaveLength(7);
+    for (const [k, raw] of d2) {
+      const c = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Rec;
+      expect(c.goal.kind === 'event_by_date' && c.goal.horizon_months > 0, `PRECONDITION ${k}: typed event, deadline stated`).toBe(true);
+      expect(eventByDateAdmissionRefusal(c as never), k).not.toBeNull();
+    }
   });
 });
 

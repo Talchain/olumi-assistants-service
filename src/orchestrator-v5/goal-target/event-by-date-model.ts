@@ -380,6 +380,31 @@ function eventDeadlineStated(goal: CandidateModel['goal'] | undefined): boolean 
     || (typeof g?.deadline_words === 'string' && g.deadline_words.trim() !== '');
 }
 
+/** The drafter's unit for a share of time ("%", "% of development time") or a count of people ("mid-weight developers"). */
+const TIME_SHARE_UNIT = /^\s*%|\bper ?cent\b/i;
+const PEOPLE_UNIT = /\b(developers?|engineers?|people|persons?|staff|ftes?|headcount|members?|employees?|workers?|designers?|testers?)\b/i;
+
+/**
+ * DL ruling C (14 Oct): the draft states the team's capacity from the brief. That is a team-size or time-allocation factor
+ * the drafter recorded as stated, with the brief's quote and figure (Paul's "six mid-weight developers", "25% of their
+ * time"), or the drafter's chain identity (capacity = people × time share). An option set on a capacity factor counts
+ * through either. An Olumi-proposed time factor (T5 D2's "Working time on feature launch") is not a basis. Reads the
+ * drafter's structured unit and provenance, never the brief's words.
+ */
+function eventCapacityBasisStated(candidate: CandidateModel): boolean {
+  const factors = Array.isArray(candidate.factors) ? candidate.factors : [];
+  const stated = factors.some((f) => {
+    const quote = (f.baseline_evidence as { quote?: unknown } | null | undefined)?.quote;
+    return f.provenance === 'explicit' && typeof quote === 'string' && quote.trim() !== ''
+      && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value)
+      && typeof f.unit === 'string' && (TIME_SHARE_UNIT.test(f.unit) || PEOPLE_UNIT.test(f.unit));
+  });
+  if (stated) return true;
+  const identities = (candidate as { identities?: unknown }).identities;
+  return Array.isArray(identities) && identities.some((i: Rec) => i?.operation === 'product'
+    && Array.isArray(i.factors) && i.factors.length >= 2);
+}
+
 function validEventCapacity(capacity: CandidateModel['options'][number]['added_capacity']): boolean {
   return !!capacity && [capacity.monthly_share_pct, capacity.lead_months_low, capacity.lead_months_high].every(Number.isFinite)
     && capacity.monthly_share_pct >= 0 && capacity.monthly_share_pct <= 100
@@ -509,7 +534,9 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   // (`unsupportedEventOptionWhy`); carrying on as now still gets its chance once the team's time is held.
   // Only for a draft the drafter TYPED as an event-by-date goal: a flagged draft answered as another kind of goal (a price
   // rise "with the next release") keeps its ordinary model when nothing in it changes the team's capacity.
-  if (candidate.goal?.kind === 'event_by_date' && eventDeadlineStated(candidate.goal)) return null;
+  // DL ruling C (14 Oct): and only where the draft carries a capacity basis from the brief (`eventCapacityBasisStated`). A
+  // marketing brief with a fixed launch date (T5 D2) keeps its outcome goals instead of a "share of the launch" forecast.
+  if (candidate.goal?.kind === 'event_by_date' && eventDeadlineStated(candidate.goal) && eventCapacityBasisStated(candidate)) return null;
   if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
   return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }
