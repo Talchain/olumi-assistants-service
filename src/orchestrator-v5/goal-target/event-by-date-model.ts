@@ -365,6 +365,69 @@ function validEventCapacity(capacity: CandidateModel['options'][number]['added_c
     && capacity.lead_months_low >= 0 && capacity.lead_months_high >= capacity.lead_months_low;
 }
 
+/** An option's change to the team's capacity, through the brief's own product identity (Paul's legacy-code brief, c1494f4d). */
+export interface EventCapacityRatio {
+  /** capacity with the option ÷ capacity today, both from the identity's own factors. */
+  readonly ratio: number;
+  /** The identity's outcome (the capacity), and each factor's value today and with the option. */
+  readonly capacity: string;
+  readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number }[];
+}
+
+const sameLabel = (a: unknown, b: unknown): boolean => typeof a === 'string' && typeof b === 'string'
+  && a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Each non-status-quo option's capacity ratio (by option index), read only from what the draft states: a PRODUCT identity
+ * whose outcome links positively to the goal, its factors' baselines, the option's ABSOLUTE settings, and one hop of a stated
+ * linear link into an identity factor (e.g. legacy time → feature time, −1 per 1). Anything it cannot read gives no ratio
+ * (fail closed): no such identity, a missing or non-positive baseline, a non-absolute setting, or no change.
+ */
+export function eventCapacityRatios(candidate: CandidateModel): ReadonlyMap<number, EventCapacityRatio> {
+  const out = new Map<number, EventCapacityRatio>();
+  const c = candidate as unknown as Rec;
+  const factors: Rec[] = Array.isArray(c.factors) ? c.factors : [];
+  const links: Rec[] = Array.isArray(c.links) ? c.links : [];
+  const baseline = (label: string): number | undefined => {
+    const f = factors.find(x => sameLabel(x.label, label));
+    return f && f.baseline_known === true && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value) && f.baseline_value > 0
+      ? f.baseline_value : undefined;
+  };
+  const identity = (Array.isArray(c.identities) ? c.identities as Rec[] : []).find(i => i.operation === 'product'
+    && Array.isArray(i.factors) && i.factors.length >= 2 && i.factors.length <= 4
+    && links.some(l => sameLabel(l.from, i.outcome) && sameLabel(l.to, c.goal?.metric) && l.direction === 'positive'));
+  if (identity === undefined) return out;
+  const labels = identity.factors as string[];
+  const today = labels.map(baseline);
+  if (today.some(v => v === undefined)) return out;
+  const options: Rec[] = Array.isArray(c.options) ? c.options : [];
+  options.forEach((o, index) => {
+    if (o.is_status_quo === true) return;
+    const settings: Rec[] = Array.isArray(o.interventions) ? o.interventions : [];
+    if (settings.some(iv => iv.value_kind !== 'absolute' || typeof iv.value !== 'number' || !Number.isFinite(iv.value))) return;
+    const withOption = labels.map((label, k) => {
+      const direct = settings.find(iv => sameLabel(iv.factor_label, label));
+      if (direct) return direct.value as number;
+      // One stated linear hop from a set factor into this identity factor.
+      let value = today[k]!;
+      for (const iv of settings) {
+        const link = links.find(l => sameLabel(l.from, iv.factor_label) && sameLabel(l.to, label)
+          && typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0);
+        const from = baseline(iv.factor_label);
+        if (link && from !== undefined) value += (link.effect_amount / link.effect_per_source_change) * ((iv.value as number) - from);
+      }
+      return value;
+    });
+    if (withOption.some(v => !Number.isFinite(v) || v <= 0) || withOption.every((v, k) => v === today[k])) return;
+    const product = (vs: readonly number[]): number => vs.reduce((a, b) => a * b, 1);
+    const ratio = product(withOption) / product(today as number[]);
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) return;
+    out.set(index, { ratio, capacity: String(identity.outcome),
+      factors: labels.map((label, k) => ({ label, today: today[k]!, withOption: withOption[k]! })) });
+  });
+  return out;
+}
+
 /** Preconditions for a construction that already selected the event prompt; never classifies text. */
 export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof EVENT_BY_DATE_REFUSALS[number] | null {
   const deliverable = candidate.goal?.deliverable;
