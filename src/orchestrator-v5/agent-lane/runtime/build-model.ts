@@ -2476,8 +2476,9 @@ export async function buildModelFromBrief(
     // words ("… the model doesn't hold it yet"). A drafter question is left out beside it only when its verified concerns are
     // all set-aside links (`withoutSetAsideQuestions`); a question quoting the same amount with no such binding is asked.
     const setAside = setAsideEstimatesOf(admitted.loss);
-    const openQuestions = withoutSetAsideQuestions(userFacingDrafterQuestions(parked), setAside,
-      (candidate as { unknown_concerns?: unknown }).unknown_concerns, admitted.nodes);
+    const parkedConcerns = (candidate as { unknown_concerns?: unknown }).unknown_concerns;
+    const openQuestions = withSetAsideFiguresSaid(withoutSetAsideQuestions(userFacingDrafterQuestions(parked), setAside,
+      parkedConcerns, admitted.nodes), setAside, parkedConcerns, admitted.nodes);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -2945,6 +2946,24 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
 }
 
 /**
+ * One binding per question from the draft's `unknown_concerns`: a duplicate entry must bind it alike, and a malformed or
+ * conflicting one leaves it unbound (null). Shared by `withoutSetAsideQuestions` and `withSetAsideFiguresSaid`.
+ */
+function verifiedConcernsOf(concerns: readonly unknown[]): Map<string, readonly string[] | null> {
+  const about = new Map<string, readonly string[] | null>();
+  for (const entry of concerns) {
+    const e = entry as { unknown?: unknown; concerns?: unknown } | null;
+    if (e === null || typeof e !== 'object' || typeof e.unknown !== 'string') continue;
+    const q = e.unknown.trim();
+    const bound = Array.isArray(e.concerns) && e.concerns.every((c) => typeof c === 'string')
+      ? [...new Set((e.concerns as string[]).map((c) => c.trim()))].sort() : null;
+    const earlier = about.get(q);
+    about.set(q, bound === null || (earlier !== undefined && JSON.stringify(earlier) !== JSON.stringify(bound)) ? null : bound);
+  }
+  return about;
+}
+
+/**
  * ⭐ GEN #2 BY ENTITY (DL ruling 14 Oct 02:0xZ; the #3000 Codex check failed the number match twice: "60% churn", "£60
  * support" and "60 new customers" vanished beside Olumi's withheld 60, and a user-value exemption let a set-aside link's
  * question back). When the draft says what each question is ABOUT (`unknown_concerns`, #3004: `unknown` the question copied
@@ -2968,17 +2987,7 @@ function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsi
   };
   const asideLinks = new Set(setAside.map((s) => `${s.from}\u0000${s.to}`));
   if (asideLinks.size === 0) return questions;
-  // One binding per question: a duplicate entry must bind it alike, and a malformed or conflicting one leaves it unbound.
-  const about = new Map<string, readonly string[] | null>();
-  for (const entry of concerns) {
-    const e = entry as { unknown?: unknown; concerns?: unknown } | null;
-    if (e === null || typeof e !== 'object' || typeof e.unknown !== 'string') continue;
-    const q = e.unknown.trim();
-    const bound = Array.isArray(e.concerns) && e.concerns.every((c) => typeof c === 'string')
-      ? [...new Set((e.concerns as string[]).map((c) => c.trim()))].sort() : null;
-    const earlier = about.get(q);
-    about.set(q, bound === null || (earlier !== undefined && JSON.stringify(earlier) !== JSON.stringify(bound)) ? null : bound);
-  }
+  const about = verifiedConcernsOf(concerns);
   const namesAsideLink = (c: string): boolean => {
     const ends = /^(.+?)\s*(?:\u2192|->)\s*(.+)$/u.exec(c.trim());
     const from = ends === null ? undefined : idOf(ends[1]!), to = ends === null ? undefined : idOf(ends[2]!);
@@ -2988,6 +2997,52 @@ function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsi
     const aboutQ = about.get(q.trim()) ?? [];
     if (aboutQ === null) return true;
     return !(aboutQ.length > 0 && aboutQ.every(namesAsideLink));
+  });
+}
+
+/**
+ * ⭐ A KEPT QUESTION NEVER STATES A SET-ASIDE FIGURE AS THE MODEL'S (DL 14 Oct; served hiring post3021 turn 01: the drafter's
+ * "Olumi’s provisional annual fully loaded cost estimates are £120,000 for a Tech lead and £90,000 per mid-weight developer…"
+ * was kept beside the contract's own "…so it was not used" for those two links, and the AI then said "The model has
+ * provisional annual cost estimates of £120,000 … and £90,000"; the model holds a placeholder). A question kept because it is
+ * also about something else (`withoutSetAsideQuestions`) whose verified concerns name a link Olumi set aside, AND which states
+ * that link's own set-aside amount, says so once, in plain words. Bound by identity first (the concern names the link by its
+ * labels, through the same verified binding: a conflicting or malformed entry binds nothing); the amount only confirms
+ * that this question states that link's figure. Nothing is removed or reworded.
+ */
+function withSetAsideFiguresSaid(questions: string[], setAside: readonly SetAsideEstimate[], concerns: unknown,
+  nodes: readonly { readonly id: string; readonly label?: unknown }[]): string[] {
+  if (!Array.isArray(concerns) || setAside.length === 0) return questions;
+  const labelOf = (id: string): string => {
+    const n = nodes.find((x) => x.id === id);
+    return typeof n?.label === 'string' ? n.label : id;
+  };
+  const idOf = (label: string): string | undefined => {
+    const named = nodes.filter((n) => typeof n.label === 'string' && canonicalLabel(n.label) === canonicalLabel(label));
+    return named.length === 1 ? named[0]!.id : undefined;
+  };
+  const asideOf = (c: string): SetAsideEstimate | undefined => {
+    const ends = /^(.+?)\s*(?:\u2192|->)\s*(.+)$/u.exec(c.trim());
+    const from = ends === null ? undefined : idOf(ends[1]!), to = ends === null ? undefined : idOf(ends[2]!);
+    return from === undefined || to === undefined ? undefined : setAside.find((a) => a.from === from && a.to === to);
+  };
+  /** Every figure the question writes, as numbers: "£120,000" → 120000, "£90k" → 90000. */
+  const figuresIn = (q: string): number[] => [...q.matchAll(/(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*([km])?\b/giu)].map((m) => {
+    const n = Number(`${m[1]!.replace(/,/g, '')}${m[2] ?? ''}`);
+    return m[3]?.toLowerCase() === 'k' ? n * 1e3 : m[3]?.toLowerCase() === 'm' ? n * 1e6 : n;
+  });
+  const bound = verifiedConcernsOf(concerns);
+  return questions.map((q) => {
+    const stated = figuresIn(q);
+    const links = [...new Set((bound.get(q.trim()) ?? []).map(asideOf))]
+      .filter((a): a is SetAsideEstimate => a !== undefined && a.amount !== null && stated.includes(Math.abs(a.amount)))
+      // Named in the order the question states their figures.
+      .sort((a, b) => stated.indexOf(Math.abs(a.amount!)) - stated.indexOf(Math.abs(b.amount!)));
+    if (links.length === 0) return q;
+    const named = links.map((a) => `\u2018${labelOf(a.from)}\u2019 \u2192 \u2018${labelOf(a.to)}\u2019`);
+    const list = named.length === 1 ? named[0]! : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]!}`;
+    return `${q} Olumi set ${links.length === 1 ? 'that estimate' : 'those estimates'} aside, so the model does not use `
+      + `${links.length === 1 ? 'it' : 'them'} yet: ${list}.`;
   });
 }
 
