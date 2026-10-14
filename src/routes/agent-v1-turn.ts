@@ -113,7 +113,7 @@ import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-senten
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceSayPromisedThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
@@ -5086,7 +5086,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
         // BYPASS1 keeps it: the gate appends its reason only when it cut a sentence, so the reply accounts for the cut.
-        sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
+        // SAY-SHOWN: where the AI was told `say` is shown, `say` gives the reason; the gate's own "why" would repeat it.
+        sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis'))
+          && !goalChanceSayPromisedThisTurn(result.tool_results),
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
         ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
       });
@@ -5119,9 +5121,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // or explains the current Run keeps the line with the rest of the chance face (never-reask, one-reply-build rows).
     const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
       || (fastPath === 'explain' && narrationStatus !== 'stale');
-    goalChanceOwed = stateFacts.current_state_unknown === true || (!hostProse && !chanceFaceTurn) ? null
-      : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
-        identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
+    // ⭐ SAY-SHOWN: the latest Run told the AI its `say` is shown (`say_shown`), so the host shows it: once, an AI copy counting
+    // as that once. Only an unknown current state still wins (DL 14 Oct): the withheld reason may itself be stale.
+    goalChanceOwed = stateFacts.current_state_unknown === true ? null
+      : goalChanceSayPromisedThisTurn(result.tool_results)
+        ? goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { graph: readbackGraph })
+        : !hostProse && !chanceFaceTurn ? null
+          : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
+            identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
       const goalLines = [goalChanceOwed];
       askEachOnce(goalLines, await repliesToCheckAsks(goalLines, historyReader, scenarioId, undefined));
