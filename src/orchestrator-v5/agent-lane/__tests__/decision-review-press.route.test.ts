@@ -25,7 +25,8 @@ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leade
 const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0003';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
-const ROOT_SENTENCE = 'How likely or how large is "Demand shortfall" today? Olumi can’t run the numbers until this risk has a figure.';
+// Paul's a994c38a risk is DRAFTED: it is left out of the Run, and the review says what the result assumes (DL 19:26Z 14 Oct).
+const ROOT_SENTENCE = 'This analysis assumes ‘Demand shortfall’ doesn’t happen; it has no figure yet.';
 const WITHHELD_SAY = goalChanceWithheldForAgent(SERVED.block)!.say;
 
 type Rec = Record<string, unknown>;
@@ -151,7 +152,7 @@ describe('the "Review this decision" press on the live route', () => {
   const press = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Review this decision', source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID } } });
 
-  it('RED (M1): the default-0 risk with its ask, and the typed goal-figure reason, each whole, with no model call', async () => {
+  it('RED (M1): the default-0 risk, said as what the result assumes, and the typed goal-figure reason, each whole, with no model call', async () => {
     const body = (await press(randomUUID())).json() as Body;
     expect(body.assistant_text).toBe([DECISION_REVIEW_OPENING, '', `- ${ROOT_SENTENCE}`, `- ${WITHHELD_SAY}`].join('\n'));
     expect(modelCalls).not.toHaveBeenCalled();

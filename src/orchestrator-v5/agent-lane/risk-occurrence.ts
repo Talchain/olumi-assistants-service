@@ -105,8 +105,8 @@ export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
  *    is offered again, as before);
  *  · the user did not put there themselves (`provenance: 'user_set'`): a risk the user added still asks for its figure first;
  *  · is undecided (`analysis_participation` absent: an adopted risk asks; a `retained_excluded` one is already out);
- *  · is a ROOT on the goal's path: no cause drawn into it (option, decision and limit links are not causes: PLoT strips them),
- *    and a directed path to a goal;
+ *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it (option, decision and limit links are not
+ *    causes: PLoT strips them; a node the user kept out is not sent), and a directed path to a goal;
  *  · is not something the Run needs: no option sets it and no limit names it (those keep asking, as before).
  * Pure; read on the model as saved, by readiness, the Run's and what-if's compute projection, and the host's line.
  */
@@ -116,7 +116,9 @@ export function unsizedRiskIds(graph: unknown): ReadonlySet<string> {
   const counts = new Map<unknown, number>();
   for (const n of nodes) counts.set(n.id, (counts.get(n.id) ?? 0) + 1);
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
-  const causal = (id: unknown): boolean => kindOf.has(id) && !['option', 'decision', 'constraint'].includes(String(kindOf.get(id)));
+  // Judged on the graph the Run SENDS (T4i): a node the user kept out (`retained_excluded`) and its links are not sent.
+  const keptOut = new Set(nodes.filter((n) => n.analysis_participation === 'retained_excluded').map((n) => n.id));
+  const causal = (id: unknown): boolean => kindOf.has(id) && !keptOut.has(id) && !['option', 'decision', 'constraint'].includes(String(kindOf.get(id)));
   const edges = graph.edges.filter(isRec).filter((e) => e.edge_type !== 'bidirected' && causal(e.from) && causal(e.to));
   const needed = new Set<unknown>([
     ...nodes.filter((n) => n.kind === 'option').flatMap((n) => [n.interventions, isRec(n.data) ? n.data.interventions : undefined]
@@ -156,7 +158,7 @@ export function withoutUnsizedRisks<T>(graph: T, identityGraph: unknown = graph)
 
 /**
  * The host's ONE line for an unsized risk (said once, on the build turn and every Run: `decision-input-ask.ts`): what the
- * analysis leaves out, and the labelled step that sizes it. The step is offered only where the occurrence card can exist (one
+ * result assumes about it (that it doesn't happen), and the labelled step that sizes it. The step is offered only where the occurrence card can exist (one
  * current goal period, `riskOccurrenceSubject`: PL 05:53Z); otherwise the line promises nothing.
  */
 export function unsizedRiskLine(graph: unknown, riskId: string, besideChance: boolean): string | null {
@@ -164,11 +166,17 @@ export function unsizedRiskLine(graph: unknown, riskId: string, besideChance: bo
   const label = typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : null;
   if (label === null || /[\r\n]/.test(label)) return null;
   const subject = riskOccurrenceSubject(graph, riskId);
-  const leftOut = `‘${label}’ has no figure yet, so this analysis leaves it out${besideChance ? ' and the chances shown don’t include it' : ''}.`;
+  // DL (AIE asked, #94): leaving the risk out is a labelled CONDITIONAL, so the line says what the result assumes.
+  const leftOut = `${besideChance ? 'These chances assume' : 'This analysis assumes'} ‘${label}’ doesn’t happen; it has no figure yet.`;
   return subject.kind !== 'eligible' ? leftOut
     : `${leftOut} To include it, say whether it’s already true now, or how likely it is to happen at least once within `
       + `${windowWords(subject.window_months)}; or ask Olumi to suggest a starting estimate for you to review.`;
 }
+
+/** The label-free form, where a label would not reach the user whole (the review's editors): the count, never a guess. */
+export const unsizedRisksUnnamedLine = (count: number): string => (count === 1
+  ? 'This analysis assumes one risk on your goal’s path doesn’t happen; it has no figure yet.'
+  : `This analysis assumes ${count} risks on your goal’s path don’t happen; they have no figures yet.`);
 
 /**
  * ⭐ AN OCCURRENCE IS A LEVEL ONLY OVER THE GOAL'S CURRENT WINDOW (Codex r2 on #3013: a write landed, the goal's period then

@@ -9,6 +9,7 @@
  *
  *   F1  `analysis_ready.unvalued_roots`          → `treatedAsZeroReplyLine` (gate 2, #2577): its own ask.
  *   F2  GOAL_ANCESTOR_DATA_GAP factor ancestors   → "‘X’ has no figure yet, …" (deduped against F1 by node id).
+ *   F1b `unsizedRiskIds` (a drafted risk with no figure, left out) → `unsizedRiskLine`: what the result assumes.
  *   F3/F4 GOAL_FIGURES_WITHHELD_CODES             → `goalChanceWithheldForAgent(...).say`. Gate 1 v2's identical-options
  *       code joins that reader with its own words (#2574), so F3 arrives through F4 and is never composed here.
  *   F5  `robustness.fragile_edges[0]`             → Science's sentence → Test without this link.
@@ -36,6 +37,7 @@ import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
+import { unsizedRiskIds, unsizedRiskLine, unsizedRisksUnnamedLine } from './risk-occurrence.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
 import { readFactorEnrichments, factorReviewSensitivity } from './factor-review.js';
 
@@ -215,6 +217,16 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
   if (rootLine !== null && unnamedZeroCount(rootLine) === 0) lines.push(rootLine);
   if (unnamedZero > 0) lines.push(unnamedZeroLine(unnamedZero));
   lines.push(...zeroLines);
+
+  // F1b (DL 19:26Z 14 Oct): a drafted risk nobody has sized is left out of the Run, so the review says what the result
+  // assumes about it, in the host's own line (`unsizedRiskLine`), or counted in its label-free form.
+  let unnamedUnsized = 0;
+  for (const id of unsizedRiskIds(graph)) {
+    const line = unsizedRiskLine(graph, id, false);
+    if (line !== null && survivesReplyEditors(line, graph, analysisReady)) lines.push(line);
+    else unnamedUnsized += 1;
+  }
+  if (unnamedUnsized > 0) lines.push(unsizedRisksUnnamedLine(unnamedUnsized));
 
   // F3/F4: the Run withheld goal figures, in the typed reason's own words when they reach the user whole; otherwise the
   // reader's own fail-closed opening (the withhold is still said, its label-bearing reason is not; Codex r2 P2).

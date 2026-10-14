@@ -14,7 +14,7 @@ import { unsizedRiskIds, withoutUnsizedRisks } from '../risk-occurrence.js';
 type Rec = Record<string, any>;
 const BODY = (JSON.parse(readFileSync(new URL('./fixtures/hiring-t1h-positive-r3-read02-after-approve.json', import.meta.url), 'utf8')) as Rec).body as Rec;
 const RISK = 'code_quality_degradation';
-const LINE = '‘Code quality degradation’ has no figure yet, so this analysis leaves it out.';
+const LINE = 'This analysis assumes ‘Code quality degradation’ doesn’t happen; it has no figure yet.';
 const nodeOf = (g: Rec, id: string) => (g.nodes as Rec[]).find((n) => n.id === id)!;
 const withRisk = (patch: Rec): Rec => {
   const g = structuredClone(BODY.graph);
@@ -54,7 +54,7 @@ describe('an unsized drafted risk is left out of the chance, said once, never a 
   it('said ONCE by the host, on the build turn and beside a chance; no window here, so no step it cannot keep', () => {
     expect(lines(BODY.graph).filter((l) => l.includes('Code quality degradation'))).toEqual([LINE]);
     expect(lines(BODY.graph, FIGURE).filter((l) => l.includes('Code quality degradation')))
-      .toEqual(['‘Code quality degradation’ has no figure yet, so this analysis leaves it out and the chances shown don’t include it.']);
+      .toEqual(['These chances assume ‘Code quality degradation’ doesn’t happen; it has no figure yet.']);
   });
 
   it('with the goal’s one period held (3 months), the line offers the labelled step: the user’s own words, or Olumi’s press-only estimate', () => {

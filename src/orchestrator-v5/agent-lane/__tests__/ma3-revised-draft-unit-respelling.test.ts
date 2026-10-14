@@ -184,7 +184,7 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     expect(String(b.public_label)).toContain('‘New customers in first 3 months’ at least 20 customers');
   });
 
-  it('(d) real path: card → approve → the saved model holds both targets and both limits → cold read → withheld for its one unvalued risk; valued, the PLoT body', async () => {
+  it('(d) real path: card → approve → the saved model holds both targets and both limits → cold read → the PLoT body, its one unsized drafted risk left out', async () => {
     const s = server();
     const { caps } = lane(s);
     const a = await caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
@@ -211,13 +211,20 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     expect((stored.nodes as Rec[]).find((n) => n.id === RISK)).toEqual({ id: RISK, kind: 'risk', label: 'Campaign execution risk', provenance: 'ai_inferred' });
     expect((stored.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
     expect((stored.edges as Rec[]).filter((e) => e.from === RISK).map((e) => e.to)).toEqual(['conversion_rate']);
-    const issues = assessCanonicalAnalysisReadiness(stored).blockingIssues;
-    expect(issues.map((i) => [i.code, i.factor_id])).toEqual([['MISSING_FACTOR_LEVEL', RISK]]);
-    expect(issues[0]!.message).toContain('How likely or how large is "Campaign execution risk" today?');
-    await expect(plotBodyFromStore(stored)).rejects.toThrow(/MISSING_FACTOR_LEVEL/);
-    // The Run's own body carries the budget as GBP/year once that risk has a level (the original assertion, unchanged).
+    // AMENDED again (DL 19:26Z 14 Oct, one rule for an unsized risk; old expectation: withheld on MISSING_FACTOR_LEVEL). The
+    // risk is DRAFTED and nobody has sized it, so it is left out of the Run (never sampled at zero) and said once by the host:
+    // these bytes give a PLoT body again, without the risk or its link.
+    expect(assessCanonicalAnalysisReadiness(stored).blockingIssues.filter((i) => i.factor_id === RISK)).toEqual([]);
+    const unsized = await plotBodyFromStore(stored);
+    expect(((unsized.graph as Rec).nodes as Rec[]).map((n) => n.id)).not.toContain(RISK);
+    expect(((unsized.graph as Rec).edges as Rec[]).filter((e) => e.from === RISK || e.to === RISK)).toEqual([]);
+    // The Run's own body carries the budget as GBP/year (the original assertion, unchanged), and once that risk has a level
+    // it is sent too.
+    expect((unsized.goal_constraints as Rec[]).filter((c) => c.constraint_id === SPEND_ID).map((c) => [c.value, c.unit, c.operator]))
+      .toEqual([[100000, 'GBP/year', '<=']]);
     const valued = { ...stored, nodes: (stored.nodes as Rec[]).map((n) => (n.id === RISK ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n)) };
     const body = await plotBodyFromStore(valued);
+    expect(((body.graph as Rec).nodes as Rec[]).map((n) => n.id)).toContain(RISK);
     expect((body.goal_constraints as Rec[]).filter((c) => c.constraint_id === SPEND_ID).map((c) => [c.value, c.unit, c.operator]))
       .toEqual([[100000, 'GBP/year', '<=']]);
   });

@@ -253,9 +253,9 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
     expect(ask(own(noPeriod))).toEqual(honest);
     // ⭐ The drafted risk (DL 19:26Z): never asked, left out, and its host line offers the same step only where the card can exist.
     for (const g of [G, conflict, noPeriod]) expect(ask(g)).toEqual([]);
-    expect(unsizedRiskLine(G, RISK, false)).toBe('‘Code quality deterioration’ has no figure yet, so this analysis leaves it out. To include it, say whether it’s '
+    expect(unsizedRiskLine(G, RISK, false)).toBe('This analysis assumes ‘Code quality deterioration’ doesn’t happen; it has no figure yet. To include it, say whether it’s '
       + 'already true now, or how likely it is to happen at least once within 3 months; or ask Olumi to suggest a starting estimate for you to review.');
-    for (const g of [conflict, noPeriod]) expect(unsizedRiskLine(g, RISK, false)).toBe('‘Code quality deterioration’ has no figure yet, so this analysis leaves it out.');
+    for (const g of [conflict, noPeriod]) expect(unsizedRiskLine(g, RISK, false)).toBe('This analysis assumes ‘Code quality deterioration’ doesn’t happen; it has no figure yet.');
   });
 });
 

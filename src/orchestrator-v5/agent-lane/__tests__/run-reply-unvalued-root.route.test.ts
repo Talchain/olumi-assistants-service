@@ -39,7 +39,12 @@ const edge = (from: string, to: string, negative = false): Rec => ({
   from, to, strength: { mean: negative ? -0.4 : 0.4, std: 0.1 },
   exists_probability: 1, effect_direction: negative ? 'negative' : 'positive',
 });
-/** Two options and a baseline over two people factors, plus a risk root on the goal path — valued or not. */
+/**
+ * Two options and a baseline over two people factors, plus a risk root on the goal path — valued or not. The risk is the
+ * user's own (`user_set`): theirs still withholds and asks first. A DRAFTED unsized risk is left out of the Run instead and
+ * said once by the host (DL 19:26Z 14 Oct, `unsizedRiskIds`): `riskDrafted` below.
+ */
+let riskDrafted = false;
 function graphWith(riskValued: boolean, riskLabel = 'Demand shortfall'): Rec {
   const options = [
     option('hire_lead', 'Hire a Tech Lead', { tech_leads: { value: 2 / 10, source: 'brief_extraction' } }),
@@ -55,7 +60,7 @@ function graphWith(riskValued: boolean, riskLabel = 'Demand shortfall'): Rec {
       observed_state: { value: 4 / 30, raw_value: 4, unit: 'people', source: 'brief_extraction' } },
     { id: 'productivity', kind: 'factor', label: 'Delivery productivity', category: 'observable',
       observed_state: { value: 20 / 100, raw_value: 20, unit: 'feature points/week', source: 'brief_extraction' } },
-    { id: 'demand_shortfall', kind: 'risk', label: riskLabel, category: 'observable',
+    { id: 'demand_shortfall', kind: 'risk', label: riskLabel, category: 'observable', ...(riskDrafted ? {} : { provenance: 'user_set' }),
       ...(riskValued ? { observed_state: { value: 0.35, source: 'brief_extraction' } } : {}) },
     ...options,
   ];
@@ -174,7 +179,7 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; historicalZero = false; historicalWarning = false; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; runAt = RUN_A_AT; });
+  beforeEach(() => { rows.length = 0; historicalZero = false; historicalWarning = false; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; runAt = RUN_A_AT; riskDrafted = false; });
 
   const runTurn = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
@@ -185,6 +190,15 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
     expectWithheldContract(body, riskValued ? undefined : SENTENCE);
     expect(body.assistant_text).toContain(SENTENCE);
     expect(body.assistant_text.split(SENTENCE)).toHaveLength(2); // said once
+  });
+
+  it('⭐ DL 19:26Z: a DRAFTED unsized risk never withholds or asks; the live Run says once that it is left out', async () => {
+    riskDrafted = true;
+    const body = (await runTurn(randomUUID())).json() as Body;
+    const line = 'This analysis assumes ‘Demand shortfall’ doesn’t happen; it has no figure yet.';
+    expect(body.assistant_text.split(line), body.assistant_text).toHaveLength(2);
+    expect(body.assistant_text).not.toContain(SENTENCE);
+    expect(body.assistant_text).not.toContain('How likely or how large is');
   });
 
   it('a saved Run with warning-only zero evidence retains its actual assumption at the route', async () => {
@@ -333,7 +347,7 @@ describe('a native Run with an unvalued risk root carries the numerical withhold
   const withRisks = (labels: string[]): Rec => {
     const g = graphWith(false, labels[0]);
     labels.slice(1).forEach((label, i) => {
-      (g.nodes as Rec[]).push({ id: `risk_${i + 2}`, kind: 'risk', label, category: 'observable' });
+      (g.nodes as Rec[]).push({ id: `risk_${i + 2}`, kind: 'risk', label, category: 'observable', provenance: 'user_set' });
       (g.edges as Rec[]).push(edge(`risk_${i + 2}`, 'goal', true));
     });
     return g;

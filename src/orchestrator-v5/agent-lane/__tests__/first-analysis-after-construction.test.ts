@@ -302,8 +302,9 @@ describe('the confirm card on the first pass (DL 5888399097; `../identity-card.t
 
 describe('T4e K1: first Run never computes an unknown sampled root as zero', () => {
   it.each(['risk', 'outcome'])('withholds a %s root, with its named next-step ask', async (kind) => {
+    // The user's own risk still withholds and asks first; a DRAFTED one is left out instead (DL 19:26Z, the next row).
     const graph = { ...READY_GRAPH, nodes: [...READY_GRAPH.nodes,
-      { id: 'unknown_root', kind, label: 'Delivery disruption' }],
+      { id: 'unknown_root', kind, label: 'Delivery disruption', ...(kind === 'risk' ? { provenance: 'user_set' } : {}) }],
       edges: [...READY_GRAPH.edges, { from: 'unknown_root', to: 'goal_x',
         strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }],
     };
@@ -319,5 +320,20 @@ describe('T4e K1: first Run never computes an unknown sampled root as zero', () 
     expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
       ? 'How likely or how large is "Delivery disruption" today? Olumi can’t run the numbers until this risk has a figure.'
       : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
+  });
+  it('DL 19:26Z: a DRAFTED risk root with no figure never holds the first Run; it is left out (never computed as zero)', async () => {
+    const graph = { ...READY_GRAPH, nodes: [...READY_GRAPH.nodes, { id: 'unknown_root', kind: 'risk', label: 'Delivery disruption' }],
+      edges: [...READY_GRAPH.edges, { from: 'unknown_root', to: 'goal_x',
+        strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }],
+    };
+    let calls = 0;
+    await runFirstAnalysisAfterConstruction({ scenarioId: SCENARIO, constructionTurnId: 't4e',
+      revisionHash: 't4e', revisionGraph: graph, requestId: 't4e', deadlineAt: Date.now() + 60000,
+      readPriorFacts: async () => ({ status: 'ok', facts: [] }),
+      dispatchRunAnalysis: async () => { calls++; return { outcome: 'ok', response: { blocks: [{ type: 'analysis_result' }] } } as never; },
+    });
+    expect(calls).toBe(1);
+    const { assessCanonicalAnalysisReadiness } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.filter(i => i.factor_id === 'unknown_root')).toEqual([]);
   });
 });

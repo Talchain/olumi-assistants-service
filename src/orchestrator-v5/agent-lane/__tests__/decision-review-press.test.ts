@@ -87,12 +87,13 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     const option = (id: string, label: string, interventions: Rec, is_baseline = false): Rec => ({ id, option_id: id, kind: 'option', label, interventions, is_baseline });
     const options = [option('hire_lead', 'Hire a Tech Lead', { tech_leads: { value: 0.2, source: 'brief_extraction' } }),
       option('hire_two', 'Hire Two Developers', { developers: { value: 0.2, source: 'brief_extraction' } }), option('carry_on', 'Carry On as Now', {}, true)];
+    // The risks are the user's own (`user_set`): theirs still ask first; a DRAFTED unsized risk is left out (DL 19:26Z 14 Oct).
     return { goal_node_id: 'goal', options, nodes: [
       { id: 'decision', kind: 'decision', label: 'Hiring approach' }, { id: 'goal', kind: 'goal', label: 'Meet our next feature-launch deadline' },
       { id: 'tech_leads', kind: 'factor', label: 'Tech leads', category: 'controllable', observed_state: { value: 0.1, raw_value: 1, unit: 'people', source: 'brief_extraction' } },
       { id: 'developers', kind: 'factor', label: 'Developers', category: 'controllable', observed_state: { value: 4 / 30, raw_value: 4, unit: 'people', source: 'brief_extraction' } },
       { id: 'productivity', kind: 'factor', label: 'Delivery productivity', category: 'observable', observed_state: { value: 0.2, raw_value: 20, unit: 'feature points/week', source: 'brief_extraction' } },
-      { id: 'demand_shortfall', kind: 'risk', label: 'Demand shortfall', category: 'observable' }, ...options],
+      { id: 'demand_shortfall', kind: 'risk', label: 'Demand shortfall', category: 'observable', provenance: 'user_set' }, ...options],
     edges: [...options.map((o) => edge('decision', String(o.id))), edge('hire_lead', 'tech_leads'), edge('hire_two', 'developers'),
       edge('carry_on', 'tech_leads'), edge('carry_on', 'developers'), edge('tech_leads', 'productivity'), edge('developers', 'productivity'),
       edge('productivity', 'goal'), edge('demand_shortfall', 'goal', true)] };
@@ -117,7 +118,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
   const withRoots = (labels: Record<string, string>, extraRoot = false): Rec => {
     const nodes = (G2_GRAPH.nodes as Rec[]).map((n) => (typeof n.id === 'string' && n.id in labels ? { ...n, label: labels[n.id] } : n));
     if (!extraRoot) return { ...G2_GRAPH, nodes };
-    return { ...G2_GRAPH, nodes: [...nodes, { id: 'supply_delay', kind: 'risk', label: labels.supply_delay ?? 'Supply delay', category: 'observable' }],
+    return { ...G2_GRAPH, nodes: [...nodes, { id: 'supply_delay', kind: 'risk', label: labels.supply_delay ?? 'Supply delay', category: 'observable', provenance: 'user_set' }],
       edges: [...(G2_GRAPH.edges as Rec[]), { from: 'supply_delay', to: 'goal', strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }] };
   };
   it.each([
