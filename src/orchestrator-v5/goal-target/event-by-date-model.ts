@@ -460,17 +460,22 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
       return value;
     });
     if (withOption.some(v => !Number.isFinite(v) || v <= 0) || withOption.every((v, k) => v === today[k])) return;
-    // AIE 6174736249 (retained origins): a figure today the brief did not state is Olumi's. A share that sums to 100% with a
-    // stated share in the same unit is Olumi's two-way split of it (75% = 100% − the stated 25%), re-derived when that is edited.
+    // AIE 6174736249 (retained origins): a figure today the brief did not state is Olumi's. ⛔ PL (14 Oct, wrong number): a
+    // split is derived ONLY from a relation the drafter DECLARED — its −1-per-1 link (above) or a `sum` identity of this share
+    // and one stated share with a known total — never from two percentages that happen to add to 100. Otherwise the figure is
+    // Olumi's estimate, with no dependency.
     const estimated = new Set<number>();
     labels.forEach((label, k) => {
       if (derived.has(k) || factors.find(x => sameLabel(x.label, label))?.provenance === 'explicit') return;
-      const unit = unitOf(label);
-      const complement = unit !== undefined && unit.trim().startsWith('%') ? factors.find(x => !sameLabel(x.label, label)
-        && x.provenance === 'explicit' && unitOf(String(x.label)) === unit && baseline(String(x.label)) !== undefined
-        && baseline(String(x.label))! + today[k]! === 100) : undefined;
-      if (complement !== undefined) derived.set(k, { from: String(complement.label), split_with: String(complement.label), split_total: 100 });
-      else estimated.add(k);
+      const sum = (Array.isArray(c.identities) ? c.identities as Rec[] : []).find(i => i.operation === 'sum'
+        && Array.isArray(i.factors) && i.factors.length === 2 && i.factors.some((f: unknown) => sameLabel(f, label)));
+      const other = sum?.factors.find((f: unknown) => !sameLabel(f, label));
+      const total = sum === undefined ? undefined : baseline(String(sum.outcome));
+      const stated = other !== undefined && factors.find(x => sameLabel(x.label, other))?.provenance === 'explicit'
+        && unitOf(String(other)) === unitOf(label) && baseline(String(other)) !== undefined;
+      if (stated && total !== undefined && Math.abs(baseline(String(other))! + today[k]! - total) < 1e-9) {
+        derived.set(k, { from: String(other), split_with: String(other), split_total: total });
+      } else estimated.add(k);
     });
     const product = (vs: readonly number[]): number => vs.reduce((a, b) => a * b, 1);
     const ratio = product(withOption) / product(today as number[]);
@@ -617,6 +622,9 @@ export function withCompiledCapacityRatios<T>(graph: T): T {
   return out as T;
 }
 
+/** The saved-figure sources that mean Olumi produced it; anything else (a user's edit or answer) is a human figure. */
+const OLUMI_FIGURE_SOURCES: ReadonlySet<string> = new Set(['cee_inference', 'cee_hypothesis', 'olumi_estimate']);
+
 function compileCapacityRatios(graph: Rec): void {
   const byId = new Map<string, Rec>(graph.nodes.filter(rec).map((n: Rec) => [n.id as string, n]));
   const num = (v: unknown): number | undefined => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -640,6 +648,10 @@ function compileCapacityRatios(graph: Rec): void {
         const d = rec(src.derived) ? src.derived[f] : undefined;
         return rec(d) && typeof d.source_id === 'string' && num(d.total) !== undefined ? { source: d.source_id, total: d.total as number } : undefined;
       };
+      // ⛔ PL (14 Oct): a human correction to the derived factor keeps its authorship and ENDS the derivation, never overwritten.
+      for (const f of Object.keys(rec(src.derived) ? src.derived : {})) {
+        if (!OLUMI_FIGURE_SOURCES.has(String(byId.get(f)?.observed_state?.source ?? 'cee_inference'))) delete src.derived[f];
+      }
       const todayOf = (f: string): number | undefined => {
         const d = split(f); if (d === undefined) return today(f);
         const s = today(d.source); return s === undefined ? undefined : d.total - s;
@@ -670,10 +682,24 @@ function compileCapacityRatios(graph: Rec): void {
     })();
     if (compiled === null) { c.ratio_source_unreadable = true; continue; }
     c.capacity_ratio = compiled.r;
+    // One value everywhere (PL 14 Oct): the derived factor's own saved figure follows its source, as the card, the AI input and
+    // the mechanism read it; it stays Olumi's (its source is untouched).
+    (src.factor_ids as string[]).forEach((id, i) => {
+      if (!rec(src.derived) || !rec(src.derived[id])) return;
+      const os = byId.get(id)?.observed_state;
+      if (!rec(os)) return;
+      const raw = compiled.base[i]!, cap = num(os.cap);
+      os.raw_value = raw; os.value = cap !== undefined && cap > 0 ? raw / cap : raw;
+    });
     const basis = rec(c.ratio_basis) ? c.ratio_basis : (c.ratio_basis = {});
     if (Array.isArray(basis.factors)) {
-      basis.factors = (src.factor_ids as string[]).map((id, i) => ({ ...(basis.factors[i] ?? {}),
-        label: byId.get(id)?.label ?? basis.factors[i]?.label, today: compiled.base[i], withOption: compiled.withOption[i] }));
+      basis.factors = (src.factor_ids as string[]).map((id, i) => {
+        const { derived: _was, estimated: _est, ...kept } = (basis.factors[i] ?? {}) as Rec;
+        const human = !OLUMI_FIGURE_SOURCES.has(String(byId.get(id)?.observed_state?.source ?? 'cee_inference'));
+        return { ...kept, label: byId.get(id)?.label ?? basis.factors[i]?.label, today: compiled.base[i], withOption: compiled.withOption[i],
+          // A human figure is theirs: no Olumi derivation or estimate label survives it.
+          ...(human ? {} : _was !== undefined && rec(src.derived) && rec(src.derived[id]) ? { derived: _was } : _est !== undefined ? { estimated: _est } : {}) };
+      });
     }
     if (Array.isArray(basis.settings)) {
       basis.settings = basis.settings.map((x: Rec, i: number) => {
