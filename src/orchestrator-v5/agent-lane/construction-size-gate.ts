@@ -279,15 +279,16 @@ export function assessConstructionSize(
  * ⭐ THE DRAFTER'S OWN LINKS BUDGET (T5 D2 r1, DL 14 Oct). The totals alone ("32 links, 2 over") left the drafter cutting
  * nothing: 18 of the 32 were its kept options' own links, which it cannot see in `links`, so its 14 `links` read as
  * within budget. Over on links only, it is told what `links` may hold: the limit minus the options' links. Still a target,
- * never a list. How to cut matches the adoption rules: a kept risk keeps its paths (`retainsRiskHypotheses`; the replay's rep 1
- * cut the options' links into its kept risk and was refused). AIE_TEXT_PENDING (`recovery/prompt/SIZE-RETRY-DRAFT.txt`).
+ * never a list. HOW it cuts matches the adoption rules (DL ruling (a), 14 Oct): whole added nodes only, since measured retries
+ * that cut a kept risk's links or the only node on a kept node's goal path were rightly refused (`retainsRiskHypotheses`).
+ * AIE_TEXT_PENDING (`recovery/prompt/SIZE-RETRY-DRAFT.txt`).
  */
 function linksBudget(v: ConstructionSizeVerdict): string[] {
   if (v.over_by.edges === 0) return [];
   const own = v.edges - v.option_edges;
   const room = v.limits.maxEdges - v.option_edges;
   return room > 0
-    ? [`${v.option_edges} of those links come from the options themselves: one from the decision to each option and one for each factor an option acts on (for the option that keeps things as they are, each factor the other options act on). That leaves \`links\` room for ${room}; yours hold ${own}, so remove at least ${own - room} entries from \`links\` that you ADDED beyond the brief. Take them out by removing a node you ADDED, whose links go with it, or a link you ADDED between two nodes you keep; a risk you keep keeps every link into and out of it.`]
+    ? [`${v.option_edges} of those links come from the options themselves: one from the decision to each option and one for each factor an option acts on (for the option that keeps things as they are, each factor the other options act on). That leaves \`links\` room for ${room}; yours hold ${own}, so \`links\` must lose at least ${own - room}. Do it only by removing whole nodes you ADDED beyond the brief, each with all of its links. Never cut a link of a risk or option you keep, and never remove a node that a kept node needs to reach the goal.`]
     : [`The options' own links (one from the decision to each option and one for each factor an option acts on) already come to ${v.option_edges}, leaving no room for \`links\`: remove an option or an action you ADDED beyond the brief.`];
 }
 

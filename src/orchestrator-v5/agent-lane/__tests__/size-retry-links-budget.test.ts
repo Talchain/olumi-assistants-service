@@ -39,7 +39,9 @@ describe('the served D2 r1 retry, through the real build path', () => {
     // The served state, byte for byte: the same draft yields the same totals the provider was sent.
     expect(retry).toContain(FX.served_retry_totals);
     expect(retry).toContain('18 of those links come from the options themselves');
-    expect(retry).toContain('That leaves `links` room for 12; yours hold 14, so remove at least 2 entries from `links` that you ADDED beyond the brief.');
+    expect(retry).toContain('That leaves `links` room for 12; yours hold 14, so `links` must lose at least 2.');
+    // HOW: whole added nodes only; never a kept risk's or option's link, never a node a kept node needs to reach the goal.
+    expect(retry).toContain('Do it only by removing whole nodes you ADDED beyond the brief, each with all of its links. Never cut a link of a risk or option you keep, and never remove a node that a kept node needs to reach the goal.');
     expect(sent[0]!.instructions as string, 'the first pass is unchanged by the retry text').not.toContain('of those links come from the options');
   });
 
@@ -71,7 +73,7 @@ describe('the links budget is said only when links are over, as a target, never 
     const v = assessConstructionSize(graph(nodes, [['d', 'o'], ['o', 'f0'], ['o', 'f1'], ...own]));
     expect([v.edges, v.option_edges]).toEqual([32, 3]);
     expect(retryInstruction(v)).toContain('3 of those links come from the options themselves');
-    expect(retryInstruction(v)).toContain('room for 27; yours hold 29, so remove at least 2 entries');
+    expect(retryInstruction(v)).toContain('room for 27; yours hold 29, so `links` must lose at least 2.');
   });
 
   it('when the options\' own links already reach the limit, the step is an added option or action, not `links`', () => {
