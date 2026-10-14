@@ -12,6 +12,7 @@ import * as turnContextReads from '../../build-turn-context.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { _resetConfigCache } from '../../../config/index.js';
+import { bindWriteCaller } from '../../ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
 import { prepareHorizonBasisForWrite, assertDoorProvenance } from '../horizon-basis-provenance.js';
 import { toOutboundGraph } from '../outbound-graph.js';
@@ -180,7 +181,7 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
     expect(r.kind).toBe('committed');
     expect(w.writes).toHaveLength(1);
     expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(attested()).horizon_basis);
-    expect(w.writes[0]!.assistantMessage).toBe('Recorded as your judgement: ‘Service quality’ stays about the same over 9 months unless you act. Then run the analysis again.');
+    expect(w.writes[0]!.assistantMessage).toBe('Recorded as your judgement: ‘Service quality’ stays about the same over 9 months unless you act.');
     expect(horizonSteadyAttested(w.read())).toBe(true);
     expect(goalOf(g)).not.toHaveProperty('horizon_basis');
     expect(goalSteadyPostimageIsScoped(g, w.read(), { goal_id: 'goal', months: 9 }, SCENARIO)).toBe(true);
@@ -1346,11 +1347,24 @@ describe('S5 r8 server proof', () => {
         source_turn_id: null, graph: w.read(), deduped: false, replayed: false,
         analysis_invalidated_at: '2026-10-09T00:00:00.000Z', event_id: 'restore-event' } };
     });
-    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never),
+    // Direct service caller (no Fastify lifecycle): mirror the admitted u-1
+    // fixture identity; version history requires an owned, non-guest row.
+    const from = vi.fn((table: string) => {
+      expect(table).toBe('scenarios');
+      return { select: (columns: string) => {
+        expect(columns).toBe('user_id');
+        return { eq: (key: string, id: string) => {
+          expect(key).toBe('id'); expect(id).toBe(SCENARIO);
+          return { maybeSingle: async () => ({ data: { user_id: 'u-1' }, error: null }) };
+        } };
+      } };
+    });
+    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc, from } as never),
       isEnabled: () => true, eventSink: { emit: vi.fn() } as never });
-    const result = await service.restoreVersionAtomic({ expected_revision: 31, scenario_id: SCENARIO, version_id: version,
+    const result = await bindWriteCaller({ userId: 'u-1', verified: true }, () => service.restoreVersionAtomic({ expected_revision: 31, scenario_id: SCENARIO, version_id: version,
       mutation_id: TURN, graph: snapshot, current_graph: seed(), expected_graph_identity_hash: null,
-      source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value });
+      source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value }));
+    expect(from).toHaveBeenCalledExactlyOnceWith('scenarios');
     expect(result.status).toBe('ok');
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(w.read()).toEqual(snapshot);
@@ -1450,16 +1464,43 @@ describe('S5 r8 server proof', () => {
       'INSERT INTO public.scenarios (user_id, title, graph, source_scenario_id) VALUES (p_user_id, v_title, v_graph, p_source_scenario_id)');
     const g = attested(), source = JSON.stringify(g), copyId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     let copied: Rec | undefined;
-    // CURRENT SQL: SELECT s.graph INTO v_graph; INSERT ... VALUES (..., v_graph, ...).
-    // DL 87114 rules this residual; the reviewed SQL identity above and inherited-proof assertion pin it.
-    const rpc = vi.fn(async (name: string, args: Rec) => {
+    // Captured legacy SQL outcome only; the transport below accepts the checked RPC exclusively.
+    // Keep the original SQL/proof assertions while supplying the door's source-read contract.
+    const legacyCopyResult = async (name: string, args: Rec) => {
       expect(name).toBe('copy_guest_scenario');
       expect(args).toEqual({ p_source_scenario_id: SCENARIO, p_user_id: 'u-1' });
       copied = JSON.parse(source);
       return { error: null, data: { scenario_id: copyId, created: true } };
+    };
+    const rpc = vi.fn(async (name: string, args: Rec) => {
+      expect(name).toBe('copy_guest_scenario_checked');
+      expect(args).toEqual({ p_source_scenario_id: SCENARIO, p_user_id: 'u-1',
+        p_checked_source_graph: g, p_checked_source_revision: 31 });
+      return legacyCopyResult('copy_guest_scenario', {
+        p_source_scenario_id: args.p_source_scenario_id, p_user_id: args.p_user_id,
+      });
     });
-    expect(await new SupabaseGuestCopyStore({ rpc } as never).copyGuestScenario(SCENARIO, 'u-1'))
-      .toEqual({ kind: 'copied', scenarioId: copyId, created: true });
+    const from = (table: string) => {
+      expect(table).toBe('scenarios');
+      const filters: Rec = {};
+      const query = {
+        select: (columns: string) => { expect(columns).toBe('user_id, graph, revision'); return query; },
+        eq: (column: string, value: string) => { filters[column] = value; return query; },
+        order: () => query, limit: () => query,
+        maybeSingle: async () => {
+          expect(filters).toEqual(filters.id === undefined
+            ? { source_scenario_id: SCENARIO, user_id: 'u-1' } : { id: SCENARIO });
+          return { error: null, data: filters.id === undefined ? null
+            : { user_id: null, graph: JSON.parse(source), revision: 31 } };
+        },
+      };
+      return query;
+    };
+    // Production's preHandler binds this caller (scenario-ownership.ts:312).
+    await bindWriteCaller({ userId: 'u-1', verified: true }, async () => {
+      expect(await new SupabaseGuestCopyStore({ rpc, from } as never).copyGuestScenario(SCENARIO, 'u-1'))
+        .toEqual({ kind: 'copied', scenarioId: copyId, created: true });
+    });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(copied).toEqual(g);
     expect(horizonSteadyAttested(copied)).toBe(true);

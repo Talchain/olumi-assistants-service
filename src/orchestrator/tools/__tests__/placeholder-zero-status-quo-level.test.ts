@@ -14,19 +14,25 @@
  * ⭐ THE CORPUS IS NOT THE AUTHOR'S. Every graph below is a served
  * `draft_graph` copied byte-for-byte from a real capture, and the expected
  * factor set is ISL's OWN warning from the same turn
- * (`served.isl_goal_ancestor_data_gap`), never a list typed here. The one
- * deliberate difference is the switch exemption, pinned by its own case.
+ * (`served.isl_goal_ancestor_data_gap`), never a list typed here. Binary shape
+ * alone does not establish a current state (AIE T4 R5, 13 October 2026).
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   assessCanonicalAnalysisReadiness,
   buildCanonicalAnalysisReadyFromGraph,
 } from '../analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
+import { guardAnalysisParticipation } from '../../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js';
+import { userExcludedOptions } from '../../../orchestrator-v5/tools/handlers/user-option-status-filter.js';
+import { gateAnalysableOptions } from '../../../orchestrator-v5/tools/handlers/analysable-option-gate.js';
+import { filterOlumiProposedOptions } from '../../../orchestrator-v5/tools/handlers/olumi-option-filter.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../../orchestrator-v5/build-turn-context.js';
+import { createRunAnalysisHandler } from '../../../orchestrator-v5/tools/handlers/run-analysis.js';
 
 interface Fixture {
   readonly _source: { readonly capture: string; readonly sha256: string };
@@ -161,7 +167,7 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
     });
   });
 
-  describe('EXEMPTION journey A brief (pj-20260927T222214Z/A01): a 0/1 switch the status quo leaves off', () => {
+  describe('K1 journey A brief (pj-20260927T222214Z/A01): binary shape without a held current state', () => {
     const fx = load('journey-a-brief-switch-222214Z');
 
     it('precondition: ISL named the switch; served ready', () => {
@@ -169,10 +175,10 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       expect(fx.served.isl_goal_ancestor_data_gap).toEqual(['feature_release_delivered']);
     });
 
-    it('0 is a real status-quo level for a switch ("not released"), so no level blocker and the Run proceeds', () => {
-      expect(levelIssueFactorIds(fx.graph)).toEqual([]);
-      expect(buildCanonicalAnalysisReadyFromGraph(fx.graph)?.status).toBe('ready');
-      expect(resolveRunAdmission(fx.graph).willProceed).toBe(true);
+    it('the missing current state blocks; an option switching on does not attest absence today', () => {
+      expect(levelIssueFactorIds(fx.graph)).toEqual(['feature_release_delivered']);
+      expect(buildCanonicalAnalysisReadyFromGraph(fx.graph)?.status).toBe('needs_user_input');
+      expect(resolveRunAdmission(fx.graph).willProceed).toBe(false);
     });
   });
 
@@ -233,6 +239,111 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       const graph = withRootSetEverywhere({ value: 0.245 });
       expect(levelIssueFactorIds(graph)).toEqual([]);
       expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    });
+  });
+
+  // T4i: the level a Run needs is judged on the graph the Run SENDS. The reference below is never a list typed here: it
+  // is the participation guard's own output (the one site that withholds a `retained_excluded` node and its links,
+  // `run-analysis.ts` §2.7), over the options the Run SUBMITS (its §2.55 chain: the user's exclusions, the analysable
+  // gate, Olumi's filter; #2999 check). The last row takes the reference from the real Run's request instead.
+  describe('JUDGED ON THE GRAPH THE RUN SENDS: an excluded node owes no level; a root it leaves behind does', () => {
+    const excluding = (graph: Record<string, unknown>, ids: readonly string[]): Record<string, unknown> => ({
+      ...graph,
+      nodes: (graph.nodes as Array<Record<string, unknown>>).map((node) =>
+        ids.includes(String(node.id)) ? { ...node, analysis_participation: 'retained_excluded' } : node),
+    });
+    const sent = (graph: unknown) => {
+      const ready = buildCanonicalAnalysisReadyFromGraph(graph)!;
+      const loaded = (ready.options as Array<{ option_id: string; label: string; interventions?: Record<string, unknown>; is_baseline?: boolean }>)
+        .map((option) => ({ id: option.option_id, ...option, interventions: option.interventions ?? {} }));
+      const user = userExcludedOptions({ options: loaded, graph });
+      const gate = gateAnalysableOptions({ options: user.options, graph, rawPersistedGraph: graph, scaleNetEnabled: true });
+      const options = filterOlumiProposedOptions({ submitted: gate.options, graph,
+        unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options as Array<{ option_id: string; interventions?: Record<string, unknown> }>;
+      return guardAnalysisParticipation(graph, {
+        goalNodeId: ready.goal_node_id,
+        submittedOptionIds: options.map((option) => option.option_id),
+        optionInterventionTargetIds: options.flatMap((option) => Object.keys(option.interventions ?? {})),
+      });
+    };
+    /** The real Run's PLoT request (the snapshot loader, then the handler up to the network), or its refusal. */
+    const requestTheRunSends = async (graph: Record<string, unknown>): Promise<Record<string, any>> => {
+      const scenarioId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const snapshot = await loadScenarioSnapshotForRunAnalysis(scenarioId, 't4i-run-option-set', {
+        loadGraphAndBriefText: async () => ({ graph, briefText: null }), readMostRecentPendingActions: async () => [],
+      } as never);
+      let request: Record<string, any> | undefined;
+      const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+        plotClient: { run: vi.fn(), validatePatch: vi.fn() } as never,
+        probe: async (p: { plotPayload: Record<string, any> }) => { request = p.plotPayload; } } as never);
+      await handler({ payload: { scenario_id: scenarioId, turn_id: 't4i-run-option-set', kind: 'message', message: 'Run analysis.' },
+        requestId: 't4i-run-option-set', signal: new AbortController().signal, context: {}, orientationText: '' } as never);
+      return request!;
+    };
+
+    it('E: its only unvalued root excluded → no level blocker and the Run proceeds, exactly as on the graph sent', () => {
+      const fx = load('journey-e-brief-213009Z');
+      const ROOT = 'current_annual_salary_spend';
+      expect(levelIssueFactorIds(fx.graph), 'contrast: included, it still blocks').toEqual([ROOT]);
+      const graph = excluding(fx.graph, [ROOT]);
+      const guard = sent(graph);
+      expect(guard.refusals).toEqual([]);
+      expect(guard.excludedNodeIds).toEqual([ROOT]);
+      expect(levelIssueFactorIds(guard.graph)).toEqual([]);
+      expect(levelIssueFactorIds(graph)).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    });
+
+    it('A: the excluded node is not asked for; the risk whose only cause it was becomes a root the engine samples, and is', () => {
+      const fx = load('journey-a-run2-final-214311Z');
+      const EXCLUDED = 'fac_new_pro_customer_price';
+      const ORPHANED = 'risk_competitive_price_or_ai_feature_response';
+      expect(levelIssueFactorIds(fx.graph), 'precondition: before exclusion the risk had a cause').not.toContain(ORPHANED);
+      const graph = excluding(fx.graph, [EXCLUDED]);
+      const guard = sent(graph);
+      expect(guard.excludedNodeIds).toEqual([EXCLUDED]);
+      const onSent = levelIssueFactorIds(guard.graph);
+      expect(onSent).toContain(ORPHANED);
+      expect(onSent).not.toContain(EXCLUDED);
+      expect(levelIssueFactorIds(graph)).toEqual(onSent);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+
+    it('a lever target excluded too: the Run refuses rather than withhold anything, so readiness withholds nothing either', () => {
+      const fx = load('journey-a-run2-final-214311Z');
+      const TARGET = 'pro_plan_price';
+      const graph = excluding(fx.graph, ['fac_new_pro_customer_price', TARGET]);
+      const guard = sent(graph);
+      expect(guard.refusals).toEqual([{ node_id: TARGET, reason: 'option_intervention_target' }]);
+      expect(guard.excludedNodeIds).toEqual([]);
+      expect(levelIssueFactorIds(graph)).toEqual(levelIssueFactorIds(guard.graph));
+      expect(levelIssueFactorIds(graph)).toEqual(levelIssueFactorIds(fx.graph));
+    });
+
+    // Codex's reproducer (#2999 @64db5b15, `codex/CHECK-2999-64db5b15-codex.md`): two user options set f; Olumi's
+    // unadopted suggestion c alone sets the excluded x, the only cause of the risk r on the path to the goal.
+    it('an unadopted Olumi option the Run drops cannot keep an excluded node in: its orphaned child is asked for, as in the real request', async () => {
+      const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.2, std: 0.05 }, exists_probability: 1, effect_direction: 'positive' });
+      const graph = { goal_node_id: 'g', nodes: [
+        { id: 'd', kind: 'decision', label: 'Service plan' }, { id: 'g', kind: 'goal', label: 'Output' },
+        ...['a', 'b'].map((id, i) => ({ id, kind: 'option', label: id, interventions: { f: { value: i ? 0.8 : 0.4, source: 'user_override' } } })),
+        { id: 'c', kind: 'option', label: 'Olumi suggestion', proposed_by: 'olumi', interventions: { x: { value: 0.7, source: 'cee_inference' } } },
+        { id: 'f', kind: 'factor', label: 'Staff', category: 'controllable', observed_state: { value: 0.5, source: 'user_override' } },
+        { id: 'x', kind: 'factor', label: 'Excluded cause', category: 'controllable', observed_state: { value: 0.3, source: 'user_override' }, analysis_participation: 'retained_excluded' },
+        { id: 'r', kind: 'risk', label: 'Orphaned risk' },
+      ], edges: [e('d', 'a'), e('d', 'b'), e('d', 'c'), e('a', 'f'), e('b', 'f'), e('c', 'x'), e('f', 'g'), e('x', 'r'), e('r', 'g')] };
+      expect(levelIssueFactorIds(graph)).toEqual(['r']);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+      await expect(requestTheRunSends(graph), 'the real Run refuses before any request').rejects.toThrow();
+      // Contrast: r valued → readiness proceeds, and the real request is the graph judged: c, x and x's links gone, r a root.
+      const valued = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'r' ? { ...n, observed_state: { value: 0.3, source: 'user_override' } } : n)) };
+      expect(levelIssueFactorIds(valued)).toEqual([]);
+      expect(resolveRunAdmission(valued).willProceed).toBe(true);
+      const request = await requestTheRunSends(valued);
+      expect(request.options.map((o: Record<string, unknown>) => o.id ?? o.option_id)).toEqual(['a', 'b']);
+      expect(request.graph.nodes.map((n: Record<string, unknown>) => n.id)).not.toContain('x');
+      expect(request.graph.edges.filter((edge: Record<string, unknown>) => edge.to === 'r')).toEqual([]);
+      expect(sent(valued).excludedNodeIds).toEqual(['x']);
     });
   });
 });

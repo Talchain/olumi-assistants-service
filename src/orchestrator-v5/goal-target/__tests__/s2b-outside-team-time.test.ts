@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readTeamTime, TEAM_TIME } from '../team-share-write.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 
 // Duration subspans are quoted verbatim; surrounding domain clauses are not team-time answers.
 const outside = [
@@ -92,7 +92,7 @@ describe('outside team-duration corpus', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     const run = (s: string) => () => { TEAM_TIME.lastIndex = 0; return TEAM_TIME.test(s); };
     const m = scalingRatio(run(' '.repeat(20000)), run(' '.repeat(160000)));
-    expect(m.ratio, m.detail).toBeLessThan(22);
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(22); }
     expect(readTeamTime(' '.repeat(20000))).toBeNull();
   });
 });

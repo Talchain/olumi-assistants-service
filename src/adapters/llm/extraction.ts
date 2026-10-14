@@ -7,8 +7,9 @@
  * Uses the existing LLM router infrastructure for provider selection and failover.
  */
 
+import { createHash } from "node:crypto";
 import OpenAI from "openai";
-import { assertProviderAllowed } from "./provider-policy.js";
+import { assertProviderAllowed, recordProviderAttempt, recordProviderUsage, type ProviderCallHandle } from "./provider-policy.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
@@ -258,6 +259,19 @@ function getOpenAIClient(): OpenAI {
   return openaiClient;
 }
 
+/** A failed extraction attempt as the ledger records it: its own cap is a timeout, never a provider error. */
+function extractionFailureAttempt(error: unknown, abortSignal: AbortSignal, message: string): Parameters<typeof recordProviderAttempt>[1] {
+  if ((abortSignal.aborted && abortSignal.reason === EXTRACTION_CAP_REACHED) || message.startsWith("LLM extraction timed out")) {
+    return { transport_status: null, result: EXTRACTION_CAP_REACHED, outcome: 'timeout', retry: false };
+  }
+  if (abortSignal.aborted) return { transport_status: null, result: 'aborted', outcome: 'cancelled', retry: false };
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') {
+    return { transport_status: status, result: 'http_error', outcome: status === 429 ? 'rate_limited' : 'http_error', retry: false };
+  }
+  return { transport_status: null, result: error instanceof Error && error.name !== '' ? error.name : 'transport_failure', outcome: 'transport_error', retry: false };
+}
+
 async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
@@ -265,6 +279,13 @@ async function callOpenAI(
   abortSignal: AbortSignal
 ): Promise<ExtractionResult> {
   const { timeoutMs = EXTRACTION_TIMEOUT_MS, maxTokens = 2000, temperature = 0, modelOverride } = options;
+  /**
+   * ⭐ SYS1 (B2): THE RECEIPT RIDES THE HANDLE THE LEDGER ALREADY GAVE. Under the Agent route this is the factor review,
+   * the one call an Agent turn reaches outside `postResponses`; its row said only that it happened (served 50530b5f: no
+   * duration, usage, attempt or prompt identity on any Run). Same functions `postResponses` closes its rows with.
+   * ⚠ The SDK's own internal retries stay inside one attempt here: they are not visible to this call site.
+   */
+  let handle: ProviderCallHandle;
 
   try {
     const client = getOpenAIClient();
@@ -272,7 +293,9 @@ async function callOpenAI(
       "openai",
       modelOverride,
     ).model;
-    assertProviderAllowed('openai', 'extraction.openai', { model, purpose: 'extraction' });
+    const settings = { max_tokens: maxTokens, temperature, response_format: { type: "json_object" as const } };
+    handle = assertProviderAllowed('openai', 'extraction.openai', { model, purpose: 'extraction',
+      prompt_sha256: createHash('sha256').update(systemPrompt, 'utf8').digest('hex'), max_output_tokens: maxTokens, settings });
 
     const responsePromise = client.chat.completions.create({
       model,
@@ -280,12 +303,13 @@ async function callOpenAI(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: maxTokens,
-      temperature,
-      response_format: { type: "json_object" },
+      ...settings,
     }, ...(options.signal !== undefined ? [{ signal: abortSignal }] as const : [] as const));
 
     const response = await withTimeout(responsePromise, timeoutMs, abortSignal);
+    // The SDK resolves only on a 2xx; Chat Completions answers a completed request with 200.
+    recordProviderUsage(handle, response.usage);
+    recordProviderAttempt(handle, { transport_status: 200, result: response.choices[0]?.finish_reason ?? 'response', outcome: 'success', retry: false });
 
     const rawText = response.choices[0]?.message?.content;
     if (!rawText) {
@@ -310,6 +334,7 @@ async function callOpenAI(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    recordProviderAttempt(handle, extractionFailureAttempt(error, abortSignal, message));
     logExtractionFailure("openai", abortSignal, message, timeoutMs);
     return {
       response: null,

@@ -16,17 +16,18 @@
  * code. A DECLARED product is read either way: evaluated, or PLoT withheld the run itself (#416, `identity on the goal's
  * path not evaluated`) and this never runs. A level of ±1 is no reading (anything × 1 is itself). Pure.
  */
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
+import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
+import type { PressBlocker } from './press-next-step.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 /** The user's own level: from the brief, or one they typed or approved (the certainty rule's `userOwns`). */
-const userOwns = (source: unknown): boolean =>
-  typeof source === 'string' && (source === 'brief_extraction' || source.startsWith('user'));
+const userOwns = (observed: unknown): boolean => isUsersLevelOrApproved(observed);
 
 /** The reconciling product this run did not read: the goal and its two parts, each with the user's level and unit. */
 export interface UnreadGoalProduct {
@@ -39,7 +40,7 @@ export interface UnreadGoalProduct {
 /** The user's level in their own units: `raw_value`, else `value` when the node declares no model scale. */
 function userLevel(n: Rec): { level: number; unit: string } | undefined {
   const os = isRec(n.observed_state) ? n.observed_state : undefined;
-  if (os === undefined || !userOwns(os.source)) return undefined;
+  if (os === undefined || !userOwns(os)) return undefined;
   const scaled = os.cap !== undefined || os.declared_scale !== undefined;
   const level = num(os.raw_value) ?? (scaled ? undefined : num(os.value));
   const unit = text(os.unit) ?? text(n.unit);
@@ -57,7 +58,7 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
   const o = num(os?.raw_value);
   const goalUnit = text(os?.unit) ?? text(goal.goal_threshold_unit);
   const goalLabel = text(goal.label) ?? goal.id;
-  if (o === undefined || o === 0 || !userOwns(os?.source) || goalUnit === undefined) return null;
+  if (o === undefined || o === 0 || !userOwns(os) || goalUnit === undefined) return null;
   // Every node with a path to the goal (options and the decision aside).
   const onPath = new Set<unknown>([goal.id]);
   for (let grew = true; grew;) {
@@ -100,13 +101,31 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
       const c = unitsCompose(goalUnit, goalLabel, a, b);
       if (c.kind === 'no' || read(a.id, b.id)) continue;
       const [rate, count] = c.rate === a.label ? [a, b] : [b, a];
-      const typed = classifyValueSource(os?.source) === 'user_stated';
+      const typed = valueClassOf(os) === 'user_stated';
       const product = { goal: { id: goal.id, label: goalLabel, level: o, unit: goalUnit, typed }, rate, count };
       if (c.kind === 'proof') return product;
       found ??= product;
     }
   }
   return found;
+}
+
+/**
+ * What can unlock an unread rate × count reading, from the route's own facts (`actions/state.ts` identityReading: a card the
+ * sole writer accepts on this base; `approvalWaiting` and a pending goal-scope question are other owners of the step).
+ */
+export type ProductUnlock = 'confirm_reading' | 'owned_elsewhere' | 'no_writer';
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step for a goal Olumi has not read as rate × count, bound
+ * to its actual cause. A writable reading card is the step (the user checks the reading and the chance can follow); while
+ * another held change or the scope question owns the step, nothing is added. Only where no card or writer can record the
+ * reading is it a CAPABILITY gap, said as such and never asked.
+ */
+export function unreadGoalProductBlockerOf(p: UnreadGoalProduct, unlock: ProductUnlock): PressBlocker | null {
+  if (unlock === 'confirm_reading') return { kind: 'confirm', by: 'confirm_reading' };
+  if (unlock === 'owned_elsewhere') return null;
+  return { kind: 'missing_implementation', what: `how likely any option is to reach ‘${p.goal.label}’ read as ‘${p.rate.label}’ × ‘${p.count.label}’` };
 }
 
 /**

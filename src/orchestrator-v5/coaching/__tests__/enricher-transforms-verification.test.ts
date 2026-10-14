@@ -99,7 +99,7 @@ const ENRICHMENT: Record<string, unknown> = {
 const BRIEF = 'Choose between Premium plan and Budget plan to maximise margin.';
 
 describe('Test N — decision_review invoke-input transforms', () => {
-  const input = buildInvokeInputForTests(BRIEF, ENRICHMENT, 'opt_a');
+  const input = buildInvokeInputForTests(BRIEF, ENRICHMENT, 'opt_a', undefined, true);
 
   it('returns a populated input (winner resolved by leadingOptionId)', () => {
     expect(input).not.toBeNull();

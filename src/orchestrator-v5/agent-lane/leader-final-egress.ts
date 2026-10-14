@@ -12,7 +12,8 @@
  *    current_leading_option_id`, gated today on entitlement only), or `null` only where the contract keeps the key
  *    required + nullable ({@link NULLABLE_LEADER_KEYS});
  * 2. the analysis block's enrichment → the wire's withheld projection again (idempotent), then any producer-prose string
- *    that BOTH uses leader vocabulary AND names an exact option label or id → deleted;
+ *    that BOTH asserts a leading option (the ENFORCEMENT reader, as for chips) AND names an exact option label or id →
+ *    deleted;
  * 3. a chip whose label / message / detail asserts a leading option by exact label → dropped;
  * 4. `assistant_text` / `framing_question` → the shared exact-label edit, on every withheld turn (after every rewrite).
  * Every removal is logged at level 50 (`agent_lane.leader_claim_residual_removed`), field PATHS only, never prose.
@@ -125,11 +126,20 @@ function namesAnOption(text: string, names: readonly string[]): boolean {
   return names.some((name) => optionLabelPattern(name).test(text));
 }
 
-/** Walk one structured subtree: null designating keys; delete leader prose that names an option. */
+/**
+ * Walk one structured subtree: null designating keys; delete leader prose that names an option.
+ *
+ * ⛔ THE ENFORCEMENT READER, NOT THE ALARM (recovery Batch C, §7.3 "stop the leader-claim filter deleting the product's
+ * own explanation of why a result is blocked"). This DELETES user-facing text, so it reads `textAssertsLeadingOption`
+ * with the roster, exactly as the chip check below does: option labels are bound first and the documented non-ranking
+ * spans ("tech leads", "leads to") are neutralised. The wide alarm reader deleted Olumi's own readiness question on all
+ * 16 of Paul's hiring replies (11 Oct): 'Factor "Additional Tech leads hired" … What should option "Carry on as now" set
+ * it to?' matched `\bleads\b` and named an option.
+ */
 function scrub(value: unknown, path: string, names: readonly string[], removed: string[], depth: number): unknown {
   if (depth > MAX_DEPTH) return value;
   if (typeof value === 'string') {
-    if (textNamesLeadingOption(value) && namesAnOption(value, names)) {
+    if (textAssertsLeadingOption(value, { optionLabels: names }) && namesAnOption(value, names)) {
       removed.push(path);
       return undefined;
     }

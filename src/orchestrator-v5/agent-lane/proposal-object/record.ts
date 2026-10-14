@@ -37,6 +37,7 @@ import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
+import { heldCardAppliesAt } from './still-applies.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
 /** The approve chip id prefix (`approval-chips.ts` APPROVE_PREFIX), restated here only to build the card's id. */
@@ -79,12 +80,16 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   set_goal_target: 'slice_3',
   set_limit: 'slice_3',
   set_team_time: 'slice_3',
+  set_hiring_times: 'slice_3', // E5: each capacity option's hiring times, like the team's time
   add_limit: 'slice_3',
   attest_goal_steady: 'none', // the user's temporal judgement is a card answer, not a numeric field
+  set_risk_occurrence: 'slice_3', // Olumi's occurrence range for a risk root (`risk-occurrence.ts`): an estimate the user could correct, not yet a card field
+  confirm_goal_reading: 'none', // the user's answer to how the goal's target is read: a card answer, not a numeric field
   set_goal_deadline: 'slice_3', // the goal's date (`goal_horizon.deadline`, new on staging 7 Oct): with goal target and limits (S3, S-E)
   confirm_identity: 'none',
   set_option_status: 'none',
   adopt_olumi_option: 'slice_3',
+  replace_draft: 'none', // a whole revised draft, approved as one act; nothing in it is a figure this card edits
 };
 
 export interface LinkStrengthField {
@@ -375,7 +380,7 @@ export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.n
   const held = agentProposalOf(pa);
   if (isRec(graph) && Array.isArray(graph.nodes) && held !== undefined && held.operations.some((o) => o.op === 'confirm_identity')) {
     const reading = identityReadingOf(held);
-    if (reading === undefined || !identityCardOfferable(graph, reading.part_levels)) return undefined;
+    if (reading === undefined || !identityCardOfferable(graph, reading.part_levels, reading)) return undefined;
   }
   return productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
 }
@@ -515,14 +520,32 @@ export interface ProposalFieldsWire {
   }[];
 }
 
-/** Only records pinned to `graphHash` are projected: the values shown are the values on the model the user sees. */
+/**
+ * A held card's record applies to this graph by the one rule (#3024): an Agent card by `heldCardAppliesAt` (its own subject,
+ * read on a moved model too: an unrelated approval never hides it); a product hold by its pin.
+ */
+export function heldRecordAppliesAt(hold: PendingAction, record: ProposalRecord, graph: unknown, graphHash: string | undefined): boolean {
+  const p = agentProposalOf(hold);
+  return p !== undefined ? heldCardAppliesAt(p, graph, graphHash) : record.base_graph_hash === graphHash;
+}
+
+/** The predicate {@link proposalFieldsWire} reads for records built from `holds` on `graph`: each record by its own carrier (revision and proposal id). */
+export function heldRecordsApplyAt(holds: readonly PendingAction[], graph: unknown, graphHash: string | undefined): (r: ProposalRecord) => boolean {
+  return (r) => holds.some((h) => h.id === r.revision && heldProposalId(h) === r.proposal_id && heldRecordAppliesAt(h, r, graph, graphHash));
+}
+
+/**
+ * Only records that apply to the model the user sees are projected: pinned to `graphHash`, or (with `applies`, #3024) still
+ * applying there by their own rule.
+ */
 export function proposalFieldsWire(
   records: readonly ProposalRecord[],
   graphHash: string | undefined,
   issuedTurnIds: ReadonlyMap<string, string> = new Map(),
+  applies?: (r: ProposalRecord) => boolean,
 ): ProposalFieldsWire | undefined {
   if (graphHash === undefined || graphHash === '') return undefined;
-  const pinned = records.filter((r) => r.base_graph_hash === graphHash);
+  const pinned = records.filter((r) => (applies !== undefined ? applies(r) : r.base_graph_hash === graphHash));
   if (pinned.length === 0) return undefined;
   return {
     version: 1,

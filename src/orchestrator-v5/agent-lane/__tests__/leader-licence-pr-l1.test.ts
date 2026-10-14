@@ -270,6 +270,74 @@ describe('the Agent lane fail-closed final egress', () => {
 });
 
 /**
+ * ⭐ RECOVERY BATCH C (§7.3): THE FINAL EGRESS NEVER DELETES THE PRODUCT'S OWN EXPLANATION OF WHY A RESULT IS BLOCKED.
+ * Served: all 16 of Paul's hiring replies (11 Oct 12:52–13:35Z, scenario 2cc9e5d9, CEE Render logs) logged level 50
+ * `agent_lane.leader_claim_residual_removed` with removed_paths = the five carriers below, all index [0]. The text is
+ * reproduced from the scenario's stored graph (graph_identity_hash d71e3c75…, revision 5) by
+ * `assessCanonicalAnalysisReadiness`: it matched the ALARM's `\bleads\b` ("Tech leads") and named an option, so the
+ * structured scrub deleted Olumi's own question. The enforcement reader (labels bound, "tech leads" neutralised) does not.
+ */
+describe('the final egress keeps the readiness explanation (Paul, 11 Oct)', () => {
+  const ASK = 'Factor "Additional Tech leads hired" is currently 0 people (Olumi\'s estimate). What should option "Carry on as now" set it to?';
+  const ASK_DEV = 'Factor "Additional developers hired" is currently 0 people (Olumi\'s estimate). What should option "Carry on as now" set it to?';
+  const PAUL_GRAPH = { nodes: [
+    { id: 'hire_a_tech_lead', kind: 'option', label: 'Hire a Tech lead' },
+    { id: 'hire_two_developers', kind: 'option', label: 'Hire two developers' },
+    { id: 'carry_on_as_now', kind: 'option', label: 'Carry on as now' },
+    { id: 'hire_one_developer', kind: 'option', label: 'Hire one developer' },
+    { id: 'additional_tech_leads_hired', kind: 'factor', label: 'Additional Tech leads hired' },
+    { id: 'additional_developers_hired', kind: 'factor', label: 'Additional developers hired' },
+  ] };
+  const READY = (first: string) => ({
+    status: 'needs_user_input',
+    blockers: [{ message: first }, { message: ASK_DEV }],
+    readiness_issues: [{ message: first }, { message: ASK_DEV }],
+    analysis_admission: { structurally_analysable: false, permitted_analysis_mode: 'none', missing_important_inputs: [{ why_it_matters: first }] },
+    repair_proposal: { unresolved_inputs: [{ prompt: first }, { prompt: ASK_DEV }] },
+  });
+  const body = (first: string): OlumiResponse => ({
+    assistant_text: 'Not shown yet; why is under More detail',
+    blocks: [],
+    suggested_actions: [],
+    analysis_ready: READY(first),
+    analysis_state: { leader_claim: { permitted: false, withheld_reason: 'goal_path_unsized' }, readiness: { status: 'needs_user_input', blockers: [{ message: first }] } },
+  } as unknown as OlumiResponse);
+  const egress = (first: string) => enforceLeaderLicenceAtFinalEgress(body(first), {
+    requestId: 'req-c-readiness', exitPath: 'agent_lane_v1_final', licence: 'withheld', mayNameLeadingOption: false,
+    graph: PAUL_GRAPH, analysisReady: READY(first),
+  });
+  const FIVE = [
+    'analysis_ready.analysis_admission.missing_important_inputs[0].why_it_matters',
+    'analysis_ready.blockers[0].message',
+    'analysis_ready.readiness_issues[0].message',
+    'analysis_ready.repair_proposal.unresolved_inputs[0].prompt',
+    'analysis_state.readiness.blockers[0].message',
+  ];
+  const at = (o: unknown, path: string): unknown => path.split(/\.|\[(\d+)\]/).filter(Boolean)
+    .reduce<unknown>((v, k) => (v as Record<string, unknown> | undefined)?.[k], o);
+
+  it('RED on c87608e4: Paul\'s served readiness question survives at all five carriers; nothing is logged at level 50', () => {
+    const error = vi.spyOn(log, 'error');
+    const out = egress(ASK);
+    expect(out.removedPaths).toEqual([]);
+    for (const path of FIVE) expect(at(out.response, path), path).toBe(ASK);
+    expect(error).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.leader_claim_residual_removed' }), expect.any(String));
+  });
+
+  it('NEGATIVE (kept): a genuine leader claim in the same carriers is still removed and logged, by exact option name', () => {
+    const error = vi.spyOn(log, 'error');
+    for (const claim of ['"Hire a Tech lead" is the leading option, ahead of "Hire two developers".', 'Hire a Tech lead leads in 57% of simulations.']) {
+      error.mockClear();
+      const out = egress(claim);
+      expect([...out.removedPaths].sort(), claim).toEqual([...FIVE].sort());
+      for (const path of FIVE) expect(at(out.response, path), `${claim} @ ${path}`).toBeUndefined();
+      expect(at(out.response, 'analysis_ready.blockers[1].message'), 'the other readiness item still ships').toBe(ASK_DEV);
+      expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.leader_claim_residual_removed', enforced: true }), expect.any(String));
+    }
+  });
+});
+
+/**
  * ⭐ STRIP GAP (CANVAS #85 5943987710): on a withheld Run the egress NULLED `run_delta.leader.{prior,current}_leading_
  * option_id`, which the contract types optional + non-nullable, so the UI quarantined the whole `run_delta` and the
  * strip and Compare went empty. Served bytes: CEE 03763318, the run turn of Paul's step 10. The ids are restored from

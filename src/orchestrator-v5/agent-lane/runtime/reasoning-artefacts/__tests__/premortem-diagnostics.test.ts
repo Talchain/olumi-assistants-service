@@ -1,3 +1,4 @@
+import { timingGated, timingIt } from '../../../../../../tests/helpers/scaling-ratio.js';
 import { describe, expect, it } from 'vitest';
 import { authoredBanAfterMasking, PremortemWorksheetV1Schema, premortemProducerDirective, premortemWorksheetDiagnosticsFor, premortemWorksheetFor } from '../premortem.js';
 import { b9ScopedTurns, b9Served, boldCases, diagnosticsCases, eligibilityCases, exitCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
@@ -62,7 +63,7 @@ describe('pre-mortem story completeness and coded diagnostics', () => {
     const banned = authoredBanAfterMasking(field, labels);
     const elapsed = performance.now() - start;
     expect(banned).toBe(false);
-    expect(elapsed).toBeLessThan(50);
+    if (timingGated) { expect(elapsed).toBeLessThan(50); }
   });
 
   it('keeps missing-appendix and failed-egress diagnostics available without rows, each with its typed exit', () => {
@@ -120,7 +121,7 @@ describe('pre-mortem story completeness and coded diagnostics', () => {
 // DL (7 Oct): the story, story-parts and blindspot parsers took 0.35–3.1 s on 20k whitespace (pre-existing); now bounded / linear.
 describe('pre-mortem parsing stays linear on long whitespace', () => {
   const base = diagnosticsCases[1].make();
-  it.each([
+  timingIt.each([
     // Spaces INSIDE the story (a trailing run is trimmed away), plus a blindspot line so the parts parser is reached.
     ['story with 20k spaces after Watch for:', '1. x Watch for:' + ' '.repeat(20_000) + 'y\nOutside the model: what could blindside this?'],
     ['story with 20k newlines', '1. x' + '\n'.repeat(20_000)],

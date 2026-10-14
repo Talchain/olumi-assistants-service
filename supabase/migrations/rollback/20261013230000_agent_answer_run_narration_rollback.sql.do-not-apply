@@ -1,0 +1,11 @@
+-- Order-safe because the store falls back to the existing answer RPCs when these are absent.
+-- The only data lost is the stored answer narration (replays then name no Run, as before T1h).
+DROP FUNCTION IF EXISTS public.append_agent_answer_if_latest_narrated(
+  uuid, uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, jsonb, jsonb, text, jsonb
+);
+DROP FUNCTION IF EXISTS public.append_agent_answer_narrated(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, jsonb, jsonb, text, jsonb
+);
+ALTER TABLE public.v5_conversation_turns DROP CONSTRAINT IF EXISTS v5_conversation_turns_run_narration_shape;
+ALTER TABLE public.v5_conversation_turns DROP COLUMN IF EXISTS run_narration;
+NOTIFY pgrst, 'reload schema';

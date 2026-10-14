@@ -176,7 +176,9 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     expect(b.assistant_text.trim()).not.toBe('');
     expect(b.guidance).toEqual({ slot1: S1_ROW });
     // DL 7 Oct: Paul's 'pills are static' ask supersedes the PANEL-T4 hold
-    expect(b.suggested_actions).toEqual([{ ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' }, NEXT_STEP_CHIPS[0], NEXT_STEP_CHIPS[1]]);
+    // R3-3: "Give your estimate" asks for the S1 row's own link, by its labels (the wire row above is unchanged).
+    expect(b.suggested_actions).toEqual([{ ...NEXT_STEP_CHIPS[2], label: 'Give your estimate',
+      message: 'How strongly does ‘Sprint capacity for AI reporting’ affect ‘AI reporting module availability’?' }, NEXT_STEP_CHIPS[0], NEXT_STEP_CHIPS[1]]);
   });
   it('NEGATIVE: a method press with no specific control ("Run a pre-mortem") → no row (the method runs; no other is offered)', async () => {
     const b = await press('agent-next-pre-mortem');
@@ -228,10 +230,14 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SCENARIO}:`))![1];
     expect(saved.assistant_message).toBe(b.assistant_text);
     expect(saved.agent_guidance).toEqual({ version: 1, entries: { [key]: {
-      status: 'offered', state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
+      status: 'offered', variant_id: 'S1', slot: 1, state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
     } } });
     expect(JSON.stringify(saved.agent_guidance)).not.toContain(AI.from);
-    expect((await turn({ message: 'What next?' })).guidance).toEqual(b.guidance); // offered is not settled
+    // E6 (DL 12 Oct, Paul's test): SHOWN counts. On the unchanged state the same row (policy AND item) is not said again.
+    // Batch R round 2 (independent check P1): another Strengthen item may follow; only the shown item cools.
+    const next = (await turn({ message: 'What next?' })).guidance as { slot1?: { policy_id: string; item?: string; state_key_hash: string } } | undefined;
+    const first = (b.guidance as { slot1: { policy_id: string; item?: string; state_key_hash: string } }).slot1;
+    expect(next?.slot1 === undefined || !(next.slot1.policy_id === first.policy_id && next.slot1.item === first.item), JSON.stringify(next)).toBe(true);
   });
   it('records a pressed event ONLY for the S1 item the successful held card actually targets', async () => {
     await turn({ message: 'Where does this leave me?' });

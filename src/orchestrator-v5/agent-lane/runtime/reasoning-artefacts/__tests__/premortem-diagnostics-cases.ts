@@ -306,9 +306,23 @@ const B9 = JSON.parse(readFileSync(new URL('./fixtures/premortem-b9-served.json'
 };
 const B9_PRICE = 'raise_prices_by_10';
 const B9_SQ = 'keep_pricing_as_it_is';
+/**
+ * ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092; CHANGED-ANSWERS 25): an absent-type `cee_inference` is Olumi's
+ * estimate on every reader. 591cc1a0's F1 alone read it 'unknown' ("its factors of unknown authorship", below), and the B9
+ * contracts were recorded on that reading. They are held on the same capture with those figures' stamp replaced by one the
+ * authority does not recognise (origin UNESTABLISHED, still stamped) — as `premortem-near-tie-path` holds W9b.
+ */
+const UNRECOGNISED = 'unrecognised_stamp';
+function unestablished(graph: Graph): void {
+  for (const n of (graph as { nodes: { observed_state?: Record<string, unknown> }[] }).nodes) {
+    const os = n.observed_state;
+    if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = UNRECOGNISED;
+  }
+}
 /** The graph read projected exactly as `readBackState` projects it (same readers, same field names). */
 export function b9Read(): PremortemRead {
   const r = structuredClone(B9.read);
+  unestablished(r.graph);
   // S-DEF #2739 (d738949c) holds the validated definition Starter-tier MRR → MRR in the analysis-affecting hash, so the
   // captured df15c8c1 `graph_hash` no longer equals today's derivation of the SAME graph. A Run computed on today's code
   // carries today's hash on both the read and the result, so the served read is re-derived here, never re-captured.

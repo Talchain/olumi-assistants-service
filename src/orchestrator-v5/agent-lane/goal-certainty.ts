@@ -39,6 +39,7 @@ import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defau
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
+import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, unknown>;
 
@@ -87,8 +88,8 @@ export type NoBreakEven =
   | 'not_an_identity' | 'identity_not_evaluated' | 'level_from_inputs' | 'addends' | 'extra_goal_parent'
   | 'operand_not_parent' | 'no_exact_figure';
 
-const userOwns = (source: unknown): boolean =>
-  typeof source === 'string' && (source === 'brief_extraction' || source.startsWith('user'));
+/** The user's own level, by the ONE provenance authority (`isUsersLevelOrApproved`): theirs, or Olumi's they approved. */
+const userOwns = (observed: unknown): boolean => isUsersLevelOrApproved(observed);
 
 /** +1 / −1 when the goal is held above / below its target; 0 when the comparator is not stated. */
 function goodSign(direction: unknown): number {
@@ -102,9 +103,9 @@ function linkSign(e: Rec): number {
   return mean === undefined || mean === 0 ? 0 : Math.sign(mean);
 }
 
-const levelOf = (n: Rec | undefined): { value?: number; raw?: number; source?: unknown; unit?: string } => {
+const levelOf = (n: Rec | undefined): { value?: number; raw?: number; observed?: unknown; unit?: string } => {
   const os = isRec(n?.observed_state) ? n!.observed_state : {};
-  return { value: num(os.value), raw: num(os.raw_value), source: os.source, unit: text(os.unit) };
+  return { value: num(os.value), raw: num(os.raw_value), observed: os, unit: text(os.unit) };
 };
 
 const interventionLevel = (v: unknown): { value?: number; raw?: number } =>
@@ -283,7 +284,7 @@ function breakEvenOf(
   if (projected === 0) return undefined;
   const fraction = Math.abs(threshold / projected - 1);
   const operand = levelOf(byId.get(through));
-  const count = operand.raw !== undefined && userOwns(operand.source) ? Math.round(fraction * operand.raw) : undefined;
+  const count = operand.raw !== undefined && userOwns(operand.observed) ? Math.round(fraction * operand.raw) : undefined;
   return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
 }
 

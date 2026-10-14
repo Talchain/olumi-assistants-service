@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * CEE #4b: one typed answer and one Yes record an asked product part's own figure and the reading together.
  * Both fixtures are stored B1 graphs; the pre-Yes copy only makes Olumi's goal reading unconfirmed.
@@ -199,7 +200,7 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     expect(sayFigureWithoutRounding(49.12, 'GBP/month')).toBe('£49.12 / month');
   });
 
-  it('P2-e both exactFigure qualifier regexes take <50ms on 20,000 spaces and repeated about', () => {
+  timingIt('P2-e both exactFigure qualifier regexes take <50ms on 20,000 spaces and repeated about', () => {
     const times: number[] = [];
     for (const text of [' '.repeat(20_000), 'about '.repeat(3334).slice(0, 20_000)]) {
       for (const side of ['before', 'after']) {

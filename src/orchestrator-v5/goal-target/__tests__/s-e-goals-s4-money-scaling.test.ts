@@ -1,8 +1,8 @@
-import { expect, it } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { expect } from 'vitest';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { readNewLimit } from '../../agent-lane/stated-limit.js';
 
-it.each([1, 6])('money amounts advance once: 20k → 160k £%i figures, <22x', amount => {
+timingIt.each([1, 6])('money amounts advance once: 20k → 160k £%i figures, <22x', amount => {
   const costGraph = { nodes: [{ id: 'total-cost', kind: 'factor', label: 'Total cost', quantity_frame: 'level',
     observed_state: { value: 0.5, raw_value: 150000, cap: 300000, unit: '£' } }], edges: [] };
   const small = `£${amount} `.repeat(20_000);

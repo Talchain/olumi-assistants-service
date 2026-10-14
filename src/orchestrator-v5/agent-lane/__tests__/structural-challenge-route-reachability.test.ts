@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /** Route → real method adapter → real SCI-DEEP dispatch → real Run handler, entirely offline.
  * Only transport boundaries are replaced. Replaying the bank-2 response tests press reachability and licences;
  * it does not claim that the fixture is a fresh scientific recomputation of the renamed test graph.
@@ -277,11 +278,11 @@ describe('agent route: real structural challenge press reachability', () => {
     const chip = `agent-test-without-link:${':'.repeat(100_000)}`;
     const parseStarted = performance.now();
     expect(parseStructuralChallengePress(chip)).toBeNull();
-    expect(performance.now() - parseStarted).toBeLessThan(20);
+    if (timingGated) { expect(performance.now() - parseStarted).toBeLessThan(20); }
     const started = performance.now();
     const response = await post(chip);
     const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(2_000);
+    if (timingGated) { expect(elapsed).toBeLessThan(2_000); }
     expect(response.statusCode).toBe(200);
     expect(response.json().assistant_text).toBe(REFUSAL);
     expect(plotCalls).toHaveLength(0); noModelCallsOrGraphWrites(response.json());

@@ -1,3 +1,5 @@
+import { confirmedCeilingStockOf } from '../agent-lane/ceiling-stock-carrier.js';
+import { isUserSetBand } from '../../cee/provenance/provenance-of.js';
 import { linkList } from '../agent-lane/unsized-path-cause.js';
 import { evaluatedIdentityCarriers, exactIdentityOperandLinks, identityCanCarryExactLinks } from './identity-evaluations.js';
 /**
@@ -29,6 +31,8 @@ import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.
 import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
+import type { PressBlocker } from '../agent-lane/press-next-step.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -116,8 +120,9 @@ export function scoredGoalIdOf(graph: unknown, scoredGoalId?: unknown): string |
  */
 function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolean {
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
-  if (identity?.operation !== 'product' || identity.stated_in_brief !== true || !Array.isArray(identity.factor_ids)
-    || identity.factor_ids.length !== 2) return false;
+  const unary = identity?.operation === 'sum' && Array.isArray(identity.factor_ids) && identity.factor_ids.length === 1;
+  if ((!unary && identity?.operation !== 'product') || identity?.stated_in_brief !== true
+    || !Array.isArray(identity.factor_ids) || (!unary && identity.factor_ids.length !== 2)) return false;
   const byId = new Map(nodes.filter(isRec).map(n => [n.id, n]));
   const levels = identity.factor_ids.map((id) => {
     const n = byId.get(id);
@@ -133,9 +138,16 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
       });
       return parts.every(part => part !== undefined) ? { unit: parts[0]!.unit, label: String(id) } : undefined;
     }
+    if (unary) return undefined;
     const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
     return os !== undefined && finite(os.raw_value) ? { unit: os.unit, label: String(id) } : undefined;
   });
+  if (unary) {
+    // S5: the target's unit through the one goal record, never a new raw read.
+    const targetUnit = typeof goal.id === 'string' ? readGoalRecord({ nodes }, goal.id)?.target?.unit : undefined;
+    return levels[0] !== undefined && typeof levels[0].unit === 'string' && typeof targetUnit === 'string'
+      && sameUnit(targetUnit, levels[0].unit);
+  }
   if (levels[0] === undefined || levels[1] === undefined) return false;
   // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
   // another currency keeps the confirmed identity; nothing downstream converts it).
@@ -256,12 +268,15 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   const goalId = scoredGoalIdOf(graph, scoredGoalId);
+  const ceilingStock = confirmedCeilingStockOf(graph);
+  // A confirmed unary stock reading defines the entire goal. Retained surplus parents do not alter its calculation.
+  const goalEdges = ceilingStock !== null && ceilingStock.goalId === goalId ? edges.filter(e => e.to !== goalId || String(e.from) === ceilingStock.carrierId) : edges;
   const ids = optionIds;
   const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
   const toGoal = new Set<unknown>(goalId === undefined ? [] : [goalId]);
   for (let grew = true; grew;) {
     grew = false;
-    for (const e of edges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
+    for (const e of goalEdges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
       toGoal.add(e.from); grew = true;
     }
   }
@@ -278,7 +293,7 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
       }
     }
     for (const id of seen) reached.add(id);
-    return { option_id, links: edges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
+    return { option_id, links: goalEdges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
       && walkable(e.to) && toGoal.has(e.to)) };
   });
   return { reached, paths, exactLinks };
@@ -357,7 +372,8 @@ export function targetTestabilityOf(
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
-    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])), identityEvaluations, goalId);
+    const { reached, paths } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])), identityEvaluations, goalId);
+    const goalPaths = new Set(paths.flatMap(path => path.links));
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
@@ -375,7 +391,8 @@ export function targetTestabilityOf(
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
-    const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
+    const stockReading = confirmedCeilingStockOf(graph) !== null;
+    const guesses = edges.filter((e) => (!stockReading || goalPaths.has(e)) && reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
       && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, goalId, identityEvaluations));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
@@ -435,6 +452,17 @@ export interface UntestableTargetParts {
    * never in "I need …"; the tail names it in its own sentence (AIQ: named, never asked).
    */
   readonly untestableComparator: string | null;
+  /**
+   * ⭐ COACH (Codex buddy r1–r3): what can unlock (b), or null without (b).
+   *   - `target_write`: a LEVEL target. The approved target write can hold the stated `<` on the goal (`add-constraint.ts`
+   *     `cardIsAGoalCeiling` → `goal_direction`, paired by `pairGoalCeiling`), which `resolveGoalThresholdStrict` scores, so
+   *     it is never a capability gap. Whether that write ALONE unlocks it here depends on the writer's own row preparation
+   *     (`add-constraint.ts` retires other own target rows) and pairing (`ceilingFrameCap`), which only the writer itself
+   *     can answer: no step is typed from it (split after r3; the target-control step waits on a pure dry run of that writer).
+   *   - `unbuilt`: a CHANGE target. That write is a level (`goal-target-edit.ts`, the contract's `raw_value`) and a change
+   *     row stays independent of it (`add-constraint.ts` `ownTarget`), so no writer holds its comparator.
+   */
+  readonly untestableComparatorUnlock: 'target_write' | 'unbuilt' | null;
   readonly question: string | null;
   /**
    * ⭐ Near tie (red team 19; DL #87, 6 Oct): the link `question` asks, when it IS the (c) link question (the failing case's
@@ -499,8 +527,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const mean = isRec(edge?.strength) ? edge.strength.mean : undefined;
     // The band edit's own stamp (`adjust-edge-strength.ts`): `source: 'user_specified'` + `provenance_display: 'user_set'`, and
     // no stated size. A link the user only DREW carries the source but not the display, so it is never "set as" a band.
-    const userBand = linkSizing(edge) === 'user' && isRec(edge?.provenance) && edge?.provenance_display === 'user_set'
-      && edge.provenance.magnitude !== 'user_stated' && edge.provenance.natural_effect === undefined;
+    const userBand = isUserSetBand(edge);
     return userBand && typeof mean === 'number' && Number.isFinite(mean) ? edgeStrengthWords(edge) : null;
   })();
   const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question
@@ -524,12 +551,28 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     clauses: cases.map((c) => said(c)[0]),
     needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
     untestableComparator: cases.includes('b') ? `'${comparatorTarget}'` : null,
+    untestableComparatorUnlock: !cases.includes('b') ? null : (stated.frame ?? 'level') === 'level' ? 'target_write' : 'unbuilt',
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
     asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
       // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
       : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
   };
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311): the ONE next step these parts support, typed by the failing cases.
+ * A question the user can answer is the step (case a/c/d). A strict comparator on a CHANGE target is a CAPABILITY gap (no
+ * writer holds it): said as such, never asked, and beside a question it travels with the ask so an answer is never
+ * promised to unlock it. A strict comparator on a LEVEL target is never called a gap (a writer can hold it) and types no
+ * step of its own (`untestableComparatorUnlock`). A case (c) whose link is a pending identity has no question: its card
+ * owns the step. Otherwise: no step.
+ */
+export function targetBlockerOf(parts: UntestableTargetParts, identityCardOffered = false): PressBlocker | null {
+  const unbuilt = parts.untestableComparatorUnlock !== 'unbuilt' ? undefined : `a chance for a ${parts.untestableComparator} target on ‘${parts.name}’`;
+  if (parts.question !== null) return { kind: 'missing_input', ask: parts.question, ...(unbuilt === undefined ? {} : { also_unbuilt: unbuilt }) };
+  if (unbuilt !== undefined) return { kind: 'missing_implementation', what: unbuilt };
+  return identityCardOffered ? { kind: 'confirm', by: 'identity_card' } : null;
 }
 
 /**

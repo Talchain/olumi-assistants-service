@@ -98,6 +98,7 @@ export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_de
  *     encoding_map,
  *     nonlinear_identity (C46 carrier, as stored),
  *     scale_frame, goal_threshold_frame, goal_direction, quantity_frame, analysis_participation,
+ *     goal_target_basis (CEE-local; only when present and well-formed — Batch C gap 2),
  *     interventions: per-factor { value, value_type, encoding_map,
  *                                  target_match: { node_id } },
  *     unresolved_targets: sorted distinct admission gaps from the canonical
@@ -378,6 +379,12 @@ function projectNode(raw: unknown): NodeProjection {
   // so removing/rebinding it must invalidate the old analysis; absent/malformed stamps preserve legacy hashes.
   const reliesOn = NodeV3.shape.relies_on.safeParse(r.relies_on);
   if (reliesOn.success && reliesOn.data !== undefined) out.relies_on = reliesOn.data;
+
+  // Recovery Batch C (gap 2): the goal's stated target basis (reference, denominator, period, effect timing) decides which
+  // goal chance may be said, so a change to it alone must stale a stored Run. CEE-local like `relies_on`: it enters ONLY
+  // when present and well-formed, so every graph without one hashes byte-identically to before.
+  const targetBasis = NodeV3.shape.goal_target_basis.safeParse(r.goal_target_basis);
+  if (targetBasis.success && targetBasis.data !== undefined) out.goal_target_basis = targetBasis.data;
 
   const observed = projectObservedState(r.observed_state);
   if (observed !== undefined && Object.keys(observed).length > 0) {

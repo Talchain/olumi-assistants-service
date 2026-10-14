@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * ⛔ THE AGENT LANE'S FAIL-CLOSED LEADER GATE — the classifier, the projection and the permit.
  *
@@ -128,7 +129,7 @@ describe('c6: an appointed lead is a staffing role, with option labels still gua
 
   // DL #2711 r2 BLOCKER: two adjacent unbounded whitespace runs in the staffing patterns were quadratic (806 ms at 20,000
   // spaces vs base 2 ms). Every run is bounded; each shape stays linear (< 50 ms at 20,000).
-  it.each([
+  timingIt.each([
     ['"Appoint one lead" + 20,000 spaces + "x"', `Appoint one lead${' '.repeat(20000)}x`],
     ['"First" + 20,000 spaces + "x"', `First${' '.repeat(20000)}x`],
     ['"Pick a lead" + 20,000 spaces + "." + 20,000 spaces + "x"', `Pick a lead${' '.repeat(20000)}.${' '.repeat(20000)}x`],
@@ -204,7 +205,7 @@ describe('c6: the closing states a refused unsized link without re-inviting it',
       .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
   });
 
-  it.each([
+  timingIt.each([
     ['"not" + 20,000 spaces + "move on return rates"', `not${' '.repeat(20000)}move on return rates`],
     ['"Return rates," + 20,000 spaces + "but move on"', `Return rates,${' '.repeat(20000)}but move on`],
   ])('LINEAR TIME (refusal): %s', (_name, userText) => {

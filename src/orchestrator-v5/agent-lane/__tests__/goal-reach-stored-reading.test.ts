@@ -73,7 +73,7 @@ describe('GOAL-REACH build 1 stored reading', () => {
   it('row 5: two product carriers on the goal path leave no unique reading', () => {
     const g = withCurrent(14700);
     delete node(g, 'mrr').nonlinear_identity;
-    node(g, 'pro_paying_subscribers').observed_state.source = 'brief_extraction';
+    { node(g, 'pro_paying_subscribers').observed_state.source = 'brief_extraction'; delete node(g, 'pro_paying_subscribers').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     g.edges = g.edges.filter(e => e.to !== 'mrr');
     for (const id of ['carrier_a', 'carrier_b']) {
       g.nodes.push({ id, kind: 'outcome', label: id, nonlinear_identity: { operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false } });
@@ -84,7 +84,7 @@ describe('GOAL-REACH build 1 stored reading', () => {
   });
   it('row 6: T1b goal card keeps its original words byte for byte', () => {
     const g = withCurrent(14700);
-    node(g, 'pro_paying_subscribers').observed_state.source = 'brief_extraction';
+    { node(g, 'pro_paying_subscribers').observed_state.source = 'brief_extraction'; delete node(g, 'pro_paying_subscribers').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     g.edges = g.edges.filter(e => e.to !== 'mrr' || ['pro_plan_price', 'pro_paying_subscribers'].includes(e.from));
     expect(proposeProductIdentity(g)?.words).toBe('Is “MRR” your “Pro plan price” × “Pro paying subscribers”? £49 × 300 = £14,700, close to your £14,700. If yes, Olumi will calculate “MRR” that way, and you can run the analysis again.');
   });

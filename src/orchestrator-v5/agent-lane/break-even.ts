@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 import { identityConflictsWithScope, nodesOf } from './goal-scope.js';
 /**
  * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205:
@@ -16,7 +17,7 @@ import { identityConflictsWithScope, nodesOf } from './goal-scope.js';
  * inexact or in another unit — never an approximate answer.
  */
 import { nonlinearIdentityForAgent } from './admit-model.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOfStateOrStamp } from '../../cee/provenance/provenance-of.js';
 import { deriveEmittedGoalDirection, heldComparatorSense, readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
@@ -76,8 +77,8 @@ export interface BreakEven {
  * `user_ratified` (an estimate the user confirmed or approved as an assumption) is NOT the user's figure and is said
  * as approved; anything the rule cannot attribute (a repair, an unknown stamp) makes the whole answer `null`.
  */
-const byOf = (source: unknown): FigureBy | null => {
-  const provenance = classifyValueSource(source);
+const byOf = (observed: unknown): FigureBy | null => {
+  const provenance = valueClassOfStateOrStamp(observed);
   if (provenance === 'user_stated') return 'user';
   if (provenance === 'user_ratified') return 'approved';
   if (provenance === 'ai_drafted') return 'olumi';
@@ -120,11 +121,12 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
   const volume = byId.get(volumeId);
   const pos = price?.observed_state;
   const vos = volume?.observed_state;
+  if (isUnverifiedUserMaterial(pos) || isUnverifiedUserMaterial(vos)) return null;
   const cap = typeof pos?.cap === 'number' && pos.cap > 0 ? pos.cap : undefined;
   const p0 = exactRaw(pos, cap);
   const v0 = exactRaw(vos, undefined);
-  const p0By = byOf(pos?.source);
-  const v0By = byOf(vos?.source);
+  const p0By = byOf(pos);
+  const v0By = byOf(vos);
   const unit = typeof pos?.unit === 'string' ? pos.unit.trim() : '';
   if (p0 === null || v0 === null || p0By === null || v0By === null || !(p0 > 0) || !(v0 > 0) || unit === '') return null;
   // ⛔ #2851 (DL ruling 2; Paul's 2 Oct brief §9 check 1): the product's PARTS today are the user's figures or nothing.
@@ -141,7 +143,7 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
     if (level === undefined) continue;
     const stored = (typeof level === 'number' ? { value: level } : level) as { value?: unknown; raw_value?: unknown; source?: unknown };
     const p = exactRaw(stored, cap);
-    const by = byOf(stored.source);
+    const by = byOf(stored);
     if (p === null || by === null || !(p > 0)) return null;
     const least = Math.ceil(baselineGoal / p - 1e-9);
     rows.push({

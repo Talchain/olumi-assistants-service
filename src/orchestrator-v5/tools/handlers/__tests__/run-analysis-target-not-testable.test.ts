@@ -250,8 +250,11 @@ describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never r
     // RE-PINNED, RT-10 B′ R2: the target-only licence (the shares and the leader are this run's findings); every
     // comparative use of the KEPT outcomes is still forbidden (DL #2448 condition (1)).
     expect(agent.note).toBe(TARGET_ONLY_OUTCOME_KEPT_NOTE);
-    expect(agent.note).toMatch(/you are not given those figures, so never quote or estimate one, never rank or order the options by those outcomes/);
-    expect(agent.note).toMatch(/never say one option is better or worse/);
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q3, rulings 1ad7f7b2…): the AIE's outcome-kept note; every comparative use of the
+    // KEPT outcomes stays forbidden (no quote, estimate or rank; no ranking for the withheld chance). "Better or worse" while
+    // the leader is withheld stays the host's rule (same-run-goal-chance-and-sensitivity pins it).
+    expect(agent.note).toContain('this note does not supply or license those figures. Do not quote, estimate or rank outcomes that the selected current Run has not separately supplied and licensed.');
+    expect(agent.note).toContain('Never substitute a relative ranking for an unavailable goal chance.');
   });
 
   it('P5 (outcome withheld) scopes the ban to the affected option; the baseline stays licensed', async () => {

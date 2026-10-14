@@ -73,7 +73,7 @@ describe('the real runAnalysis hands the Agent the projection; the user-facing b
     let seen: unknown[] = [];
     const dispatch: InternalDispatch = async () => ({ status: 200, json: { analysis_ready: { status: 'ready', options: [], blockers: [] }, blocks: [SERVED] } });
     const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', (p) => { seen = p.blocks ?? []; });
-    const r = await caps.runAnalysis(ctx, { reason: 'compare the options' });
+    const r = await caps.runAnalysis(ctx, { reason: 'compare the options', effects_timing: null });
     const result = r.result as { enrichment: Enr; decision_sensitivity: unknown };
     // S2i (DL GO): robustness ran on this Run, so the screen shows it and no absence status is handed to the Agent.
     expect(result).not.toHaveProperty('decision_sensitivity');

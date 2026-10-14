@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * S2l THROUGH THE ROUTE: what the model is sent when the user presses Explain on the SERVED Wave B9 unseen b9-1 Run
  * (guest, staging, CEE df15c8c1; `waveB9-unseen1-df15c8c-readback-pre-challenge.json`, the graph read verbatim). Its screen
@@ -49,6 +50,8 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
   const sent: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }] }), { status: 200 });
     }));
@@ -74,7 +77,7 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
   /** Run, then press the real Explain control; returns the model bodies the Explain turn sent. */
   const runThenExplain = async (): Promise<string[]> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
+      kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);

@@ -2,7 +2,8 @@
 import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolvedEventOptionIds } from './event-by-date-model.js';
 import { goalDeadlineFromRecord, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween, todayInLondon } from './deadline-date.js';
-import { gate, type ShareGate, type ShareParts } from './event-by-date-share.js';
+import { extrasOf, gate, MAX_RANGED_PARTS, rangedPartCount, type ExtraShare, type ShareGate, type ShareParts } from './event-by-date-share.js';
+import { hiringTimesLabel } from './hiring-times.js';
 import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
 
 type Rec = Record<string, any>;
@@ -47,7 +48,8 @@ function capacityInputFailure(extra: Rec): string | null {
   }
   if (typeof extra.monthly_share !== 'number' || !Number.isFinite(extra.monthly_share)
     || extra.monthly_share < 0 || extra.monthly_share > 100) {
-    return "Not shown. Olumi's estimate of the new team's pace is not usable. State a pace from 0% to 100% of the work a month.";
+    // AIE 6122738619's meaning (DL, 12 Oct): the hires' ADDITIONAL progress, never "the new team's pace" (the whole team).
+    return "Not shown. Olumi's estimate of the additional progress from the hires is not usable. State it from 0% to 100% of the work per month.";
   }
   return null;
 }
@@ -91,6 +93,30 @@ export function shareChanceInputFailure(graph: unknown, optionId?: string): stri
   return null;
 }
 
+/** The capacity parts an option switches on, in the order of the goal's parts; null when there is no such option. */
+function activePartsOf(g: Rec, share: NonNullable<ReturnType<typeof shareByDateGoalOf>>, optionId: string): Rec[] | null {
+  const option = g.nodes.find((n: Rec) => n.id === optionId && n.kind === 'option');
+  if (option === undefined) return null;
+  return share.parts.filter(p => {
+    const v = option.interventions[p.from];
+    return p.from !== share.team_part_id && (typeof v === 'number' ? v : v?.value) === 1;
+  }).map(p => g.nodes.find((n: Rec) => n.id === p.from));
+}
+
+/**
+ * ⭐ E-TAIL (b), AIE 6130197656 §2, EXACT LABEL: said once beside the chances when a licensed option's hire link was limited to
+ * the whole deliverable on Olumi's own pace (`extraShareLinkMoments`; the carrier's `link_limit`, Olumi's assumption).
+ */
+export const OLUMI_HIRE_LIMIT_NOTE = "Olumi's provisional modelling estimate limits typical extra progress from these hires to 100% of the launch. "
+  + 'The bell-curve analysis can still simulate values outside that figure.';
+/** True when any active hire part of these options rests on Olumi's limit (`link_limit.origin === 'olumi_assumption'`). */
+export function hireLinkLimitedFor(graph: unknown, optionIds: readonly string[]): boolean {
+  const share = shareByDateGoalForChanceOf(graph);
+  if (share === null) return false;
+  return optionIds.some(id => (activePartsOf(graph as Rec, share, id) ?? [])
+    .some(n => n?.observed_state?.extra_share_by_date?.link_limit?.origin === 'olumi_assumption'));
+}
+
 export function sharePartsForOption(graph: unknown, optionId: string): ShareParts | null {
   if (shareChanceInputFailure(graph, optionId) !== null) return null;
   if (unresolvedEventOptionIds(graph).includes(optionId)) return null;
@@ -99,17 +125,18 @@ export function sharePartsForOption(graph: unknown, optionId: string): SharePart
   const g = graph as Rec;
   const teamNode = g.nodes.find((n: Rec) => n.id === share.team_part_id);
   const team = statedTeamShareOf(teamNode, share.deadline, share.goal.goal_threshold_unit as string)!;
-  const option = g.nodes.find((n: Rec) => n.id === optionId && n.kind === 'option');
-  if (option === undefined) return null;
-  const active = share.parts.filter(p => {
-    const v = option.interventions[p.from];
-    return p.from !== share.team_part_id && (typeof v === 'number' ? v : v?.value) === 1;
-  });
-  if (active.length > 1) return null;
+  const active = activePartsOf(g, share, optionId);
+  if (active === null) return null;
   if (active.length === 0) return { team };
-  const c = g.nodes.find((n: Rec) => n.id === active[0]!.from).observed_state.extra_share_by_date;
-  return { team, extra: { monthlyShare: c.monthly_share / 100,
-    D: timeBetween(c.reference_date, share.deadline, 'months'), leadLow: c.lead_low, leadHigh: c.lead_high } };
+  const extras = active.map(n => {
+    const c = n.observed_state.extra_share_by_date;
+    return { monthlyShare: c.monthly_share / 100,
+      D: timeBetween(c.reference_date, share.deadline, 'months'), leadLow: c.lead_low, leadHigh: c.lead_high };
+  });
+  // Each started part keeps its own start; parts are summed, never averaged into one start.
+  if (rangedPartCount(extras) > MAX_RANGED_PARTS) return null;
+  const [extra, ...furtherExtras] = extras;
+  return furtherExtras.length === 0 ? { team, extra } : { team, extra, furtherExtras };
 }
 
 /** Null means unsupported parts, never permission to display a point. */
@@ -120,12 +147,53 @@ export function shareGateForOption(graph: unknown, optionId: string, displayedPo
   return gate(parts, share.threshold_raw / 100, displayedPoint, rounding);
 }
 
-/** Per-option words: only the active capacity contributes an Olumi estimate. */
-export function shareOptionEstimateWords(graph: unknown, optionId: string): string {
+/**
+ * EBD E2: the team's time when its range is Olumi's assumption from the user's single forecast (`range_origin`), else null.
+ * The ONE reader every sentence about that range uses, so none calls Olumi's range the user's (AIE 6122738619).
+ */
+export function olumiAssumedTeamRange(graph: unknown): { readonly forecast: number; readonly low: number; readonly high: number } | null {
+  const share = shareByDateGoalForChanceOf(graph);
+  const stated = share === null ? undefined : (graph as Rec).nodes.find((n: Rec) => n.id === share.team_part_id)?.observed_state?.stated_time;
+  return stated?.range_origin === 'olumi_estimate' && [stated.forecast, stated.low, stated.high].every(v => typeof v === 'number' && Number.isFinite(v))
+    ? { forecast: stated.forecast, low: stated.low, high: stated.high } : null;
+}
+const months = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+/**
+ * The team part of the provisional chance attribution, after "using ". AIE 6125204695 (b1), verbatim: the engine's chance is a
+ * bell-curve approximation built from the range's moments (`recovery/bB/ebd-law/DIAGNOSIS.md`), never "all times in the range
+ * equally likely" (withdrawn for b1). The forecast and its words stay the user's; the range and the approximation are Olumi's.
+ */
+export function olumiAssumedRangeAttribution(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
+  return `your ${months(t.forecast)}-month forecast and Olumi’s bell-curve approximation based on an assumed ${months(t.low)}–${months(t.high)}-month range`;
+}
+/**
+ * AIE 6125204695 (b1), verbatim: the timing-range note. It describes the INPUT range, never a probability interval, and never
+ * says the range covers a fixed fraction or "most runs" (the engine samples derived progress, not completion times).
+ */
+export function olumiAssumedRangeLine(t: { readonly forecast: number; readonly low: number; readonly high: number }): string {
+  return `You gave ${months(t.forecast)} months. Olumi’s assumed ${months(t.low)}–${months(t.high)}-month range informs this approximate calculation; `
+    + 'modelled outcomes can fall outside those time bounds.';
+}
+
+/**
+ * Per-option words: the user's forecast with Olumi's assumed range on every option (EBD E2; `withoutTeam`: the range line,
+ * which says that range in its own sentence), then the option's hiring timings (E5 r2): where a start carries the user's
+ * own statement, the words quote it and say every assumption Olumi made from it (`hiringTimesLabel`); a construction-only
+ * option keeps Olumi's own words (AIE 6122738619: the additional progress from the hires, never "the new team's pace").
+ */
+export function shareOptionEstimateWords(graph: unknown, optionId: string, opts: { readonly withoutTeam?: boolean } = {}): string {
   const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
-  if (share === null || parts?.extra === undefined) return '';
-  const extra = parts.extra, number = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  const lead = extra.leadLow === extra.leadHigh ? number(extra.leadLow) : `${number(extra.leadLow)}–${number(extra.leadHigh)}`;
+  if (share === null || parts === null) return '';
+  // EBD E2: a team time held as Olumi's assumption from the user's single forecast is attributed as that on every option.
+  const assumed = opts.withoutTeam === true ? null : olumiAssumedTeamRange(graph);
+  const team = assumed === null ? '' : olumiAssumedRangeAttribution(assumed);
+  if (parts.extra === undefined) return team === '' ? '' : `using ${team}`;
+  const extras = extrasOf(parts);
+  const lead = (x: ExtraShare): string => x.leadLow === x.leadHigh ? months(x.leadLow) : `${months(x.leadLow)}–${months(x.leadHigh)}`;
   const deliverable = String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, '');
-  return `using Olumi's estimates of hiring time (${lead} months) and the new team's pace (${number(extra.monthlyShare * 100)}% of ${deliverable} a month)`;
+  const yours = hiringTimesLabel(activePartsOf(graph as Rec, share, optionId) ?? [], deliverable);
+  const hires = yours !== '' ? yours : extras.length === 1
+    ? `Olumi’s estimates of hiring time (${lead(extras[0]!)} months) and of the additional progress from the hires (${months(extras[0]!.monthlyShare * 100)}% of ${deliverable} per month)`
+    : `Olumi’s estimates of hiring times (${extras.map(lead).join(' months, then ')} months) and of the additional progress from the hires (${months(extras.reduce((t, x) => t + x.monthlyShare * 100, 0))}% of ${deliverable} per month, split equally between the two starts)`;
+  return `using ${team === '' ? '' : `${team}, and `}${hires}`;
 }

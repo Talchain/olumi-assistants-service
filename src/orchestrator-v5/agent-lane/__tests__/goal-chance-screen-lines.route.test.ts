@@ -40,6 +40,15 @@ const VIEW = {
 const SCENARIO = '7a5e4d3c-2b1a-4d0e-9f8a-7b6c5d4e3f2a';
 const ALL_SCREEN = JSON.parse(readFileSync(new URL('./fixtures/waveB-screen-chance-lines-20261007.json', import.meta.url), 'utf8')) as { line: string; source: string }[];
 const SCREEN = ALL_SCREEN.filter((s) => s.source.includes('/unseen-b3-2/')).map((s) => s.line);
+// Batch C: condition 6 of a correct chance / r1 item 6 (DL, 12 Oct) — a range rests on the same Olumi inputs as a point and
+// says so in the point's own words. The served B3 line predates that: SCREEN_NOW is the CAPTURED line with exactly that
+// clause inserted after "in this model" (its count is RC4's census, `goalChanceEstimateCounts`). Nothing else moves.
+const withClause = (line: string, words: string): string => {
+  const at = line.indexOf(', in this model.');
+  if (at < 0) throw new Error(`no "in this model" in: ${line}`);
+  return `${line.slice(0, at)}, in this model, using Olumi's estimates for ${words} (see Check estimates).${line.slice(at + ', in this model.'.length)}`;
+};
+const SCREEN_NOW = SCREEN.map((l) => withClause(l, '6 starting values, 2 option settings and 5 relationships'));
 const SCREEN_T1B = ALL_SCREEN.filter((s) => s.source.includes('/t1b-b5-1/')).map((s) => s.line);
 const SIZE_QUESTION = 'How sure are you of that size?';
 // RC6 keeps the first screen unit intact and drops only the later copy of its question.
@@ -356,7 +365,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       .filter((option: Json) => option.option_id === 'fourth_shop_in_clifton');
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
     expect(composeInput?.chanceCells?.map(cell => cell.kind)).toEqual(['range']);
-    expect(b.assistant_text).toContain(SCREEN[0]!);
+    expect(b.assistant_text).toContain(SCREEN_NOW[0]!);
     expect(b.assistant_text).toContain("This chance uses the model's numbers as they are today");
     expect(b.assistant_text).not.toContain('These chances use');
     expect(withholdMarkers(b)).toEqual([]);
@@ -397,7 +406,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const note = "Risks Olumi added aren't in the chance yet, so it may be too high.";
     expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'range', option_id: 'fourth_shop_in_clifton' }));
     expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'withheld', option_id: 'loyalty_app' }));
-    expect(body.assistant_text).toContain(SCREEN[0]!);
+    expect(body.assistant_text).toContain(SCREEN_NOW[0]!);
     expect(input.widenedRiskNote).toBe(note);
     expect(input.widenedRiskMarker).toBe(WIDENED_RISK_MARKER_DOWN);
     expect(count(body.assistant_text, note)).toBe(1);
@@ -566,7 +575,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     oneChance({ goal_horizon_months: undefined }, true);
     expect(whatChangesFaceLine(analysisResult, READ.graph)).not.toBeNull();
     READ.analysis_state.run_state.kind = 'complete_stale';
-    const b = await turn([], 'Run it', { chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    const b = await turn(run('The analysis returned a stale result.'), 'Run it', { chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
     expect(composeInput?.faceContract).toBe('run');
     expect(composeInput?.whatChanges).toBeUndefined();
     expect(b.assistant_text).not.toContain('What would change it:');
@@ -704,7 +713,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   it('RED at base: a Run reply with no range figure ends up saying the screen’s line, once', async () => {
     const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
     expect(b._agent.tool_calls.map((c) => c.name)).toContain('run_analysis');
-    expect(count(b.assistant_text, SCREEN[0]!), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, SCREEN_NOW[0]!), b.assistant_text).toBe(1);
   });
 
   it.each(['live', 'replay'] as const)('RANGE WINS B2 %s: the assistant says the range without the contradictory guided sentence', async mode => {
@@ -713,7 +722,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     analysisResult = structuredClone(RANGE_WINS_B2.run);
     const body = await turn(run('The analysis ran.'), 'Run it');
     const assertB2 = (text: string): void => {
-      expect(text).toContain('‘Launch starter tier’: between about 5% and 37% chance of meeting your goal, in this model.');
+      // Batch C: condition 6 (DL, 12 Oct) — the range says the Olumi input it rests on, as its point would.
+      expect(text).toContain('‘Launch starter tier’: between about 5% and 37% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 relationship (see Check estimates).');
       expect(text).not.toContain("The chance isn't shown yet");
     };
     assertB2(body.assistant_text);

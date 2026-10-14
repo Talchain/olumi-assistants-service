@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildAnalysisRefusalFact } from '../../context/analysis-refusal-continuity.js';
@@ -46,6 +47,26 @@ function mapFact(fact: Json) {
 }
 
 describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
+  it.each(['live', 'backfill'] as const)('maps evaluated revisions in %s and keeps null rows byte-identical', mode => {
+    const fact = factFromRead(succeeded);
+    const ctx = { scenarioId: fact.result.scenario_id, mode };
+    const legacy = toTypedRunRows(fact, ctx);
+    expect(JSON.stringify(toTypedRunRows(fact, { ...ctx, evaluatedScenarioRevision: null }))).toBe(JSON.stringify(legacy));
+    expect(legacy).toMatchObject({ ok: { scenario_revision: null, revision_source: 'legacy_unknown' } });
+    for (const n of [0, 7, 2147483647, Number.MAX_SAFE_INTEGER]) {
+      expect(toTypedRunRows(fact, { ...ctx, evaluatedScenarioRevision: n })).toEqual({
+        ok: { ...('ok' in legacy ? legacy.ok : {}), scenario_revision: n, revision_source: 'recorded' },
+      });
+    }
+  });
+  it.each([-1, 1.5, '7', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, {}, true])('quarantines invalid evaluated revision %j', evaluatedScenarioRevision => {
+    const fact = factFromRead(succeeded);
+    for (const mode of ['live', 'backfill'] as const) {
+      expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode, evaluatedScenarioRevision }))
+        .toEqual({ quarantine: 'evaluated_scenario_revision_invalid' });
+    }
+  });
+
   it('maps the captured Run fields through the ONE TS specification', () => {
     expect(TYPED_RUN_PAYLOAD_PATHS).toContain('result.input_snapshot');
 
@@ -393,7 +414,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { canonicalJson, loadCorpus, parity2b } from '../../../../scripts/phase2/parity-2b.js';
 import { selectRunAnalysisFact } from '../../context/freshness.js';
-import { readLatestRun, type AnalysisRunReadRow } from '../read-latest-run.js';
+import { readLatestRun, readTwoLatestRuns, type AnalysisRunReadRow } from '../read-latest-run.js';
 
 /** Mock only transport paging/eligibility; selection runs in the real freshness core. */
 function typedTableClient(rows: AnalysisRunReadRow[]): Pick<SupabaseClient, 'from'> {
@@ -402,7 +423,10 @@ function typedTableClient(rows: AnalysisRunReadRow[]): Pick<SupabaseClient, 'fro
     let scenarioId: string;
     let from = 0; let to = 499;
     const builder = {
-      select() { return builder; },
+      select(columns: string) {
+        expect(columns.split(',').map(column => column.trim())).toEqual(expect.arrayContaining(['scenario_revision', 'revision_source']));
+        return builder;
+      },
       eq(column: string, value: string) { if (column === 'scenario_id') scenarioId = value;
         else { expect(column).toBe('status'); expect(value).toBe('succeeded'); } return builder; },
       order(column: string, opts: { ascending: boolean }) {
@@ -422,6 +446,17 @@ function materialisedCorpus() {
   }]);
 }
 describe('S1 TS golden corpus and dormant typed reader', () => {
+  it('both typed read ports project recorded and explicit legacy revisions unchanged', async () => {
+    const rows = materialisedCorpus().filter(row => row.status === 'succeeded').slice(0, 2);
+    expect(rows).toHaveLength(2);
+    const first = { ...rows[0]!, computed_at: '2026-10-09T12:00:00Z', scenario_revision: 7, revision_source: 'recorded' as const };
+    const second = { ...rows[1]!, scenario_id: first.scenario_id, computed_at: '2026-10-09T11:00:00Z',
+      scenario_revision: null, revision_source: 'legacy_unknown' as const };
+    await expect(readLatestRun(typedTableClient([second, first]), first.scenario_id)).resolves.toEqual(first);
+    await expect(readTwoLatestRuns(typedTableClient([second, first]), first.scenario_id)).resolves.toEqual([first, second]);
+    await expect(readLatestRun(typedTableClient([second]), first.scenario_id)).resolves.toEqual(second);
+  });
+
   it('reproduces expected.json in-process from the same 31 source payloads', () => {
     expect(loadCorpus()).toHaveLength(31);
     expect(canonicalJson(parity2b())).toBe(readFileSync(new URL('../../../../scripts/phase2/corpus-2b/expected.json', import.meta.url), 'utf8'));
@@ -488,4 +523,53 @@ describe('S1 TS golden corpus and dormant typed reader', () => {
       if (selected?.fact.fact_type !== 'run_analysis') throw new Error('No selected Run');
       await expect(readLatestRun(typedTableClient(rows), old.scenario_id)).resolves.toHaveProperty('run_id', selected.fact.result.run_id);
     });
+});
+
+
+// SQL remains operator-rehearsed. These rows pin source bytes and prevent an
+// accidental rewrite of unrelated writer/claim behaviour or rollback drift.
+describe('B2 migration function byte boundaries', () => {
+  const sql = (name: string) => readFileSync(new URL(`../../../../supabase/migrations/${name}`, import.meta.url), 'utf8');
+  const forward = sql('20261009160000_b2_fact_evaluated_revision.sql');
+  const rollback = sql('rollback/20261009160000_b2_fact_evaluated_revision_rollback.sql.do-not-apply');
+  const definition = (text: string, name: string) => {
+    const found = text.match(new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([\\s\\S]*?AS (\\$(?:function)?\\$)[\\s\\S]*?\\1;`));
+    if (!found) throw new Error(`Missing ${name}`);
+    return found[0];
+  };
+  const body = (text: string) => {
+    const found = text.match(/AS (\$(?:function)?\$)([\s\S]*?)\1;/);
+    if (!found) throw new Error('Missing dollar-quoted function body');
+    return found[2]!;
+  };
+  const md5 = (text: string) => createHash('md5').update(body(text), 'utf8').digest('hex');
+  it('changes only the v4 fact INSERT, preserving exact arguments/attributes and rollback bytes', () => {
+    const original = definition(rollback, 'append_turn_atomic_v4');
+    expect(md5(original)).toBe('db7bdbe3e2052237c623d8c5477a96e5');
+    expect(body(original).length).toBe(4856);
+    const revised = definition(forward, 'append_turn_atomic_v4');
+    const insert = /INSERT INTO v5_handler_facts \([\s\S]*?\n {6}\);/;
+    expect(revised.replace(insert, '<fact INSERT>')).toBe(original.replace(insert, '<fact INSERT>'));
+    expect(revised.match(insert)?.[0]).toContain("jsonb_typeof(v_fact->'evaluated_scenario_revision') = 'number'");
+    const signature = 'public.append_turn_atomic_v4(uuid,text,text,text,text,boolean,integer,integer,jsonb,jsonb,text,jsonb,jsonb,text,text,text,text,boolean,bigint)';
+    expect(forward).toContain(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, anon, authenticated;`);
+    expect(forward).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO service_role;`);
+    expect(forward).toContain("md5(p.prosrc) = 'db7bdbe3e2052237c623d8c5477a96e5'");
+    expect(rollback).toContain(`md5(p.prosrc) = '${md5(revised)}'`);
+  });
+  it.each([
+    ['claim_analysis_run_facts', 'aa43423e62f68b00a07f1f116e406ad8'],
+    ['claim_analysis_run_reconciliation', '3c14bc6590d368ca44f690f938ad55b0'],
+  ])('pins %s current body hash and the sole sibling-key addition', (name, expectedHash) => {
+    const original = definition(sql('20261009040000_phase2_a_legacy_unattributable.sql'), name);
+    const revised = definition(forward, name);
+    expect(md5(original)).toBe(expectedHash);
+    const constant = `expected_${name}_md5`;
+    expect(forward).toContain(`${constant} CONSTANT text := '${expectedHash}';`);
+    expect(forward).toContain(`md5(p.prosrc) = ${constant}`);
+    expect(forward.split(expectedHash)).toHaveLength(2);
+    expect(revised.replace(",'evaluated_scenario_revision',h.evaluated_scenario_revision", '')).toBe(original);
+    expect(definition(rollback, name)).toBe(original);
+    expect(rollback).toContain(`md5(p.prosrc) = '${md5(revised)}'`);
+  });
 });

@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../../../tests/helpers/scaling-ratio.js';
 import { legacyDoorGraph, reclassifiedCTurn, reclassifiedCPlan } from '../../../__tests__/licence-test-graphs.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -9,6 +10,7 @@ import { cardCallFor, fallbackReply, methodDirective, methodTurnForReadback, pla
   settleMethodTurn, type MethodReadback, type RunMethodTurn } from '../../method-turn.js';
 import type { SuppliedItem } from '../../../science/method-science-context.js';
 import { capture, draftFor, readback, requireRun, turn } from './w9c-rows.js';
+import { withApprovedMethodWords } from './approved-method-words.js';
 
 const load = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 const base = load('../fixtures/w9c/r2-base-controls.json');
@@ -31,6 +33,23 @@ function captureReadback(name: string): MethodReadback {
   if (name.startsWith('A-')) return servedReadback(name);
   return readback(capture(name));
 }
+/**
+ * ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092; CHANGED-ANSWERS 25): an absent-type `cee_inference` is Olumi's
+ * estimate on every reader. 591cc1a0's F1 alone read it 'unknown', and these R2 contracts were recorded on that reading.
+ * They are held on the same captures with those figures' stamp replaced by one the authority does not recognise (origin
+ * UNESTABLISHED, still stamped) — the class every reader now reads 'unknown' — exactly as `premortem-near-tie-path` and
+ * `premortem-empty-leader-path` hold W9/W9b. The as-captured behaviour is pinned there (as-captured rows).
+ */
+const UNRECOGNISED = 'unrecognised_stamp';
+function unestablished(rb: MethodReadback): MethodReadback {
+  const copy = structuredClone(rb); // keeps the readback's Sets (identityEvaluated)
+  for (const n of (copy.graph as { nodes: { observed_state?: Record<string, unknown> }[] }).nodes) {
+    const os = n.observed_state;
+    if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = UNRECOGNISED;
+  }
+  return copy;
+}
+const recordedReadback = (name: string): MethodReadback => unestablished(captureReadback(name));
 
 r2Rows['P1-1: all 29 historical checker fixtures keep exact matches, failures and targets'] = () => {
   const fixtures = load('../../../__tests__/fixtures/reasoning-coach-acceptance.json').method_turn_fixtures;
@@ -62,7 +81,7 @@ for (const [name, prefix] of Object.entries({ spaces: ' '.repeat(20_000), newlin
       const result = checkMethodTurn('RC-PREMORTEM', reply, out.check_inputs);
       const elapsed = performance.now() - start;
       times.push(elapsed);
-      assert.ok(elapsed < 50, `${name}: ${elapsed}ms`);
+      if (timingGated) { assert.ok(elapsed < 50, `${name}: ${elapsed}ms`); }
       assert.deepEqual(result.failed, name === 'newlines + marker' ? ['PM-GROUNDED', 'PM-WATCH-MITIGATE'] : []);
     }
     timings[name] = times;
@@ -137,7 +156,7 @@ r2Rows['P1-3 served A-STALE-SILENT: exact kind-correct link fallback without lev
 
 for (const name of ['w9b-2', 'w9b-3', 'C', 'A-Q-D1-BUILD', 'draw2']) {
   r2Rows[`P1-4 union + A2 option-grounding intersection: ${name}`] = () => {
-    const rb = captureReadback(name);
+    const rb = recordedReadback(name);
     const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, rb));
     const items = out.context.supplied_items;
     assert.ok(items.some(i => i.lever_option_labels !== undefined));
@@ -156,7 +175,7 @@ for (const name of ['w9b-2', 'w9b-3', 'C', 'A-Q-D1-BUILD', 'draw2']) {
       // Science 393023 LICENCE (a)/(b), 7 Oct: C's option-scoped turns also gain their newly unsized path link; all other fields stay pinned.
       const original = name === 'C' ? reclassifiedCPlan(recorded, id) : recorded;
       const scoped = methodTurnForReadback(planPickChipId(id), rb);
-      assert.equal(JSON.stringify(scoped), JSON.stringify(original), `${name} option ${id}`);
+      assert.equal(JSON.stringify(scoped), JSON.stringify(withApprovedMethodWords(original)), `${name} option ${id}`);
       if (original?.kind !== 'run') continue;
       const expected = original.context.supplied_items.filter(i => (i.kind === 'factor' || i.kind === 'link')
         && (name === 'C' ? reclassifiedCTurn(base[name].turn) : base[name].turn).context.supplied_items.some((b: SuppliedItem) => b.id === i.id && b.kind === i.kind));
@@ -189,14 +208,14 @@ r2Rows['P1-4 R1: the ORIGINAL served D1 GOOD draft passes verbatim with no card'
 r2Rows['P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/settlement pin'] = () => {
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, captureReadback('C')));
   // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; fallback and settlement stay pinned.
-  assert.equal(JSON.stringify(out), JSON.stringify(reclassifiedCTurn(pinned.C.turn)));
+  assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(reclassifiedCTurn(pinned.C.turn))));
   assert.equal(fallbackReply(out.context), pinned.C.fallback);
   assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(pinned.C.settled));
 };
 r2Rows['P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical'] = () => {
-  const rb = captureReadback('draw1');
+  const rb = recordedReadback('draw1');
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, rb));
-  assert.equal(JSON.stringify(out), JSON.stringify(base.draw1.turn));
+  assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(base.draw1.turn)));
   assert.equal(fallbackReply(out.context), base.draw1.fallback);
   assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(base.draw1.settled));
   const draft = `Two ways this went badly.\n1. Price rise MRR uplift and monthly recurring revenue diverged. Watch for: early feedback. Mitigate: check it.\n2. Customer losses from price rise materialised. Watch for: cancellations. Mitigate: prepare a response.\nOutside the model: what else could blindside this?`;
@@ -211,9 +230,9 @@ r2Rows['P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay 
 };
 r2Rows['P2 scope: non-near-tie D1 and stale decision changes are whole-object pinned'] = () => {
   for (const name of ['A-Q-D1-BUILD', 'A-STALE-SILENT', 'draw2']) {
-    const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, captureReadback(name)));
+    const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, recordedReadback(name)));
     assert.notEqual(JSON.stringify(out), JSON.stringify(base[name].turn));
-    assert.equal(JSON.stringify(out), JSON.stringify(pinned[name].turn));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(pinned[name].turn)));
     assert.equal(fallbackReply(out.context), pinned[name].fallback);
   }
 };

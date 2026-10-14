@@ -142,7 +142,7 @@ describe('identity, precedence, absence and typed future basis', () => {
     expect(readGoalRecord(multi, 'B')).toEqual({
       goal_id: 'B', label: 'at least 999',
       target: { raw: 40, unit: '£', frame: 'level', comparator: '<', comparator_source: 'row_operator_as_stated', source: 'user' },
-      horizon: { deadline: '2027-01-01', as_stated: 'by January' }, provenance: 'user_set',
+      horizon: { deadline: '2027-01-01', months: 12, as_stated: 'by January' }, provenance: 'user_set',
     });
   });
   it('horizon approved months precede legacy months (synthetic discriminator)', () => {

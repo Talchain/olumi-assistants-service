@@ -9,6 +9,7 @@ import {
   PREMORTEM_PRESS_ID, cardCallFor, fallbackReply, methodTurnForReadback, methodTurnFromSignals,
   planPickChipId, settleMethodTurn, type MethodReadback, type MethodTurn, type RunMethodTurn,
 } from '../method-turn.js';
+import { withApprovedMethodWords } from './helpers/approved-method-words.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[]; goal_constraints?: unknown };
 type Read = {
@@ -18,7 +19,22 @@ type Read = {
 };
 const load = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/w9b/${name}.json`, import.meta.url), 'utf8'));
 // Science 393023 LICENCE (a)/(b), 7 Oct: C's mean-projected links are now grounded as unsized; captured bytes stay unchanged.
-const captured = (name: string): Read => load(name).j;
+/**
+ * ONE PROVENANCE AUTHORITY (DL ruling; AIE 6119326092): an absent-type `cee_inference` is Olumi's estimate on every reader.
+ * 591cc1a0's F1 alone read it 'unknown', and these W9b contracts were recorded on that reading. They are held on the same
+ * captures with those figures' stamp replaced by one the authority does not recognise (origin UNESTABLISHED, still
+ * stamped) — the class every reader now reads 'unknown'. The as-captured behaviour is its own row (`asCaptured`).
+ */
+const UNRECOGNISED = 'unrecognised_stamp';
+const unestablished = (r: Read): Read => {
+  for (const n of r.graph.nodes) {
+    const os = n.observed_state as Record<string, unknown> | undefined;
+    if (os?.source === 'cee_inference' && os.extractionType === undefined && os.user_material_unverified !== true) os.source = UNRECOGNISED;
+  }
+  return r;
+};
+const captured = (name: string): Read => unestablished(load(name).j);
+const asCaptured = (name: string): Read => load(name).j;
 const base = load('base-turns') as Record<string, MethodTurn>;
 const readback = (c: Read): MethodReadback => ({
   graph: c.graph, analysisState: c.analysis_state, analysisResult: c.analysis_result,
@@ -82,10 +98,24 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     }
   });
 
+  it('ONE PROVENANCE AUTHORITY: A as captured — its absent-type cee_inference figures are Olumi\'s estimates on the F1 reader too', () => {
+    const c = asCaptured('A');
+    const ids = c.graph.nodes.filter(n => n.observed_state?.source === 'cee_inference' && n.observed_state?.extractionType === undefined
+      && typeof n.observed_state?.value === 'number').map(n => n.id as string);
+    assert.ok(ids.length > 0, 'precondition: the capture holds absent-type cee_inference figures');
+    const factors = signalsOf(c)['model.goal_path_factors'];
+    for (const id of ids) {
+      const f = factors.find(x => x.factor_id === id);
+      if (f !== undefined) assert.equal(f.value_authorship, 'olumi_estimate', id);
+    }
+    assert.ok(ids.some(id => factors.some(x => x.factor_id === id)), 'at least one is on the goal path (not vacuous)');
+  });
+
   it('the review’s Monthly churn 4% probe is on an own-option path but is not an own lever', () => {
     const c = captured('A');
     c.graph.nodes.push({ id: 'monthly_churn_4', kind: 'factor', label: 'Monthly churn 4%',
-      observed_state: { source: 'cee_inference', value: 0.04 } });
+      // Origin unestablished (a stamp the authority does not recognise): an absent-type `cee_inference` is now Olumi's estimate.
+      observed_state: { source: UNRECOGNISED, value: 0.04 } });
     const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.1, std: 0.01 },
       provenance: { source: 'user_specified', magnitude: 'user_stated' } });
     c.graph.edges.push(edge('price_change_from_current', 'monthly_churn_4'), edge('monthly_churn_4', 'monthly_recurring_revenue'));
@@ -99,7 +129,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
   });
 
   it('B: entire grounded licensed-plan output is byte-equivalent to the base replay', () => {
-    assert.equal(JSON.stringify(turn(captured('B'))), JSON.stringify(base.B));
+    assert.equal(JSON.stringify(turn(captured('B'))), JSON.stringify(withApprovedMethodWords(base.B)));
   });
 
   it('C: whole decision turn and exact fallback are pinned with the grounding union intact', () => {
@@ -107,7 +137,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     const out = run(turn(c));
     const expected = JSON.parse(readFileSync(new URL('./fixtures/w9c/r2-controls.json', import.meta.url), 'utf8')).C;
     // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; every other whole-turn field stays pinned.
-    assert.equal(JSON.stringify(out), JSON.stringify(reclassifiedCTurn(expected.turn)));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(reclassifiedCTurn(expected.turn))));
     const fallback = settleMethodTurn(out, '');
     assert.equal(fallback.reply, expected.fallback);
     assert.equal(JSON.stringify(fallback), JSON.stringify(expected.settled));
@@ -131,7 +161,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     assert.equal(out?.kind, 'unavailable');
     assert.equal(out?.kind === 'unavailable' && out.reason, 'no_grounded_item');
     // Base A is the same complete decision refusal; pin the entire output, including its actions and copy.
-    assert.equal(JSON.stringify(out), JSON.stringify(base.A));
+    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(base.A)));
   });
 
   it('explicit unlicensed A pick retains the base empty-path refusal', () => {
@@ -145,7 +175,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     const c = captured('A');
     for (const n of c.graph.nodes.filter(n => n.kind === 'factor')) n.observed_state.source = 'user_specified';
     c.graph.nodes.push({ id: 'off_path', kind: 'factor', label: 'Status quo lever',
-      observed_state: { source: 'cee_inference', value: 10 } });
+      observed_state: { source: UNRECOGNISED, value: 10 } });
     c.graph.nodes.find(n => n.id === 'keep_pricing_as_it_is')!.interventions = { off_path: 10 };
     c.graph.edges.push({ from: 'off_path', to: 'monthly_recurring_revenue', strength: { mean: 0.1, std: 0.01 },
       provenance: { source: 'user_specified', magnitude: 'user_stated' } });
@@ -165,7 +195,7 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
       const c = captured('A');
       for (const n of c.graph.nodes.filter(n => n.kind === 'factor')) {
         if (change === 'user_source') n.observed_state.source = 'user_specified';
-        if (change === 'brief_source') n.observed_state.source = 'brief_extraction';
+        if (change === 'brief_source') { n.observed_state.source = 'brief_extraction'; delete n.observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
         if (change === 'explicit_type') n.observed_state.extractionType = 'explicit';
         if (change === 'node_explicit_type') n.extractionType = 'explicit';
         if (change === 'accepted') n.observed_state.reviewed_by_user = { intent: 'confirm' };

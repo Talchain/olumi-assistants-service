@@ -1,6 +1,6 @@
 /** RC5: ask about an order-of-magnitude scope/unit slip; never change the user's value. */
 import type { Action } from '@talchain/schemas/boundary';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { identityConflictsWithScope } from './goal-scope.js';
 import { proposeProductIdentity, todaysLevelFor } from './identity-proposal.js';
@@ -56,7 +56,7 @@ function levelFor(graph: unknown, node: Rec): Level | null {
   if (os?.raw_value !== undefined) {
     const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     // An outcome's Olumi projection is not today's count; preserve the today reader's refusal to copy it.
-    if (node.kind === 'outcome' && classifyValueSource(os.source) !== 'user_stated'
+    if (node.kind === 'outcome' && valueClassOf(os) !== 'user_stated'
       && edges.some((e) => e.to === node.id
         && nodes.some((n) => n.id === e.from && !['option', 'decision'].includes(String(n.kind))))) return null;
     const unit = words(os.unit);
@@ -75,7 +75,7 @@ function inUnit(unit: string, label: string, goalUnit: string, goalLabel: string
 /** §(e): a user's stated current level must reconcile; its absence is explicitly vacuous. */
 function reconciles(graph: unknown, node: Rec, implied: number, unit: string): boolean {
   const os = isRec(node.observed_state) ? node.observed_state : undefined;
-  if (classifyValueSource(os?.source) !== 'user_stated') return true;
+  if (valueClassOf(os) !== 'user_stated') return true;
   const level = levelFor(graph, node);
   const label = words(node.label) ?? '';
   return level !== null && inUnit(level.unit, label, unit, label)

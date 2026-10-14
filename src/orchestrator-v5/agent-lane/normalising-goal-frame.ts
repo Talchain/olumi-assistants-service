@@ -20,6 +20,7 @@
  * PURE: returns the graph itself when there is nothing to retire, otherwise a new one.
  */
 import { clampForPersist, frameOf, refitFramesForStatedEffects, withStatedStrengths } from './refit-frames.js';
+import { hasOlumiEstimateSize, hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { statementWords, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import { SET_ASIDE_ESTIMATE_LABEL } from './admit-candidate.js';
@@ -66,7 +67,7 @@ function refitAndSetAside<G>(g: Rec): { graph: G; setAside: SetAsideEstimate[] }
   const refitted = refitFramesForStatedEffects(g, { goalOwnRows: true }).graph;
   const setAside: SetAsideEstimate[] = [];
   for (const e of (refitted.edges ?? []) as Rec[]) {
-    if (e.provenance?.magnitude !== 'olumi_estimate' || e.provenance?.definitional === true
+    if (!hasOlumiEstimateSize(e) || e.provenance?.definitional === true
       || !num(e.strength?.mean) || Math.abs(e.strength.mean) <= 1 + 1e-9) continue;
     const natural = e.provenance.natural_effect;
     const source = refitted.nodes.find((n: Rec) => n.id === e.from);
@@ -88,8 +89,8 @@ function refitAndSetAside<G>(g: Rec): { graph: G; setAside: SetAsideEstimate[] }
 
 /** Sized links carry natural units; an Olumi estimate qualifies only while its recorded natural size is current. */
 const sizedIntoGoal = (e: Rec, goalId: string): boolean =>
-  e?.to === goalId && (e?.provenance?.magnitude === 'user_stated' || e?.provenance?.definitional === true
-    || (e?.provenance?.magnitude === 'olumi_estimate' && num(e.strength?.mean)
+  e?.to === goalId && (hasUserStatedSize(e) || e?.provenance?.definitional === true
+    || (hasOlumiEstimateSize(e) && num(e.strength?.mean)
       && num(e.provenance.natural_effect?.strength_mean)
       && Math.abs(e.provenance.natural_effect.strength_mean - e.strength.mean) <= 1e-9 * Math.abs(e.strength.mean)));
 

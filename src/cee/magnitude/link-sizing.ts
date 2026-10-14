@@ -24,17 +24,17 @@
  *        strength ({@link isSizedOnlyByOlumi}, the parts rule, unchanged).
  * Pure.
  */
-import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+import {
+  type LinkSizing, PLACEHOLDER_MAGNITUDE, ESTIMATE_MAGNITUDE, DOOR_DEFAULT_CONSTANTS, linkSizing,
+} from '../provenance/provenance-of.js';
+
+// The classes, their literals, the door constants and `linkSizing` itself live in the ONE provenance authority (Recovery
+// Batch C, DL 12 Oct): this module keeps the writers and the predicates over `linkSizing`'s answer, never the strings.
+export { type LinkSizing, PLACEHOLDER_MAGNITUDE, ESTIMATE_MAGNITUDE, DOOR_DEFAULT_CONSTANTS, linkSizing };
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-export type LinkSizing = 'user' | 'placeholder' | 'olumi_accepted' | 'olumi_estimate' | 'unmarked';
-
-/** The writer's own literal for a link nobody sized (`cee-v3.ts` `magnitude`). */
-export const PLACEHOLDER_MAGNITUDE = 'olumi_placeholder';
-/** The literal an approval writes on a placeholder whose band the user approved: Olumi's size, now chosen. */
-export const ESTIMATE_MAGNITUDE = 'olumi_estimate';
 
 /** Mark a projected mean at the writer seam. An authored spread may keep its existing magnitude eligibility. */
 export function markPlaceholder<E extends { provenance?: object; defaulted?: boolean }>(
@@ -52,49 +52,6 @@ export function clearPlaceholderMarker<E extends { provenance?: object; defaulte
   if (edge.provenance !== undefined) delete (edge.provenance as Rec).mean_projected;
   delete edge.defaulted;
   return edge;
-}
-
-function reviewedByUser(p: Rec): boolean {
-  const r = p.reviewed_by_user;
-  return isRec(r) && r.intent === 'confirm';
-}
-
-/**
- * The default doors (Science 393023 LICENCE (b), 7 Oct 20:48Z): every producer that writes a size nobody chose writes
- * `defaulted: true` and the tag; this table is how the reader still knows the links a door wrote before it tagged.
- * One row per door, never only `hypothesisEdgeValue`'s. A bare 0.5 with no `defaulted` is never matched: a user's 0.5
- * must never read as a placeholder.
- */
-export const DOOR_DEFAULT_CONSTANTS: ReadonlyArray<{ readonly door: string; readonly mean: number; readonly std: number }> = [
-  { door: 'hypothesisEdgeValue (+ Option / + Risk / add-factor)', mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
-  { door: 'factor enricher (enricher.ts)', mean: 0.5, std: 0.2 },
-];
-
-function isUntaggedDoorDefault(edge: unknown, p: Rec | undefined): boolean {
-  if (p?.magnitude !== undefined || p?.natural_effect !== undefined) return false;
-  if (!isRec(edge) || edge.defaulted !== true || !isRec(edge.strength)) return false;
-  const { mean, std } = edge.strength;
-  return typeof mean === 'number' && DOOR_DEFAULT_CONSTANTS.some((d) => Math.abs(mean) === d.mean && std === d.std);
-}
-
-/**
- * Order (Science 393023 LICENCE rulings 1-2, 7 Oct 20:48Z):
- *   1. `magnitude: 'user_stated'`: the user stated the size.
- *   2. `mean_projected`: a projected mean is unsized WHATEVER its magnitude or natural_effect (a contradictory record
- *      fails closed: a misreading may only withhold or range) and whatever its source (`user_specified` + a projected
- *      mean = the user drew the link but gave no number).
- *   3. `source: 'user_specified'`.
- *   4. the tag, the other `olumi_*` classes, then the untagged door constants ({@link DOOR_DEFAULT_CONSTANTS}).
- */
-export function linkSizing(edge: unknown): LinkSizing {
-  const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  if (p?.magnitude === 'user_stated') return 'user';
-  if (p?.mean_projected === true) return 'placeholder';
-  if (p?.source === 'user_specified') return 'user';
-  if (p?.magnitude === PLACEHOLDER_MAGNITUDE) return 'placeholder';
-  if (typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) return reviewedByUser(p) ? 'olumi_accepted' : 'olumi_estimate';
-  if (isUntaggedDoorDefault(edge, p)) return 'placeholder';
-  return 'unmarked';
 }
 
 /** (i) The link nobody sized — the one class that withholds goal figures and reads "Olumi hasn't sized…". */
@@ -122,8 +79,8 @@ export function isAcceptedOlumiSize(edge: unknown): boolean {
 }
 
 /**
- * The links an approval SIZES (L4 design 2): nobody sized them — Olumi's placeholder, or Olumi's older default (no sizing
- * mark at all, `defaulted: true`, not the user's: Paul's 4 magnitude-less links approved at 09:25, `96c6f5f4`).
+ * Links that need a new size before approval can size them: a placeholder or an older unmarked default.
+ * Confirmation of their stored default supplies no estimate; only a different, newly adopted size can replace it.
  */
 export function approvalSizes(edge: unknown): boolean {
   const s = linkSizing(edge);
@@ -131,12 +88,12 @@ export function approvalSizes(edge: unknown): boolean {
 }
 
 /**
- * The approval rule (L4 design 2): a review recorded on a link nobody sized ({@link approvalSizes}) sizes it — Olumi's
- * band, now chosen and accepted — and on any other link changes nothing. Authorship is untouched (`source`, `reasoning`
- * and the rest are kept by the caller): an accepted Olumi estimate is still Olumi's figure. Returns the provenance to
- * store. `edge` is the link as stored BEFORE this write.
+ * Only adoption of a newly supplied, different estimate may replace an unsized default. A confirmation alone
+ * never supplies a size. `newMean` is passed only by the trusted adoption writer; `edge` is its stored preimage.
  */
-export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
+export function sizedByApproval<P extends object>(provenance: P, edge: unknown, newMean?: number): P {
+  if (newMean === undefined || !Number.isFinite(newMean) || !isRec(edge) || !isRec(edge.strength)
+    || newMean === edge.strength.mean) return provenance;
   if (!approvalSizes(edge)) return provenance;
   // Science 393023 LICENCE ruling 1 / R3 B1: `user_specified` on a projected mean records who drew the link, not who
   // sized it. A review must keep that carrier: clearing it would make the unchanged prior read `user` under the ONE

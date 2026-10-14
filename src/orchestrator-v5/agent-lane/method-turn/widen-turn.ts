@@ -35,8 +35,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
-import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
+import { goalTargetGapOf } from '../../goal-target/goal-target-gap.js';
 import { constructionOperationId } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 
@@ -711,6 +711,9 @@ export function constructionRegistrationTurnId(scenarioId: string, brief: string
 /** Offer the existing risks door after a thin first draft; the reply contract owns placement of the face. */
 export function thinDraftOffer(graph: unknown, mutated: boolean): { face: string; button: string; press: SuggestedAction } | null {
   const g = graphOf(graph);
+  // A risk the draft-time widening added (`draft_widening`) is Olumi's suggestion, never "in your brief": risks were
+  // already suggested, so no offer (and no face counting it as the brief's).
+  if (g.nodes.some((n) => n.kind === 'risk' && n.draft_widening !== undefined && n.draft_widening !== null)) return null;
   const risks = g.nodes.filter((n) => n.kind === 'risk').length;
   if (mutated !== true || !g.nodes.some((n) => n.kind === 'goal')
     || !g.nodes.some((n) => n.kind === 'option' && n.is_baseline !== true) || risks > 1) return null;
@@ -766,7 +769,6 @@ export type ModelGap =
   | { readonly kind: 'deadline_missing'; readonly goal_id: string; readonly question: string }
   | { readonly kind: 'budget_without_limit'; readonly question: string };
 
-const finiteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 /** A budget the user stated in words: "budget" within one clause of a money figure (bounded runs, no nesting). */
 const MONEY = String.raw`(?:[£$€][ \t]{0,2}\d[\d,.]{0,15}(?:k|m|bn)?|\d[\d,.]{0,15}[ \t]{0,2}(?:k|m|bn)?[ \t]{0,2}(?:pounds|dollars|euros|gbp|usd|eur)\b)`;
 const MONEY_UNIT = /[£$€]|\b(?:gbp|usd|eur|pounds?|dollars?|euros?|budget|cost|spend|salary|salaries)\b/iu;
@@ -786,19 +788,9 @@ export function modelGapOf(graph: unknown, userWords: string = ''): ModelGap | n
   if (chance && typeof goal.id === 'string' && labelOf(goal) !== null && goalDeadlineFromRecord(graph, goal.id) === undefined) {
     return { kind: 'deadline_missing', goal_id: goal.id, question: chanceGoalDeadlineAsk(labelOf(goal)!) };
   }
-  if (!chance && raw !== undefined && goal !== undefined && typeof goal.id === 'string' && labelOf(goal) !== null
-    && statedGoalTargetOf(raw, goal) === null) {
-    const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
-    const horizon = rec(goal.goal_horizon);
-    const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
-      || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months);
-    return {
-      kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,
-      question: deadlineKnown
-        ? `One gap: ${quote(labelOf(goal)!)} has no target yet. What would count as meeting it?`
-        : `One gap: ${quote(labelOf(goal)!)} has no target or deadline yet. What would count as meeting it, and by when?`,
-    };
-  }
+  // The one "no target" gap, in its own module so the Run cells read the same words (C1, `goal-target-gap.ts`).
+  const targetGap = goalTargetGapOf(graph);
+  if (targetGap !== null) return targetGap;
   // Only a MONEY limit answers a stated budget (Codex r1 P2: a hiring-count cap is not the budget).
   // An explicit unit decides (Codex r2 P2: "Budget reviewers" in people is not money); a label only when no unit is stored.
   const unitOf = (r: Rec): string => [r.unit, rec(rec(g.nodes.find((n) => n.id === r.node_id))?.observed_state)?.unit, labelOf(g.nodes.find((n) => n.id === r.node_id))]
@@ -893,8 +885,9 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
   const risks = g.nodes.filter((n) => n.kind === 'risk' && labelOf(n) !== null).map((n) => labelOf(n)!);
   const favoured = favouredOptionOf(graph);
   const directive = [
-    'METHOD TURN: the user asked Olumi to suggest risks they have not considered. Do not write prose. Reply with ONLY '
-      + `<${RISK_TAG}>JSON array</${RISK_TAG}>, nothing before or after it. The server writes every word the user sees.`,
+    'METHOD TURN: the user asked Olumi to suggest risks they have not considered. Return ONLY '
+      + `<${RISK_TAG}>JSON array</${RISK_TAG}>`
+      + ', with no text before or after it. Put useful risk explanations in the existing declared text fields, preserving their specified meanings and this role’s schema. Do not add an answer field or rely on another layer to invent missing reasoning.',
     'METHOD: assumption-based planning. For each option below, find what it RELIES ON in the model (a factor it changes) and '
       + `how that could fail. Use the prompt list (${RISK_METHOD.categories.join(', ')}) for coverage, and keep up to ${RISK_MAX_ITEMS} `
       + 'risks, each from a DIFFERENT class. Risks on what the options DIFFER on come first; a risk on a factor no option changes '

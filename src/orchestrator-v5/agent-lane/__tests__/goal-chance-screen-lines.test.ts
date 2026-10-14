@@ -35,6 +35,24 @@ const withoutRange = (body: Json): Json => {
   return out;
 };
 const T1B_LEAD = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
+// Batch C: condition 6 of a correct chance / r1 item 6 (DL, 12 Oct) — a range rests on the same Olumi inputs as a point and
+// says so in the point's own words. The served UI lines predate that: each is the CAPTURED line with exactly the clause
+// inserted after "in this model" (its count is RC4's census, `goalChanceEstimateCounts`, as for a point). Nothing else moves.
+const withClause = (line: string, words: string): string => {
+  const at = line.indexOf(', in this model.');
+  if (at < 0) throw new Error(`no "in this model" in: ${line}`);
+  return `${line.slice(0, at)}, in this model, using Olumi's estimates for ${words} (see Check estimates).${line.slice(at + ', in this model.'.length)}`;
+};
+// ⛔ RE-SCOPE 2 (R5-1/R5-2, DL AMEND: three provenance states) — CHANGED EXPECTATION for the two 01a2b27 captures: their six
+// factor levels upstream of the goal are stamped `cee_inference` with NO extraction type. F1 defers that stamp to the extraction
+// type and so read them `unknown`: e58b8dbd counted nothing and said nothing ("zero estimates"). `cee_inference` is a
+// recognised AI source (AIE R5 item 1; the UI's own `classifyValueProvenance` reads it 'ai'): six starting values, Olumi's.
+// b3-2 (`cee_inference` + `inferred`) is unchanged.
+const RANGE_INPUTS: Record<string, string> = { 'unseen-b4-1': '6 starting values and 6 relationships', 'unseen-b4-2': '6 starting values and 10 relationships', 'unseen-b3-2': '6 starting values, 2 option settings and 5 relationships' };
+const servedNow = (capture: string): string[] => screenFor(capture).map((l) => withClause(l, RANGE_INPUTS[capture]!));
+// …and, once the screen carries Olumi's count, RC4's existing rule applies to the range as to a point: narration never
+// supplies k, so the served B4-1 narrator's own count sentence ("16 underlying values …") is taken out (narratorCountGuard).
+const B4_1_NARRATOR_COUNT = 'The analysis ran, but it cannot put an option forward: profit-generating links remain unsized, and 16 underlying values are Olumi’s assumptions, not yours.\n\n';
 
 describe('S4c: the lines are the SCREEN’s, word for word, in its order', () => {
   it.each(['months_to_finish', 'share_per_month'])('P1-c: stated_time %s describes slow to fast without causal doubt', quantity => {
@@ -64,9 +82,9 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     expect(whole(lines[0]!)).not.toMatch(/affects|assumed|best|leader/);
   });
   it('served ranges (b4-1, b4-2, b3-2 readback): every line equals the line the UI drew', () => {
-    expect(linesOf(B4_RUN1).map(whole)).toEqual(screenFor('unseen-b4-1'));
-    expect(linesOf(B4_RUN2).map(whole)).toEqual(screenFor('unseen-b4-2'));
-    expect(goalChanceScreenLinesForAgent(B3_READ.analysis_result, B3_READ.graph, true).map(whole)).toEqual(screenFor('unseen-b3-2'));
+    expect(linesOf(B4_RUN1).map(whole)).toEqual(servedNow('unseen-b4-1'));
+    expect(linesOf(B4_RUN2).map(whole)).toEqual(servedNow('unseen-b4-2'));
+    expect(goalChanceScreenLinesForAgent(B3_READ.analysis_result, B3_READ.graph, true).map(whole)).toEqual(servedNow('unseen-b3-2'));
     expect(screenFor('unseen-b4-1')).toHaveLength(2);
   });
 
@@ -123,13 +141,15 @@ describe('S4c: owed only when the reply does not give that option’s figure', (
   it('RED at base: the served b4-1 narration gets both range lines right after the range opening', () => {
     const out = withScreenLinesOwed(B4_RUN1.assistant_text, linesOf(B4_RUN1));
     expect(out.added).toBe(4);
-    expect(out.text).toBe(B4_RUN1.assistant_text.replace(RANGE_OPENING, `${RANGE_OPENING} ${screenFor('unseen-b4-1').join(' ')}`));
+    expect(B4_RUN1.assistant_text.startsWith(B4_1_NARRATOR_COUNT)).toBe(true);
+    expect(out.text).toBe(B4_RUN1.assistant_text.replace(B4_1_NARRATOR_COUNT, '')
+      .replace(RANGE_OPENING, `${RANGE_OPENING} ${servedNow('unseen-b4-1').join(' ')}`));
   });
 
   it('RED at base: the served b4-2 narration says the chance right after "That share is not its chance …"', () => {
     const out = withScreenLinesOwed(B4_RUN2.assistant_text, linesOf(B4_RUN2));
     expect(out.added).toBe(4);
-    for (const line of screenFor('unseen-b4-2')) expect(out.text).toContain(line);
+    for (const line of servedNow('unseen-b4-2')) expect(out.text).toContain(line);
     expect(out.text.indexOf('That share is not its chance')).toBeLessThan(out.text.indexOf('between about 9% and 58%'));
   });
 
@@ -149,8 +169,17 @@ describe('S4c: owed only when the reply does not give that option’s figure', (
   });
 
   it('a reply that already says the lines (restyled quotes and bold) is unchanged', () => {
+    // Batch C: condition 6 (DL, 12 Oct) — kept for a range that rests on no Olumi input (the served lines as captured, no clause).
+    const plain = linesOf(B4_RUN1).map(({ olumi_estimate_link_count: _k, ...l }) => ({ ...l,
+      chance: l.chance.replace(`, using Olumi's estimates for ${RANGE_INPUTS['unseen-b4-1']} (see Check estimates)`, '') }));
+    expect(plain.map(whole)).toEqual(screenFor('unseen-b4-1'));
     const said = `${B4_RUN1.assistant_text}\n\n${screenFor('unseen-b4-1').join(' ').replace(/‘/g, '**“').replace(/’:/g, '”**:')}`;
-    expect(withScreenLinesOwed(said, linesOf(B4_RUN1))).toEqual({ text: said, added: 0 });
+    expect(withScreenLinesOwed(said, plain)).toEqual({ text: said, added: 0 });
+    // A range that rests on Olumi's inputs is held to the point's rule (RC4): only its own estimate sentence pays it.
+    const restyled = `${B4_RUN1.assistant_text}\n\n${servedNow('unseen-b4-1').join(' ').replace(/‘/g, '**“').replace(/’:/g, '”**:')}`;
+    const out = withScreenLinesOwed(restyled, linesOf(B4_RUN1));
+    expect(out.added).toBeGreaterThan(0);
+    for (const l of linesOf(B4_RUN1)) expect(out.text).toContain(l.chance);
   });
 
   it('a reply that names the option with its figure in other words is unchanged (author)', () => {
@@ -187,7 +216,7 @@ describe('S4c: owed only when the reply does not give that option’s figure', (
   });
 
   it('with no range opening and no empty lead-in, the lines close the reply as their own paragraph', () => {
-    expect(withScreenLinesOwed('The analysis ran.', linesOf(B4_RUN2)).text).toBe(`The analysis ran.\n\n${screenFor('unseen-b4-2').join(' ')}`);
+    expect(withScreenLinesOwed('The analysis ran.', linesOf(B4_RUN2)).text).toBe(`The analysis ran.\n\n${servedNow('unseen-b4-2').join(' ')}`);
   });
 
   it('no lines → the reply unchanged', () => {

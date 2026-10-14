@@ -6,7 +6,7 @@ import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE as TARG
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { optionPathsOf, perOptionTargetReasonsForRun, scopedFailuresFor } from '../target-testability-per-option.js';
 import { withGoalChanceRange, GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
-import { withGoalChanceLicence, goalChanceDisplayForAgent } from '../goal-chance-licence.js';
+import { withGoalChanceLicence, goalChanceDisplayForAgent, goalChanceLicenceForAgent } from '../goal-chance-licence.js';
 import { scopeTargetNotTestableWithRanges } from '../scope-target-not-testable.js';
 import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
 
@@ -98,7 +98,11 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
     expect(ranged.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_RANGE)?.range_by_option.starter)
       .toMatchObject({ low_pct: 40, high_pct: 51 });
     const final = scopeTargetNotTestableWithRanges(withGoalChanceLicence(ranged, g, 'goal'), g, 'goal');
-    expect(Object.keys(goalChanceDisplayForAgent(final) ?? {})).toEqual(['raise', 'keep']);
+    // Batch C: AIE status-quo disposition (12 Oct) — the goal is anchored at 500, reached through links and set by no option:
+    // the same-draw reference. Keep (the status quo) at 60% disagrees with it, so the licence withholds it with that reason
+    // (the target gate above still leaves its raw row alone: `chances(afterTarget)` is unchanged).
+    expect(Object.keys(goalChanceDisplayForAgent(final) ?? {})).toEqual(['raise']);
+    expect(goalChanceLicenceForAgent(final)?.withheld_reason_by_option?.keep?.reason).toBe('reference_moved');
     expect(warning(final)).toBeUndefined();
     expect(JSON.stringify(final)).not.toContain('needs nothing more of its own');
     expect(final.option_comparison.map((r: Rec) => r.win_probability)).toEqual(afterS.option_comparison.map((r: Rec) => r.win_probability));

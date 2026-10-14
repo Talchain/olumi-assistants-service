@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ THE AUTOMATIC FIRST ANALYSIS SHOWS ITS ONE RUN-TURN COACHING CARD (run-turn coaching contract, #1855).
  * Since the limit-first rule (#70, Paul's manual test 1a298d6d), a run whose leader is withheld FOR A LIMIT —
@@ -90,6 +91,8 @@ function installFetch() {
     if (body.text?.format?.type === 'json_schema') {
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(candidate) }] }] }), { status: 200 });
     }
+    const runCall = runPressToolResponse(body);
+    if (runCall) return runCall;
     const next = body['tool_choice'] === 'none' ? undefined : script.shift();
     return new Response(JSON.stringify(next ?? say('Here is a provisional first pass to argue with.')), { status: 200 });
   }));

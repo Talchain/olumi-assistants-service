@@ -30,6 +30,7 @@ import type { ToolResult } from './runtime/agent-tools.js';
 import { eventByDateRefusalDetail } from '../goal-target/event-by-date-model.js';
 import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
+import type { PressBlocker } from './press-next-step.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -64,7 +65,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   partially_applied: 'only part of it was saved',
   not_applied: 'none of it was applied',
   model_changed_while_proposing: 'the model changed while it was being put together',
-  model_already_exists: 'a model already exists for this decision',
+  model_already_exists: 'a model already exists for this scenario',
   read_only_preview: 'this preview cannot change the model',
   approve_on_card: 'a typed “yes” cannot adopt an Olumi suggestion — press the displayed adoption card to include it',
   // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
@@ -74,7 +75,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
   construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
-  registration_refused: 'it could not be saved to this decision — ask me to try again',
+  registration_refused: 'it could not be saved to this scenario — ask me to try again',
   option_name_ambiguous: 'the model uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
   /**
    * ⛔ EVERY CODE A WRITE TOOL RETURNS HAS WORDS (fix/agent-never-shows-instructions-or-codes). Until now these fell
@@ -83,13 +84,13 @@ const REFUSAL_WORDS: Record<string, string> = {
    * (`withheld_on_chip_turn`) and `buildModelFromBrief` (`construction_unavailable`, `empty_brief`). A compound part's
    * `reason` reads through this same map (`unresolved_effect_relationship` is the option-level writer's refusal).
    */
-  not_found: 'Olumi could not read this decision’s model, so nothing was changed — ask me to try again',
+  not_found: 'Olumi could not read this scenario’s model, so nothing was changed — ask me to try again',
   unsupported_compound: 'this proposal mixes changes that cannot be applied together, so nothing was changed — ask me to propose them one at a time',
   unparsable_arguments: 'the request could not be read, so nothing was changed — ask me again',
   unknown_tool: 'that change cannot be made here, so nothing was changed',
   withheld_on_chip_turn: 'a suggestion button cannot approve a change — approving has its own button',
   construction_unavailable: 'building a model is not available right now — ask me to try again later',
-  empty_brief: 'there was no description of the decision to build it from — tell me what you are deciding',
+  empty_brief: 'there was no brief to build it from — tell me about the question you are working on',
   unresolved_effect_relationship: 'the option does not act on that factor, so no level could be set for it',
 };
 
@@ -151,6 +152,12 @@ const UNCONFIRMED_WORDS: Record<string, string> = {
  * Agent (it reads the result's `refusal` and `detail`); the user reads one plain sentence with a next step.
  */
 const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
+/**
+ * R2 T1 words: an unapproved change is waiting, not failed. AIE AMENDED (#94 6128697025): the button alone, always ("or type
+ * its words" is gone: the typed binding matches the card's message, which the button may not show).
+ */
+export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card.';
+export const APPROVAL_REQUIRED_BUTTON_WORDS = 'Not saved yet: press the approval button on the card.';
 const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
 const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
 
@@ -228,7 +235,7 @@ export interface NotSavedValue {
   readonly unit: string;
   /** The figure not saved was the user's own (`user_stated`); else Olumi's suggestion. */
   readonly yours: boolean;
-  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' };
+  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' | 'unverified_brief' };
   /** The model could not be read after the refusal: what it holds now is not said (never inferred). */
   readonly unconfirmed?: true;
 }
@@ -246,6 +253,7 @@ function notSavedValueLine(x: NotSavedValue, why: string): string {
   if (x.still === undefined) return `${head} The model still has no figure for it.`;
   // A figure this approval does not write is said the estate's way: exact, else "about" (`sayFigureRead`; AIQ 5924240860).
   const held = sayFigureRead(x.still.value, x.still.unit);
+  if (x.still.owner === 'unverified_brief') return `${head} Not confirmed from your brief`;
   const still = x.still.owner === 'yours' ? `your figure of ${held}`
     : x.still.owner === 'brief' ? `the figure from your brief, ${held}`
       : x.still.owner === 'olumi_accepted' ? `Olumi\u2019s estimate of ${held}, which you accepted` : `Olumi\u2019s estimate of ${held}`;
@@ -364,19 +372,27 @@ function contextAskOf(r: ToolResult | undefined): string | null {
  */
 const OPEN_QUESTIONS_SHOWN = 2;
 
-/** The questions the build parked instead of modelling — what to examine next, not answers. */
-function openQuestionsLine(r: ToolResult): string {
+/**
+ * The questions the build parked instead of modelling — what to examine next, not answers.
+ *
+ * ⭐ EBD (DL, 12 Oct): EACH ASK ONCE PER REPLY. A question this reply already says before this line (`alreadySaid`: the Agent's
+ * words and the owed lines, e.g. the first analysis's blocked line, which is readiness's ask) is not shown again; the count
+ * of the rest is unchanged. Paul's first reply said the deadline question there, here, and in the readiness line.
+ */
+function openQuestionsLine(r: ToolResult, alreadySaid = ''): string {
   const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
   const next = typeof r.displayed_next_question === 'string' ? r.displayed_next_question : null;
   const shownCount = next === null ? OPEN_QUESTIONS_SHOWN : 1;
-  const shown = (next === null ? qs.slice(0, shownCount) : [next]).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const shownQs = (next === null ? qs.slice(0, shownCount) : [next]).filter((q) => alreadySaid === '' || !alreadySaid.includes(q.trim()));
+  const shown = shownQs.map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
   const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
   // names the omitted items even if an earlier sentence is dropped; the disclosure lists all (`_agent.open_questions`).
   const more = rest > 0 ? ` ${rest} more question${rest === 1 ? ' remains' : 's remain'} unresolved.` : '';
-  return ` Questions this model does not answer yet: ${shown}${more}`;
+  if (shown === '' && more === '') return '';
+  return ` Questions this model does not answer yet: ${shown === '' ? more.trim() : `${shown}${more}`}`;
 }
 
 /** Every question a build parked, in the producer's order. */
@@ -425,7 +441,7 @@ export function partialRangeLevelsWarning(ranges: readonly { factor: string; ran
 }
 
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', exactlyOneCardWaits = false): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
@@ -458,7 +474,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       const approval = pending === null ? '' : pending === 'figures'
         ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
         : 'What I proposed above is not made until you approve it.';
-      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r)]
+      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r, alreadySaid)]
         .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }
     if (r.refusal === 'event_goal_unadmitted') {
@@ -502,8 +518,14 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
 
   const code = String(r.refusal ?? '');
   const unconfirmed = UNCONFIRMED_WORDS[code];
-  if (unconfirmed !== undefined) return unconfirmed;
+  // A capability's own unconfirmed receipt (the link set's, AIE packet 2b19ae59) is said instead of the generic words; a
+  // re-encoded sibling disclosure keeps them beside it.
+  if (unconfirmed !== undefined) {
+    return typeof r.follow_up === 'string' && !Array.isArray(r.reencoded_siblings) ? withoutAgentDirections(r.follow_up).text : unconfirmed;
+  }
   const mutated = r.mutated === true;
+  // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
+  if (code === 'approval_required' && !mutated) return exactlyOneCardWaits ? APPROVAL_REQUIRED_WORDS : APPROVAL_REQUIRED_BUTTON_WORDS;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
 }
 
@@ -521,7 +543,13 @@ export function narrateWriteOutcome(
   toolCalls: readonly { name: string }[],
   toolResults: readonly ToolResult[],
   /** False for a guest, whose saves are never versioned: a save without a version is then not an anomaly. */
-  opts: { readonly versioned?: boolean } = {},
+  opts: {
+    readonly versioned?: boolean;
+    /** EBD (DL, 12 Oct): what the reply already says before the status line; a question in it is not shown again. */
+    readonly alreadySaid?: string;
+  } = {},
+  /** R2 T1: exactly one card waits, so typed card words bind; otherwise "approval_required" names the button only. */
+  exactlyOneCardWaits = false,
 ): WriteOutcomeNarration {
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
@@ -570,7 +598,7 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? '', exactlyOneCardWaits));
   const status = lines.length > 0
     ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
@@ -632,4 +660,13 @@ export function staleResultLine(analysisState: unknown, analysisReady: unknown):
   return mayRun
     ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
     : 'The analysis on screen was computed before this change.';
+}
+
+/** ⭐ COACH (DL coaching-on-press): a stale result's ONE next step is this same line while it says "run it again" (the Run
+ * control's own verdict). Where the Run may not run, the line has no step to take: another blocker holds the Run and owns
+ * the step (Codex buddy r1), so nothing is typed here. Only from `run_state`, never from a result that could not be bound. */
+export function staleBlockerOf(analysisState: unknown, analysisReady: unknown): PressBlocker | null {
+  if ((analysisReady as { may_run?: unknown } | undefined)?.may_run !== true) return null;
+  const say = staleResultLine(analysisState, analysisReady);
+  return say === null ? null : { kind: 'stale', say };
 }

@@ -366,7 +366,7 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     const initial = fixture(row);
     // Served b8143909 holds Olumi's 0 (cee_inference): the F1 row above asks about both ends. The user's own 0 settles one.
     expect(nodeOf(initial, 'bread_price_change').observed_state).toMatchObject({ raw_value: 0, source: 'cee_inference' });
-    nodeOf(initial, 'bread_price_change').observed_state.source = 'brief_extraction';
+    { nodeOf(initial, 'bread_price_change').observed_state.source = 'brief_extraction'; delete nodeOf(initial, 'bread_price_change').observed_state.extractionType; /* one authority: a brief figure carries no AI marker */ }
     const w = world(row, initial); const before = w.graph(); const result = await propose(w, row);
     oneQuestion(result, 'Is that a 3-point fall in “Footfall” (say 13% → 10%), or 3% of today’s level?');
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);

@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** The real build route, with Paul's captured graph and narrator words; no provider is contacted. */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -107,8 +108,10 @@ describe('ONE reply contract through the build route', () => {
   beforeAll(async () => {
     vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
     info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error('Unexpected external call');
+      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (runCall) return runCall;
       if (!askedToBuild) {
         askedToBuild = true;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',
@@ -293,7 +296,10 @@ describe('ONE reply contract through the build route', () => {
     // The historical capture retains its display grammar, with §(ad)'s retired chance-free horizon clause removed.
     expect(body.assistant_text, 'no widening preserves the existing reply apart from the retired horizon clause').toBe([
       "Not shown: how MRR is worked out isn't confirmed",
-      "• Olumi's estimates: 3, see Check estimates.",
+      // ONE CENSUS (DL 12 Oct, last check BLOCKING 4): Check estimates lists every Olumi figure the result rests on, from the
+      // chance face's own census — here the three starting values AND the Olumi-sized link Pro plan price → Monthly churn,
+      // which the old panel walk left out.
+      "• Olumi's estimates: 4, see Check estimates.",
       'Olumi built your pricing model.',
       // Q-c (DL 87114): one horizon-limit statement per surface.
       "This model doesn't yet say whether any option gets there within 12 months.",
@@ -373,7 +379,9 @@ describe('ONE reply contract through the build route', () => {
     expect(count(body.assistant_text, note)).toBe(1);
     const riskOption = ((risks[0]!.draft_widening as Rec).hits as Rec).id;
     expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'figure', option_id: riskOption }));
-    expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(risks.length);
+    // The interpreted loop uses the existing sentence dedupe: retain every named risk and state the shared exclusion once.
+    for (const risk of risks) expect(body.assistant_text).toContain(`‘${risk.label}’: ‘Raise prices 10%’ relies on this not happening.`);
+    expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(1);
     await expectStoredAndReplayed(body, payload);
   });
 
@@ -419,7 +427,8 @@ describe('ONE reply contract through the build route', () => {
     expect(body._answer_shape).toBeDefined();
     const shown = face(body._answer_shape!);
     expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual(['Not shown yet; why is under More detail']);
-    expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
+    // AIE packet 6e52e896 `event_risk.readiness_copy`: the risk root's event path asks its occurrence within the goal's period.
+    expect(shown).toContain('How likely is ‘Price-rise cancellation risk’ to happen at least once within 12 months?');
     expect(shown).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     // Q-c (DL 87114): one horizon-limit statement per surface.
@@ -674,5 +683,46 @@ describe('ONE reply contract through the build route', () => {
     expect(body.suggested_actions.map(a => a.label)).not.toContain('It stays about the same unless we act');
     const currentLevelControl = body.action_bar?.priority.filter(a => a.action_id === 'set_current_level' && a.enabled === true) ?? [];
     expect(count(face(body._answer_shape!), '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);
+  });
+
+  // R2 N1 (friction audit row N1): "Not shown: some relationships aren't sized yet" + "Olumi's estimates: N, see Check
+  // estimates." took the face of ordinary replies (hiring 17/19, marketing 11/12) and hid the answer. CONTRAST: the
+  // build/Run turn above ("r13 draft without widened", "R1 Paul") keeps both lines.
+  it('R2 N1: an ordinary reply beside the same withheld Run leads with its own answer, with no status or estimates line', async () => {
+    withUserRatifiedSubscribers();
+    const built = await buildTurn();
+    expect(built.assistant_text, 'contrast: the build/Run turn keeps the estimates line').toContain("Olumi's estimates: ");
+    narrator = 'Start with how many subscribers a price change would cost you.';
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'What should I look at first?' } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis' || c.name === 'build_model_from_brief')).toBe(false);
+    expect(body.assistant_text).not.toContain("Olumi's estimates: ");
+    expect(body.assistant_text).not.toMatch(/^Not shown/);
+    expect(body._answer_shape?.headline ?? body.assistant_text.split('\n')[0]).toContain(narrator);
+  });
+
+  // AI-first Lane 2 N1 (PLAN-AI-FIRST-SUBTRACT): the AI's answer IS the reply on an ordinary turn. A long answer was cut to
+  // an 80-word face with the rest under "More detail". CONTRAST: `buildTurn` asserts the build keeps its Draft face.
+  it('AI-first N1: a long ordinary answer beside the withheld Run ships whole, in its own order, with no fold', async () => {
+    withUserRatifiedSubscribers();
+    await buildTurn();
+    const paragraphs = [
+      'Start with how many subscribers a price change would cost you, because that figure carries most of the uncertainty in this model.',
+      '- Ask your support team how many customers mentioned price when they cancelled last quarter.\n- Compare that with the cancellations that gave no reason.\n- Check whether annual-plan customers behave differently from monthly ones.',
+      'Once you have even a rough range, enter it on the link from price to subscribers and run the comparison again, so the model reflects your evidence rather than its placeholder.',
+      'If the range turns out to be wide, that is useful too: it tells you the decision depends on learning more before committing.',
+    ];
+    narrator = paragraphs.join('\n\n');
+    expect(words(narrator), 'the control: longer than the old 80-word face').toBeGreaterThan(80);
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'What should I look at first?' } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis' || c.name === 'build_model_from_brief')).toBe(false);
+    expect(body._answer_shape, 'no face/detail sidecar on an ordinary turn').toBeUndefined();
+    expect(body.assistant_text.startsWith(narrator), body.assistant_text.slice(0, 300)).toBe(true);
+    expect(body.assistant_text).not.toContain("Olumi's estimates: ");
   });
 });

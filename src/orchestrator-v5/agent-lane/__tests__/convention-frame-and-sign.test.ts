@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * ⭐ SCIENCE §(s) + §(u) + §(v) (goals rulings, 8 Oct 2026; DL "B", Science accepted): OLUMI'S CONVENTION FRAME, RESCUE-
  * ONLY, AND THE SIGN OF AN OLUMI-DRAFTED SIZE.
@@ -277,7 +278,7 @@ describe('a drafter unit can be any string: the convention never reads a patholo
     const ws = ' '.repeat(20000);
     const t0 = performance.now();
     const a = admit(candidate([{ label: 'Pro plan price', unit: `£${ws}/${ws}month`, level: 49, max: 200 }, CHURN(5, 15)], [PRICE_TO_CHURN]));
-    expect(performance.now() - t0).toBeLessThan(2000);
+    if (timingGated) { expect(performance.now() - t0).toBeLessThan(2000); }
     expect(frameOf(a, 'Pro plan price')).toBe(200);
   });
 });

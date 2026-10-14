@@ -155,8 +155,10 @@ describe('a definitional link is typed only when its own size proves it (DL 5916
     expect(onLinks(contract.errors)).toEqual([]);
     const sent = new Ajv({ strict: false, allErrors: true }).compile(strictForTheDrafter(buildCandidateSchema()));
     sent(recorded);
-    // Every recorded link misses exactly the keys required only when SENT: `definitional` and (#2848, Science §(p)(1)) `basis`.
+    // Every recorded link misses exactly the keys required only when SENT: `definitional`, (#2848, Science §(p)(1)) `basis`
+    // and (the generation source contract, DL 02:0xZ 14 Oct) `source_quote`.
     const missing = onLinks(sent.errors).map((x) => `${x.instancePath}:${x.params?.missingProperty}`).sort();
-    expect(missing).toEqual((recorded.links as unknown[]).flatMap((_l, i) => [`/links/${i}:basis`, `/links/${i}:definitional`]).sort());
+    expect(missing).toEqual((recorded.links as unknown[]).flatMap((_l, i) => [`/links/${i}:basis`, `/links/${i}:definitional`,
+      `/links/${i}:source_quote`]).sort());
   });
 });

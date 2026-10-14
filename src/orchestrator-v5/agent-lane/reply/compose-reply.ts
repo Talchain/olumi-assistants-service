@@ -18,7 +18,7 @@
  *   · Optional estimates and whatChanges demote in that order over 80 visible words. Chance findings, their own
  *     notes, horizon, matching figure disclosures and the next step stay; mandatory overflow is counted.
  *   · Ordinary coaching retains the three-bullet pool, small-detail/short-reply passthrough and whole-reply exits.
- *   · The existing method_step, proposal, leader_free_envelope and host_composed whole-reply paths are unchanged.
+ *   · Proposal bodies stay whole, with only an eligible Why suffix; other whole-reply paths are unchanged.
  *   · `_answer_shape` and assistant_text have one identity: deriveAnswerTextFromShape(shape). RC6 removes only its
  *     recorded whole-sentence copies; every other sentence is conserved. Open questions belong to detail.
  *
@@ -29,6 +29,8 @@
  * `__tests__/compose-reply.test.ts`.
  */
 import { z } from 'zod';
+import type { EligibleIntervention } from '../turn-context/guidance-wire.js';
+import { composeEligibleIntervention } from './eligible-intervention-reply.js';
 import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
@@ -38,7 +40,7 @@ import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
-import { goalHorizonSteadyWhyLine } from '../../goal-target/goal-horizon-detail.js';
+import { goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
 export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
@@ -141,16 +143,24 @@ export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
 /**
  * Why a reply ships whole by the turn's identity: its profile is not `coaching`, the egress replaced the body, or no model
  * wrote words this turn (a card press, an uninterpreted Explain: `host_composed`). Uninterpreted Run uses coaching.
+ * `ai_answer` (AI-first Lane 2, N1): an ordinary coaching turn the model wrote, neither a Draft build nor a Run/Explain.
+ * The AI's answer is the reply: no face cut, no "More detail" fold, no host face lines; only the recorded copies go.
  */
-export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed';
+export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed' | 'ai_answer';
 
 export interface ReplyComposeInput {
+  readonly eligibleIntervention?: EligibleIntervention;
+  readonly interventionActionLabel?: string;
+  /** E6 Why-once: the policy's Why? was already said on this state (`selectTurnGuidanceShown`); the action stays. */
+  readonly interventionWhySaid?: boolean;
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   /** Only a typed Draft mutation or Run/Explain turn opts into the H/W/E/N face contract. */
   readonly faceContract?: 'draft' | 'run';
   /** Exact horizon disclosure owed beside on-face Run chances, after their own notes. */
   readonly horizonLine?: string;
+  /** The current stored Run, supplying method scope from its submitted options. Internal only. */
+  readonly analysisResult?: unknown;
   /** The canonical per-option cells, projected once by the route from the gated Run. */
   readonly chanceCells?: readonly CanonicalAnalysisCell[];
   /** P05b owns these words and counts; Draft face immediately after H, Run detail, ignored without a contract. */
@@ -166,6 +176,11 @@ export interface ReplyComposeInput {
   readonly whatChanges?: string;
   /** The route's RC4 census words; never counted or inferred from prose here. */
   readonly estimatesLine?: string;
+  /**
+   * R2 N1 (friction audit): this turn neither ran nor explained a Run; it only sits beside a withheld one. Its reply
+   * carries no chance-status marker (the Run reply and Results already say it), so the user's answer leads.
+   */
+  readonly notRunOrExplain?: true;
   /** Exact questions already carried by this reply's pending/suggested typed control. */
   readonly typedControlQuestions?: readonly string[];
   /** Node labels resolve narrator mentions to the typed directed link subjects. */
@@ -619,6 +634,18 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  * Compose the reply's shape. Only recorded whole-sentence copies may be deleted; all other text is retained.
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
+  const composed = composeNormalReplyShape(input);
+  if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true, input.interventionWhySaid === true);
+  }
+  if (input.eligibleIntervention !== undefined && (input.profile ?? 'coaching') === 'coaching') {
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined,
+      false, input.interventionWhySaid === true);
+  }
+  return composed;
+}
+
+function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
   const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
   const foldedInput = foldQuotes(input.text);
@@ -641,16 +668,17 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       return [{ ...o, text: sentence ?? written }];
     }) : [];
   const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const chanceMarker = chanceDisclosure === null ? undefined : markerForDisclosure(chanceDisclosure);
+  const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined : markerForDisclosure(chanceDisclosure);
   const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
     || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
       && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
   // The full typed note owns detail even when another host part contained it. Its marker carries the face identity.
   const inputObligations = (input.obligations ?? []).filter(o => !disclosures.some(d => foldQuotes(o.text).includes(foldQuotes(d.text)) || foldQuotes(d.text).includes(foldQuotes(o.text))))
     .concat(markerObligations, chanceMarker === undefined ? [] : [{ role: 'withheld_reason' as const, text: chanceMarker, ...((input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range') ? {} : { lead: true as const }) }]);
+  const method = goalStockMethodForRun(input.graph, input.analysisResult);
   const steadyAttested = goalHorizonVerdict(input.graph) === 'steady_attested';
   const horizonWithheld = chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested';
-  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && !horizonWithheld ? input.horizonLine : undefined;
+  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && method === null && !horizonWithheld ? input.horizonLine : undefined;
   const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const steadyWhy = canMark && faceContract && steadyAttested && horizonBesideChance
     ? goalHorizonSteadyWhyLine(input.graph) : undefined;
@@ -660,13 +688,14 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...horizonWithholdDetails, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
     horizonDetail === undefined || !horizonBesideChance ? undefined : HORIZON_MARKER,
     input.faceContract === 'draft' ? input.widenedLine : undefined,
     widenedRiskMarker,
+    input.faceContract === 'run' && horizonBesideChance && method !== null ? method.face : undefined,
     input.whatChanges, input.estimatesLine,
   ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
   const inputQuestions = openQuestionsSegment(input.text);
@@ -778,6 +807,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // Turn identity prohibits reshaping AND the copy rule: a whole reply ships byte-identical (DL rulings R2/R3: a
   // proposal's disclosure and a method worksheet are verbatim; keepWhole turns are host-composed), never deduplicated.
   const whole = { ...initialMeasure, said_once_dropped: [] };
+  if (input.keepWhole === 'ai_answer') return { text, shape: null, outcome: 'kept_whole', reason: 'ai_answer', measure: initialMeasure };
   if (input.keepWhole !== undefined) return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
   if (input.profile === 'method_step' || input.profile === 'proposal') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.profile, measure: whole };
   if (owed.some((o) => o.text.length === 0 || o.text.includes('\n'))) {
@@ -898,8 +928,9 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
         return present.some((o) => (o.role === 'withheld_reason' || o.role === 'caveat') && u.text.includes(o.text)
           && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)));
       }));
-    const horizon = input.faceContract !== 'run' || horizonDetail === undefined || !horizonBesideChance ? undefined
-      : units.find((u) => u.text === HORIZON_MARKER);
+    const horizon = input.faceContract !== 'run' || !horizonBesideChance ? undefined
+      : method !== null ? units.find(u => u.text === method.face)
+      : horizonDetail === undefined ? undefined : units.find((u) => u.text === HORIZON_MARKER);
     const withhold = chanceMarker === undefined ? undefined : units.find(u => u.text === chanceMarker);
     const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
       : units.find(u => u.text === asWritten(input.widenedLine!.trim()));

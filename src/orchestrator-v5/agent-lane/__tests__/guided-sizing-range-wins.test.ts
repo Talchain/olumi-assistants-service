@@ -15,7 +15,11 @@ const CAPTURE = (JSON.parse(readFileSync(new URL('../method-turn/__tests__/fixtu
 const B2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-range-wins.json', import.meta.url), 'utf8')) as Json;
 const WORDS = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Starter tier price’ affects ‘Starter subscribers’, so any figure would be a guess.";
 const MIXED_WORDS = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Existing plan price’ affects ‘Existing subscribers’, so any figure would be a guess.";
-const RANGE_LINE = '‘Launch starter tier’: between about 5% and 37% chance of meeting your goal, in this model.';
+// Batch C: condition 6 of a correct chance / r1 item 6 (DL, 12 Oct) — a range says the Olumi inputs it rests on, in the
+// point's own words (RC4's census: one Olumi relationship on this goal path).
+const RANGE_BARE = '‘Launch starter tier’: between about 5% and 37% chance of meeting your goal, in this model.';
+const rangeLine = (words: string): string => RANGE_BARE.replace(/\.$/, `, using Olumi's estimates for ${words} (see Check estimates).`);
+const RANGE_LINE = rangeLine('1 relationship');
 const RANGE_DEPENDS = 'Of the links not sized yet, it depends most on how strongly ‘Starter tier price’ affects ‘Starter subscribers’, which isn’t sized in the model yet.';
 const withoutRange = (run: Json): Json => ({ ...run, enrichment: { ...run.enrichment,
   inference_warnings: run.enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE') } });
@@ -87,7 +91,9 @@ describe('RANGE WINS at the guided sentence producer', () => {
     expect(guidedSizingActions(guidedSizingForRun(run, graph), graph)).toEqual([]);
     expect(guidedSizingReplyText(guidedSizingForRun(run, graph, true)).guided).toBeNull();
     expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(RANGE_OPENING);
-    expect(said(run, graph)).toContain(RANGE_LINE);
+    // Batch C: condition 6 — the one Olumi link is now the user's, so the range rests on no Olumi input: no clause.
+    expect(said(run, graph)).toContain(RANGE_BARE);
+    expect(said(run, graph)).not.toContain('using Olumi');
     expect(said(run, graph)).not.toContain("The chance isn't shown yet");
     expect(goalChanceWithheldForAgent(withoutRange(run), graph)?.say)
       .toBe(`${WORDS} Give a rough strength for it to see the chance.`);
@@ -118,7 +124,8 @@ describe('RANGE WINS at the guided sentence producer', () => {
     expect(guidedSizingReplyText(draft).guided).toBe(MIXED_WORDS);
     expect(draft.sentence_draft?.total).toBe(1);
     expect(goalChanceWithheldForAgent(run, graph, draft, guidedSizingReplyText(draft).guided)?.say).toContain(MIXED_WORDS);
-    expect(said(run, graph)).toContain(RANGE_LINE);
+    // Batch C: condition 6 — the added ‘Existing subscribers’ → goal link is Olumi's and on the shared goal path.
+    expect(said(run, graph)).toContain(rangeLine('2 relationships'));
     expect(said(run, graph)).toContain(MIXED_WORDS);
     expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('how strongly ‘Starter tier price’');
     expect(guidedSizingActions(draft, graph)).toEqual(guidedSizingActions(guidedSizingForRun(withoutRange(run), graph), graph));

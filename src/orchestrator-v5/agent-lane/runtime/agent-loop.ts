@@ -137,6 +137,8 @@ export interface AgentTurnInput {
    * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
    */
   readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
+  /** A Run press returns its saved result before optional narration. Other turns keep the ordinary loop. */
+  readonly stopAfterSuccessfulRun?: () => string;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
   /**
@@ -178,6 +180,9 @@ export const PREWARM_DEADLINE_MS = 15_000;
 
 /** The prefix of the call id a host-made first call carries in the conversation (never a model's id; unique per turn). */
 export const HOST_FIRST_CALL_ID = 'host_first_call';
+
+/** One harness instruction; actual tool/reason/detail are supplied by the refusal result. */
+export const REPEATED_REFUSAL_NARRATION = '{tool} was refused twice for the same reason ({refusal}: {detail}); do not call it again this turn; tell the user in plain words what is missing.';
 
 /**
  * Where a turn's wall time actually went.
@@ -238,6 +243,13 @@ export interface AgentTurnResult {
   readonly mutated: boolean;
   readonly hops: number;
   readonly stopped_reason: 'answered' | 'hop_limit' | 'incomplete';
+  /**
+   * ⭐ BYPASS1 (DL, 14 Oct): who wrote `assistant_text`. `ai` only where the model's own final answer is returned; `host`
+   * at every exit Olumi composes (the Run press's ready text, a single call answered from its own result, a narration
+   * recovered from a held proposal, an unfinished answer, the hop limit). The route stops restating, in prose, facts the
+   * AI was given ONLY when the AI wrote the reply; a host-written reply keeps every host line.
+   */
+  readonly reply_author?: 'ai' | 'host';
   /** Where this turn's wall time went. Always present. */
   readonly timing: TurnTiming;
 }
@@ -395,6 +407,9 @@ export async function runAgentTurn(
   const mode: AgentLaneMode = input.mode ?? 'full';
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const withheld = new Set(input.withheldTools ?? []);
+  const refusalCounts = new Map<string, number>();
+  const repeatLimitations = new Map<string, string>();
+  const repeatedRefusals = new Map<string, ToolResult>();
   /**
    * ⭐ THE STATE THE SERVER ALREADY HOLDS IS GIVEN, NOT FETCHED (slice C1; P3A replay of Paul's transcript, 27 Sep).
    * Every ordinary turn spent a whole model call (~3 s) asking for `get_canonical_state`, and every answer then sat
@@ -508,6 +523,7 @@ export async function runAgentTurn(
       mutated,
       hops: hopsTaken,
       stopped_reason: 'answered',
+      reply_author: 'host',
       timing: ((t) => { emitTiming(t); return t; })(timingAt(hopsTaken)),
     };
   };
@@ -517,6 +533,9 @@ export async function runAgentTurn(
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
     const narrateHop = narrateNext;
+    const limitationItems = [...repeatLimitations.values()].map(text => ({
+      role: 'developer', content: [{ type: 'input_text', text }],
+    }));
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
       .filter((t) => !withheld.has(t.name));
     const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
@@ -525,11 +544,11 @@ export async function runAgentTurn(
       ? input.firstCallTool : undefined;
     const request: ModelCallRequest = {
       instructions: input.instructions,
-      input: narrateNext ? [...items, NARRATE_ITEM] : items,
+      input: [...items, ...limitationItems, ...(narrateNext ? [NARRATE_ITEM] : [])],
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-      ...(narrateNext ? { reasoning_role: 'narrate' as const } : {}),
+      ...(narrateHop ? { reasoning_role: 'narrate' as const } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
@@ -595,6 +614,7 @@ export async function runAgentTurn(
           mutated,
           hops: hop,
           stopped_reason: 'incomplete',
+          reply_author: 'host',
           timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
         };
       }
@@ -607,6 +627,7 @@ export async function runAgentTurn(
         mutated,
         hops: hop,
         stopped_reason: 'answered',
+        reply_author: 'ai',
         timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
       };
     }
@@ -619,7 +640,9 @@ export async function runAgentTurn(
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = withheld.has(String(call.name))
+      const result: ToolResult = repeatLimitations.has(String(call.name))
+        ? { ...repeatedRefusals.get(String(call.name))!, detail: repeatLimitations.get(String(call.name)), repeat_withheld: true }
+        : withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
@@ -646,6 +669,21 @@ export async function runAgentTurn(
                   + 'a change the user has already seen stays theirs to approve or decline.',
               }
             : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+      if (result.ok === false && typeof result.refusal === 'string' && !withheld.has(String(call.name))) {
+        const key = `${String(call.name)}:${result.refusal}`;
+        const count = (refusalCounts.get(key) ?? 0) + 1;
+        refusalCounts.set(key, count);
+        // One corrected retry remains possible. Only the second identical refusal withholds the tool.
+        if (count === 2) {
+          withheld.add(String(call.name));
+          const detail = typeof result.detail === 'string' && result.detail.trim() !== ''
+            ? result.detail.replace(/\s+/g, ' ').slice(0, 600) : result.refusal;
+          const text = REPEATED_REFUSAL_NARRATION.replace('{tool}', () => String(call.name))
+            .replace('{refusal}', () => result.refusal as string).replace('{detail}', () => detail);
+          repeatLimitations.set(String(call.name), text);
+          repeatedRefusals.set(String(call.name), structuredClone(result));
+        }
+      }
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own
@@ -711,6 +749,18 @@ export async function runAgentTurn(
       });
     }
     const hopResults = toolResults.slice(hopResultsFrom);
+    // Finish every call's bookkeeping before returning, so history retains a paired output for each call.
+    // The route still checks the final canonical read before shipping the result and its bound Explain control.
+    if (input.stopAfterSuccessfulRun !== undefined && calls.some((call, index) =>
+      call.name === 'run_analysis' && hopResults[index]?.ok === true && hopResults[index]?.ran === true)) {
+      const text = input.stopAfterSuccessfulRun();
+      items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+      return {
+        assistant_text: text, items: handedOn(), tool_calls: toolCalls, tool_results: toolResults,
+        mutated, hops: hop + 1, stopped_reason: 'answered', reply_author: 'host',
+        timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+      };
+    }
     // ⛔ P44 S2 — align each call with its own result; refused and replayed builds cannot announce writing.
     previousHopBuilt = calls.some((call, index) => {
       const result = hopResults[index];
@@ -739,6 +789,7 @@ export async function runAgentTurn(
           mutated,
           hops: hop + 1,
           stopped_reason: 'answered',
+          reply_author: 'host',
           timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
         };
       }
@@ -755,6 +806,7 @@ export async function runAgentTurn(
     mutated,
     hops: maxHops,
     stopped_reason: 'hop_limit',
+    reply_author: 'host',
     timing: ((t) => { emitTiming(t); return t; })(timingAt(maxHops)),
   };
 }

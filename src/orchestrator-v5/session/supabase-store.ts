@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
@@ -48,8 +49,10 @@ import {
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
+  answerRunNarrationOf,
   type AtomicCommittedModelVersionReceipt,
   type AnswerOffersRead,
+  type CommittedTurnLedger,
   type CommittedTurnRecord,
   type ConditionalAppendOptions,
   type ConditionalSessionAppendOutcome,
@@ -268,6 +271,8 @@ export interface SupabaseSessionStoreOptions {
 
 /** Telemetry hash-prefix length for the 64-hex identity hashes. */
 const GRAPH_CAS_HASH_PREFIX_LENGTH = 16;
+/** Rows the restated-goal ledger reads: an unreviewed draft has a handful; more than this is not one (`complete: false`). */
+const COMMITTED_TURN_LEDGER_ROWS = 200;
 
 function identityHashPrefix(hash: string | null | undefined): string | null {
   return typeof hash === 'string' && hash.length > 0
@@ -525,7 +530,9 @@ export class SupabaseSessionStore implements SessionStore {
         counts.attempts += 1;
         try {
           if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') throw new Error('Invalid claimed fact identity');
-          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
+          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, {
+            scenarioId: row.scenario_id, evaluatedScenarioRevision: row.evaluated_scenario_revision,
+          });
           if ('ok' in mapped) {
             const { options, ...run } = mapped.ok;
             const stored = await port.storeTypedAnalysisRun({ p_fact_id: row.fact_id, p_run: run, p_options: options });
@@ -691,7 +698,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_response_emitted: write.response_emitted,
       p_llm_calls_used: write.llm_calls_used,
       p_duration_ms: write.duration_ms,
-      p_handler_facts: serialiseHandlerFacts(write.handler_facts),
+      p_handler_facts: serialiseHandlerFacts(write.handler_facts, write.run_evaluated_revisions),
       p_graph: write.graph ?? null,
       p_brief_text: write.briefText ?? null,
       p_pending_actions: write.pending_actions ?? [],
@@ -749,6 +756,12 @@ export class SupabaseSessionStore implements SessionStore {
     rpcMode: GraphCasRpcMode,
     options: ConditionalAppendOptions,
   ): Promise<ConditionalSessionAppendOutcome> {
+    if (write.run_narration !== undefined) {
+      const narrated = await this.appendNarratedAnswer(write, baseRpcArgs, options);
+      if (narrated !== undefined) return narrated;
+      const { run_narration: _narration, ...withoutNarration } = write;
+      return this.appendAgentAnswerIfLatest(withoutNarration, baseRpcArgs, rpcMode, options);
+    }
     const rpcName = 'append_agent_answer_if_latest';
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
     const { data, error } = await this.client.rpc(rpcName, {
@@ -775,6 +788,45 @@ export class SupabaseSessionStore implements SessionStore {
     }
     // JSONB preserves the delegate's receipt object, or its UUID string on v2.
     const outcome = this.decodeAnswerAppendResult(data, rpcName, withOffers || write.agent_guidance !== undefined);
+    this.cache.invalidateAll(write.scenario_id);
+    return outcome;
+  }
+
+  /**
+   * T1h: the final answer row WITH the narration it was sent with (migration 20261013230000), conditional when
+   * `options` is given. `undefined` when the RPC is absent: the caller then takes today's path without the narration.
+   */
+  private async appendNarratedAnswer(
+    write: SessionTurnWrite,
+    baseRpcArgs: Record<string, unknown>,
+    options: ConditionalAppendOptions | undefined,
+  ): Promise<ConditionalSessionAppendOutcome | undefined> {
+    const rpcName = options === undefined ? 'append_agent_answer_narrated' : 'append_agent_answer_if_latest_narrated';
+    const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
+    const { data, error } = await this.client.rpc(rpcName, {
+      ...(options === undefined ? {} : { p_expected_latest_row_id: options.expectedLatestRowId }),
+      ...baseRpcArgs,
+      p_agent_guidance: write.agent_guidance ?? null,
+      p_suggested_actions: withOffers ? write.suggested_actions : null,
+      p_suggested_actions_run_key: withOffers ? write.suggested_actions_run_key ?? null : null,
+      p_run_narration: write.run_narration,
+    });
+    if (error) {
+      if (isMissingAppendFunction(error)) {
+        // Never silent: every answer recorded without its narration says so.
+        log.warn({ event: 'v5.agent_answer.narrated_rpc_missing', rpc: rpcName, rpc_code: errCode(error),
+          scenario_id: write.scenario_id, turn_id: write.turn_id },
+        'Narrated answer RPC is unavailable; recording the answer without its narration until migration 20261013230000 is applied');
+        return undefined;
+      }
+      throw new StateCommitFailedError(`${rpcName} RPC failed: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) });
+    }
+    if (options !== undefined && data !== null && typeof data === 'object' && !Array.isArray(data)
+      && (data as { status?: unknown }).status === 'latest_moved') {
+      return { status: 'latest_moved' };
+    }
+    const outcome = this.decodeAnswerAppendResult(data, rpcName, true);
     this.cache.invalidateAll(write.scenario_id);
     return outcome;
   }
@@ -809,6 +861,13 @@ export class SupabaseSessionStore implements SessionStore {
   ): Promise<SessionAppendOutcome> {
     if (useAppendV6() && write.graph != null) {
       return this.appendAtomicFenced(write, baseRpcArgs, rpcMode, null);
+    }
+    if (write.run_narration !== undefined && write.graph == null) {
+      const narrated = await this.appendNarratedAnswer(write, baseRpcArgs, undefined);
+      if (narrated !== undefined && !('status' in narrated)) return narrated;
+      if (narrated !== undefined) throw new StateCommitFailedError('append_agent_answer_narrated returned a conditional outcome');
+      const { run_narration: _narration, ...withoutNarration } = write;
+      return this.dispatchCheckedAppend(withoutNarration, baseRpcArgs, rpcMode);
     }
     const useV3 = rpcMode !== 'off' && write.graph != null;
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
@@ -2009,18 +2068,27 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
-    const { data, error } = await this.client
-      .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions')
-      .eq('scenario_id', scenarioId)
-      .eq('turn_id', turnId)
-      .limit(1);
+    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance';
+    const read = (select: string) => this.client.from('v5_conversation_turns').select(select)
+      .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
+    let { data, error } = await read(`${columns}, run_narration`);
+    // Order-safe: before migration 20261013230000 the column is absent; the row is then read as before T1h, its Run
+    // identity unknown, never refused. Never silent: every such read says so.
+    if (error && errCode(error) === '42703') {
+      log.warn({ event: 'v5.committed_turn.run_narration_column_missing', rpc_code: errCode(error),
+        scenario_id: scenarioId, turn_id: turnId },
+      'Committed-turn read without run_narration; its Run is unknown until migration 20261013230000 is applied');
+      ({ data, error } = await read(columns));
+    }
     // A failed read is an UNKNOWN and is thrown, never folded into "no row":
     // the caller would otherwise re-execute a turn that may already have run.
     if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
     const row = ((data as Array<Record<string, unknown>> | null) ?? [])[0];
     if (!row || typeof row.id !== 'string') return null;
+    const guidance = row.agent_guidance == null ? undefined : parseAnswerGuidance(row.agent_guidance);
+    if (guidance === null) throw new SessionReadError('Committed turn guidance malformed');
     return {
+      ...(guidance !== undefined ? { agent_guidance: guidance } : {}),
       id: row.id,
       request_hash: String(row.request_hash ?? ''),
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
@@ -2031,7 +2099,46 @@ export class SupabaseSessionStore implements SessionStore {
       pending_actions: (Array.isArray(row.pending_actions) ? row.pending_actions : [])
         .map((pa) => parsePendingAction(pa))
         .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
+      // The narration this exact answer was sent with; absent or malformed reads as unknown.
+      run_narration: answerRunNarrationOf(row.run_narration),
     };
+  }
+
+  /**
+   * ⭐ B RESTATED GOAL: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`). Scoped at the bytes
+   * to the exact scenario; oldest first with a stable tie break; one row past the cap marks the ledger incomplete. Only
+   * the first message's text is returned as the brief; the later ones only as context (`later_user_messages`). A failed or
+   * malformed read throws: "unknown", never "nothing written".
+   */
+  async readCommittedTurnLedger(scenarioId: string): Promise<CommittedTurnLedger> {
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, turn_id, user_message, model_version_mutation_id, created_at')
+      .eq('scenario_id', scenarioId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(COMMITTED_TURN_LEDGER_ROWS + 1);
+    if (error) throw new SessionReadError(`readCommittedTurnLedger(${scenarioId}) failed: ${errMsg(error)}`, { code: 'turn_ledger_read_failed' });
+    if (!Array.isArray(data)) throw new SessionReadError(`readCommittedTurnLedger(${scenarioId}): PostgREST returned a non-array payload`, { code: 'turn_ledger_read_failed' });
+    const rows = data as Array<Record<string, unknown>>;
+    const writes: string[] = [];
+    const messages: string[] = [];
+    const later: { turn_id: string; text: string }[] = [];
+    let first: string | null = null;
+    for (const row of rows.slice(0, COMMITTED_TURN_LEDGER_ROWS)) {
+      if (typeof row.turn_id !== 'string' || row.turn_id === '') {
+        throw new SessionReadError(`readCommittedTurnLedger(${scenarioId}): a row has no turn id`, { code: 'turn_ledger_read_failed' });
+      }
+      if (row.model_version_mutation_id != null && !writes.includes(row.turn_id)) writes.push(row.turn_id);
+      const said = typeof row.user_message === 'string' ? row.user_message.trim() : '';
+      if (said !== '' && !messages.includes(row.turn_id)) {
+        messages.push(row.turn_id);
+        if (first === null) first = said;
+        else later.push({ turn_id: row.turn_id, text: said });
+      }
+    }
+    return { write_turn_ids: writes, user_message_turn_ids: messages, first_user_message: first, later_user_messages: later,
+      complete: rows.length <= COMMITTED_TURN_LEDGER_ROWS };
   }
 
   async releaseTurnClaim(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void> {
@@ -2393,7 +2500,7 @@ export class SupabaseSessionStore implements SessionStore {
     // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
-      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
+      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at, evaluated_scenario_revision')
       .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
       .order('created_at', { ascending: false })
       .order('id', { ascending: false });
@@ -2430,6 +2537,7 @@ export class SupabaseSessionStore implements SessionStore {
       noop?: unknown;
       v5_conversation_turn_id?: unknown;
       created_at?: unknown;
+      evaluated_scenario_revision?: unknown;
     }>) {
       const payloadObj =
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
@@ -2454,12 +2562,16 @@ export class SupabaseSessionStore implements SessionStore {
         : '';
       const factRowId = typeof row.id === 'string' ? row.id : '';
       const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
-      out.push({
+      const entry: HandlerFactWithTurn = {
         fact: parsed.data,
         fact_row_id: factRowId,
         turn_id: turnId,
         fact_created_at: createdAt,
-      });
+        ...(parsed.data.fact_type === 'run_analysis'
+          ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+      };
+      bindRunAnalysisOccurrence(entry);
+      out.push(entry);
     }
     return out;
   }
@@ -2590,6 +2702,76 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * See {@link SessionStore.readStatedObjectionFactsFor}. Scenario-scoped, uncached, newest-first with a stable
+   * tie-break; `finding_dissent` and `noop = false` only. Read in pages of 50 so a user who rewrote ONE finding's reason
+   * many times cannot starve the others: paging stops at the first short page, at `limit` rows, or once `distinctFindings`
+   * different findings are covered. A read error, a non-array payload or a row that is not a valid `finding_dissent` fact
+   * THROWS: the caller must be able to say "unknown", never "no objections".
+   */
+  async readStatedObjectionFactsFor(
+    scenarioId: string,
+    limit: number,
+    distinctFindings?: number,
+  ): Promise<readonly HandlerFact[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new SessionReadError(
+        `readStatedObjectionFactsFor(${scenarioId}): limit must be a positive safe integer`,
+        { code: 'stated_objection_limit_invalid' },
+      );
+    }
+    const PAGE = 50;
+    const out: HandlerFact[] = [];
+    const findings = new Set<string>();
+    for (let from = 0; from < limit; from += PAGE) {
+      const to = Math.min(from + PAGE, limit) - 1;
+      const { data, error } = await this.client
+        .from('v5_handler_facts')
+        .select('id, payload, handler_id, noop, created_at')
+        .eq('scenario_id', scenarioId)
+        .eq('handler_id', 'finding_dissent')
+        .eq('noop', false)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+      if (error) {
+        throw new SessionReadError(
+          `readStatedObjectionFactsFor(${scenarioId}) failed: ${errMsg(error)}`,
+          { cause: error, code: errCode(error) },
+        );
+      }
+      if (!Array.isArray(data)) {
+        throw new SessionReadError(
+          `readStatedObjectionFactsFor(${scenarioId}): PostgREST returned a non-array payload`,
+          { code: 'stated_objection_corrupt' },
+        );
+      }
+      for (const row of data as Array<{ payload?: unknown; handler_id?: unknown; noop?: unknown }>) {
+        const payloadObj =
+          row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : {};
+        const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
+        if (
+          !parsed.success ||
+          parsed.data.fact_type !== 'finding_dissent' ||
+          row.handler_id !== 'finding_dissent' ||
+          parsed.data.noop !== false
+        ) {
+          throw new SessionReadError(
+            `readStatedObjectionFactsFor(${scenarioId}): eligible row is not a valid finding_dissent fact`,
+            { code: 'stated_objection_corrupt' },
+          );
+        }
+        out.push(parsed.data);
+        findings.add(parsed.data.result.finding_id);
+      }
+      if (data.length < to - from + 1) break;
+      if (distinctFindings !== undefined && findings.size >= distinctFindings) break;
+    }
+    return out;
+  }
+
+  /**
    * Load the bounded scenario-wide run-analysis fact set with an exact
    * pre-limit count. This is reasoning authority, not claim-safety
    * entitlement: it deliberately returns every non-noop run_analysis fact and
@@ -2610,7 +2792,7 @@ export class SupabaseSessionStore implements SessionStore {
     const { data, error, count } = await abortableAnalysisRead(this.client
       .from('v5_handler_facts')
       .select(
-        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, evaluated_scenario_revision',
         { count: 'exact' },
       )
       .eq('scenario_id', scenarioId)
@@ -2820,12 +3002,13 @@ export class SupabaseSessionStore implements SessionStore {
   async readExistingScenario(scenarioId: string) {
     const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
-      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision')
+      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision, created_at')
       .eq('id', scenarioId)
       .maybeSingle());
     if (error) throw new SessionReadError('Existing scenario read failed', { cause: error, code: errCode(error) });
     if (data === null) return null;
-    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined };
+    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined,
+      createdAt: typeof data.created_at === 'string' && Number.isFinite(Date.parse(data.created_at)) ? data.created_at : null };
   }
 
   /** Read actual capture rows; no process-local status and no capped history lookup. */
@@ -2834,8 +3017,8 @@ export class SupabaseSessionStore implements SessionStore {
       abortableAnalysisRead(this.client.from('scenarios')
         .select('id, user_id, brief, analysis_provenance').eq('id', scenarioId).maybeSingle()),
       decisionRecordId === null ? Promise.resolve({ data: null, error: null })
-        : abortableAnalysisRead(this.client.from('decision_records').select('id, scenario_id')
-          .eq('scenario_id', scenarioId).eq('id', decisionRecordId).maybeSingle()),
+        : abortableAnalysisRead(this.client.from('decision_records').select('record_id, scenario_id')
+          .eq('scenario_id', scenarioId).eq('record_id', decisionRecordId).maybeSingle()),
     ]);
     if (scenario.error || decision.error || !scenario.data || scenario.data.id !== scenarioId) {
       throw new SessionReadError('Run recording rows could not be read', { cause: scenario.error ?? decision.error });
@@ -2847,7 +3030,7 @@ export class SupabaseSessionStore implements SessionStore {
     return {
       brief: scenario.data.brief, analysisProvenance: scenario.data.analysis_provenance,
       guest: scenario.data.user_id === null,
-      decisionRecordPresent: decisionRecordId !== null && decision.data?.id === decisionRecordId
+      decisionRecordPresent: decisionRecordId !== null && decision.data?.record_id === decisionRecordId
         && decision.data?.scenario_id === scenarioId,
     };
   }
@@ -3191,13 +3374,21 @@ export class SupabaseSessionStore implements SessionStore {
  */
 function serialiseHandlerFacts(
   facts: readonly HandlerFact[],
-): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown }> {
-  return facts.map((f) => ({
-    handler_id: f.fact_type,
-    action_type: f.fact_type,
-    noop: f.noop,
-    payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
-  }));
+  runEvaluatedRevisions?: Readonly<Record<string, number>>,
+): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown; evaluated_scenario_revision?: number }> {
+  return facts.map((f) => {
+    const runId = f.fact_type === 'run_analysis' ? f.result.run_id : undefined;
+    const revision = typeof runId === 'string' && runEvaluatedRevisions !== undefined
+      && Object.hasOwn(runEvaluatedRevisions, runId) ? runEvaluatedRevisions[runId] : undefined;
+    return {
+      handler_id: f.fact_type,
+      action_type: f.fact_type,
+      noop: f.noop,
+      payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
+      ...(typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
+        ? { evaluated_scenario_revision: revision } : {}),
+    };
+  });
 }
 
 /** Shared strict parser for the durable page and the bounded currentness read. */
@@ -3212,6 +3403,7 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
     action_type?: unknown;
     noop?: unknown;
     created_at?: unknown;
+    evaluated_scenario_revision?: unknown;
   }>) {
     if (
       typeof row.id !== 'string' ||
@@ -3263,11 +3455,15 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handl
         { code: 'analysis_fact_corrupt' },
       );
     }
-    facts.push({
+    const entry: IdentifiedHandlerFact = {
       fact: parsed.data,
       fact_row_id: row.id,
       fact_created_at: row.created_at,
-    });
+      ...(parsed.data.fact_type === 'run_analysis'
+        ? { evaluated_scenario_revision: validatedScenarioRevision(row.evaluated_scenario_revision) } : {}),
+    };
+    bindRunAnalysisOccurrence(entry);
+    facts.push(entry);
   }
   return facts;
 }

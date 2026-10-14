@@ -23,7 +23,8 @@ import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
-import { extraShareMoments, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
+import { extraShareLinkMoments, hirePaceIsOlumisOwn, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
+import { COMPUTE_SIGMA_FLOOR } from '../../cee/constants.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -196,20 +197,27 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
       || options.some(o => setting(o) !== 0 && setting(o) !== 1)) return null;
     const D = timeBetween(c.reference_date, deadline, 'months');
     if (D <= 0) return null;
-    const expected = extraShareMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high);
+    const expected = extraShareLinkMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high, hirePaceIsOlumisOwn(source));
     if (!finite(e.strength.mean) || !finite(e.strength.std) || Math.abs(e.strength.mean - expected.mean) > 0.0005
-      || Math.abs(e.strength.std - expected.sd) > 0.0005
+      || !partSpreadMatches(e.strength.std, expected.sd)
       || !finite(held.strength.mean) || !finite(held.strength.std) || held.exists_probability !== 1
       || Math.abs(held.strength.mean - expected.mean) > 0.0005
-      || Math.abs(held.strength.std - expected.sd) > 0.0005) return null;
+      || !partSpreadMatches(held.strength.std, expected.sd)) return null;
   }
-  if (teams.length !== 1 || options.some(o => inbound.filter(e => {
-    const settings = isRec(o.interventions) ? o.interventions : {};
-    const v = settings[e.from as string];
-    return e.from !== teams[0] && (isRec(v) ? v.value : v) === 1;
-  }).length > 1)) return null;
+  // E5: an option may switch on several capacity parts ("two developers" start at different times); each part passed
+  // its own checks above, and the per-option chance sums them (share-by-date-run.ts sharePartsForOption).
+  if (teams.length !== 1) return null;
   return { goal, deadline, threshold_raw: goal.goal_threshold_raw, cap: 100, team_part_id: teams[0]!,
     parts: inbound.map(e => ({ from: e.from as string, to: e.to as string })) };
+}
+
+/**
+ * E5: the recogniser applies the SAME floor the compute applies. A part's spread below COMPUTE_SIGMA_FLOOR (a start
+ * given as one figure has none) is stored as written and floored to COMPUTE_SIGMA_FLOOR on the graph the Run computes
+ * on (`floorGraphSigmaForCompute`), so either reading is the same part; any other spread must still match its moments.
+ */
+function partSpreadMatches(std: number, sd: number): boolean {
+  return Math.abs(std - sd) <= 0.0005 || (sd < COMPUTE_SIGMA_FLOOR && Math.abs(std - COMPUTE_SIGMA_FLOOR) <= 0.0005);
 }
 
 /** The one goal node of a graph, when there is exactly one. */

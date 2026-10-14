@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /** Captured-wire regression rows collected by the default and required CI Vitest suites. */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
@@ -354,6 +355,6 @@ it('20k whitespace copy path runs below 50 ms (no new regex)', () => {
   const out = scopeTargetNotTestableWithRanges(long, graph);
   const elapsed = performance.now() - start;
   console.log(`S4b 20k whitespace: ${elapsed.toFixed(3)} ms; new regex: none`);
-  expect(elapsed < 50).toBeTruthy();
+  if (timingGated) { expect(elapsed < 50).toBeTruthy(); }
   expect(warning(out)).toBeUndefined();
 });

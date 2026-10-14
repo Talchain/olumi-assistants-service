@@ -18,6 +18,7 @@
  * `propose_link_strength` / `propose_link_strengths`, and the writer itself (`adjust-edge-strength.ts`).
  */
 import { edgeStrengthWords } from '../../orchestrator-v5/format/edge-strength-words.js';
+import { hasUserStatedSize } from '../provenance/provenance-of.js';
 import { linkSizing } from './link-sizing.js';
 
 type Rec = Record<string, unknown>;
@@ -37,7 +38,7 @@ export interface UserFigureHeld {
  */
 export function userFigureHeld(edge: unknown): UserFigureHeld | null {
   const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  if (p?.magnitude !== 'user_stated') return null;
+  if (p === undefined || !hasUserStatedSize(edge)) return null;
   const ne = isRec(p.natural_effect) ? p.natural_effect : undefined;
   if (ne === undefined) return null;
   // ⭐ Only a figure that still DESCRIBES the link (buddy r1 #6): `natural_effect.strength_mean` is the β it was written

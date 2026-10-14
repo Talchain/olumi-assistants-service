@@ -799,6 +799,15 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
       "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
   },
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_horizon_stated_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the same field-scoped duration warrant as goal_horizon_months: its unit is whole months " +
+      "(`.int().positive()`), and the S4 deadline door writes it only from the user's literal stated duration " +
+      "on the approved deadline card. Generic AI mutations cannot write it (field-safety pipeline-owned roots). " +
+      "Absence means no literal duration was stated; target-level qualifiers do not attest this duration.",
+  },
   // ── UNWARRANTED, ADJUDICATED: a link size's written range (declared 30 Sep 2026, A4, CEE #2409) ──────────
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.low",
@@ -837,7 +846,9 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "(`eventRiskIngressIssues`); the chat add-risk door's hold stamp (event_risk.v1 slice 2a: `readStatedEventRisk` " +
       "reads the user's own words, `basis: 'user'`, validated by `EventRiskV1` before holding, stamped after the " +
       "re-referee); and the draft door (slice 2c, `holdStatedEventRisks` in `buildModelFromBrief`: the same reader over " +
-      "one sentence of the BRIEF that names exactly that risk, `basis: 'user'`, never from the drafter). No producer may " +
+      "one sentence of the BRIEF that names exactly that risk, `basis: 'user'`, never from the drafter); and the approved " +
+      "card of Olumi's range for an unvalued risk ROOT (`risk-occurrence.ts`: `basis: 'olumi'`, over the goal's own period, " +
+      "validated by `EventRiskV1`, written only by the atomic level door after the user's press). No producer may " +
       "author it (field-safety pipeline-owned). Never defaulted. It IS an analysis input: ISL draws occurrence from it.",
   },
   {
@@ -894,6 +905,33 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     decision:
       "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction; " +
       "reason given there (a fraction by meaning, attested by the block's `occurrence.basis`).",
+  },
+  // ── SCOPE-AMBIGUOUS: the goal's target basis (declared 12 Oct 2026, recovery Batch C; Batch 0 change-goal decision
+  //    ruling 4 and amendments 2–3) — two numbers inside one CEE-only block, never on the wire and never hashed ──────
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_target_basis.target_raw",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — not a value, a STALENESS KEY. Its one writer (`admitGoalTargetBasis`, goal-target-basis.ts) copies the " +
+      "goal's own stored `goal_threshold_raw` into it, and its one reader (`goalTargetBasisOf`) drops the WHOLE basis " +
+      "unless it still equals the node's `goal_threshold_raw` exactly (with `quantity_frame` / `target_frame`), so an " +
+      "edited target can never be read through an old basis. Its unit and attestation are therefore `goal_threshold_raw`'s " +
+      "(`goal_threshold_unit`, `threshold_source`) by equality; nothing reads it as a number. No producer may write it " +
+      "(field-safety CEE-owned roots). It enters the analysis hash only inside the whole well-formed basis (graph-hash.ts " +
+      "`projectNode`, Batch C gap 2), so a basis change stales a stored Run; absent, every hash is unchanged.",
+  },
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_target_basis.period_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (whole months, " +
+      "`.int().min(1).max(120)`), and what it measures is named by its two siblings — `reference` (today | launch) and " +
+      "`period_kind` (at_end | over_period). Its attestation is the block's REQUIRED literal `source: 'olumi_reading'`: " +
+      "it is always Olumi's reading of the brief, never presented as the user's. Its one writer refuses it when it " +
+      "disagrees with the drafted deadline ('period_conflict'), and the horizon verdict licenses a chance on it only " +
+      "when it equals the held months ('basis_at_h'). Read only for the licence's words and that verdict; no producer may " +
+      "write it (field-safety CEE-owned). It enters the analysis hash inside the whole well-formed basis, only when " +
+      "present (graph-hash.ts `projectNode`, Batch C gap 2): a basis-only change stales a stored Run.",
   },
 ];
 

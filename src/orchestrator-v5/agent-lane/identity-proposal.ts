@@ -1,3 +1,6 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
+import { edgeProvenanceDisplay } from '../../cee/provenance/provenance-of.js';
+import { goalStockAccumulationOf, goalStockNetReadingLine, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
  * ⛔ THE CARD FOR A PRODUCT THE MINT COULD NOT PROVE (DL 5888399097; AIQ 5886967509 step (2); R3 served witness 5888379558).
@@ -25,7 +28,7 @@ import { accumulationStockFor, GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoney
 import { sayFigure } from './say-figure.js';
 import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 
 /** The figure just typed for an asked product part, carried inside its one confirmation. */
 export interface IdentityPartLevel {
@@ -34,15 +37,19 @@ export interface IdentityPartLevel {
   readonly unit: string;
 }
 
-export interface IdentityProposal {
+interface IdentityProposalBase {
+  readonly ceiling_stock?: import('./ceiling-stock.js').CeilingStockPending;
   readonly outcome_id: string;
-  readonly operation: 'product';
-  /** The existing cards put the rate first; a stored reading keeps its declared order. */
-  readonly factor_ids: readonly [string, string];
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
   readonly part_levels?: readonly IdentityPartLevel[];
+  readonly one_off_words?: string;
 }
+
+export type IdentityProposal = IdentityProposalBase & (
+  | { readonly operation: 'product'; readonly factor_ids: readonly [string, string] }
+  | { readonly operation: 'sum'; readonly factor_ids: readonly [string] }
+);
 
 /** The approved-card door's limit on the displayed words (Canonical #2292). */
 export const CARD_WORDS_MAX = 400;
@@ -57,7 +64,7 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.tri
  */
 function usersLevel(node: Rec): { value: number; unit: string } | null {
   const os = node.observed_state;
-  if (!isRec(os) || classifyValueSource(os.source) !== 'user_stated') return null;
+  if (!isRec(os) || isUnverifiedUserMaterial(os) || valueClassOf(os) !== 'user_stated') return null;
   const value = os.raw_value;
   const unit = text(os.unit);
   if (typeof value !== 'number' || !Number.isFinite(value) || value === 0 || unit === undefined) return null;
@@ -79,7 +86,7 @@ function otherParent(node: Rec | undefined, goal: { code: string; period: 'month
   const m = money && goal !== null ? readMoneyTotal(unit, text(node?.label) ?? '') : null;
   const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
   const figure = typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : null;
-  return { figure, money, inGoalTerms, users: figure !== null && classifyValueSource(os?.source) === 'user_stated' };
+  return { figure, money, inGoalTerms, users: figure !== null && !isUnverifiedUserMaterial(os) && valueClassOf(os) === 'user_stated' };
 }
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
@@ -139,11 +146,22 @@ export function readingTermsWords(graph: unknown): string {
 
 /** The confirmation receipt, read back from the stored graph: Science §(i) (3) names its terms as the card did. */
 export function identityReceiptWords(goalLabel: string, rate: string, count: string, graph: unknown): string {
+  if (goalStockAccumulationOf(graph) !== null) return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}". Any earlier result is now out of date; `
+    + 'run the analysis again to see it calculated that way.';
   return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}"${readingTermsWords(graph)}. Any earlier result is now out of date; `
     + 'run the analysis again to see it calculated that way.';
 }
 
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
+  const stock = goalStockAccumulationOf(graph);
+  if (stock !== null && (stock.identity.stated_in_brief !== true
+    || (stock.netZero !== null && (stock.netZero.observed_state as Rec).source !== 'user_confirmed'))) {
+    const net = goalStockNetReadingLine(graph);
+    const words = `Olumi reads ‘${String(stock.goal.label)}’ as ‘${String(stock.carrier.label)}’.${net === null ? '' : ` ${net}`} Is that how you work it out?`;
+    return words.length > CARD_WORDS_MAX ? null : { outcome_id: String(stock.goal.id), operation: 'sum',
+      factor_ids: [String(stock.carrier.id)], words,
+      ...(goalStockOneOffChoice(graph) === null ? {} : { one_off_words: goalStockOneOffChoice(graph)! }) };
+  }
   return proposeOnGoal(graph) ?? proposeOnCarrier(graph) ?? proposeOnStoredReading(graph);
 }
 
@@ -232,7 +250,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const n = byId.get(e.from);
     if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') continue;
     const prov = isRec(e.provenance) ? e.provenance : undefined;
-    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
+    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || edgeProvenanceDisplay(prov?.source) === 'user_set';
     if (prov?.definitional !== true || userAuthored) return null;
     addends.push(termOf(n, e).words);
   }
@@ -245,7 +263,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   const currentState = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // Science §(e) Q1.3 also covers a stated zero or unreadable current level; usersLevel's
   // legacy null for those must not turn a contradictory statement into an absent one.
-  if (current === null && currentState !== undefined && classifyValueSource(currentState.source) === 'user_stated') return null;
+  if (current === null && currentState !== undefined && valueClassOf(currentState) === 'user_stated') return null;
   // Condition 4: a stated CURRENT level must reconcile at the factors' current raw values within the existing 5%.
   if (current !== null) {
     // Codex r1 P2: currency AND period read in the goal's own context ("Monthly recurring revenue" + GBP = £/month).
@@ -353,7 +371,7 @@ function todaysCause(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]
   // still credits the user's cause, never this node; its own level stays Olumi's and a Yes does not re-author it.
   // ⛔ AIQ 5906521706 (P0 PARTNER row E): an exact copy is the same figure in the SAME UNIT. 1,500 "customers" beside the
   // user's 1,500 "subscribers" may count another population (free or non-Pro), so the value match proves nothing: no card.
-  if (typeof os?.raw_value === 'number' && (classifyValueSource(os.source) === 'user_stated' || os.raw_value !== level.value
+  if (typeof os?.raw_value === 'number' && (valueClassOf(os) === 'user_stated' || os.raw_value !== level.value
     || !sameUnit(os.unit, level.unit))) return null;
   return { n, f, level };
 }

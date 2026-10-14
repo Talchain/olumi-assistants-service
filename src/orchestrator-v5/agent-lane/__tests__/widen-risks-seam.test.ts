@@ -238,10 +238,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const t = await thinConstruction(riskCount, () => {
       const candidate = constructionCandidate!;
       (candidate.factors as Record<string, unknown>[])[0]!.unit = 'GBP/month';
+      (candidate.factors as Record<string, unknown>[])[0]!.baseline_evidence = { quote: 'Our Pro price is £49 a month.' };
       // #2851 RE-PIN (class: Olumi's inferred 250, now a missing level so no card): these rows test the risk offers beside
       // a pending identity card, so the brief states the count and the card is offered on the user's figure.
       (candidate.factors as Record<string, unknown>[]).push({ label: 'Paying subscribers', role: 'observable',
-        baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000 });
+        baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000,
+        baseline_evidence: { quote: 'We have 250 paying subscribers.' } });
       (candidate.links as Record<string, unknown>[]).push({ from: 'Paying subscribers', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
         effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
       // Churn threatens the subscriber count. Give every risk its own real path, so the constructor does not repair
@@ -253,7 +255,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       candidate.identities = [{ outcome: 'Total MRR', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'ai_proposed' }];
       script.splice(1, 1, () => fnCall('propose_identity', {}), () => say('Here is the model to explore together.'));
       prepare?.();
-    }, `${CONSTRUCTION_BRIEF} We have 250 paying subscribers.`);
+    }, `Our Pro price is £49 a month. We have 250 paying subscribers.\n\n${CONSTRUCTION_BRIEF}`);
     const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
     expect(identity, `identity fixture setup: ${JSON.stringify(t)}`).toMatchObject({ ok: true, mutated: false });
     expect(t.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t.suggested_actions)).toHaveLength(1);
@@ -292,6 +294,30 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       return proposal?.proposal_id === id ? [proposal] : [];
     })[0];
   };
+
+  /** The construction ANSWER row this route wrote (claim rows excluded), as the store received it. */
+  const answerWrite = (): Record<string, unknown> | undefined => [...store.append.mock.calls].map(([w]) => w as Record<string, unknown>)
+    .reverse().find((w) => w.scenario_id === SCENARIO && !String(w.turn_id).endsWith(':claim') && w.response_emitted !== false);
+  it('E6 (DL 12 Oct): the construction answer that shows the thin risks offer records RC-WIDEN\'s risks row as SHOWN; CONTRAST: with one proposed option the row is W2 (options) and nothing is recorded', async () => {
+    // This file's store has no guidance history (so the route fails closed: no row); a readable, empty history here only.
+    const readable = store as Record<string, unknown>;
+    readable.readGuidanceHistory = vi.fn(async () => ({}));
+    try {
+    const t = await thinConstruction(1, () => {
+      const candidate = constructionCandidate! as { options: Record<string, unknown>[]; factors: Record<string, unknown>[]; links: Record<string, unknown>[] };
+      candidate.options.push({ label: 'Increase ad spend', provenance: 'explicit', changes: ['Ad spend'], interventions: [], is_status_quo: null, added_capacity: null });
+      candidate.factors.push({ label: 'Ad spend', role: 'controllable', baseline_known: true, baseline_value: 1000, unit: 'GBP', provenance: 'explicit', plausible_max: 10000 });
+      candidate.links.push({ from: 'Ad spend', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+    });
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id), JSON.stringify(t.suggested_actions)).toBe(true);
+    expect(answerWrite()?.agent_guidance, JSON.stringify(answerWrite())).toMatchObject({ version: 1, entries: { 'RC-WIDEN': { status: 'offered', variant_id: 'W6' } } });
+    nextScenario();
+    const one = await thinConstruction(1);
+    expectThinPress(one);
+    expect((answerWrite()?.agent_guidance as { entries?: Record<string, unknown> } | undefined)?.entries?.['RC-WIDEN']).toBeUndefined();
+    } finally { delete readable.readGuidanceHistory; }
+  });
 
   it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
     const t = await thinConstruction(1);

@@ -38,6 +38,9 @@ const TEST_FILE = /\.(test|spec)\./;
 const ALLOWED_CROSS_BOUNDARY = new Set(
   [
     '../../config/index.js', // config.cee.modelVersionsEnabled (flag read)
+    '../persist-graph-write.js', // SYS10: authorised save/restore operations in the existing controlled door
+    '../persisted-graph-invariants.js', // refusal class retained at the HTTP boundary
+    '../ownership/door-ownership.js', // existing ownership refusal class
     // S5 2b (#2899): pure zero-import outbound proof strip; DL review in this PR
     '../goal-target/outbound-graph.js',
     '../context/graph-identity.js', // Group A: computeGraphIdentityHash + analysis-affecting hash
@@ -211,7 +214,7 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
     for (const file of moduleFiles) {
       for (const spec of scanImports(file).specifiers) {
         expect(
-          FORBIDDEN_LIVE_SURFACE.test(spec),
+          FORBIDDEN_LIVE_SURFACE.test(spec) && !['../persist-graph-write.js', '../persisted-graph-invariants.js'].includes(spec),
           `${file} imports forbidden live surface '${spec}'`,
         ).toBe(false);
       }
@@ -255,6 +258,7 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
 const SANCTIONED_INBOUND_CALL_SITES = new Set(
   [
     '../commit.ts',
+    '../persist-graph-write.ts', // SYS10 controlled door dispatches the existing version adapter
     '../handlers/draft-graph-dispatch.ts',
     '../build-turn-context.ts', // bounded read-only receipt -> immutable version adoption
     '../context/canonical-label-transition.ts', // pure pair validation, no writes

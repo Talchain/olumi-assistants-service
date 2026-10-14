@@ -1,3 +1,4 @@
+import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
@@ -57,6 +58,7 @@ import { sayDate } from '../../goal-target/deadline-date.js';
 import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
+import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
@@ -154,6 +156,7 @@ import {
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
 import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
+import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
 import { carryUnconfirmedGoalProduct } from './unconfirmed-goal-product.js';
 import {
   AnalysisNotReadyError,
@@ -212,8 +215,9 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
-import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
+import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -301,25 +305,30 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
 export const PLOT_BRIEF_MAX_CHARS = 10_000;
 
 /**
- * ⭐ A2 (DL #72 5861407189): THE ENGINE GETS THE HELD OPERATOR ONLY. A stored limit may carry
- * `operator_as_stated` ("<" beside "<=", `GoalConstraintSchema`) so CEE can SAY "less than 4%"; PLoT and ISL are
- * unchanged and receive `operator` alone, so the field is withheld from this wire copy. The stored row is never
- * touched: a row that carries it is copied without it, and an array with none is returned as the SAME reference.
+ * ⭐ A2 (DL #72 5861407189) → RECOVERY BATCH C (ruling 16, amendment 5): THE ENGINE GETS THE COMPARATOR THE USER STATED.
+ * A stored limit or target keeps `operator` (`>=` / `<=`) with `operator_as_stated` (`>` / `<`) beside it, so every
+ * surface can SAY "above 15%" / "less than 4%". Until Batch C this wire copy sent the held, inclusive operator only. PLoT
+ * (#448) and ISL (recovery/batchC-isl) now score `>` / `<` exactly, ties included, so the stated strict comparator is
+ * what the engine receives: "above 15%" is never scored as "at least 15%". `operator_as_stated` itself never travels.
  *
- * ⚠ NOT MODELLED: over continuous draws P(X < 4) = P(X <= 4). A level PINNED exactly at the threshold is the one case
- * the engine scores differently from the words ("exactly 4%" meets "<= 4"). The wire stays "<=" for it too (R4 in
- * `limit-operator-as-stated.test.ts`); CEE withholds that option's result for that limit instead
- * (`strictLimitsPinnedAtThreshold` → `deriveConstraintVerdict`; `strict-limit-pinned-at-threshold.test.ts`).
+ * Only a CONSISTENT pair goes strict (`>` beside `>=`, `<` beside `<=`); any other stated value is dropped and the held,
+ * inclusive bound is sent (fail closed: a ceiling is never turned into a floor). The stored rows are never touched; an
+ * array with nothing to change is returned as the SAME reference.
+ *
+ * The pinned-at-threshold withhold (`strictLimitsPinnedAtThreshold` → `deriveConstraintVerdict`) is kept: it now only
+ * withholds a figure the engine scores correctly (conservative), never one it scores wrongly.
  */
-function withholdStatedOperator<C>(goalConstraints: C): C {
+export function wireGoalConstraints<C>(goalConstraints: C): C {
   if (!Array.isArray(goalConstraints)) return goalConstraints;
-  const carries = (c: unknown): c is Record<string, unknown> =>
-    c !== null && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'operator_as_stated');
+  // `role` (Batch C: a goal target, `goal-targets-joint.ts`) is CEE's own metadata and never travels either.
+  const carries = (c: unknown): c is Record<string, unknown> => c !== null && typeof c === 'object'
+    && (Object.prototype.hasOwnProperty.call(c, 'operator_as_stated') || Object.prototype.hasOwnProperty.call(c, 'role'));
   if (!goalConstraints.some(carries)) return goalConstraints;
   return goalConstraints.map((c: unknown) => {
     if (!carries(c)) return c;
-    const { operator_as_stated: _stated, ...engine } = c;
-    return engine;
+    const { operator_as_stated: stated, role: _role, ...engine } = c;
+    const strict = (stated === '>' && engine.operator === '>=') || (stated === '<' && engine.operator === '<=');
+    return strict ? { ...engine, operator: stated } : engine;
   }) as C;
 }
 
@@ -336,6 +345,7 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  readonly evaluatedScenarioRevision?: number;
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /** The current graph (PLoT consumes as-is). */
@@ -503,6 +513,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const args: RunAnalysisArgs = argsResult.data;
+    // Existing chip parameters carry the Agent's reading; absent/invalid never defaults to not_stated.
+    const effectsTiming = effectsTimingOf(invocation.payload.kind === 'message'
+      ? invocation.payload.chip?.parameters?.effects_timing : undefined);
 
     // --- 2. Load scenario snapshot ----------------------------------------
     let snapshot: RunAnalysisScenarioSnapshot;
@@ -597,6 +610,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // Freeze the read-B identity before dispatch; never consult the store for this Run again (B2).
+    const evaluatedScenarioRevision = snapshot.evaluatedScenarioRevision;
+    const frozenRevision = typeof evaluatedScenarioRevision === 'number'
+      && Number.isSafeInteger(evaluatedScenarioRevision) && evaluatedScenarioRevision >= 0
+      ? evaluatedScenarioRevision : undefined;
     const shareChanceBlocked = shareChanceRunBlock(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (shareChanceBlocked !== null) {
       throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
@@ -1181,7 +1199,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: toOutboundGraph(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)),
+      // Recovery Batch B (L6): a stated level range changes no compute; the wire copy drops it (`withoutStatedLevelRanges`).
+      graph: toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph))),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -1196,7 +1215,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
-      plotPayload.goal_constraints = withholdStatedOperator(withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints));
+      plotPayload.goal_constraints = wireGoalConstraints(withholdRetainedLimitFrames(snapshot.rawPersistedGraph ?? snapshot.graph,
+        withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints)));
       const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
       if (frameWithheld.length > 0) {
         log.info(
@@ -1980,6 +2000,35 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
+    const unresolvedLimits = unresolvedRetainedLimits(snapshot.rawPersistedGraph ?? snapshot.graph);
+    const retainedLimitReason = retainedLimitWithheldLine(snapshot.rawPersistedGraph ?? snapshot.graph);
+    if (unresolvedLimits.length > 0) {
+      const ids = unresolvedLimits.map((c) => c.constraint_id);
+      const optionIds = new Set(finalWireOptions.flatMap((o) => {
+        const id = optionIdOf(o as Record<string, unknown>);
+        return id === undefined ? [] : [id];
+      }));
+      response = withholdOptionLimitScores(response, new Map(ids.map((id) => [id, optionIds])));
+      response = withholdOptionGoalFigures(response, optionIds, {
+        code: RETAINED_LIMIT_WITHHOLD_CODE, severity: 'warning', source: 'cee',
+        message: retainedLimitReason, constraint_ids: ids,
+      });
+      // Existing per-limit/joint refusal carriers. CEE's retained-question evidence, not an engine claim.
+      const env = response as Record<string, unknown>;
+      // Older engine envelopes carry the aggregate joint here instead of on each option.
+      const legacyConstraints = env.constraint_analysis;
+      if (legacyConstraints !== null && typeof legacyConstraints === 'object' && !Array.isArray(legacyConstraints)) {
+        const { joint_probability: _joint, joint_probability_precision: _precision, ...kept } = legacyConstraints as Record<string, unknown>;
+        env.constraint_analysis = kept;
+      }
+      const priorJoint = env.joint_withheld as { constraint_ids?: string[] } | undefined;
+      env.joint_withheld = { reason: 'limit_unscored', constraint_ids: [...new Set([...(priorJoint?.constraint_ids ?? []), ...ids])] };
+      response = appendInferenceWarning(response, {
+        code: 'CONSTRAINT_TARGET_UNRELIABLE', severity: 'warning', source: 'cee', constraint_ids: ids,
+        reason: unresolvedLimits.some((c) => c.retained_unresolved_limit?.reason === 'retained_limit_quantity_unresolved')
+          ? 'retained_limit_quantity_unresolved' : 'retained_limit_equivalence_unresolved', message: retainedLimitReason,
+      });
+    }
     const identicalArms = detectIdenticalArms(response, finalWireOptions);
 
     // --- 5. Check analysis status (V5 alpha hardening Phase 2.3) ---------
@@ -2197,6 +2246,19 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
+    // ⭐ Recovery Batch C (amendment 3): a target read more than one way is not tested until the user says which.
+    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id);
+    // ⛔ AMEND item 2 (kept, DL 12 Oct): a level chance on Olumi's own estimate of the goal's level is refused by the licence;
+    // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
+    // ⭐ D3 (AIE #94 6128697025; recovery Batch D): a change target whose effects are not stated at the period's end (ruling
+    // 12) is refused by the licence; the Run says why — never an invisible null. No next step is promised.
+    // ⭐ G (AIE amendments 6131950992): unless the licence reads it CONDITIONALLY — this Run's sent target is the held one and
+    // the AI reads effects as in place by the period or not stated (the licence below reads the same value).
+    const periodEndInputs = { sentRun: plotPayload, brief: snapshot.briefText ?? null, effects_timing: effectsTiming };
+    const withholdForPeriodEnd = <E,>(run: E, graph: unknown, goalId: unknown): E => withholdForPeriodEndEffects(run, graph, goalId, periodEndInputs);
+    response = [withholdForOlumiGoalLevel, withholdForPeriodEnd]
+      .reduce((run, withhold) => withhold(run, graphForAnalysis, snapshot.goal_node_id), response);
+
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
@@ -2222,7 +2284,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
     // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
-    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
+    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -2858,9 +2920,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
+    // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
+    // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
+    const sentRun = plotPayload;
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
-      snapshot.rawPersistedGraph ?? graphForAnalysis);
+      // Hiring row 3 (14 Oct): read with the period-end withhold's own inputs, so a change goal's conditional licence holds here too.
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, periodEndInputs),
+      snapshot.rawPersistedGraph ?? graphForAnalysis,
+      // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
+      // so a several-targets joint names exactly the conditions ISL counted on each draw.
+      // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
+      { storedConstraints: snapshot.goal_constraints, sentConstraints: plotPayload.goal_constraints, sentRun, perLimit: constraintVerdict.perLimit,
+        brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
@@ -3002,7 +3073,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       return disclosedHeadline !== null && headline !== null
         ? disclosedHeadline + summary.slice(headline.length) : summary;
     })();
-    const summary = composedSummary;
+    const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -3145,7 +3216,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       .map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
       withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0),
-      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0);
+      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0, submittedOptionsForMethod(factCandidate.result));
 
     // --- 7. Zod-validate the fact ----------------------------------------
     //
@@ -3216,6 +3287,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     return {
       assistant_text: summary,
       handler_facts: [parsed.data],
+      ...(frozenRevision !== undefined
+        ? { __run_evaluated_revision: { run_id: runId, revision: frozenRevision } } : {}),
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
       // Internal channel (never the wire envelope directly) — the

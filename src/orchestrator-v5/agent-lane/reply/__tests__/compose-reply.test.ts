@@ -22,7 +22,7 @@ import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
   composeReplyShape, shapeFromDerivedAnswerText, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
   HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE,
@@ -876,15 +876,14 @@ describe('the served corpus', () => {
 });
 
 describe('the producer half: one shape rule for every model', () => {
-  it('names the construct: one sentence, at most three bullets, More detail, the question last', () => {
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('begin with one short sentence that answers');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('at most three bullets');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 20 words');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('More detail');
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('If you ask a question, it stays your last sentence.');
+  it('names the shape rule: the useful answer stays in the visible reply, never a hidden fold', () => {
+    // ⛔ CHANGED EXPECTATION (prompt P12, AIE one-pass packet 94ad9c8f…): the construct's word budgets and its "More detail"
+    // fold premise are retired; the role's own schema stays and the answer is said where the user sees it.
+    expect(REPLY_SHAPE_INSTRUCTION).toBe('Keep the existing reply structure where required by this role’s schema, but put the useful answer '
+      + 'and necessary explanation in the visible answer. Do not rely on a host-authored headline, hidden More detail section or later '
+      + 'appendix to communicate it.');
     expect(REPLY_SHAPE_INSTRUCTION).not.toMatch(/[‒-―]/);
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 75 words, with one reasoning move and at most one question or next action');
-    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toEqual(['20', '75']);
+    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toBeNull();
   });
 });
 
@@ -896,7 +895,7 @@ describe('timing: every regex on the path scales linearly (20k -> 160k, min of 7
     ['terminators', (n) => `${'.'.repeat(n)} A${'?'.repeat(n)}`],
     ['sentences and bullets', (n) => Array.from({ length: Math.ceil(n / 20) }, (_, i) => (i % 3 === 0 ? `- Point ${i} is here.` : `Sentence ${i} is here.`)).join('\n')],
   ];
-  it.each(shapes)('%s', (_name, make) => {
+  timingIt.each(shapes)('%s', (_name, make) => {
     const small = make(20_000);
     const large = make(160_000);
     expect(large.length).toBeGreaterThanOrEqual(small.length * 3);

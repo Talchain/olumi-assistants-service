@@ -1,3 +1,5 @@
+import { retainedLimitOnlyNodeIds } from '../../graph/retained-limit.js';
+import { isUnverifiedUserMaterial } from './provenance-display.js';
 /**
  * Analysis-Ready Transformer
  *
@@ -36,7 +38,7 @@ import {
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
 import { readIsBaseline } from "../baseline-identity.js";
-import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
+import { valueClassOf } from "../graph-readiness/obligation-provenance.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
 // ⭐ ROADMAP 2.1266 — ONE authority on repair-authored option→factor edges,
@@ -500,7 +502,8 @@ export interface InterventionDetail {
  * (`classifyValueSource`); Olumi's (`ai_drafted`, `system_repaired`) is labelled, every other level reads as before.
  */
 function isOlumisLevel(factorNode: NodeV3T): boolean {
-  const owner = classifyValueSource((factorNode.observed_state as { source?: unknown } | undefined)?.source);
+  if (isUnverifiedUserMaterial(factorNode.observed_state)) return false;
+  const owner = valueClassOf(factorNode.observed_state);
   return owner === "ai_drafted" || owner === "system_repaired";
 }
 
@@ -1323,11 +1326,13 @@ export function buildAnalysisReadyPayload(
 
   // Find unreachable controllable factors
   const unreachableControllableBlockers: AnalysisBlockerT[] = [];
+  const retainedLimitOnly = retainedLimitOnlyNodeIds(graph);
   for (const node of graph.nodes) {
     if (node.kind !== "factor") continue;
     // Exclude constraint nodes by ID prefix (compound-goals creates constraint_* nodes with kind=constraint,
     // but guard against any that might be mis-tagged as factor)
     if (node.id.startsWith("constraint_")) continue;
+    if (retainedLimitOnly.has(node.id)) continue;
     if (transitivelyReachableFactors.has(node.id)) continue;
     // Skip factors that already have mapped interventions (reachable via V3 option data)
     if (factorsWithInterventions.has(node.id)) continue;

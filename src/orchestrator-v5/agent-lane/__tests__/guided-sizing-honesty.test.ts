@@ -248,10 +248,13 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const run = pointWordRun(measured.graph);
     const lines = goalChanceScreenLinesForAgent(run, measured.graph, true);
     expect(lines).toHaveLength(2);
-    expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 relationship (see Check estimates).');
+    // Batch C: ruling r1 item 6 (amendment 7) — ‘Monthly churn’ 3% and ‘Paying Pro subscribers’ 250 are Olumi's inferred
+    // starting values on the goal path, so they are named beside RC4's one relationship (still 1, the definition excluded).
+    expect(lines[0]!.olumi_estimate_link_count).toBe(1);
+    expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 2 starting values and 1 relationship (see Check estimates).');
     const reply = withScreenLinesOwed('This Run is ready.', lines);
     expect(reply.text).toContain(lines[0]!.chance);
-    expect(reply.text).toContain('using Olumi\'s estimates for 1 relationship (see Check estimates)');
+    expect(reply.text).toContain('using Olumi\'s estimates for 2 starting values and 1 relationship (see Check estimates)');
   });
 
   it('MUTANT: relaxed case(c), but the narrator gave the unlabelled chance → RED', () => {
@@ -262,7 +265,8 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const bare = '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.';
     const owed = withScreenLinesOwed(bare, [lines[0]!]).text;
     const text = withEstimateGoalPointsAtEgress({ assistant_text: owed }, { analysisResult: run, graph, current: true }).assistant_text;
-    expect(text).toContain('using Olumi\'s estimates for 1 relationship (see Check estimates)');
+    // Batch C: ruling r1 item 6 — the inferred starting values are named too.
+    expect(text).toContain('using Olumi\'s estimates for 2 starting values and 1 relationship (see Check estimates)');
     expect(text).not.toContain(bare);
   });
 
@@ -276,7 +280,8 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     try {
       const run = pointWordRun(graph);
       const lines = goalChanceScreenLinesForAgent(run, graph, true);
-      const exact = `using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)`;
+      // Batch C: ruling r1 item 6 — the two inferred starting values are named first; k is still RC4's relationship count.
+      const exact = `using Olumi's estimates for 2 starting values and ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)`;
       expect(lines[0]!.olumi_estimate_link_count).toBe(k);
       expect(lines[0]!.chance).toContain(exact);
       const screenReply = withScreenLinesOwed('This Run is ready.', lines).text;

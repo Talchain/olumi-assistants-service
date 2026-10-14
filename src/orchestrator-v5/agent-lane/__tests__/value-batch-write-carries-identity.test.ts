@@ -27,7 +27,7 @@ const BASE: Node[] = [
 ];
 const wired = (ns: Node[]) => ns.filter((o) => o.kind === 'option').flatMap((o) => ns.filter((f) => f.kind === 'factor' && f.id !== 'coordination_load')
   .map((f) => ({ from: o.id, to: f.id, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' })));
-const ASSUMPTIONS = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
+const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
 const LEVELS = [
   { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires' },
   { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },

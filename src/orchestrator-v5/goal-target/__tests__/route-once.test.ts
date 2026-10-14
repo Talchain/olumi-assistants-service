@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { endsOfGraph, heldLinkBeforeRouteOnce, heldLinkOf, routeOnceCoveredSources, withHeldUserLinks } from '../held-user-links.js';
 import { goalChanceDriverOf } from '../goal-chance-driver.js';
@@ -244,7 +244,7 @@ describe('rule R route-once', () => {
     expect(endsOfGraph(graph)(null).routeOnce).toBe(false);
   });
 
-  it('Scaling: layered DAG, 4000/500 nodes, min of 7 calibrated batches, ratio < 22', () => {
+  timingIt('Scaling: layered DAG, 4000/500 nodes, min of 7 calibrated batches, ratio < 22', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const layered = (count: number): Graph => {
       const nodes = Array.from({ length: count }, (_, i) => ({ id: `n${i}`, kind: 'chance', label: `n${i}` }));

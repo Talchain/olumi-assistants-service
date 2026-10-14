@@ -43,11 +43,6 @@ import {
 } from '../../cee/decision-review/prose-fact-agreement.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
-import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
-import {
-  deriveWinnerConstraintInfeasibility,
-  readMayNameLeadingOptionFromResult,
-} from '../../orchestrator/context/constraint-feasibility.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // F3 — the runner-up gap-statistic policy. Installed at the enricher's single
@@ -68,8 +63,6 @@ import { projectRunGraphForDecisionReview } from './decision-review-graph-projec
 // `enrichment.flip_thresholds[]` shape, shared with the coach context path so
 // the two surfaces cannot drift into disagreeing about the same rows.
 import {
-  readTopLevelFlipRows,
-  flipRowScaleUnsafeForPromptUnits,
   type TopLevelFlipRow,
 } from '../context/flip-threshold-rows.js';
 // M1 (Codex r2 pre-merge review): the option-result source precedence is now
@@ -79,10 +72,8 @@ import {
 // import stable.
 import {
   readOptionResultSources,
-  isUsableWinProbability,
 } from '../../orchestrator/context/option-result-source.js';
-import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
-import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
+import { buildLicensedRunFacts, type LicensedRunFacts } from '../context/licensed-run-facts.js';
 import {
   buildScaffoldPromptDisclosure,
   type ScaffoldedOptionRecord,
@@ -170,6 +161,8 @@ export interface EnrichDecisionReviewInput {
    * Optional: absent behaves exactly as before.
    */
   readonly runGraph?: unknown;
+  /** Latest server-side graph snapshot, distinct from Run grounding. */
+  readonly currentGraph?: unknown;
   /**
    * Optional write-back sink for the decision_review LLM call's attribution
    * (model / provider / token usage). Populated as a side effect ONLY on the
@@ -286,22 +279,8 @@ export async function enrichRunAnalysisWithDecisionReview(
       ? buildScaffoldPromptDisclosure(input.scaffoldedOptions)
       : undefined;
 
-  const invokeInput = buildInvokeInput(
-    input.brief,
-    enrichment,
-    fact.result.leading_option_id,
-    scaffoldDisclosure,
-    // T1 claim safety, read from the FACT (typed `result.constraint_verdict`
-    // first, interim `enrichment.__cee_claim_safety` second, fail-closed on
-    // neither). This is the only place that can see it: `buildInvokeInput`
-    // receives `enrichment` alone, and since schemas 0.25.0 the verdict is a
-    // SIBLING of that record, not a member of it.
-    readMayNameLeadingOptionFromResult(fact.result),
-    // The graph THIS RUN analysed. `enrichment.graph` is absent on this path as
-    // a documented steady state, so without this the reviewing model receives
-    // `<GRAPH>{}</GRAPH>` — 21 characters against a 43,100 budget, measured live.
-    input.runGraph,
-  );
+  const licensedFacts = buildLicensedRunFacts(fact, input.scenarioId, input.runGraph, input.currentGraph);
+  const invokeInput = buildInvokeInput(input.brief, licensedFacts, scaffoldDisclosure, input.runGraph);
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
       brief_present: true,
@@ -428,6 +407,7 @@ export async function enrichRunAnalysisWithDecisionReview(
       requestId: input.requestId,
       timeoutMs: DECISION_REVIEW_TIMEOUT_MS,
       signal: childAbort.signal,
+      licensedFacts,
     });
     // V5 holistic audit UU-16: record model resolution unconditionally once
     // the adapter call returned. The decision_review site was previously
@@ -733,11 +713,12 @@ export async function enrichRunAnalysisWithDecisionReview(
     // would take out the whole review (bias findings, evidence enhancements,
     // flip thresholds) and tell the user nothing. See
     // `compose/winner-naming-egress-guard.ts` for the full reasoning.
-    const winnerNaming = applyWinnerNamingEgressGuard(
+    const winnerNaming = typeof invokeInput.winner.label === 'string' && typeof invokeInput.winner.win_probability === 'number'
+      ? applyWinnerNamingEgressGuard(
       proseFact.output as Record<string, unknown>,
-      invokeInput.winner,
+      { ...invokeInput.winner, label: invokeInput.winner.label, win_probability: invokeInput.winner.win_probability },
       input.requestId,
-    );
+    ) : { value: proseFact.output, substituted: false, details: null };
     if (winnerNaming.substituted && winnerNaming.details !== null) {
       // Not routine. This is a review that named something the analysed model
       // does not contain — the condition the live path could not previously see.
@@ -889,173 +870,32 @@ export function buildInvokeInputForTests(
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
   scaffoldDisclosure?: string,
-  /**
-   * T1 claim safety. THREADED, not re-read from `enrichment`: since
-   * @talchain/schemas 0.25.0 the verdict lives on `result.constraint_verdict`,
-   * which this function never sees. Defaults to `true` so every pre-existing
-   * caller of this test seam keeps its licensed-claim behaviour; the
-   * production caller always passes the fact's real verdict.
-   */
-  mayNameLeadingOption = true,
-  /** See `buildInvokeInput`. Absent behaves exactly as before. */
+  mayNameLeadingOption = false,
   runGraph?: unknown,
 ): DecisionReviewInvokeInput | null {
-  return buildInvokeInput(
-    brief,
-    enrichment,
-    leadingOptionId,
-    scaffoldDisclosure,
-    mayNameLeadingOption,
-    runGraph,
-  );
+  // Synthetic fixture admission is explicit; this seam is never used by runtime.
+  const graph = runGraph ?? readGraph(enrichment);
+  const result: Extract<HandlerFact, { fact_type: 'run_analysis' }>['result'] = { scenario_id: 'test-scenario', summary: '', enrichment: { flip_thresholds_status: 'computed', ...enrichment }, leading_option_id: leadingOptionId,
+    graph_hash_at_run: 'test-run', constraint_verdict: { constraint_verdict_state: mayNameLeadingOption ? 'not_applicable' : 'unevaluated',
+      may_name_leading_option: mayNameLeadingOption } };
+  const facts = buildLicensedRunFacts({ fact_type: 'run_analysis', fact_version: 1, noop: false, result },
+    'test-scenario', graph, undefined, 'test-run');
+  return buildInvokeInput(brief, facts, scaffoldDisclosure, runGraph);
 }
 
 function buildInvokeInput(
   brief: string,
-  enrichment: Record<string, unknown>,
-  leadingOptionId: string | null,
+  facts: LicensedRunFacts,
   scaffoldDisclosure: string | undefined,
-  /**
-   * T1 claim safety — the turn's OWN answer to "may a leading option be
-   * named", read from the run_analysis fact by the caller.
-   *
-   * THREADED RATHER THAN RE-READ, and that is the fix this parameter exists
-   * for. It used to be derived here as
-   * `readMayNameLeadingOption(enrichment)` — the legacy enrichment-only
-   * reader, renamed `legacyReadMayName_DO_NOT_USE` in 2026-07-27's R8 fix
-   * precisely because of this incident — which worked only while the
-   * verdict rode INSIDE the enrichment record as the interim
-   * `__cee_claim_safety` stamp. Schemas 0.25.0 moves it to
-   * `result.constraint_verdict` — a sibling of `enrichment`, invisible from
-   * here — so the old read would have silently returned `false` on EVERY
-   * turn, permitted or not, suppressing the recommendation universally with
-   * no error anywhere. Exactly the class of silent skew the parent CLAUDE.md
-   * calls the dominant risk at a boundary.
-   */
-  mayNameLeadingOption: boolean,
-  /**
-   * The graph this run analysed, threaded like `brief` because the enrichment
-   * envelope does not carry one. See `runGraph` on `EnrichDecisionReviewInput`
-   * for the measurement and for why a turn-start reread is the wrong graph.
-   * Optional: absent behaves exactly as before.
-   */
   runGraph?: unknown,
 ): DecisionReviewInvokeInput | null {
-  // Phase 3A fix (2026-05-17): walk every available results source until
-  // one can match `leading_option_id`. The previous "first non-empty
-  // source wins" shape would skip `no_winner` when (e.g.) a legacy
-  // `enrichment.results` was present but truncated, even though the
-  // current `enrichment.option_comparison` contained the declared
-  // leader. Returning at the first matching source guarantees we honour
-  // PLoT's declared winner whenever ANY source carries it.
-  //
-  // Source ordering for the null-leader case (no declared winner): WALK the
-  // sources current-first and take the first that yields a highest-probability
-  // winner. We deliberately do NOT pool entries across sources — that would mix
-  // shapes and could double-count the same option. (M1 minor: the previous
-  // `sources[0]` shortcut silently coerced to no_winner / a thin-current 0%
-  // when the current source had entries but none carried a usable
-  // win_probability, even though a richer legacy source could supply one.)
-  // Status gate (shared across all winner surfaces via the ONE
-  // isRecommendableOption predicate): a FAILED / skipped option is never
-  // crowned as the winner and never counted as the runner-up it is measured
-  // against, mirroring the direct receipt (run-analysis.ts), compactAnalysis
-  // and projectAnalysis. Applied per-source BEFORE selection so `chosenSource`
-  // — which selectRunnerUp reads — is already status-filtered. Absent status
-  // stays recommendable, so status-less enrichments are unaffected. A declared
-  // `leadingOptionId` that points at a failed option finds no match in any
-  // filtered source and yields the honest `no_winner` outcome.
-  const sources = readResultsArraySources(enrichment).map((source) =>
-    source.filter(isRecommendableOption),
-  );
-  if (sources.length === 0) return null;
-
-  let winner: DecisionReviewInvokeInput['winner'] | null = null;
-  let chosenSource: ReadonlyArray<Record<string, unknown>> | null = null;
-
-  if (typeof leadingOptionId === 'string' && leadingOptionId.length > 0) {
-    for (const source of sources) {
-      const w = selectWinner(source, leadingOptionId);
-      if (w !== null) {
-        winner = w;
-        chosenSource = source;
-        break;
-      }
-    }
-  } else {
-    for (const source of sources) {
-      const w = selectWinner(source, null);
-      if (w !== null) {
-        winner = w;
-        chosenSource = source;
-        break;
-      }
-    }
+  if (!facts.hasReviewOptions) return null;
+  const enrichment = facts.enrichment;
+  let winner: DecisionReviewInvokeInput['winner'] = facts.winner;
+  const runnerUp = facts.runnerUp;
+  if (config.features.constraintInfeasibleGate && facts.constraintInfeasible) {
+    winner = { ...winner, constraint_infeasible: true };
   }
-
-  if (winner === null || chosenSource === null) return null;
-  const runnerUp = selectRunnerUp(chosenSource, winner);
-
-  // Trust-spine board #1 (CEE half): when the leading option violates a hard
-  // constraint, flag the winner infeasible so the decision-review prompt does
-  // not present it as a clean pick. Detection single-sourced (both wire shapes)
-  // in constraint-feasibility.ts, keyed on the SAME winner id.
-  //
-  // `constraint_infeasible` is the NARROW claim — "the leader breaks a limit we
-  // DID check" — and it stays keyed on its own predicate, behind its own gate,
-  // because the prompt uses it to say something specific about a checked limit.
-  if (config.features.constraintInfeasibleGate) {
-    const feasibility = deriveWinnerConstraintInfeasibility(enrichment, winner.id);
-    if (feasibility.infeasible) {
-      winner = { ...winner, constraint_infeasible: true };
-    }
-  }
-
-  // T1 claim safety — `recommendation_suppressed` is the WIDE claim: "we cannot
-  // stand behind naming a leader at all". It is now keyed on the ONE constraint
-  // verdict, read off the stamp the run_analysis handler persisted
-  // (`deriveConstraintVerdict`, the single owner), instead of on
-  // `deriveWinnerConstraintInfeasibility`.
-  //
-  // WHY THIS CHANGED. Keyed on the infeasibility predicate it fired for exactly
-  // ONE of the three withholding states — `evaluated_infeasible` — and never for
-  // `unevaluated` or `identity_unresolved`. That is the G-CEE-1 defect in
-  // miniature: on the live `unevaluated` run (staging 1c078f0) the suppression
-  // flag existed, was correct, and simply did not fire, so the prompt was told
-  // to name a winner and `blocks[1].body` came back "The MacBook Pro leads by a
-  // margin of about 52 percentage points" underneath "no option can be put
-  // forward yet".
-  //
-  // Suppressing HERE is the earliest possible point: it stops the leader claim
-  // being AUTHORED, so it is never written into `enrichment.decision_review` and
-  // never persisted onto the fact.
-  //
-  // ⚠ IT IS NOT A GATE, AND THE LIVE BYTES SAY SO. This flag is an INSTRUCTION
-  // TO A MODEL. On the POST-#710 walk (staging `227e0aa`, which carries this
-  // suppression) the withheld `unevaluated` turn ran its decision_review call —
-  // two LLM calls in `_diagnostic_trace.llm_calls`, `decision_review
-  // .produced_at` 8s after `decision_brief.created_at` — with
-  // `recommendation_suppressed: true` set, and the model returned
-  // *"Defer and Keep Current Machines (Status Quo) leads by about 35 percentage
-  // points…"* anyway, on 5/5 withheld bodies. Prompt-level suppression reduces
-  // the rate; it does not decide the outcome. The deterministic gate is the
-  // egress projection (ROADMAP 1.218, `compose/withheld-claim-projection.ts`),
-  // which drops this blob whole on a withheld turn. This stays because a claim
-  // never authored is strictly better than one dropped downstream.
-  //
-  // Fails closed via `readMayNameLeadingOptionFromResult` at the call site.
-  // `buildInvokeInput` is reached only from
-  // `enrichRunAnalysisWithDecisionReview`, which runs on the run_analysis fact
-  // the handler just wrote, so the verdict is always present on the production
-  // path.
-  //
-  // Deliberately NOT behind `constraintInfeasibleGate`: that flag governs the
-  // narrow infeasibility claim above. A claim-safety withhold that a feature
-  // flag can switch off is not a withhold.
-  if (!mayNameLeadingOption) {
-    winner = { ...winner, recommendation_suppressed: true };
-  }
-
   // Build label/unit lookups from enrichment.graph.nodes[]. The graph is
   // opaque (Record<string, unknown>) on this path, so reads are defensive.
   // Same maps are reused by readFlipThresholdData and readIslResults so
@@ -1073,17 +913,15 @@ function buildInvokeInput(
   const graphProjection = projectRunGraphForDecisionReview(readGraph(enrichment), runGraph);
   const graph = graphProjection.graph;
   const labelMap = buildNodeLabelMap(graph);
-  const unitMap = buildNodeUnitMap(graph);
 
-  const flipDerivation = readFlipThresholdData(enrichment, labelMap, unitMap);
+  const flipDerivation = readFlipThresholdData(facts);
   const flipThresholdData = flipDerivation.rows;
-  const islResults = readIslResults(enrichment, labelMap);
+  const islResults = readIslResults(enrichment, labelMap, facts.mayNameLeader);
   const dcResult = normaliseDeterministicCoachingFromM1(enrichment);
   const deterministicCoaching = dcResult.value;
 
-  const margin = runnerUp !== null
-    ? winner.win_probability - runnerUp.win_probability
-    : null;
+  const margin = runnerUp !== null && typeof winner.win_probability === 'number'
+    ? winner.win_probability - runnerUp.win_probability : null;
   const robustnessLevel = readRobustnessLevel(enrichment);
 
   const meta: DecisionReviewMeta = {
@@ -1174,83 +1012,7 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
  * -probability entry (returns null if none of the entries carry a usable
  * win_probability).
  */
-export function selectWinner(
-  results: ReadonlyArray<Record<string, unknown>>,
-  leadingOptionId: string | null,
-): DecisionReviewInvokeInput['winner'] | null {
-  if (results.length === 0) return null;
-  if (typeof leadingOptionId === 'string' && leadingOptionId.length > 0) {
-    const byId = results.find(
-      (r) => r.option_id === leadingOptionId || r.id === leadingOptionId,
-    );
-    return byId && isUsableWinProbability(byId.win_probability)
-      ? projectOptionAsWinner(byId)
-      : null;
-  }
-  const top = highestWinProbability(results);
-  return top ? projectOptionAsWinner(top) : null;
-}
-
-function selectRunnerUp(
-  results: ReadonlyArray<Record<string, unknown>>,
-  winner: DecisionReviewInvokeInput['winner'],
-): DecisionReviewInvokeInput['runner_up'] {
-  // Filter against BOTH `option_id` and `id` so entries from the
-  // `option_comparison` shape (which populates both) and the
-  // `decision_brief.options` shape (which only populates `option_id`)
-  // are both excluded correctly from the runner-up candidate set.
-  const others = results.filter(
-    (r) => r.option_id !== winner.id && r.id !== winner.id,
-  );
-  const top = highestWinProbability(others);
-  return top ? projectOptionAsWinner(top) : null;
-}
-
-function highestWinProbability(
-  results: ReadonlyArray<Record<string, unknown>>,
-): Record<string, unknown> | null {
-  let best: Record<string, unknown> | null = null;
-  let bestProb = -Infinity;
-  for (const r of results) {
-    // Round-4 review MAJOR-A: gate on the SHARED usable-probability predicate
-    // (finite AND in [0,1]) so the null-leader + runner-up paths skip a thin /
-    // out-of-range source exactly like the other selectors.
-    if (!isUsableWinProbability(r.win_probability)) continue;
-    const p = r.win_probability;
-    if (p > bestProb) {
-      best = r;
-      bestProb = p;
-    }
-  }
-  return best;
-}
-
-function projectOptionAsWinner(r: Record<string, unknown>): DecisionReviewInvokeInput['winner'] {
-  const id =
-    typeof r.option_id === 'string'
-      ? r.option_id
-      : typeof r.id === 'string'
-        ? r.id
-        : '';
-  const label =
-    typeof r.option_label === 'string'
-      ? r.option_label
-      : typeof r.label === 'string'
-        ? r.label
-        : id;
-  const winProb = readNumber(r.win_probability) ?? 0;
-  // outcome_mean: read from flat field first, then nested outcome.mean.
-  // PLoT's option_comparison shape carries the value nested; older fixtures
-  // and some test paths use the flat field.
-  const outcomeMean = readNumber(r.outcome_mean)
-    ?? readNumber(readRecord(r.outcome)?.mean);
-  return {
-    id,
-    label,
-    win_probability: winProb,
-    ...(outcomeMean !== null ? { outcome_mean: outcomeMean } : {}),
-  };
-}
+export { selectWinner } from '../context/licensed-run-facts.js';
 
 // `readGraph` is relocated to ../context/enrichment-graph-labels.ts and
 // re-exported below.
@@ -1258,6 +1020,7 @@ function projectOptionAsWinner(r: Record<string, unknown>): DecisionReviewInvoke
 function readIslResults(
   enrichment: Record<string, unknown>,
   labelMap: Map<string, string>,
+  mayNameLeader: boolean,
 ): Record<string, unknown> {
   // PLoT V2RunResponseEnvelope carries factor_sensitivity, robustness, and
   // results at the top level. The decision_review prompt (defaults.ts:1245-
@@ -1359,7 +1122,7 @@ function readIslResults(
       option_label: (typeof r.option_label === 'string' && r.option_label)
         ? r.option_label
         : (typeof r.label === 'string' ? r.label : null),
-      win_probability: typeof r.win_probability === 'number' ? r.win_probability : null,
+      ...(mayNameLeader ? { win_probability: typeof r.win_probability === 'number' ? r.win_probability : null } : {}),
       outcome: {
         mean,
         p10,
@@ -1658,7 +1421,8 @@ interface FlipThresholdDerivation {
 }
 
 /**
- * Derive `flip_threshold_data` — the decision_review prompt's flip input.
+ * Format the licensed object's approved `flip_threshold_data`; no raw Run reads.
+ * Historical rationale below describes the source precedence now owned by licensed-run-facts.
  *
  * ⚠ ROADMAP 2.228 F1 — THIS FUNCTION USED TO READ A SHAPE NOBODY EMITS.
  * It delegated exclusively to {@link collectFactorFlipEntries}, which walks
@@ -1740,9 +1504,7 @@ interface FlipThresholdDerivation {
  * copied from the row's own `direction` string.
  */
 function readFlipThresholdData(
-  enrichment: Record<string, unknown>,
-  graphNodeLabels: Map<string, string>,
-  graphNodeUnits: Map<string, string>,
+  facts: LicensedRunFacts,
 ): FlipThresholdDerivation {
   const project = (
     row: Pick<TopLevelFlipRow, 'factor_id' | 'factor_label' | 'current_value' | 'flip_value' | 'direction' | 'unit'> &
@@ -1775,33 +1537,12 @@ function readFlipThresholdData(
     return out;
   };
 
-  if (Array.isArray(enrichment.flip_thresholds)) {
-    const rows = readTopLevelFlipRows(enrichment, graphNodeLabels, graphNodeUnits);
-    const noEffectCount = rows.filter((r) => r.kind === 'attested_no_flip').length;
-    const pairs = rows.filter((r) => r.kind === 'flip_pair');
-    const kept = pairs.filter((r) => !flipRowScaleUnsafeForPromptUnits(r));
-    return {
-      rows: kept.length > 0 ? kept.map(project) : undefined,
-      source: 'top_level',
-      noEffectCount,
-      scaleRefusedCount: pairs.length - kept.length,
-    };
-  }
-
-  // Legacy branch — reached only when PLoT shipped no `flip_thresholds` key
-  // at all. `collectFactorFlipEntries` is still the shared reader for this
-  // shape (analysis-compact.ts's V4 compact path is its other consumer), so
-  // nothing here re-implements the parse.
-  const entries = collectFactorFlipEntries(
-    enrichment as V2RunResponseEnvelope,
-    graphNodeLabels,
-    graphNodeUnits,
-  );
+  const rows = facts.flipRows;
   return {
-    rows: entries.length > 0 ? entries.map(project) : undefined,
-    source: entries.length > 0 ? 'nested_legacy' : 'none',
-    noEffectCount: 0,
-    scaleRefusedCount: 0,
+    rows: rows.length > 0 ? rows.map(project) : undefined,
+    source: facts.flipSource,
+    noEffectCount: facts.flipNoEffectCount,
+    scaleRefusedCount: facts.flipScaleRefusedCount,
   };
 }
 
@@ -1832,23 +1573,6 @@ export { readGraph, buildNodeLabelMap };
  * `node.data.unit` (the prompt-side convention from the brief).
  * Falls back to `node.observed_state.unit` for older fixtures.
  */
-function buildNodeUnitMap(graph: Record<string, unknown>): Map<string, string> {
-  const map = new Map<string, string>();
-  const nodes = graph.nodes;
-  if (!Array.isArray(nodes)) return map;
-  for (const raw of nodes) {
-    const n = readRecord(raw);
-    if (!n) continue;
-    const id = typeof n.id === 'string' ? n.id : null;
-    if (!id) continue;
-    const data = readRecord(n.data);
-    const obs = readRecord(n.observed_state);
-    const unit = (typeof data?.unit === 'string' ? data.unit : null)
-      ?? (typeof obs?.unit === 'string' ? obs.unit : null);
-    if (unit) map.set(id, unit);
-  }
-  return map;
-}
 
 /**
  * Read robustness.level defensively from the V2 envelope.

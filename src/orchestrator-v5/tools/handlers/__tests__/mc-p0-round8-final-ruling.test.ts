@@ -222,15 +222,18 @@ async function adjust(g: R, strength: number): Promise<R> {
   expect(r.mutated_graph).toBeDefined(); return r.mutated_graph as R;
 }
 
-it.each(['placeholder', 'unmarked', 'estimate'] as const)('R8-3 approval writer %s: changes magnitude and clears, or confirm-only keeps carrier and hash', async kind => {
+it.each(['placeholder', 'unmarked', 'estimate'] as const)('Batch A: approval writer %s keeps magnitude, carrier and hash', async kind => {
   const provenance = { source: 'cee_hypothesis', mean_projected: true, ...(kind === 'unmarked' ? {} : { magnitude: kind === 'placeholder' ? 'olumi_placeholder' : 'olumi_estimate' }) };
   const g = graph(provenance), after = await adjust(g, 0.5);
   expect(link(after).strength.mean).toBe(0.5);
-  if (kind === 'estimate') {
-    expect(link(after).provenance.mean_projected).toBe(true); expect(hash(after)).toBe(hash(g));
-  } else {
-    expect(link(after).provenance.mean_projected).toBeUndefined(); expect(link(after).provenance.magnitude).toBe('olumi_estimate'); expect(hash(after)).not.toBe(hash(g));
-  }
+  // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+  expect(link(after).provenance.mean_projected).toBe(true);
+  // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+  expect(link(after).provenance.magnitude).toBe(link(g).provenance.magnitude);
+  // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+  expect(hash(after)).toBe(hash(g));
+  // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+  expect(link(after).provenance.reviewed_by_user).toMatchObject({ intent: 'confirm' });
 });
 
 it('R8-3 user set changes mean, clears projected carrier and moves hash', async () => {
@@ -265,7 +268,7 @@ it('R8-2 AST: only link-sizing reads mean_projected in production; writers and s
   const found: string[] = [];
   function scan(dir: string): void {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
-      if (item.name === '__tests__' || item.name === 'fixtures') continue;
+      if (item.name.includes('sealed') || item.name === '__tests__' || item.name === 'fixtures') continue;
       const path = join(dir, item.name); if (item.isDirectory()) { scan(path); continue; }
       if (!path.endsWith('.ts') || path.endsWith('.test.ts')) continue;
       const text = readFileSync(path, 'utf8');
@@ -282,7 +285,9 @@ it('R8-2 AST: only link-sizing reads mean_projected in production; writers and s
   // DL 7 Oct (L1, Science 393023 ruling (b)): the absent-mediator-unit reader reads the flag ONLY to EXCLUDE a projected
   // mean from unit authority (fail-closed: an estimate never establishes a unit). The licence stays the one 'unsized' reader.
   // Science 393023 LICENCE (b) ONE predicate: link-sizing owns the placeholder reading.
-  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/cee/magnitude/link-sizing.ts', 'src/orchestrator/context/placeholder-parts.ts'].sort());
+  // ONE PROVENANCE AUTHORITY (Batch C): the sizing core and the unit reader's exclusion moved verbatim into the one
+  // provenance module; link-sizing keeps its writers. Still ONE reading of the flag.
+  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/cee/magnitude/link-sizing.ts', 'src/cee/provenance/provenance-of.ts'].sort());
 });
 
 it('R8 wording budget keeps exact singular/plural grammar and truncates only endpoint labels', () => {

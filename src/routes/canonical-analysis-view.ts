@@ -1,17 +1,20 @@
+import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
+import { goalTargetGapOf } from '../orchestrator-v5/goal-target/goal-target-gap.js';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import { isAnalysisRefusalFact } from '../orchestrator-v5/context/analysis-refusal-continuity.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../orchestrator-v5/compose/leader-licence.js';
-import { goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { readStoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import {
-  goalChanceFactsForAgent, goalChanceDriversForAgent, goalChanceWithheldReasonsForAgent,
+  goalChanceFactsForAgent, goalChanceDriversForAgent, goalChanceWithheldReasonsForAgent, STATUS_QUO_BY_ASSUMPTION,
   type GoalChanceRangeDisplay, type RecordedGoalChanceWithholdReason,
 } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
+import { sayDisplayedPct } from '../orchestrator-v5/goal-target/goal-targets-joint.js';
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Rec : undefined;
@@ -22,6 +25,11 @@ const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 
 const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
+/** Recovery Batch C, amendment 1: the status quo row's face — no figure, no interval. */
+const STATUS_QUO_FACE = 'No change, by assumption';
+/** C1: with no goal target, no option can have a chance of meeting it. */
+const GOAL_TARGET_MISSING = 'goal_target_missing';
+const GOAL_TARGET_MISSING_FACE = 'Not shown yet: needs a target';
 
 /**
  * Moved readGoalIdentityWithheld message selection from DGAI
@@ -43,10 +51,18 @@ function goalIdentityWithheldMessage(result: unknown, option_id: string): string
   if (matched.length === 0) return undefined;
   const hasTargetRequirement = matched.some(warning => warning.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
   const reasons = hasTargetRequirement ? matched.filter(warning => warning.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') : matched;
-  const words = reasons.map(warning => typeof warning.message === 'string' ? warning.message.trim() : '');
+  // R2 C3: a display-safe specific reason ("This comparison turns on the links from …") takes the "Not shown." prefix
+  // instead of being dropped for the generic line. Empty or unsafe words still fall back.
+  // D3 (AIE #94 6128697025; DL 12 Oct): ruling 12's sentence already says the chance "isn’t shown", so it is said as written,
+  // never "Not shown. The chance … isn’t shown".
+  const words = reasons.map(warning => {
+    const itself = rec(warning.detail)?.reason === PERIOD_END_EFFECTS_UNSTATED;
+    const raw = typeof warning.message === 'string' ? warning.message.trim() : '';
+    return { itself, raw: raw === '' || itself || raw.startsWith('Not shown.') ? raw : `Not shown. ${raw}` };
+  });
   const notDisplaySafe = /\b[a-z0-9]+_[a-z0-9_]+\b|[{}[\]<>]/;
-  const allSafe = words.every(raw => raw.startsWith('Not shown.') && raw.length <= 400 && !notDisplaySafe.test(raw));
-  return allSafe ? [...new Set(words)].join(' ')
+  const allSafe = words.every(({ itself, raw }) => (itself ? raw !== '' : raw.startsWith('Not shown.')) && raw.length <= 400 && !notDisplaySafe.test(raw));
+  return allSafe ? [...new Set(words.map(({ raw }) => raw))].join(' ')
     : "Not shown. Olumi can't give each option's figures for this goal from this run.";
 }
 
@@ -81,10 +97,12 @@ export interface CanonicalAnalysisView {
     /** Null means unknown/no Run, never an assertion that this Run is fresh. */
     readonly stale: boolean | null;
     readonly revision: number | null;
-    readonly run_revision: null;
-    readonly basis: 'analysis_graph_hash_interim';
+    readonly run_revision: number | null;
+    readonly run_revision_source?: 'recorded' | 'legacy_unknown';
+    readonly basis: 'analysis_graph_hash_interim' | 'recorded_run_revision';
     readonly reason: FreshnessDerivation['reason'] | null;
-    readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.';
+    readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.'
+      | 'No analysis hash was available; only the scenario revision was compared.';
   };
   readonly leader_licence: LeaderLicence;
   readonly options: readonly {
@@ -92,6 +110,27 @@ export interface CanonicalAnalysisView {
     readonly cell: CanonicalAnalysisCell;
     readonly main_driver: CanonicalMainDriver;
   }[];
+  /**
+   * ⭐ RECOVERY BATCH C (rulings 15–22; amendments 1–7): what the chance in each cell is a chance OF, the sentences said once
+   * beside the chances, and — with several targets — each target's own chance per option and the joint's status. Copied
+   * from the Run's stored licence by the same reader as the Agent's (`goalChanceFactsForAgent`); absent = nothing to add.
+   */
+  readonly goal_chance?: CanonicalGoalChanceDetail;
+}
+
+export interface CanonicalGoalChanceDetail {
+  /** "chance of ‘productivity’ being at least 10% higher than today at three months". */
+  readonly chance_words?: string;
+  /** Disclosures, in order: reference/status quo assumption, effect timing, partial goal, estimate_only, provisional. */
+  readonly notes?: readonly string[];
+  readonly status_quo?: { readonly option_id: string; readonly line: string };
+  readonly targets?: {
+    /** The headline: the joint, licensed with its words, or withheld with its line (and the Fréchet bound when it applies). */
+    readonly joint: { readonly status: 'licensed'; readonly words: string } | { readonly status: 'withheld'; readonly line: string; readonly frechet_line?: string };
+    /** Each target on its own, below the headline, with each option's displayed figure. */
+    readonly per_target: readonly { readonly constraint_id: string; readonly words: string;
+      readonly options: readonly { readonly option_id: string; readonly display: string }[] }[];
+  };
 }
 
 export interface CanonicalAnalysisViewInput {
@@ -129,6 +168,12 @@ export function projectCanonicalAnalysisCells(
     return typeof row?.id === 'string' && typeof row.label === 'string' && row.label.trim() !== ''
       ? [[row.id, row.label] as const] : [];
   }));
+  // C1 (Paul's funding test, 14 Oct): with no goal target no option can have a chance of meeting it, so the missing target
+  // is the ONE root reason, ahead of placeholder and horizon reasons. The standing gap's own reader and words
+  // (`goal-target-gap.ts`, which `modelGapOf` and the action bar's "Set target" read; one target predicate with the target
+  // ask, so a legacy goal's normalised threshold is a target, and a provisional objective is never asked for one).
+  const gap = goalTargetGapOf(graph);
+  const targetMissing = gap === null ? undefined : { code: GOAL_TARGET_MISSING, message: gap.question };
   const compared = rec(rec(result)?.enrichment)?.option_comparison;
   // The roster belongs to the served Run, not today's graph or a refused attempt.
   const optionIds = [...new Set([
@@ -145,7 +190,7 @@ export function projectCanonicalAnalysisCells(
       ? facts.goal_chance_range_display?.[option_id] : undefined;
     const display = Object.hasOwn(facts.goal_chance_display ?? {}, option_id)
       ? facts.goal_chance_display?.[option_id] : undefined;
-    const reasons = goalChanceWithheldReasonsForAgent(result, option_id);
+    const reasons = [...(targetMissing === undefined ? [] : [targetMissing]), ...goalChanceWithheldReasonsForAgent(result, option_id)];
     const recordedLabel = licence?.option_labels_by_option?.[option_id];
     const label = typeof recordedLabel === 'string' && recordedLabel.trim() !== '' ? recordedLabel : labels.get(option_id);
     const reasonByOption = rec(rec(licence)?.withheld_reason_by_option);
@@ -157,11 +202,18 @@ export function projectCanonicalAnalysisCells(
       ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
     // DGAI RunView:125 precedence, applied only to the existing withheld cell.
     const horizonReason = reasons.find(reason => reason.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
-    const withheldWhy = horizonReason?.message ?? identityMessage ?? certainty.get(option_id) ?? reasonLine ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
+    // Recovery Batch C: the status quo of a change target (or of several targets) is no change, by assumption (amendment 1);
+    // a joint withheld for several targets says its own line. Both are the licence's stored words, never composed here.
+    const byAssumption = reasons.find(reason => reason.code === STATUS_QUO_BY_ASSUMPTION);
+    const batchCReason = byAssumption ?? reasons.find(reason => reason.code === 'goal_joint_not_shown');
+    const withheldWhy = targetMissing?.message ?? horizonReason?.message ?? identityMessage ?? certainty.get(option_id) ?? reasonLine
+      ?? batchCReason?.message ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
     const face = faces.get(option_id);
     const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
       : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
-        : reasons.length > 0 ? { kind: 'withheld', reasons, face: horizonReason === undefined ? OPTION_CHANCE_NOT_SHOWN : ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, why: withheldWhy } : { kind: 'none' };
+        : reasons.length > 0 ? { kind: 'withheld', reasons,
+          face: targetMissing !== undefined ? GOAL_TARGET_MISSING_FACE : horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE : OPTION_CHANCE_NOT_SHOWN,
+          why: withheldWhy } : { kind: 'none' };
     return { option_id, cell };
   });
 }
@@ -173,6 +225,12 @@ export function projectCanonicalAnalysisCells(
  */
 export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput): CanonicalAnalysisView {
   const fact = input.runFact != null && !isAnalysisRefusalFact(input.runFact as HandlerFact) ? input.runFact : null;
+  const occurrence = fact === null ? undefined : readRunAnalysisOccurrence(fact);
+  const recordedRevision = occurrence?.evaluated_scenario_revision ?? null;
+  const runRevision = recordedRevision !== null && occurrence?.fact_row_id === input.derivation?.selected_fact_row_id
+    && recordedRevision === input.derivation?.run_revision?.value
+    ? recordedRevision : null;
+  const revisionBasis = input.derivation?.basis === 'recorded_run_revision' && runRevision !== null;
   const freshness = fact === null ? undefined : input.derivation?.freshness;
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
@@ -182,6 +240,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const availability = goalChanceDriverAvailabilityForAgent(result);
   const driverStatus = new Map(availability?.options.map(row => [row.option_id, row]) ?? []);
   const cells = projectCanonicalAnalysisCells(result, input.graph, fact?.result.goal_certainty);
+  const goalChance = canonicalGoalChanceDetail(facts);
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
     ...(fact !== null && freshness === 'stale' ? { face_when_stale: RUN_AGAIN_FOR_CHANCE } : {}),
@@ -193,9 +252,11 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
     staleness: {
       stale: freshness === 'stale' ? true : freshness === 'fresh' ? false : null,
       revision: typeof input.revision === 'number' && Number.isSafeInteger(input.revision) && input.revision >= 0 ? input.revision : null,
-      run_revision: null, basis: 'analysis_graph_hash_interim',
+      run_revision: runRevision, run_revision_source: runRevision === null ? 'legacy_unknown' : 'recorded',
+      basis: revisionBasis ? 'recorded_run_revision' : 'analysis_graph_hash_interim',
       reason: fact === null ? null : input.derivation?.reason ?? null,
-      limitation: 'Hash equality cannot detect brief, framing or stage changes.',
+      limitation: revisionBasis ? 'No analysis hash was available; only the scenario revision was compared.'
+        : 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),
     options: cells.map(({ option_id, cell }) => {
@@ -208,5 +269,23 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
           ? { kind: 'none_licensed', reason: status.reason } : { kind: 'not_recorded' };
       return { option_id, cell, main_driver };
     }),
+    ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
   };
+}
+
+/** Recovery Batch C: the stored licence's sentence parts, as the screen shows them (no calculation, no second licence). */
+function canonicalGoalChanceDetail(facts: ReturnType<typeof goalChanceFactsForAgent>): CanonicalGoalChanceDetail | undefined {
+  const targets = facts.goal_targets;
+  const detail: CanonicalGoalChanceDetail = {
+    ...(facts.goal_chance_words !== undefined ? { chance_words: facts.goal_chance_words } : {}),
+    ...(facts.goal_chance_notes !== undefined ? { notes: facts.goal_chance_notes } : {}),
+    ...(facts.goal_chance_status_quo !== undefined ? { status_quo: facts.goal_chance_status_quo } : {}),
+    ...(targets !== undefined ? { targets: {
+      joint: targets.joint.status === 'licensed' ? { status: 'licensed' as const, words: targets.joint.words }
+        : { status: 'withheld' as const, line: targets.joint.line, ...(targets.joint.frechet_line !== undefined ? { frechet_line: targets.joint.frechet_line } : {}) },
+      per_target: targets.per_target.map(t => ({ constraint_id: t.constraint_id, words: t.words,
+        options: Object.entries(t.pct_by_option).map(([option_id, pct]) => ({ option_id, display: sayDisplayedPct(pct) })) })),
+    } } : {}),
+  };
+  return Object.keys(detail).length > 0 ? detail : undefined;
 }

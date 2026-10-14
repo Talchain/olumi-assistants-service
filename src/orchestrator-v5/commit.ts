@@ -1,5 +1,6 @@
 import { assertShareByDatePreserved } from './goal-target/share-by-date-carrier.js';
 import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
+import { heldAgentCardStillApplies } from './agent-lane/proposal-object/still-applies.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -104,6 +105,7 @@ export interface CommitMetadata {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  readonly run_evaluated_revisions?: Readonly<Record<string, number>>;
   /**
    * Draft graph to persist atomically with the turn insert via
    * append_turn_atomic(p_graph). Both the graph write and the turn row commit
@@ -551,6 +553,8 @@ export function computeSurvivingPriorPendingsDetailed(
   consumedRefs: readonly string[],
   currentGraphHash: string | undefined,
   nowMs: number,
+  /** A held Agent card that still applies to the current graph by its own rule (`heldAgentCardStillApplies`). Absent: none. */
+  heldCardStillAppliesNow?: (pa: PendingAction) => boolean,
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
@@ -647,14 +651,17 @@ export function computeSurvivingPriorPendingsDetailed(
     const pa = clampAskWindows ? clampRecordedAskWindow(priorPa) : priorPa;
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
-    // 4. graph-hash invalidation — only when both hashes are known.
+    // 4. graph-hash invalidation — only when both hashes are known. A held Agent card whose OWN subject is unchanged is
+    // not invalidated by a model move (hiring post3009: approving two link strengths dropped the pending deadline card); it
+    // keeps its pin, which is its proposal's base, and its press re-checks the same rule.
     const preconditionHash = pa.preconditions.graph_hash;
     if (
       typeof preconditionHash === 'string' &&
       preconditionHash.length > 0 &&
       typeof currentGraphHash === 'string' &&
       currentGraphHash.length > 0 &&
-      preconditionHash !== currentGraphHash
+      preconditionHash !== currentGraphHash &&
+      heldCardStillAppliesNow?.(pa) !== true
     ) {
       hashInvalidatedCount += 1;
       continue;
@@ -1391,12 +1398,20 @@ export async function commitDirectAnswer(
         CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
         !isPendingActionExpired(pa, nowMsForPendings),
     );
+  // The graph `effectiveGraphHash` names, for a held Agent card's own rule: the bytes this commit stores, or (a commit that
+  // writes none) the stored graph, read only when such a card's pin differs from it. Unreadable: no card is kept by it.
+  const heldCardGraph: unknown = writesGraph ? graphForStore
+    : (metadata.priorPendingActions ?? []).some((pa) => pa.action.kind === 'apply_proposed_change'
+      && typeof pa.preconditions.graph_hash === 'string' && pa.preconditions.graph_hash !== effectiveGraphHash)
+      ? await (async () => { try { return await store.loadGraph(metadata.scenario_id); } catch { return undefined; } })() : undefined;
+  const heldCardStillAppliesNow = (pa: PendingAction): boolean => heldCardGraph != null && heldAgentCardStillApplies(pa, heldCardGraph);
   const prelimCarryForward = computeSurvivingPriorPendingsDetailed(
     metadata.priorPendingActions ?? [],
     initialChipDerivedPending,
     metadata.consumedPendingRefs ?? [],
     effectiveGraphHash,
     nowMsForPendings,
+    heldCardStillAppliesNow,
   );
   const holdLiveAfterCommit =
     hasLiveConfirmationExpecting(initialChipDerivedPending) ||
@@ -1444,6 +1459,7 @@ export async function commitDirectAnswer(
     metadata.consumedPendingRefs ?? [],
     effectiveGraphHash,
     nowMsForPendings,
+    heldCardStillAppliesNow,
   );
   const survivingPrior = carryForward.survivors;
   // Adversarial round-3 concern 3 — consent-priority cap fill. The plain
@@ -1661,6 +1677,8 @@ export async function commitDirectAnswer(
       llm_calls_used: metadata.llm_calls_used,
       duration_ms: metadata.duration_ms,
       handler_facts: metadata.handler_facts,
+      ...(metadata.run_evaluated_revisions !== undefined
+        ? { run_evaluated_revisions: metadata.run_evaluated_revisions } : {}),
       graph: graphForStore,
       briefText: metadata.briefText,
       pending_actions: finalPendings,

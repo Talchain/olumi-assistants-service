@@ -9,6 +9,7 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
+import { jointWithheldLine } from './goal-targets-joint.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
 import { SHARE_BY_DATE_UNIT, isShareCalendarDate } from './goal-kind.js';
 
@@ -80,7 +81,13 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       && typeof stated.high === 'number' && Number.isFinite(stated.high) && stated.high >= stated.low;
     const estimateUnit = time ? ' months' : typeof stated?.unit === 'string'
       ? `${stated.unit.startsWith('%') ? '' : ' '}${stated.unit}` : ' per month';
-    const estimate = hasEstimate
+    // EBD E2 (AIE 6122738619): a range Olumi assumed from the user's single forecast is named as Olumi's (the card's words), never
+    // as "your …" figures.
+    const assumed = hasEstimate && time && stated.range_origin === 'olumi_estimate' && typeof stated.forecast === 'number'
+      && Number.isFinite(stated.forecast);
+    const estimate = assumed
+      ? `Olumi’s provisional ${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')}-month range`
+      : hasEstimate
       ? `${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')}${estimateUnit}`
       : time ? 'time estimate' : 'pace estimate';
     Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: {
@@ -126,6 +133,10 @@ export interface RecordedGoalChanceWithholdReason {
   readonly message: string | null;
 }
 
+/** Recovery Batch C: the reason codes of the two Batch C withheld cells (by assumption; the joint not shown). */
+export const STATUS_QUO_BY_ASSUMPTION = 'status_quo_by_assumption';
+export const GOAL_JOINT_NOT_SHOWN = 'goal_joint_not_shown';
+
 /** The point predicate's SAME scoped warnings, exposed without reconstructing their cause. */
 export function goalChanceWithheldReasonsForAgent(result: unknown, optionId: string): RecordedGoalChanceWithholdReason[] {
   const reasons = goalChanceWithholdWarningsForOption(result, optionId).map(w => ({
@@ -134,6 +145,18 @@ export function goalChanceWithheldReasonsForAgent(result: unknown, optionId: str
   const licence = goalChanceLicenceForAgent(result);
   const zeroSpread = licence?.withheld_reason_by_option?.[optionId];
   if (zeroSpread !== undefined) return [{ code: zeroSpread.reason, message: zeroSpread.line }, ...reasons];
+  // ⭐ Recovery Batch C, amendment 1: the status quo of a change target is no change, by assumption — its own reason.
+  if (licence?.status_quo?.option_id === optionId) return [{ code: STATUS_QUO_BY_ASSUMPTION, message: licence.status_quo.line }, ...reasons];
+  // ⭐ Recovery Batch C, rulings 15–17: with several targets the headline is the joint; its withheld reason is this option's.
+  const joint = licence?.targets?.joint;
+  if (joint !== undefined && reasons.length === 0 && licence!.option_ids.includes(optionId)) {
+    if (joint.status === 'withheld') {
+      return [{ code: GOAL_JOINT_NOT_SHOWN, message: joint.frechet_line === undefined ? joint.line : `${joint.line} ${joint.frechet_line}` }];
+    }
+    if (joint.withheld_option_ids?.includes(optionId)) {
+      return [{ code: GOAL_JOINT_NOT_SHOWN, message: jointWithheldLine(licence!.targets!.conditions.length, 'not_returned') }];
+    }
+  }
   // Only a licence with a point attests withholding without a recorded cause.
   // An empty licence speaks only through its named zero-spread reasons.
   const hasLicensedPoint = Object.keys(rec(agentLicenceRecordOf(result)?.pct_by_option) ?? {}).length > 0;
@@ -273,6 +296,12 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   goal_chance_range_display?: Record<string, GoalChanceRangeDisplay>;
   goal_chance_words?: string;
   goal_horizon_line?: string;
+  /** Recovery Batch C: the licence's disclosures, said once beside the chances, in order (amendments 1, 2, 4, 7, 10). */
+  goal_chance_notes?: readonly string[];
+  /** Recovery Batch C: the status quo row of a change target, by assumption (amendment 1). */
+  goal_chance_status_quo?: { readonly option_id: string; readonly line: string };
+  /** Recovery Batch C: several targets — each target's own chance, and the joint headline or why it is withheld. */
+  goal_targets?: NonNullable<ReturnType<typeof goalChanceLicenceForAgent>>['targets'];
 } {
   if (!current) return {};
   const licence = goalChanceLicenceForAgent(result);
@@ -284,13 +313,18 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   const target = rec(agentLicenceRecordOf(result)?.target);
   const shareWords = hasChance && typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit) && isShareCalendarDate(target.by_date)
     ? shareGoalChanceWords(target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) : undefined;
+  // ⭐ Recovery Batch C (rulings 18–22): the licence's own words for what this chance is a chance OF, when it carries them.
+  const chanceWords = shareWords ?? (hasChance ? licence?.chance_words : undefined);
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
   const hasRange = Object.keys(rangeDisplay).length > 0;
   const horizon = warningsOf(result).filter((w) => (w.code === GOAL_HORIZON_NOT_TESTED || w.code === GOAL_HORIZON_STEADY_ATTESTED));
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
-    ...(shareWords !== undefined ? { goal_chance_words: shareWords } : {}),
+    ...(chanceWords !== undefined ? { goal_chance_words: chanceWords } : {}),
+    ...(licence?.notes !== undefined && (hasChance || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),
+    ...(licence?.status_quo !== undefined ? { goal_chance_status_quo: licence.status_quo } : {}),
+    ...(licence?.targets !== undefined ? { goal_targets: licence.targets } : {}),
     ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),
     ...(hasRange ? { goal_chance_range_display: rangeDisplay } : {}),
     ...((hasChance || hasRange) && line !== undefined ? { goal_horizon_line: line } : {}),

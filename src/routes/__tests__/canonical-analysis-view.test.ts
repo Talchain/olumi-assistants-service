@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence } from '../../orchestrator-v5/types/handler-fact.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -31,7 +32,8 @@ async function project(args: Json): Promise<Json> {
   return module.projectCanonicalAnalysisView(args as never);
 }
 const cell = (view: Json, id: string): Json => view.options.find((o: Json) => o.option_id === id).cell;
-const graph = { nodes: [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'revenue', kind: 'goal', label: 'Revenue' }], edges: [] };
+// C1 (14 Oct): the goal states its target; with none and no licence the missing target leads (`c1-root-cause-next-step`).
+const graph = { nodes: [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'revenue', kind: 'goal', label: 'Revenue', goal_threshold_raw: 1000, goal_direction: '>=' }], edges: [] };
 const licence = { code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each', option_ids: ['raise', 'keep'], pct_by_option: { keep: 63 } };
 const warning = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', severity: 'warning', message: 'Not shown. The price link is not sized.', option_ids: ['raise'] };
 function result(warnings: Json[]): Json {
@@ -127,4 +129,25 @@ describe('canonical analysis view — one stored Run and the existing licences',
     expect(view.options).toEqual([]);
     expect(view.staleness.stale).toBeNull();
   });
+});
+
+
+it('C2 projection refuses another row’s provenance even when its recorded number matches', async () => {
+  const selected = fact(); const foreign = fact();
+  bindRunAnalysisOccurrence({ fact: selected, fact_row_id: 'selected-row', evaluated_scenario_revision: 7 });
+  bindRunAnalysisOccurrence({ fact: foreign, fact_row_id: 'foreign-row', evaluated_scenario_revision: 7 });
+  const derivation = deriveAnalysisFreshness([foreign], foreign.result.graph_hash_at_run!);
+  const view = await project(input({ runFact: selected, derivation }));
+  expect(view.staleness).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown' });
+});
+
+it('C2 mismatched selected row with the same revision cannot supply revision provenance or basis', async () => {
+  const args = input();
+  bindRunAnalysisOccurrence({ fact: args.runFact, fact_row_id: 'view-run-row', evaluated_scenario_revision: 7 });
+  args.derivation = { ...args.derivation, selected_fact_row_id: 'other-selected-row',
+    run_revision: { value: 7, source: 'recorded' }, basis: 'recorded_run_revision' };
+  const view = await project(args);
+  expect(view.staleness.run_revision).toBeNull();
+  expect(view.staleness.run_revision_source).toBe('legacy_unknown');
+  expect(view.staleness.basis).toBe('analysis_graph_hash_interim');
 });

@@ -1,3 +1,4 @@
+import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /** R2: the opt-in /graph read serves only CEE-authorised original held offers. */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -144,6 +145,7 @@ beforeEach(() => {
 import { agentProposals, HELD_OFFER_ROWS_READ_CAP } from '../../orchestrator-v5/agent-lane/held-approval-offers.js'
 import { createProposal, computeProposalId, hasCardOnlyOperations, ProposalStore, MAX_PROPOSALS, type ProposalOperation, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js'
 import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js'
+import { deadlineCardSubjectOf } from '../../orchestrator-v5/agent-lane/proposal-object/still-applies.js'
 import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js'
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js'
 import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js'
@@ -349,7 +351,7 @@ describe('R2 /graph server-validated held offers (only when conversation request
 // A real turn route, with the internal Run result and provider response fixed locally.
 // No network or model is contacted. The approval hydration/carrier path is production code.
 async function runTurn(sid = SCENARIO, approveId?: string) {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message',
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [{ type: 'message',
     content: [{ type: 'output_text', text: 'The run is provisional.' }] }] }), { status: 200 })))
   const app = Fastify()
   await installOwnershipHarness(app, () => resolveUserIdentity())
@@ -458,7 +460,11 @@ describe('R2 committed carrier read failure and bounded newest-offer identity', 
   it('newest originally offered carrier wins, carried-only rows skipped, no older reads', async () => {
     const p = proposalOf(offered)
     const carryOnly = proposalPendingAction(p, chip, { scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso }, false)
-    table = [answerRow(carryOnly, 'newest-carried'), answerRow(offered, 'newest-offer'), answerRow(offered, 'older-offer')]
+    // One instant for the three rows: `answerRow` stamps `new Date()` per row, and on a slow runner (#2966 CI, 12 Oct) distinct
+    // milliseconds let the reload's issued-turn reader (`issuedTurnIdsForProposalRecords`, which skips tied timestamps) read
+    // the newest row a third time. The exact read list below is the held-offer reader's, on a fixed clock.
+    const at = new Date().toISOString()
+    table = [answerRow(carryOnly, 'newest-carried'), answerRow(offered, 'newest-offer'), answerRow(offered, 'older-offer')].map(r => ({ ...r, created_at: at }))
     const body = await heldRead()
     expect(body.held_proposal_offers[0]).toMatchObject({ turn_id: 'newest-offer', proposal_id: p.proposal_id })
     expect(body.held_proposal_offers[0].suggested_actions.map((a: { id: string }) => a.id)).toEqual([chip.id, 'agent-amend-proposal'])
@@ -467,7 +473,13 @@ describe('R2 committed carrier read failure and bounded newest-offer identity', 
   })
   it('fixed cap stops before an older offer', async () => {
     const carryOnly = proposalPendingAction(proposalOf(offered), chip, { scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso }, false)
+    // One shared answer time, fixed: each row's `created_at` was its own `new Date()`, so on a slow runner (CI, #2971) the
+    // rows spanned more than one millisecond, and the S-D issuing-turn search (`issuedTurnIdsForProposalRecords`, the
+    // graph read's proposal_fields) then found a unique earliest row and read it too: a 9th read of 'carry-0', on
+    // staging 22393d76 as well. Same-time rows leave that search ambiguous (no read), as on a fast machine.
+    const at = new Date().toISOString()
     table = [...Array.from({ length: HELD_OFFER_ROWS_READ_CAP }, (_, i) => answerRow(carryOnly, `carry-${i}`)), answerRow(offered)]
+      .map(row => ({ ...row, created_at: at }))
     expect(await heldRead()).not.toHaveProperty('held_proposal_offers')
     expect(readCommittedTurn).toHaveBeenCalledTimes(HELD_OFFER_ROWS_READ_CAP)
     expect(readCommittedTurn.mock.calls.map(c => c[1])).not.toContain('held-turn')
@@ -540,6 +552,73 @@ describe('S-D reload: proposal_fields on the opt-in graph read', () => {
     } finally { await app.close(); latest = []; }
   });
 });
+
+/**
+ * ⭐ COLD RELOAD (#3024 follow-up, Codex r2): a held Agent card is projected on the opt-in read by the ONE rule
+ * (`heldCardAppliesAt`), never by the whole-graph hash. After an unrelated change it is still the card the user can press;
+ * once its own goal moved (here a rename, which leaves the hash unchanged) it is not served, although no turn has run since.
+ */
+describe('COLD RELOAD: a held deadline card on the opt-in graph read follows its own subject, not the whole-graph hash', () => {
+  const GOAL_GRAPH = { ...GRAPH_NO_LAYOUT, nodes: [...GRAPH_NO_LAYOUT.nodes, { id: 'g1', label: 'Ship on time', kind: 'goal' }] }
+  /** An unrelated change: a new factor linked to another factor (the goal untouched). */
+  const unrelated = <G extends typeof GOAL_GRAPH>(g: G) => ({ ...g, nodes: [...g.nodes, { id: 'n3', label: 'Salary', kind: 'factor' }],
+    edges: [...g.edges, { from: 'n3', to: 'n2', strength: { mean: 0.5, std: 0.125 } }] })
+  const deadlineHold = () => {
+    const base = computeAnalysisAffectingGraphHash(GOAL_GRAPH)!
+    const proposal = createProposal({ scenario_id: SCENARIO, user_id: OWNER, base_graph_identity_hash: base,
+      operations: [{ op: 'set_goal_deadline', path: 'g1',
+        value: { deadline: '2027-01-14', expected_deadline: null, expected_goal: deadlineCardSubjectOf(GOAL_GRAPH, 'g1') } }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Set the deadline',
+    })
+    const card = { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Set the deadline', message: 'Yes, set that date.', detail: '14 January 2027' }
+    const hold = parsePendingAction(proposalPendingAction(proposal, card, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() }))!
+    expect(hold).not.toBeNull()
+    return { proposal, hold }
+  }
+  const fieldsOn = async (graph: unknown) => {
+    const { proposal, hold } = deadlineHold()
+    latest = [hold]; table = [answerRow(hold)]
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: 'Should I take the job?' })
+    const body = await heldRead()
+    return { id: proposal.proposal_id, ids: (body.proposal_fields?.proposals ?? []).map((p: { proposal_id: string }) => p.proposal_id), body }
+  }
+
+  it('CONTROL: on the model it was made against, the card is projected', async () => {
+    const r = await fieldsOn(GOAL_GRAPH)
+    expect(r.ids).toEqual([r.id])
+  })
+
+  it('RED→GREEN: after an UNRELATED change (the hash moved), the waiting card is still projected, on the current hash', async () => {
+    const moved = unrelated(GOAL_GRAPH)
+    expect(computeAnalysisAffectingGraphHash(moved)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(moved)
+    expect(r.ids).toEqual([r.id])
+    expect(r.body.proposal_fields.graph_hash).toBe(computeAnalysisAffectingGraphHash(moved))
+  })
+
+  it('NEGATIVE: its goal RENAMED (the hash unchanged, no turn since) → the card is not served', async () => {
+    const renamed = { ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) }
+    expect(computeAnalysisAffectingGraphHash(renamed)).toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(renamed)
+    expect(r.ids).not.toContain(r.id)
+  })
+
+  it('ADVERSARIAL (equal value, different identity): its goal renamed and ANOTHER goal now carries its old label → not served', async () => {
+    const decoy = { ...GOAL_GRAPH, nodes: [...GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)),
+      { id: 'g2', label: 'Ship on time', kind: 'goal' }] }
+    expect(deadlineCardSubjectOf(decoy, 'g2'), 'the decoy holds the card’s exact recorded subject').toEqual(deadlineCardSubjectOf(GOAL_GRAPH, 'g1'))
+    const r = await fieldsOn(decoy)
+    expect(r.ids).not.toContain(r.id)
+  })
+
+  it('NEGATIVE: an unrelated change AND its goal renamed → not served', async () => {
+    const both = unrelated({ ...GOAL_GRAPH, nodes: GOAL_GRAPH.nodes.map((n) => (n.id === 'g1' ? { ...n, label: 'Team productivity' } : n)) })
+    expect(computeAnalysisAffectingGraphHash(both)).not.toBe(computeAnalysisAffectingGraphHash(GOAL_GRAPH))
+    const r = await fieldsOn(both)
+    expect(r.ids).not.toContain(r.id)
+  })
+})
 
 vi.mock('../../utils/supabase-user-jwt.js', async () => ({
   looksLikeJwt: () => true,

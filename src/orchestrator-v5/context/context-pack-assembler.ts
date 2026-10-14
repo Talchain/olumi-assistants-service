@@ -868,6 +868,7 @@ export interface AssembleContextPackInput {
   readonly priorFactsReadOk?: boolean;
   /** Existing durable invalidation marker from the same context read. */
   readonly analysisInvalidatedAt?: string | null;
+  readonly currentScenarioRevision?: number;
   readonly priorFactsWithTurn?: SelectCanonicalAnalysisStateInput['priorFactsWithTurn'];
   readonly legacyEditFacts?: SelectCanonicalAnalysisStateInput['legacyEditFacts'];
   /**
@@ -1703,6 +1704,7 @@ function deriveContextPackAnalysisState(
     priorFacts: input.priorFacts,
     currentGraphHash,
     currentGraph: rawGraph,
+    currentScenarioRevision: input.currentScenarioRevision,
     analysisInvalidatedAt: input.analysisInvalidatedAt,
     priorFactsWithTurn: input.priorFactsWithTurn,
     legacyEditFacts: input.legacyEditFacts,

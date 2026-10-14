@@ -200,7 +200,12 @@ describe('RC4: Check estimates uses the same bound census as its producer', () =
     expect(reply.text).toContain('9 in total; here are 3.');
     expect(reply.text).toContain('For example:');
     expect(reply.text).not.toContain('The 3 that matter most');
-    expect(facts.olumiEstimates).toEqual(expected);
+    // ONE CENSUS (DL 12 Oct, last check BLOCKING 4): the panel is now the chance face's own census, not this RC4 signal walk.
+    // The same 9 figures, 1 accepted and 2 placeholders, in the same order, give the same reply (above). Only `goal_distance`
+    // is the census's own hop count — a link into the goal is 1 hop, where the retired walk said 0.
+    const withoutDistance = (x: unknown): unknown => JSON.parse(JSON.stringify(x, (k, v) => (k === 'goal_distance' ? undefined : v)));
+    expect(withoutDistance(facts.olumiEstimates)).toEqual(withoutDistance(expected));
+    expect(facts.olumiEstimates!.links.map(l => l.goal_distance)).toEqual(Array.from({ length: 8 }, () => 1));
   });
 
   it('link-only: offers check_estimates, replies by identity, and never offers bias_anchoring; old rank hides both', () => {
@@ -247,7 +252,14 @@ describe('RC4: Check estimates uses the same bound census as its producer', () =
       'Which of these would you check first?',
     ].join('\n');
     expect(replyFor('bias_anchoring', facts)).toMatchObject({ text: expected, exits: [], outcome: 'ran' });
-    expect(facts.olumiEstimates).toEqual(olumiEstimatesFeedingResult(censusInput(read)));
+    // ONE CENSUS (DL 12 Oct, last check BLOCKING 4): Check estimates is the chance face's own census (uncapped), not this RC4
+    // signal walk. The same 3 figures, the same distances, the same shown `top` and so the same reply; only the `values`
+    // list is in the census's order (nearest the goal first), where the retired walk listed ‘Far’ first.
+    const walk = olumiEstimatesFeedingResult(censusInput(read));
+    expect({ ...facts.olumiEstimates!, values: [] }).toEqual({ ...walk, values: [] });
+    expect(facts.olumiEstimates!.values.map(v => [v.id, v.goal_distance])).toEqual([['near', 1], ['znear', 1], ['far', 3]]);
+    expect([...facts.olumiEstimates!.values].sort((x, y) => x.id.localeCompare(y.id))).toEqual([...walk.values].sort((x, y) => x.id.localeCompare(y.id)));
+    expect(replyFor('check_estimates', facts)).toEqual({ text: sayOlumiEstimates(walk).join('\n'), exits: [], outcome: 'ran' });
   });
 
   it.each(['olumi_accepted', 'olumi_placeholder'] as const)('%s-only census: offered despite zero estimates and empty anchoring points', size => {

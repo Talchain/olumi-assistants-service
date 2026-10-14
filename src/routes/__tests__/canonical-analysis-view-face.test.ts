@@ -16,9 +16,11 @@ const saved: Json = JSON.parse(readFileSync(new URL('./fixtures/canonical-view-b
 const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
+// C1 (14 Oct): the goal states its target. These rows rank the cell's OTHER reasons; with no target and no licence the
+// missing target leads (`c1-root-cause-next-step.test.ts`).
 const graph = { nodes: [
   { id: 'raise', kind: 'option', label: 'Raise' }, { id: 'keep', kind: 'option', label: 'Keep' },
-  { id: 'price', kind: 'factor', label: 'Price' }, { id: 'revenue', kind: 'goal', label: 'Revenue' },
+  { id: 'price', kind: 'factor', label: 'Price' }, { id: 'revenue', kind: 'goal', label: 'Revenue', goal_threshold_raw: 1000, goal_direction: '>=' },
 ], edges: [] };
 const licence = { code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
   option_ids: ['raise', 'keep'], withheld_option_ids: ['raise'], pct_by_option: { keep: 63 } };
@@ -343,5 +345,26 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     const view = project(args([bothWithheld, target, placeholder, placeholder]));
     expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', why: placeholder.message });
     expect(cell(view, 'raise').why).toBe("Not shown. Olumi can't give each option's figures for this goal from this run.");
+  });
+});
+
+describe('R2 C3 (friction audit row C3): the specific reason on the wire is the why, not the generic line', () => {
+  const GENERIC = "Not shown. Olumi can't give each option's figures for this goal from this run.";
+  // Served (marketing results): the cell's why read GENERIC while the wire carried "This comparison turns on the links
+  // from ‘Campaign plan quality’…" (GOAL_FIGURES_PLACEHOLDER_PATH), because it did not start "Not shown.".
+  const served = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', severity: 'warning',
+    message: 'This comparison turns on the links from ‘Campaign plan quality’ to ‘Qualified leads’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.' };
+
+  it('C3: a display-safe reason not starting "Not shown." is shown with that prefix', () => {
+    expect(cell(project(args([licence, served]))).why).toBe(`Not shown. ${served.message}`);
+    expect(cell(project(args([licence, served]))).why).not.toBe(GENERIC);
+  });
+
+  it('C3 CONTRAST: unsafe or empty words still fall back; an already-prefixed reason is byte-unchanged', () => {
+    expect(cell(project(args([licence, { ...served, message: 'This comparison turns on raw_node_id.' }]))).why).toBe(GENERIC);
+    expect(cell(project(args([licence, { ...served, message: '' }]))).why).toBe(GENERIC);
+    expect(cell(project(args([licence, { ...served, message: '   ' }]))).why).toBe(GENERIC);
+    expect(cell(project(args([licence, { ...served, message: 'Not shown. A link is not sized.' }]))).why).toBe('Not shown. A link is not sized.');
+    expect(cell(project(args([licence, { ...served, message: `${'x '.repeat(200)}end.` }]))).why).toBe(GENERIC);
   });
 });

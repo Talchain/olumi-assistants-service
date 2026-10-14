@@ -11,6 +11,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 });
 
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { verifiedFactorLevel } from '../verified-option-setting.js';
 import { buildModelFromBrief, chancesWithheldByAGuess, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -18,7 +19,8 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 
 type Rec = Record<string, unknown>;
 const SCENARIO = '62626262-6262-4626-8626-626262626262';
-const BRIEF = 'Given our goal of reaching £20k Pro MRR within 12 months, should we raise the Pro plan price from £49 to £59? '
+const BRIEF = 'Our Pro price is £49. We have 250 Pro subscribers. Our monthly churn is 3%. We have 20 new Pro subscribers a month.\n\n'
+  + 'Given our goal of reaching £20k Pro MRR within 12 months, should we raise the Pro plan price from £49 to £59? '
   + 'We have 250 Pro subscribers, lose 3% a month and add about 20 new Pro subscribers a month.';
 const SUBS12 = 'Pro subscribers at month 12';
 
@@ -36,10 +38,11 @@ function candidate(identities: unknown[]): CandidateModel {
         interventions: [{ factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [
-      { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100 },
-      { label: 'Pro subscribers', role: 'external', baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000 },
-      { label: 'Monthly churn', role: 'external', baseline_known: true, baseline_value: 3, unit: '%', provenance: 'explicit', plausible_max: 100 },
-      { label: 'New Pro subscribers per month', role: 'external', baseline_known: true, baseline_value: 20, unit: 'subscribers/month', provenance: 'explicit', plausible_max: 200 },
+      { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100, baseline_evidence: { quote: 'Our Pro price is £49.' } },
+      { label: 'Pro subscribers', role: 'external', baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000,
+        baseline_evidence: { quote: 'We have 250 Pro subscribers.' } },
+      { label: 'Monthly churn', role: 'external', baseline_known: true, baseline_value: 3, unit: '%', provenance: 'explicit', plausible_max: 100, baseline_evidence: { quote: 'Our monthly churn is 3%.' } },
+      { label: 'New Pro subscribers per month', role: 'external', baseline_known: true, baseline_value: 20, unit: 'subscribers/month', provenance: 'explicit', plausible_max: 200, baseline_evidence: { quote: 'We have 20 new Pro subscribers a month.' } },
     ],
     risks: [],
     outcomes: [{ label: SUBS12, provenance: 'inferred' }],
@@ -57,6 +60,13 @@ const PILOT = JSON.parse(readFileSync(new URL('./fixtures/accumulation-pilot-hea
   Record<'B1' | 'ACC', { brief: string; draft: CandidateModel }>;
 
 async function build(brief: string, c: CandidateModel): Promise<{ result: Rec; nodes: Rec[]; graph: ReturnType<typeof GraphV3.parse>; instructions: string }> {
+  const receipted = structuredClone(c);
+  const stock = receipted.factors.find(f => f.label === 'Pro subscribers today'
+    && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 250 && f.unit === 'subscribers');
+  if (stock !== undefined && stock.baseline_evidence == null) {
+    stock.baseline_evidence = { quote: 'We have 250 Pro subscribers paying £49 a month.' };
+    if (verifiedFactorLevel(receipted, stock, brief)) c = receipted;
+  }
   let stored: string | undefined;
   let instructions = '';
   const dispatch: InternalDispatch = async (path, body) => {
@@ -77,6 +87,17 @@ async function build(brief: string, c: CandidateModel): Promise<{ result: Rec; n
 }
 const carrierOn = (nodes: Rec[], label: string): unknown => nodes.find((n) => n.label === label)?.nonlinear_identity;
 const said = (r: Rec): string => JSON.stringify(r);
+/**
+ * S7 disposition `unverified_rate_claims` (AIE quantity contract): of the three recorded ACC levels only the stock's
+ * sentence ("We have 250 Pro subscribers …") passes the verifier. The inflow ("We add about 20 …") fails first-person
+ * ownership grammar and the churn ("lose about 3% of them") fails the declared percent base — each stays the USER'S claim,
+ * visible and unverified (never Olumi's estimate, never credited), so the identity is not "stated in brief" and the
+ * chances are asked, not ready. Figures and identities are unchanged.
+ */
+const levelStates = (nodes: Rec[], identity: { factor_ids: string[] }): { credited: Rec[]; unverified: Rec[] } => {
+  const states = identity.factor_ids.map((id) => nodes.find((n) => n.id === id)!.observed_state as Rec);
+  return { credited: states.filter((s) => s.source === 'brief_extraction'), unverified: states.filter((s) => s.user_material_unverified === true) };
+};
 
 describe('the accumulation reaches the registered graph only on an attested deadline', () => {
   it('registered on the derived node with the brief\'s three levels and an admitted goal product', async () => {
@@ -116,11 +137,15 @@ describe('the accumulation reaches the registered graph only on an attested dead
     expect(said(result)).toContain('but nothing in the model works the goal out from it, so that was not used');
   });
 
-  it('an accumulation declared on the goal is refused, said, and nothing is carried', async () => {
+  // Science §(ai) Q1 (9 Oct): a goal may now be the stock through a derived carrier (time-cut-goal-as-stock R1). This
+  // declaration still fails: its stock (subscribers) does not feed the goal (MRR) directly, so nothing is carried.
+  it('an accumulation declared on the goal whose stock does not feed it is refused, said, and nothing is carried', async () => {
     const { nodes, result } = await build(BRIEF, candidate([{ ...ACC, outcome: 'Pro MRR' }]));
     expect(carrierOn(nodes, 'Pro MRR')).toBeUndefined();
     expect(carrierOn(nodes, SUBS12)).toBeUndefined();
-    expect(said(result)).toMatch(/the goal itself is never worked out this way/);
+    const goalId = String(nodes.find((n) => n.kind === 'goal')?.id);
+    expect(nodes.some((n) => n.id === `${goalId}_at_month_12`)).toBe(false);
+    expect(said(result)).toMatch(/Pro subscribers\W+does not feed directly into \W+Pro MRR/);
   });
 
   // Bound at ADMISSION: its ledger is where the product checker's refusal lands (the build result does not echo it).
@@ -181,8 +206,12 @@ describe('recorded head pilot outputs replayed offline through admission and reg
     const accBrief = 'We have 250 Pro subscribers paying £49 a month. We add about 20 new Pro subscribers a month and lose about 3% of them each month. Our goal is to reach £20k MRR within 12 months. Should we raise the Pro price to £59 a month?';
     expect(recorded.ACC.brief).toBe(accBrief);
     const control = await build(accBrief, recorded.ACC.draft);
-    expect.soft(carrierOn(control.nodes, SUBS12), 'ACC carrier').toMatchObject({ operation: 'accumulation', stated_in_brief: true });
-    expect.soft(!chancesWithheldByAGuess(control.graph), 'ACC chance_ready').toBe(true);
+    expect.soft(carrierOn(control.nodes, SUBS12), 'ACC carrier').toMatchObject({ operation: 'accumulation', stated_in_brief: false });
+    const controlLevels = levelStates(control.nodes, carrierOn(control.nodes, SUBS12) as { factor_ids: string[] });
+    expect.soft(controlLevels.credited.map((s) => [s.raw_value ?? s.value, s.extractionType]), 'ACC credited level').toEqual([[250, 'explicit']]);
+    expect.soft(controlLevels.unverified.map((s) => [s.raw_value ?? s.value, s.source]), 'ACC unverified claims')
+      .toEqual(expect.arrayContaining([[3, 'cee_inference'], [20, 'cee_inference']]));
+    expect.soft(!chancesWithheldByAGuess(control.graph), 'ACC chance_ready: asked until the unverified claims are confirmed').toBe(false);
   });
 
   it('B1 retains its used accumulation as Olumi\'s reading and cannot make chances ready from invented levels', async () => {
@@ -209,10 +238,12 @@ describe('recorded head pilot outputs replayed offline through admission and reg
     };
     const { nodes } = await build(PILOT.ACC.brief, repaired);
     const stock = nodes.find((n) => n.label === SUBS12)!;
-    expect(stock.nonlinear_identity).toMatchObject({ operation: 'accumulation', stated_in_brief: true });
+    expect(stock.nonlinear_identity).toMatchObject({ operation: 'accumulation', stated_in_brief: false });
     const identity = stock.nonlinear_identity as { factor_ids: string[] };
-    expect(identity.factor_ids.map((id) => (nodes.find((n) => n.id === id)!.observed_state as Rec).source))
-      .toEqual(['brief_extraction', 'brief_extraction', 'brief_extraction']);
+    const levels = levelStates(nodes, identity);
+    expect(levels.credited.map((s) => [s.raw_value ?? s.value, s.extractionType])).toEqual([[250, 'explicit']]);
+    expect(levels.unverified).toHaveLength(2);
+    expect(levels.unverified.every((s) => s.source === 'cee_inference' && s.extractionType !== 'explicit')).toBe(true);
     const goal = nodes.find((n) => n.kind === 'goal')!;
     expect(goal.nonlinear_identity).toMatchObject({ operation: 'product', factor_ids: expect.arrayContaining([stock.id]) });
     expect((goal.observed_state as Rec).raw_value).toBe(12250);

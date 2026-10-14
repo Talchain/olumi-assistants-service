@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ PRESSING RUN MUST NOT DELETE THE WAY TO APPROVE WHAT IS STILL WAITING.
  *
@@ -42,6 +43,8 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelCalls += 1;
+      const runCall = runPressToolResponse(body);
+      if (runCall) return runCall;
       if (body['tool_choice'] === 'none') {
         return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'On this provisional run, Team size matters most.' }] }] }), { status: 200 });
       }
@@ -86,7 +89,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
     const r = await run();
     expect(r.statusCode).toBe(200);
     const b = r.json() as Body;
-    expect(b._diagnostic_trace.fast_path, 'the control: fast path 3 ran').toBe('run');
+    expect(b._diagnostic_trace.fast_path, 'the control: Run returns first').toBe('run');
     // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
     expect(b.suggested_actions.map((a) => [a.id, a.label])).toEqual([
       [`agent-approve-proposal:${proposalId}`, 'Make this change'],

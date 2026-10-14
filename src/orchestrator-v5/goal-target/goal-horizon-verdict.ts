@@ -1,29 +1,37 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { readGoalRecord } from './goal-record.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
 import { goalKindOf } from './goal-kind.js';
+import { timeClassOf } from './time-class.js';
+import { goalTargetBasisOf } from './goal-target-basis.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
   && !Array.isArray(value) ? value as Rec : undefined;
 
-export type GoalHorizonVerdict = 'no_horizon' | 'computed_at_h' | 'steady_attested' | 'withhold';
+/**
+ * `basis_at_h` (recovery Batch C, amendment 2; ruling 12): the goal's own stated basis says every option's effect on it IS
+ * its size at the held month (including recruitment and ramp-up) — an explicit timing assumption Olumi states beside the
+ * chance, never a steady state. Only at the SAME month as the held horizon, and never while the target's question is open.
+ */
+export type GoalHorizonVerdict = 'no_horizon' | 'computed_at_h' | 'steady_attested' | 'basis_at_h' | 'withhold';
 export const GOAL_HORIZON_STEADY_ATTESTED = 'GOAL_HORIZON_STEADY_ATTESTED';
 
 /** The one held-month accessor: wording consumers do not validate/re-derive the horizon. */
 export function heldGoalHorizonMonths(goal: unknown): number | undefined {
-  const month = recordOf(goal)?.goal_horizon_months;
-  return typeof month === 'number' && Number.isInteger(month) && month > 0 ? month : undefined;
+  const node = recordOf(goal);
+  return typeof node?.id === 'string' ? readGoalRecord({ nodes: [node] }, node.id)?.horizon?.months : undefined;
 }
 
 /** The one held-deadline accessor for horizon permission and its wording; validates the schema's date arm. */
 export function heldGoalDeadline(goal: unknown): string | undefined {
-  const horizon = NodeV3.shape.goal_horizon.safeParse(recordOf(goal)?.goal_horizon).data;
-  return horizon !== undefined && 'deadline' in horizon ? horizon.deadline : undefined;
+  const node = recordOf(goal);
+  return typeof node?.id === 'string' ? readGoalRecord({ nodes: [node] }, node.id)?.horizon?.deadline : undefined;
 }
 
 /** A Run's carrier must attest the declared positional inputs and the goal's own month. */
@@ -37,7 +45,8 @@ function accumulationTestedAtGoalHorizon(graph: unknown, envelope?: unknown): bo
   const month = heldGoalHorizonMonths(goal);
   if (month === undefined) return false;
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
-  if (product?.operation !== 'product') return false;
+  if (product?.operation !== 'product' && !(product?.operation === 'sum' && product.factor_ids.length === 1)) return false;
+  if (product.operation === 'sum' && product.stated_in_brief !== true) return false;
   const env = recordOf(envelope);
   const evaluations = env?.identity_evaluations;
   const evaluated = env === undefined ? undefined : evaluatedIdentityCarriers(nodes,
@@ -58,19 +67,39 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   const goal = goals.length === 1 ? goals[0] : undefined;
   if (heldGoalHorizonMonths(goal) === undefined) {
     // Calendar dates have no bound carrier today; share-by-date's event chances already model time.
-    return heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date' ? 'withhold' : 'no_horizon';
+    if (heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date') return 'withhold';
+    // Batch C: no held month, but the target's own stated period with effects at its end — the chance says that period.
+    const stated = goalTargetBasisOf(goal);
+    return stated !== undefined && stated.effects_at_period_end && stated.open_question === undefined ? 'basis_at_h' : 'no_horizon';
   }
+  // ⭐ EBD (Paul's hiring test, 12 Oct): a share-by-date forecast is computed AT its deadline (`withEventShareDate`
+  // materialises the team's share and every added capacity by that date); the month count its deadline card also holds names
+  // the same date. Without this, every option's chance was withheld as "only today's numbers" (DL GO, 12 Oct).
+  if (goalKindOf(graph) === 'share_by_date') return 'computed_at_h';
   if (accumulationTestedAtGoalHorizon(graph, envelope)) return 'computed_at_h';
-  return horizonSteadyAttested(graph) ? 'steady_attested' : 'withhold';
+  if (horizonSteadyAttested(graph)) return 'steady_attested';
+  // ⛔ Amendment 2: never assume steady state for an urgent hire. Without an at-horizon basis the chance is withheld.
+  const basis = goalTargetBasisOf(goal);
+  return basis !== undefined && basis.effects_at_period_end && basis.open_question === undefined
+    && basis.period_months === heldGoalHorizonMonths(goal) ? 'basis_at_h' : 'withhold';
 }
 
-/** A held month needs this Run's evaluated carrier or a verified S5 door attestation. */
-export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown): E {
-  return goalHorizonVerdict(graph, response) === 'withhold' ? withholdUntestedHorizonFigures(response, graph) : response;
+/**
+ * A held month needs this Run's evaluated carrier or a verified S5 door attestation. And a brief that STATES a timing shape the
+ * product cannot yet work out over time (`time-class.ts`: "starting in month 3", seasonality, a gradual build-up) loses the at-H
+ * chance even when a carrier exists: the carrier knows nothing of that mechanism, so its chance would be manufactured certainty.
+ * The brief may only WITHHOLD here (never license, compute or add a figure), and it is said in the user's own words.
+ */
+export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown, brief?: string | null): E {
+  const verdict = goalHorizonVerdict(graph, response);
+  // Both licences at a held month (a carrier computed it; the user attested the goal steady) are WITHHELD when the brief states a timing
+  // shape the product cannot work out: neither knows of it, so either chance would be manufactured certainty. Only a withhold is added.
+  const outsideTheClass = (verdict === 'computed_at_h' || verdict === 'steady_attested') && timeClassOf(brief).shapes.length > 0;
+  return verdict === 'withhold' || outsideTheClass ? withholdUntestedHorizonFigures(response, graph, brief) : response;
 }
 
 /** Only callers that have obtained the ONE verdict enter this projection. */
-function withholdUntestedHorizonFigures<E>(response: E, graph: unknown): E {
+function withholdUntestedHorizonFigures<E>(response: E, graph: unknown, brief?: string | null): E {
   const goals = recordOf(graph)?.nodes;
   const goal = Array.isArray(goals) ? goals.map(recordOf).find(node => node?.kind === 'goal') : undefined;
   const env = recordOf(response);
@@ -83,7 +112,7 @@ function withholdUntestedHorizonFigures<E>(response: E, graph: unknown): E {
   const scored = [...new Set([...readOptionResultSources(env).flat().map(row => row.option_id ?? row.id), ...displayIds]
     .filter((id): id is string => typeof id === 'string' && id !== ''))];
   if (goal === undefined || scored.length === 0) return response;
-  const message = goalHorizonWithholdDetail(graph);
+  const message = goalHorizonWithholdDetail(graph, brief);
   return withholdOptionGoalFigures(response, new Set(scored), {
     code: GOAL_FIGURES_HORIZON_NOT_TESTED, severity: 'warning', message, say: message,
     node_ids: [String(goal.id)], option_ids: scored,

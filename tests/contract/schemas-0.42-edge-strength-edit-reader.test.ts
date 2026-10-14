@@ -305,7 +305,17 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // `dist/boundary/turn-payload.d.ts`, `dist/fixtures/index.js` and the manifest differ with 0 changed lines naming
     // `edge_strength_edit`. The turn-payload.d.ts change is the inferred NodeV3 expansion (contrast: 1,046 of its 3,998 changed
     // lines name `event_risk`/`EventRisk` or its fields; 185 changed dist lines across the package name `event_risk`/`EventRisk`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.82.0');
+    // 0.82.0 → 0.83.0 (schemas: probability precision on the enrichment wire — `probability_of_joint_goal_precision`,
+    // `constraint_probabilities_precision`, `probability_precision`; gitHead 1e451c55 = v0.83.0), RE-DERIVED on 12 Oct against
+    // the PUBLISHED tarballs: 0.82.0 sha1 `3c18c645…` (= the sha1 recorded above; sha256 `976e9fdf…` = its own commit's
+    // sidecar), 0.83.0 sha1 `f3930713…` (registry shasum, 467f101), sha256 `69e11b74…` (= sidecar), sha512 `2yK1A9GD…`
+    // (= the lockfile integrity). The FILE SET naming `edge_strength_edit` is identical (the same 5 dist files plus
+    // `contracts/adoption-manifest.json`); all four boundary files (enums.d.ts/.js, turn-payload.d.ts/.js) are
+    // byte-unchanged, and `dist/fixtures/index.js` (15 changed lines) and the manifest (63) differ with 0 changed lines
+    // naming `edge_strength_edit`, a strength or a band. Contrast: of the 1,063 changed dist lines across the package, 23
+    // name `probability_of_joint_goal_precision` and 20 `constraint_probabilities_precision`. The installed package was
+    // proved byte-identical to that tarball (`diff -rq` empty) before this row was run.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.83.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

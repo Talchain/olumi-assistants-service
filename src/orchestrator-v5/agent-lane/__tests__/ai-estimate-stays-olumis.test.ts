@@ -29,6 +29,10 @@ function candidate(extra: Partial<Record<'estimated' | 'zero' | 'absent' | 'stat
   const f = (label: string, over: Partial<Factor> = {}): Factor => ({
     label, role: 'controllable', baseline_known: false, baseline_value: null, unit: 'FTE', provenance: 'inferred', plausible_max: 100, ...over,
   });
+  const stated = f('Stated headcount', { baseline_known: true, baseline_value: 49, unit: 'GBP', plausible_max: 200, provenance: 'explicit', ...extra.stated });
+  if (stated.baseline_known && stated.provenance === 'explicit' && stated.baseline_value === 49 && stated.unit === 'GBP') {
+    stated.baseline_evidence = { quote: 'Our stated headcount is £49.' };
+  }
   return {
     goal: { metric: 'Delivery velocity', operator: '>=', value: 30, unit: 'points per sprint', horizon_months: null, provenance: 'explicit' },
     constraints: [],
@@ -44,8 +48,8 @@ function candidate(extra: Partial<Record<'estimated' | 'zero' | 'absent' | 'stat
       f('Estimated headcount', { baseline_value: 10, provenance: 'explicit', ...extra.estimated }),
       f('Zero tech leads', { baseline_value: 0, plausible_max: 10, ...extra.zero }),
       f('Absent contractors', { ...extra.absent }),
-      f('Stated headcount', { baseline_known: true, baseline_value: 49, unit: 'GBP', plausible_max: 200, provenance: 'explicit', ...extra.stated }),
-      // No range and nothing the model holds to derive one from.
+      stated,
+      // No supplied range; A3 can derive a coordinate frame from this named-unit estimate.
       f('Unframeable backlog', { baseline_value: 250, unit: 'tickets', plausible_max: null, ...extra.unframeable }),
     ],
     risks: [],
@@ -55,6 +59,8 @@ function candidate(extra: Partial<Record<'estimated' | 'zero' | 'absent' | 'stat
     })),
   } as CandidateModel;
 }
+
+const admitted = (model: CandidateModel) => admitCandidateModel(model, {}, 'Our stated headcount is £49.');
 
 const byId = (m: { nodes: readonly { id: string }[] }, id: string) => {
   const n = m.nodes.find((x) => x.id === id);
@@ -73,14 +79,14 @@ async function registered(model: CandidateModel) {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('44444444-4444-4444-8444-444444444444', 'Should I hire a tech lead or two developers?', d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('44444444-4444-4444-8444-444444444444', "Our stated headcount is £49.\n\nShould I hire a tech lead or two developers?", d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return GraphV3.parse(graph);
 }
 
 describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
   it('T1 RED: a finite estimate survives, framed on the node’s scale_frame and stamped cee_inference — capless', () => {
-    const m = admitCandidateModel(candidate());
+    const m = admitted(candidate());
     const n = byId(m, 'estimated_headcount');
     expect(n.observed_state).toStrictEqual({ value: 10 / 100, raw_value: 10, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
     expect(n.scale_frame).toBe(100);
@@ -98,52 +104,58 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
   });
 
   it('T2 RED: an estimate of ZERO survives — no truthiness guard', () => {
-    const n = byId(admitCandidateModel(candidate()), 'zero_tech_leads');
+    const n = byId(admitted(candidate()), 'zero_tech_leads');
     expect(n.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
     expect(n.scale_frame).toBe(10);
   });
 
   it('T3 control: a truly absent baseline stays absent, and keeps its frame', () => {
-    const n = byId(admitCandidateModel(candidate()), 'absent_contractors');
+    const n = byId(admitted(candidate()), 'absent_contractors');
     expect(n).not.toHaveProperty('observed_state');
     expect(n.scale_frame).toBe(100);
   });
 
   it('T4 control: an explicit known baseline is byte-identical and stays brief_extraction', () => {
-    const n = byId(admitCandidateModel(candidate()), 'stated_headcount');
+    const n = byId(admitted(candidate()), 'stated_headcount');
     expect(n.observed_state).toStrictEqual({
       value: 49 / 200, raw_value: 49, cap: 200, declared_scale: 'unit_interval', unit: 'GBP', source: 'brief_extraction',
+      extractionType: 'explicit', // S7: the verifier-credited quantity carries the existing explicit type; figures unchanged
     });
     expect(n).not.toHaveProperty('scale_frame');
   });
 
-  it('T5: an estimate that cannot be framed stays missing and adds no blocking issue', async () => {
+  it('A3: a named-unit estimate gets a coordinate frame; a truly absent level still blocks', async () => {
     const withEstimate = await registered(candidate());
     const withoutEstimate = await registered(candidate({ unframeable: { baseline_value: null } }));
     const n = byId(withEstimate, 'unframeable_backlog');
-    expect(n).not.toHaveProperty('observed_state');
-    expect(n).not.toHaveProperty('scale_frame');
-    const blockers = (g: unknown) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}:${i.message}`).sort();
-    expect(blockers(withEstimate)).toEqual(blockers(withoutEstimate));
+    expect(n.observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
+    expect(n.scale_frame).toBe(1000);
+    const blockers = (g: unknown) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}:${i.factor_id}`).sort();
+    expect(blockers(withEstimate)).toEqual(['MISSING_FACTOR_LEVEL:absent_contractors',
+      'MISSING_OPTION_VALUE:absent_contractors', 'MISSING_OPTION_VALUE:stated_headcount', 'MISSING_OPTION_VALUE:unframeable_backlog']);
+    expect(blockers(withoutEstimate)).toEqual(['MISSING_FACTOR_LEVEL:absent_contractors', 'MISSING_FACTOR_LEVEL:unframeable_backlog',
+      'MISSING_OPTION_VALUE:absent_contractors', 'MISSING_OPTION_VALUE:stated_headcount', 'MISSING_OPTION_VALUE:unframeable_backlog']);
   });
 
   it('T5b: an estimate outside its stated range stays missing; the range still travels', () => {
-    const n = byId(admitCandidateModel(candidate({ estimated: { baseline_value: 150 } })), 'estimated_headcount');
+    const n = byId(admitted(candidate({ estimated: { baseline_value: 150 } })), 'estimated_headcount');
     expect(n).not.toHaveProperty('observed_state');
     expect(n.scale_frame).toBe(100);
   });
 
   it('nothing constructed claims user authority', () => {
-    const m = admitCandidateModel(candidate());
+    const m = admitted(candidate());
     const text = JSON.stringify(m.nodes);
     for (const stamp of ['user_override', 'user_stated', 'user_assumption', 'user_specified']) expect(text).not.toContain(stamp);
   });
 
-  it('an estimate never feeds a derived frame: a range derived only from an estimate is not invented', () => {
-    // No stated range, no intervention: the only number is Olumi's guess. A frame
-    // derived from it would let the guess set its own scale.
-    const m = admitCandidateModel(candidate({ unframeable: { baseline_value: 250, plausible_max: null } }));
-    expect(m.loss.filter((l) => l.field_path === 'nodes[unframeable_backlog].observed_state.cap')).toEqual([]);
+  it('A3: the derived coordinate frame discloses its exact value and estimated origin', () => {
+    // No stated range or intervention: the coordinate frame must disclose that its number came from Olumi's estimate.
+    const m = admitted(candidate({ unframeable: { baseline_value: 250, plausible_max: null } }));
+    expect(m.loss.filter((l) => l.field_path === 'nodes[unframeable_backlog].observed_state.cap')).toEqual([{
+      field_path: 'nodes[unframeable_backlog].observed_state.cap', before: null, after: 1000, severity: 'warn',
+      reason: 'No range was stated for "Unframeable backlog", and a number above 1 with no range cannot be analysed at all — nor can a range be added afterwards. A range of 0 to 1000 has been used, taken from the largest figure the model already holds for it. That is a unit of measurement, not a forecast or a limit, and the figures it was taken from are Olumi\'s own estimates, not figures you gave, and are stored unchanged beside it.',
+    }]);
   });
 
   it('a defaulted frame over Olumi’s own figures does not call them "your own figures"', () => {
@@ -159,7 +171,7 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
         ] },
       ],
     } as CandidateModel;
-    const m = admitCandidateModel(tweaked);
+    const m = admitted(tweaked);
     const [entry] = m.loss.filter((l) => l.field_path === 'nodes[unframeable_backlog].observed_state.cap');
     expect(entry?.after).toBe(1000);
     expect(entry?.reason).not.toContain('your own figures');

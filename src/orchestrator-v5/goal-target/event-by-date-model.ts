@@ -2,9 +2,10 @@
 import { REPAIR_CODES } from '@talchain/schemas';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
-import { goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
-import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
+import { extraShareLinkMoments, hirePaceIsOlumisOwn, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_WORD_TO_CODE } from '../../utils/currency-alphabet.js';
 import { figureTheUserWroteForSpan } from '../agent-lane/stated-by-user.js';
@@ -24,6 +25,22 @@ const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
   deliver: 'deliver', delivering: 'deliver', delivered: 'deliver', delivers: 'deliver',
   finish: 'finish', finishing: 'finish', finished: 'finish', finishes: 'finish',
 };
+/**
+ * ⛔ AN UNATTESTED EVENT IS NEVER SAVED AS THE GOAL (DL ruling 14 Oct, amended per PL #94 05:36Z; served hiring on 34a5cdf6,
+ * raw 9d75b605: "We have an urgent launch date in the next three months." drafted as the event-by-date goal "Urgent launch"
+ * while the brief's governing sentence asks to "increase productivity by at least 10%"). The drafter's event goal the brief
+ * reader does not attest, with the brief's own words kept for the redraft and the clarification: the event's quote and the
+ * governing sentence, each only when it is verbatim in the brief (else null, never paraphrased). Null when the draft's goal
+ * is not an event, or construction prompted the event (`event_by_date_prompted`), or the brief attests it.
+ */
+export interface UnattestedEventGoal { readonly event: string; readonly words: string | null; readonly governing: string | null }
+export function unattestedEventGoal(candidate: CandidateModel, brief: string, prompted: boolean): UnattestedEventGoal | null {
+  const goal = candidate.goal;
+  if (prompted || goal.kind !== 'event_by_date' || briefAttestsEventByDate(brief, goal)) return null;
+  const verbatim = (text: unknown): string | null => (typeof text === 'string' && text.trim() !== '' && brief.includes(text.trim()) ? text.trim() : null);
+  return { event: goal.metric, words: verbatim((goal as { source_quote?: unknown }).source_quote), governing: verbatim(candidate.decision_question) };
+}
+
 /** The candidate's quantity decides the class; numbers elsewhere in the brief do not. */
 export function isQuantityGoalCandidate(goal: CandidateModel['goal']): boolean {
   return goal.value !== null || readCurrencyUnitWithQualifiers(currencyWordsAsCodes(goal.unit)).kind === 'currency';
@@ -71,7 +88,7 @@ function eventDateSpans(brief: string): { start: number; end: number }[] {
         const end = word.index + word[0].length;
         if (end > 80) break;
         // The reference only recognises a date phrase; no date is written or inferred here.
-        if (readStatedDeadline(tail.slice(0, end), '1900-01-01')) {
+        if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true })) {
           spans.push({ start: part.start + lead.index, end: part.start + lead.index + end });
         }
       }
@@ -167,6 +184,43 @@ export function withEventNumberLoss(model: AdmittedModel, brief: string): Admitt
   return { ...model, loss: [...model.loss.filter(l => !/^brief\[\d+\]\.event_forecast_not_modelled$/.test(l.field_path)), ...loss] };
 }
 
+/**
+ * ⭐ EBD E4 — WHAT THE DEADLINE MODEL SET ASIDE FROM THE BRIEF, SAID ONCE WHERE THE USER SEES IT (DL GO, 12 Oct). The brief's own
+ * factors kept as reasoning context (`retained_excluded`) and its figures this forecast does not model reached only
+ * `not_represented`, which only the Agent reads: they were dropped silently for the user. ONE sentence, from admission's own
+ * loss ledger (the event_context nodes it set aside, then the brief's unmodelled figures), carried by the build result as
+ * `event_forecast_disclosures` into the reply's detail on the build turn (`disclosure.ts`), never as an open question. AIE 6122738619's
+ * words for what the saved model keeps as context; the real limit for what it does not hold. `null` when nothing was set aside.
+ */
+export function eventSetAsideLine(model: Pick<AdmittedModel, 'nodes' | 'loss'>): string | null {
+  const retained: string[] = [], dropped: string[] = [], inQuestion: string[] = [];
+  const add = (into: string[], words: unknown): void => {
+    if (typeof words !== 'string' || words.trim() === '' || words.length > 120) return;
+    const quoted = `"${words.trim()}"`;
+    if (![...retained, ...dropped, ...inQuestion].includes(quoted)) into.push(quoted);
+  };
+  // Kept in the saved model as reasoning context: "remain" is true of these (the saved graph holds the node).
+  for (const n of model.nodes) {
+    if (n.id.startsWith('event_context_') && n.analysis_participation === 'retained_excluded'
+      && model.loss.some(l => l.field_path === `nodes[${n.id}].event_forecast_not_modelled` && l.after === 'retained_excluded')) add(retained, n.label);
+  }
+  // The brief's figures this forecast does not model: never "remain". Said as the real limit: kept only in the words of the
+  // saved decision question when its label holds them, otherwise not held by the model at all.
+  const question = model.nodes.find(n => n.kind === 'decision')?.label;
+  for (const l of model.loss) if (/^brief\[\d+\]\.event_forecast_not_modelled$/.test(l.field_path)) {
+    add(typeof question === 'string' && typeof l.before === 'string' && question.includes(l.before.trim()) ? inQuestion : dropped, l.before);
+  }
+  const list = (q: string[]): string => q.length === 1 ? q[0]! : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+  const lines = [
+    // AIE 6122738619, verbatim (the pronoun agrees with the count).
+    ...(retained.length > 0 ? [`This forecast does not yet use ${list(retained)} from your brief; ${retained.length === 1 ? 'it remains' : 'they remain'} as context for the wider productivity question.`] : []),
+    // The real retention limit (AIE: "otherwise state the real retention limit"); new words, for AIE ACK.
+    ...(inQuestion.length > 0 ? [`This forecast does not yet use ${list(inQuestion)} from your brief; the model keeps ${inQuestion.length === 1 ? 'it' : 'them'} only in the wording of your decision question.`] : []),
+    ...(dropped.length > 0 ? [`This forecast does not yet use ${list(dropped)} from your brief, and the model does not hold ${dropped.length === 1 ? 'it' : 'them'}.`] : []),
+  ];
+  return lines.length === 0 ? null : lines.join(' ');
+}
+
 /** Persisted provenance is passthrough at every graph boundary, unlike node labels. */
 export function eventShareCarrierOf(graph: unknown): Rec | null {
   const goal = soleGoalOf(graph);
@@ -229,6 +283,41 @@ export function teamTimeAsk(graph: unknown): string | null {
     : `How long would ${part.deliverable} take with the team you have now?`;
 }
 
+/**
+ * ⭐ EBD E1 — THE EVENT MODEL'S ONE QUESTION (Paul's hiring test, 12 Oct, scenario 4184e877). Its team part takes a value
+ * only from the team's time, and only once the deadline is held, so the question is the deadline first, then that time.
+ * Readiness asked "What is "Share today's team finishes by the deadline" today, before any option changes it? … treat it
+ * as zero" instead: a level this part can never be given. The readiness blocker (`analysis-ready-helper.ts`), the coach
+ * (`decision-input-ask.ts`) and so the UI all say THIS sentence. `null` when the model has no drafted event team part.
+ */
+export function eventModelAsk(graph: unknown): string | null {
+  const part = draftedTeamPartOf(graph);
+  if (part === null) return null;
+  return goalDeadlineFromRecord(graph, part.goal.id) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
+}
+
+/**
+ * ⭐ COACH (DL coaching-on-press; PL #94 6135017311; Codex buddy r1): the ONE next step for a goal measured as a chance, from
+ * the same branches as the coach's one ask (`decision-input-ask.ts` `rawDecisionInputAsk`). A drafted event team part has
+ * its own question chain, the date then the team's time (`eventModelAsk`), each answer taken by a writer: that question is
+ * the step. Any other chance goal: with the date held the model still can't say what must be done by then and no writer
+ * records that, so it is a CAPABILITY gap; with no date, the date is still asked first (Science ruling §4), with that same
+ * gap beside it so the answer is never promised to unlock the chance.
+ */
+export function chanceGoalBlockerOf(graph: unknown): PressBlocker | null {
+  if (draftedTeamPartOf(graph) !== null) {
+    const ask = eventModelAsk(graph);
+    return ask === null ? null : { kind: 'missing_input', ask };
+  }
+  const goal = soleGoalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '' || goalKindOf(goal) !== 'chance_of_event') return null;
+  const unbuilt = `a chance for ‘${label}’ until the model says what must be done by the deadline`;
+  return goalDeadlineFromRecord(graph, goal.id) === undefined
+    ? { kind: 'missing_input', ask: chanceGoalDeadlineAsk(label), also_unbuilt: unbuilt }
+    : { kind: 'missing_implementation', what: unbuilt };
+}
+
 export const EVENT_BY_DATE_REFUSALS = [
   "Olumi couldn't connect your options to the launch date yet: it needs the deliverable the date is for.",
   "Olumi couldn't connect your options to the launch date yet: it needs how much capacity each option adds.",
@@ -265,8 +354,8 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   if (!Array.isArray(candidate.options)) return EVENT_BY_DATE_REFUSALS[1];
   const options = candidate.options.filter(o => o.is_status_quo !== true);
   if (options.length === 0) return EVENT_BY_DATE_REFUSALS[2];
-  if (options.some(o => !validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
-  return options.some(o => o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
+  if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
+  return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }
 
 export function admitEventByDate(candidate: CandidateModel, brief = ''): AdmittedModel {
@@ -355,10 +444,15 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
       stated_time: { ...stated, deadline } });
   }
   for (const edge of out.edges.filter((e: Rec) => e.to === goal.id && e.from !== team.id)) {
-    const c = out.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
+    const node = out.nodes.find((n: Rec) => n.id === edge.from), c = node?.observed_state?.extra_share_by_date;
     if (!c) continue;
     Object.assign(c, { deadline, reference_date: c.reference_date ?? reference });
-    const m = extraShareMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high);
+    const m = extraShareLinkMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high,
+      hirePaceIsOlumisOwn(node));
+    // E-tail (b), AIE 6130197656 §2: beside the unchanged pace, start times and reference, the carrier keeps the raw mean and
+    // spread and marks the limit as Olumi's assumption (absent when nothing was limited).
+    if (m.raw !== undefined) c.link_limit = { raw_mean: m.raw.mean, raw_sd: m.raw.sd, entered_mean: m.mean, entered_sd: m.sd, origin: 'olumi_assumption' };
+    else delete c.link_limit;
     edge.strength = { mean: m.mean, std: m.sd };
     delete edge.defaulted;
     edge.provenance.natural_effect = { amount: m.mean * 100, amount_unit: unit, per_source_change: 1,

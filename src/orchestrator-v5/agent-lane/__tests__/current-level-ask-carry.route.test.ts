@@ -1,3 +1,4 @@
+import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** W1 R3: captured founder Run/auto Explain must carry the delivered ask. No provider/DB contacted. */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync } from 'node:fs';
@@ -135,6 +136,8 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { tool_choice?: { name?: string }; input?: unknown };
+      const forced = runPressToolResponse(body);
+      if (forced) return forced;
       providerBodies.push(body);
       const call = body.tool_choice?.name === CURRENT_LEVEL_TOOL || (direct && providerBodies.length === 1);
       return new Response(JSON.stringify({ output: call ? [{ type: 'function_call', call_id: 'level-answer', name: CURRENT_LEVEL_TOOL,
@@ -242,6 +245,7 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
     expect(next.id).not.toBe(prior.id);
     expect(pending.filter(p => p.action.kind === 'elicit_goal_current_level')).toHaveLength(1);
     pending = [{ ...next, expires_at_iso: '2000-01-01T00:00:00.000Z' }];
+    reply = 'Those figures are noted.'; // R1: test carry expiry, not a newly delivered model question.
     await run(); expect(askOnLatest()).toBeNull();
   });
   it('non-typed turns and replay preserve TTL; one typed unrelated turn decrements once', async () => {

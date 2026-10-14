@@ -134,8 +134,10 @@ test('ROW 4 — an actual graph-changing edit retains the writer stale verdict',
   assert.equal(result.freshness?.freshness, 'stale');
   assert.equal(state.run_state.kind, 'complete_stale');
   // Existing post-write derivation wins: this class repair adds no reread after it.
-  assert.deepEqual(result.freshness, deriveAnalysisFreshness([fact], response.graph_hash ?? null, undefined,
-    { currentGraph: graph, priorFactsReadOk: true, analysisInvalidatedAt: null }));
+  assert.deepEqual(result.freshness, { ...deriveAnalysisFreshness([fact], response.graph_hash ?? null, undefined,
+    { currentGraph: graph, priorFactsReadOk: true, analysisInvalidatedAt: null }),
+    selected_fact_row_id: factRow.fact_row_id, run_revision: { value: null, source: 'legacy_unknown' },
+    basis: 'analysis_graph_hash_interim' });
 });
 
 test('FAIL CLOSED — graph reread failure cannot manufacture current', async () => {

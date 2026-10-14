@@ -18,7 +18,7 @@
  *     (`classifyValueSource`, the one authority), and each participant's own level/unit.
  * No figure is recomputed here: the only numbers said are the two ISL compared.
  */
-import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { structureProvenance } from '../../cee/graph-readiness/obligation-provenance.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayLevel } from './bound-graph.js';
 import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
@@ -253,7 +253,7 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       const unit = rec(target.observed_state)?.unit;
       const R = sayFigure(w.reconstructed, unit, T);
       const S = sayFigure(w.stated, unit, T);
-      const owner = classifyValueSource(rec(target.observed_state)?.source);
+      const owner = structureProvenance(target);
       const statedClause = owner === 'user_stated' || owner === 'user_ratified'
         ? `you said ${q(T)} is ${S}`
         : owner === 'ai_drafted' || owner === 'system_repaired'

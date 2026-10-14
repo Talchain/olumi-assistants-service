@@ -201,7 +201,9 @@ describe('(d) a model with no Olumi values says nothing; one value keeps the exi
       { from: 'o', to: 'f', strength: { mean: 1, std: 0.01 }, provenance: { source: 'cee_hypothesis' } },
       {
         from: 'f', to: 'g', strength: { mean: 0.4, std: 0.1 },
-        provenance: { source: withOlumiLink ? 'cee_hypothesis' : 'user_specified' },
+        // ONE PROVENANCE AUTHORITY (AIE 6121121310): an Olumi link SIZE is established by its mark; an unmarked AI drawing
+        // stamp alone is unestablished (disclosed as unverified by the census, never "mine" here).
+        provenance: withOlumiLink ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : { source: 'user_specified' },
       },
     ],
   });

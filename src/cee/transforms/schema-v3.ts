@@ -49,7 +49,7 @@ import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { assertsBriefExtraction } from "../factor-extraction/brief-extraction-claim.js";
-import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
+import { isUnverifiedUserMaterial, nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // ⭐ THE SAME AUTHORITY THE PROJECTOR BINDS STATED ITEMS WITH. Imported, never
 // restated — `nodes[].provenance` and `options[].provenance.source` describe one
@@ -866,6 +866,12 @@ export function transformNodeToV3(
     }
   }
 
+  // Carry admission's withheld receipt intact through legacy projection; never infer this marker from extraction.
+  const incomingObserved = (node as { observed_state?: unknown }).observed_state;
+  if (isUnverifiedUserMaterial(incomingObserved)) {
+    v3Node.observed_state = incomingObserved as NodeV3T['observed_state'];
+  }
+
   // UI provenance display. Read extractionType from whichever location holds
   // it on this node — observed_state (factor with value), node-level
   // (external/repaired factors), or data (factor without observed_state).
@@ -875,7 +881,7 @@ export function transformNodeToV3(
     v3Node.observed_state?.extractionType
     ?? v3Node.extractionType
     ?? dataExtractionType;
-  const claimedProvenance = nodeProvenanceDisplay(extractionTypeForDisplay);
+  const claimedProvenance = nodeProvenanceDisplay(extractionTypeForDisplay, v3Node.observed_state);
 
   // ROADMAP 2.972 — A VALUE-FREE NODE CANNOT HAVE COME FROM THE BRIEF.
   //

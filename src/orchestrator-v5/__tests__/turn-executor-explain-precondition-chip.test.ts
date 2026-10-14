@@ -92,7 +92,7 @@ const READY_GRAPH = {
   nodes: [
     { id: 'goal_q3', kind: 'goal', label: 'Goal' },
     { id: 'dec_q3', kind: 'decision', label: 'Resourcing choice' },
-    { id: 'fac_capacity', kind: 'factor', label: 'Engineering Capacity' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Engineering Capacity', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     {
       id: 'opt_hire',
       kind: 'option',

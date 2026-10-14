@@ -457,7 +457,10 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
       if (isPlaceholderLink(edge)) { expect(card, item.id).toBeNull(); continue; }
       expect(card?.tool).toBe('propose_link_strengths');
       if (card?.tool !== 'propose_link_strengths') return;
-      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)) }]);
+      // ⛔ EXPECTATION CHANGED (#3002, the AIE's producer AMEND, packet 2b19ae59): the band is the STORED band, declared `stored`,
+      // so the door carries its stored origin by identity; it claims no basis and no new Olumi estimate.
+      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)),
+        origin: 'stored' }]);
       expect([nodeLabel(edge.from), nodeLabel(edge.to)]).toEqual(item.labels);
       expect(bandEnum).toContain(card.args.links[0].strength);
       expect(Object.keys(card.args.links[0])).not.toContain('from_words');
@@ -483,7 +486,7 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
         const node = (c.body.draft_graph.nodes as { id: string; label: string; observed_state: { value: number; unit: string; raw_value?: number } }[]).find((n) => n.id === item.id)!;
         const card = cardCallFor(item, c.body.draft_graph, 'x');
         expect(card, item.id).toEqual({ tool: 'propose_assumptions', args: { assumptions: [{
-          factor_label: node.label, value: node.observed_state.value, unit: node.observed_state.unit, basis: 'Olumi\u2019s current estimate', keep: true }] } });
+          factor_label: node.label, value: node.observed_state.value, unit: node.observed_state.unit, basis: 'Olumi\u2019s current estimate', user_stated: false, keep: true }] } });
         if (card?.tool === 'propose_assumptions') for (const key of required) expect(card.args.assumptions[0]).toHaveProperty(key);
         if (node.observed_state.raw_value !== undefined && node.observed_state.raw_value !== node.observed_state.value) contrast += 1;
       }

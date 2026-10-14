@@ -1,0 +1,86 @@
+{
+ "_note": "Files under src/ (non-test) containing an LLM provider transport call. A NEW file here must be mapped (to a manifest assembler, or to a kind with a reason) before merge; `unclassified_census_gap` is closed and must stay empty. Edits inside listed files do not trip the ratchet.",
+ "transport_files": [
+  "src/adapters/llm/caching.ts",
+  "src/adapters/llm/failover.ts",
+  "src/adapters/llm/openai.ts",
+  "src/adapters/llm/usage-tracking.ts",
+  "src/cee/decision-review/invoke.ts",
+  "src/cee/draft-quality/judge.ts",
+  "src/cee/dual-draft/m2-review.ts",
+  "src/cee/unified-pipeline/stages/coaching-pass.ts",
+  "src/cee/validation-pipeline/validate-graph.ts",
+  "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+  "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts",
+  "src/orchestrator-v5/replacement/agent-loop.ts",
+  "src/orchestrator-v5/routing/open-frame-intake.ts",
+  "src/orchestrator-v5/routing/route-with-tool-use.ts",
+  "src/orchestrator/tools/edit-graph.ts",
+  "src/routes/agent-v1-turn.ts",
+  "src/routes/assist.v1.decision-review.ts"
+ ],
+ "infrastructure": [
+  "src/adapters/llm/caching.ts",
+  "src/adapters/llm/failover.ts",
+  "src/adapters/llm/openai.ts",
+  "src/adapters/llm/usage-tracking.ts"
+ ],
+ "unclassified_census_gap": [],
+ "mapped": {
+  "src/cee/decision-review/invoke.ts": {
+   "assembler": "buildDecisionReviewUserMessage",
+   "reason": "Serialises the review request from the licensed Run facts (context/licensed-run-facts.ts) the enricher builds; guarded by decision-review-licensed-reads.guard.test.ts."
+  },
+  "src/cee/draft-quality/judge.ts": {
+   "assembler": "judgeDraftCoverage",
+   "reason": "Draft-time quality judge over the draft graph and brief; carries no Run facts."
+  },
+  "src/cee/dual-draft/m2-review.ts": {
+   "assembler": "reviewDraftGraph",
+   "reason": "Draft-time review over the draft graph and brief; carries no Run facts."
+  },
+  "src/cee/unified-pipeline/stages/coaching-pass.ts": {
+   "assembler": "runStageCoachingPass",
+   "reason": "Draft-pipeline coaching stage over the draft graph and brief; carries no Run facts."
+  },
+  "src/cee/validation-pipeline/validate-graph.ts": {
+   "assembler": "callValidateGraph",
+   "reason": "Graph validation over the draft graph only."
+  },
+  "src/orchestrator-v5/agent-lane/runtime/build-model.ts": {
+   "assembler": "buildModelFromBrief",
+   "reason": "Construction: the user's brief and a compact graph; no Run facts."
+  },
+  "src/orchestrator/tools/edit-graph.ts": {
+   "assembler": "handleEditGraph",
+   "reason": "V2 edit tool builds its own context; on staging it ran about once in 24 h (10 Oct), not on the served path."
+  },
+  "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": {
+   "kind": "construction_stage",
+   "reason": "Widening pass over the admitted draft: signals come from assembleGuidanceSignals (turn-context/guidance-signals.ts) and the candidate model; carries no Run facts."
+  },
+  "src/orchestrator-v5/routing/open-frame-intake.ts": {
+   "kind": "router_classifier",
+   "reason": "Advisory start_model/continue_conversation call on an EMPTY model: the current message and at most OPEN_FRAME_INTAKE_RECENT_TURNS_CAP recent turns; no graph, analysis or figure."
+  },
+  "src/orchestrator-v5/replacement/agent-loop.ts": {
+   "kind": "transport_only",
+   "via": "projectTurnContext",
+   "reason": "The model call is injected; the input is the replacement layer's projectTurnContext / read tools."
+  },
+  "src/orchestrator-v5/routing/route-with-tool-use.ts": {
+   "kind": "transport_only",
+   "via": "assembleContextPackWithSummary",
+   "reason": "The V5 router's input is the ContextPack built by the canonical assembler, serialised by buildUserMessage."
+  },
+  "src/routes/agent-v1-turn.ts": {
+   "kind": "route",
+   "via": "projectModelContext",
+   "reason": "The Agent loop input is projectModelContext + withSavedRunCertainty; the Run interpreter input is assembled inline from the licensed pieces (canonicalAfterRun / selectedRun), pinned by run-explanation-one-assembly.test.ts."
+  },
+  "src/routes/assist.v1.decision-review.ts": {
+   "kind": "http_route",
+   "reason": "Standalone API: request-validated input with no Run; calls buildDecisionReviewUserMessage without licensed facts (the single exemption in decision-review-licensed-reads.guard.test.ts)."
+  }
+ }
+}

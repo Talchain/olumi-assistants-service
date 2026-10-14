@@ -1,3 +1,4 @@
+import { readRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 /**
@@ -123,6 +124,7 @@ export type FreshnessReason =
  * priorFactsReadOk — CEE #977's `PriorFactsReadResult` is that distinction.
  */
 export interface DeriveAnalysisFreshnessOptions {
+  readonly currentScenarioRevision?: number | null;
   /** The same current graph used for the hash, before any unit defaults. A
    * Run with an input snapshot cannot be declared fresh without this proof. */
   readonly currentGraph?: unknown;
@@ -150,6 +152,9 @@ export interface DeriveAnalysisFreshnessOptions {
  * cannot restamp it.
  */
 export interface FreshnessDerivation {
+  readonly selected_fact_row_id?: string | null;
+  readonly run_revision?: { readonly value: number | null; readonly source: 'recorded' | 'legacy_unknown' };
+  readonly basis?: 'analysis_graph_hash_interim' | 'recorded_run_revision';
   readonly freshness: AnalysisFreshness;
   readonly reason: FreshnessReason;
   /**
@@ -291,7 +296,7 @@ function viewRunAnalysisFact(
     fact,
     index,
     graph_hash_at_run:
-      typeof result.graph_hash_at_run === 'string' ? result.graph_hash_at_run : null,
+      typeof result.graph_hash_at_run === 'string' && result.graph_hash_at_run.length > 0 ? result.graph_hash_at_run : null,
     computed_at:
       typeof result.computed_at === 'string' ? result.computed_at : null,
     status: readAnalysisStatus(result.enrichment),
@@ -695,8 +700,19 @@ export function deriveAnalysisFreshness(
   currentGraphHash: string | null,
   currentGraphOptionIds?: readonly string[] | null,
   opts?: DeriveAnalysisFreshnessOptions,
-): FreshnessDerivation {
+): FreshnessDerivation & Required<Pick<FreshnessDerivation, 'run_revision' | 'basis'>> {
   const selected = selectRunAnalysisFact(priorFacts);
+  const recordedRevision = selected === null ? null
+    : readRunAnalysisOccurrence(selected.fact)?.evaluated_scenario_revision ?? null;
+  const provenance = {
+    selected_fact_row_id: selected === null ? null : readRunAnalysisOccurrence(selected.fact)?.fact_row_id ?? null,
+    run_revision: { value: recordedRevision, source: recordedRevision === null ? 'legacy_unknown' as const : 'recorded' as const },
+    basis: 'analysis_graph_hash_interim' as const,
+  };
+  const finish = (value: FreshnessDerivation) => ({ ...enforceInvariants(value),
+    run_revision: provenance.run_revision, basis: value.basis ?? provenance.basis });
+  const currentRevision = validatedScenarioRevision(opts?.currentScenarioRevision);
+  if (currentGraphHash === '') currentGraphHash = null;
 
   if (selected === null) {
     // CONTEXT/MEMORY V5 defect 4 — AN EMPTY FACT LIST IS AMBIGUOUS, AND ONLY
@@ -719,6 +735,7 @@ export function deriveAnalysisFreshness(
     // decides — a degraded flag must never blank out a good analysis.
     if (opts?.priorFactsReadOk === false) {
       const degraded: FreshnessDerivation = {
+        ...provenance,
         freshness: 'unknown',
         reason: 'derivation_failed',
         selected_fact_index: null,
@@ -726,9 +743,10 @@ export function deriveAnalysisFreshness(
         current_graph_hash: currentGraphHash,
         computed_at: null,
       };
-      return enforceInvariants(degraded);
+      return finish(degraded);
     }
     const noFact: FreshnessDerivation = {
+      ...provenance,
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',
       selected_fact_index: null,
@@ -736,7 +754,7 @@ export function deriveAnalysisFreshness(
       current_graph_hash: currentGraphHash,
       computed_at: null,
     };
-    return enforceInvariants(noFact);
+    return finish(noFact);
   }
 
   const invalidatedAtMs =
@@ -752,7 +770,8 @@ export function deriveAnalysisFreshness(
       !Number.isFinite(selectedAtMs) ||
       selectedAtMs <= invalidatedAtMs)
   ) {
-    return enforceInvariants({
+    return finish({
+      ...provenance,
       freshness: 'stale',
       reason: 'model_restored_after_analysis',
       selected_fact_index: selected.index,
@@ -781,6 +800,7 @@ export function deriveAnalysisFreshness(
   let base: FreshnessDerivation;
   if (selected.graph_hash_at_run === null) {
     base = {
+      ...provenance,
       freshness: 'unknown',
       reason: 'legacy_fact_missing_hash',
       selected_fact_index: selected.index,
@@ -790,6 +810,7 @@ export function deriveAnalysisFreshness(
     };
   } else if (currentGraphHash === null) {
     base = {
+      ...provenance,
       freshness: 'unknown',
       reason: 'current_graph_hash_unavailable',
       selected_fact_index: selected.index,
@@ -799,6 +820,7 @@ export function deriveAnalysisFreshness(
     };
   } else if (selected.graph_hash_at_run === currentGraphHash) {
     base = {
+      ...provenance,
       freshness: 'fresh',
       reason: 'graph_hash_match',
       selected_fact_index: selected.index,
@@ -808,6 +830,7 @@ export function deriveAnalysisFreshness(
     };
   } else {
     base = {
+      ...provenance,
       freshness: 'stale',
       reason: 'graph_hash_diverged',
       selected_fact_index: selected.index,
@@ -815,6 +838,11 @@ export function deriveAnalysisFreshness(
       current_graph_hash: currentGraphHash,
       computed_at: selected.computed_at,
     };
+  }
+
+  if ((base.reason === 'legacy_fact_missing_hash' || base.reason === 'current_graph_hash_unavailable')
+    && recordedRevision !== null && currentRevision !== null && recordedRevision === currentRevision) {
+    base = { ...base, freshness: 'fresh', basis: 'recorded_run_revision' };
   }
 
   const legacyEdits = opts?.legacyEditFacts;
@@ -874,7 +902,7 @@ export function deriveAnalysisFreshness(
     }
   }
 
-  return enforceInvariants(base);
+  return finish(base);
 }
 
 /** Human copy for the existing freshness_reason text carrier; no new wire enum. */

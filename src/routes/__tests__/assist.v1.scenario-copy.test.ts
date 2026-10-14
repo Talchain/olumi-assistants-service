@@ -1,3 +1,4 @@
+import { bindWriteCaller } from '../../orchestrator-v5/ownership/door-ownership.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ACCOUNTS B3 — the guest → account COPY route.
@@ -57,7 +58,12 @@ function portReturning(outcome: Outcome | Error) {
     if (outcome instanceof Error) throw outcome;
     return outcome;
   });
-  return { store: { copyGuestScenario } as Port, copyGuestScenario };
+  return { store: {
+    copyGuestScenario,
+    readGuestSource: async () => ({ user_id: null, graph: { nodes: [], edges: [] }, revision: 7 }),
+    readGuestCopy: async () => null,
+    copyGuestScenarioChecked: async write => copyGuestScenario(write.sourceScenarioId, write.userId),
+  } as Port, copyGuestScenario };
 }
 async function buildApp(store: Port): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -232,12 +238,16 @@ describe('the rate limit is keyed by the verified user (REAL limiter)', () => {
 describe('the adapter: exactly one RPC, and the SQL function\'s SQLSTATEs map to outcomes', () => {
   const client = (result: { data: unknown; error: { code?: string; message: string } | null }) => {
     const rpc = vi.fn(async () => result);
-    return { rpc, store: new SupabaseGuestCopyStore({ rpc } as never) };
+    const query = { select: () => query, eq: () => query, order: () => query, limit: () => query,
+      maybeSingle: async () => ({ data: { user_id: null, graph: { nodes: [], edges: [] }, revision: 7 }, error: null }) };
+    const adapter = new SupabaseGuestCopyStore({ rpc, from: () => query } as never);
+    return { rpc, store: { copyGuestScenario: (source: string, user: string) =>
+      bindWriteCaller({ userId: user, verified: true }, () => adapter.copyGuestScenario(source, user)) } };
   };
-  it('sends exactly { p_source_scenario_id, p_user_id } to copy_guest_scenario', async () => {
+  it('sends exactly source, verified owner and the checked graph/revision to copy_guest_scenario_checked', async () => {
     const { rpc, store } = client({ data: { scenario_id: COPY, created: true }, error: null });
     expect(await store.copyGuestScenario(GUEST, ME)).toEqual({ kind: 'copied', scenarioId: COPY, created: true });
-    expect(rpc.mock.calls).toEqual([['copy_guest_scenario', { p_source_scenario_id: GUEST, p_user_id: ME }]]);
+    expect(rpc.mock.calls).toEqual([['copy_guest_scenario_checked', { p_source_scenario_id: GUEST, p_user_id: ME, p_checked_source_graph: { nodes: [], edges: [] }, p_checked_source_revision: 7 }]]);
   });
   const map: Array<[string, string]> = [['CG404', 'not_copyable'], ['CG409', 'not_copyable'], ['CG422', 'no_model'], ['CG413', 'too_large'], ['22023', 'unknown_user']];
   for (const [code, reason] of map) {

@@ -206,7 +206,14 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     // when sent (strict output), exactly as `definitional` is.
     const goal = (back.properties as Record<string, { required: string[] }>).goal!;
     goal.required = goal.required.filter((k) => k !== 'kind' && k !== 'deliverable');
+    // Batch C: ruling 11 — the goal's `quantity_frame` and `basis` and each constraint's `role` are optional in the contract
+    // (recorded candidates predate them) and required when sent (strict output), exactly as `kind` / `deliverable` are.
+    goal.required = goal.required.filter((k) => k !== 'quantity_frame' && k !== 'basis');
+    items(back, 'constraints').required = items(back, 'constraints').required.filter((k) => k !== 'role');
     items(back, 'options').required = items(back, 'options').required.filter((k) => k !== 'added_capacity');
+    // S4 time cut (Science §(ai) Q2): the accumulation `reading` (net|gross) is optional in the contract and required when
+    // sent (strict output), exactly as `added_capacity` is.
+    items(back, 'identities').required = items(back, 'identities').required.filter((k) => k !== 'reading');
     expect(JSON.stringify(back)).toBe(JSON.stringify(contract));
   });
 

@@ -62,6 +62,7 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
   'result.enrichment.inference_warnings[].pct_by_option.{option_id}',
   'result.enrichment.inference_warnings[].horizon_untested',
   'result.enrichment.inference_warnings[].summary_withheld',
+  'result.enrichment.inference_warnings[].period_end_assumption',
   'result.enrichment.inference_warnings[].driver_by_option.{option_id}',
 ] as const;
 
@@ -71,6 +72,8 @@ export interface TypedRunRowsContext {
   readonly mode?: 'live' | 'backfill';
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
   readonly graphIdentityHash?: string | null;
+  /** Frozen fact-element metadata, outside the strict-parsed payload. Absence is legacy. */
+  readonly evaluatedScenarioRevision?: unknown;
 }
 
 export interface TypedRunOptionRow {
@@ -88,9 +91,8 @@ export interface TypedRunOptionRow {
 /** The ONE mapping; storage RPCs add source identity and insertion metadata. */
 export interface TypedRunRows {
   readonly run_id: string;
-  /** No evaluated revision exists in RunAnalysisResultSchema yet (commit B owns stamping it). */
-  readonly scenario_revision: null;
-  readonly revision_source: 'legacy_unknown';
+  readonly scenario_revision: number | null;
+  readonly revision_source: 'recorded' | 'legacy_unknown';
   /** producer verdict at Run time; compose applies further remove-only gates; NOT the final permission */
   readonly leading_option_id: string | null;
   readonly constraint_may_name_leading_option: boolean | null;
@@ -128,6 +130,11 @@ export function toTypedRunRows(fact: unknown, ctx: TypedRunRowsContext): TypedRu
 }
 
 function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult {
+  const evaluatedRevision = ctx.evaluatedScenarioRevision ?? null;
+  if (evaluatedRevision !== null && (typeof evaluatedRevision !== 'number'
+    || !Number.isSafeInteger(evaluatedRevision) || evaluatedRevision < 0)) {
+    return { quarantine: 'evaluated_scenario_revision_invalid' };
+  }
   const source = recordOf(fact);
   const sourceResult = recordOf(source?.result);
   // Class refusal_not_a_run: a refusal attempt computed nothing. Match the shared predicate before
@@ -263,7 +270,9 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
       return { quarantine: `option ${optionId} GOAL_CHANCE_LICENSED percentage is malformed` };
     }
     const recordedDriver = recordOf(recordOf(licence!.driver_by_option)?.[optionId]);
-    const caveated = licence!.horizon_untested === true || recordOf(licence!.summary_withheld) !== undefined;
+    // G: a chance read on Olumi's period-end assumption is conditional, never stored as an unqualified permission.
+    const caveated = licence!.horizon_untested === true || recordOf(licence!.summary_withheld) !== undefined
+      || recordOf(licence!.period_end_assumption) !== undefined;
     options.push({
       option_id: optionId, chance: chance as number,
       low: precision?.interval_lower ?? null, high: precision?.interval_upper ?? null,
@@ -273,7 +282,7 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   }
   return { ok: {
     run_id: result.run_id,
-    scenario_revision: null, revision_source: 'legacy_unknown',
+    scenario_revision: evaluatedRevision, revision_source: evaluatedRevision === null ? 'legacy_unknown' : 'recorded',
     leading_option_id: result.leading_option_id,
     constraint_may_name_leading_option: producerPermission,
     canonical_request_hash: result.input_snapshot.sent_digest,

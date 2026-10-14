@@ -1,0 +1,7 @@
+{
+ "_source": {
+  "brief": "olumi-work/recovery/live/runs/2026-10-14T031016Z-hiring-post3007/hiring/brief.txt, stripped; sha256 4011bff74021a01e81a09d74d4bc5b6f870f4bd42afae30e009c3b42a4529e15 = the record's brief_sha256",
+  "draft": "served-hiring-post3007-draft.json = cee_drafter_raw_responses ece929e4-71e2-4dc7-a99a-94513903e49b (staging, CEE 35a66525, 2026-10-14 03:11:08Z) calls[0].raw_text, parsed; its Postgres jsonb text sha256 7f194fc0fbe0f032cc1293d20b5caaac8056a20f703cd037999e00bcb308e0cd equals this file's (read-only SELECT, control {\"a\": 1} reproduced)"
+ },
+ "brief": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less."
+}

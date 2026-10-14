@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { admitCandidateModel, type AdmittedModel, type CandidateModel } from '../admit-model.js';
 import { widenDraft, widenedRiskMarker, widenedRiskNote, WIDENED_RISK_MARKER_DOWN } from '../runtime/widen-draft.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
-import { doorLevelOf, estimateLevelPersists, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { doorLevelOf, estimateLevelPersists, projectEntity, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { widenGate, widenTurnFromSignals } from '../method-turn/widen-turn.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
@@ -156,7 +156,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
           hits_id: 'hire_engineers', through_id: 'engineer_hires', through_direction: 'positive',
           affects_id: 'features_delivered', direction: 'negative', relies_on: 'both hires joining in time', watch_for: 'offers remain unaccepted' }] }
         : { options: [] }) }));
-    expect(await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured, finalGraph })).toBeNull();
+    expect(await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured, finalGraph, risksArm: true })).toBeNull();
     expect(widenedGraph, 'the risk must survive admission and reach final graph comparison').toBeDefined();
     for (const node of before.nodes) expect(widenedGraph!.nodes.find(other => other.id === node.id)).toEqual(node);
     expect(widenedGraph!.edges.find(edge => edgeKey(edge) === edgeId)).not.toEqual(before.edges.find(edge => edgeKey(edge) === edgeId));
@@ -192,7 +192,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
           hits_id: 'hire_engineers', through_id: 'engineer_hires', through_direction: 'positive',
           affects_id: 'features_delivered', direction: 'negative', relies_on: 'both hires joining in time', watch_for: 'offers remain unaccepted' }] }
         : { options: [] }) }));
-    const widened = await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured });
+    const widened = await widenDraft({ admitted, candidate, admit: (c) => admitCandidateModel(c, {}, brief), brief, deadlineAt: Date.now() + 60_000, callStructured, risksArm: true });
     expect(widened).not.toBeNull();
     expect(callStructured).toHaveBeenCalledTimes(1);
     expect(widened!.counts).toEqual({ options: 0, risks: 1 });
@@ -220,5 +220,11 @@ describe('P05b widening retains the level its existing options gate checked', ()
     const renamedInput = withoutPreconditionRisks(renamed);
     expect(renamedInput.nodes.map((node) => node.id)).not.toContain('hiring_stalls');
     expect(renamedInput.nodes.map((node) => node.id)).toContain('supplier_delay');
+    // T4i (DL 14 Oct): the Agent sees the added risk as Olumi's and kept out of the Run; the user's own risk carries neither.
+    const added = graph.nodes.find((node) => node.id === 'hiring_stalls')!;
+    expect(projectEntity(added as never)).toMatchObject({ id: 'hiring_stalls', kind: 'risk', proposed_by: 'olumi', analysis_participation: 'retained_excluded' });
+    const stated = projectEntity(graph.nodes.find((node) => node.id === 'supplier_delay')! as never);
+    expect(stated).not.toHaveProperty('proposed_by');
+    expect(stated).not.toHaveProperty('analysis_participation');
   });
 });

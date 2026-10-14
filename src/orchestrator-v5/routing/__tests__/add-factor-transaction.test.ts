@@ -22,12 +22,14 @@ import type { PendingAction } from '../../session/pending-action.js';
 import {
   buildAddFactorTransaction,
   GM_HELD_USER_TODAY_KEY,
+  isNewFactorTarget,
   isUserTodayObservedState,
+  levelRangePointBasis,
   readUserTodayMember,
   stampNewUserTodayLevels,
   USER_TODAY_SOURCE,
 } from '../add-factor-transaction.js';
-import { hypothesisEdgeValue } from '../add-option-transaction.js';
+import { hypothesisEdgeValue, isAffectsTarget } from '../add-option-transaction.js';
 import { dispatchAddFactorTransaction } from '../../handlers/add-factor-dispatch.js';
 import { executeGmHeldResume, readGmHeldResume } from '../../handlers/gm-held-execute.js';
 import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
@@ -92,18 +94,39 @@ describe('PJ-E-FIG — the figure and its frame', () => {
   });
 
   it('S1: £120,000 and £65,000 frame exactly as the ruling says, on Olumi\'s default range, as the user\'s', () => {
-    expect(SENIOR).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE });
-    expect(JUNIOR).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE });
+    // The typed door verified each figure (`figureTheUserWrote`), so its formatter writes the attestation (`explicit`, DL 12 Oct).
+    expect(SENIOR).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE, extractionType: 'explicit' });
+    expect(JUNIOR).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_EDIT_SOURCE, extractionType: 'explicit' });
     expect(isUserTodayObservedState(SENIOR)).toBe(true);
     expect(isUserTodayObservedState(JUNIOR)).toBe(true);
   });
 
-  it('S2: only the user\'s framed figure is a door level — never the brief\'s source, never the illegal literal, never an extra member', () => {
+  it('S2: a door level preserves its typed frame and source — never the brief\'s source, never the illegal literal, never an extra member', () => {
     expect(isUserTodayObservedState({ ...SENIOR, source: 'brief_extraction' })).toBe(false);
     expect(isUserTodayObservedState({ ...SENIOR, source: 'user_specified' })).toBe(false);
     expect(isUserTodayObservedState({ ...SENIOR, provenance: 'user_set' })).toBe(false);
     expect(isUserTodayObservedState({ ...SENIOR, value: 0.5 })).toBe(false);
     expect(isUserTodayObservedState({ value: 120000, source: USER_TODAY_SOURCE })).toBe(false);
+  });
+});
+
+describe('W14 — proposed figures retain source and finite quantities', () => {
+  it('accepts Olumi figures only with inferred source and the matching approval basis', () => {
+    const os = { ...SENIOR, source: 'cee_inference', extractionType: 'inferred' };
+    expect(isUserTodayObservedState(os)).toBe(true);
+    const range = { low: 100000, high: 140000, meaning: 'min_max', source: USER_TODAY_SOURCE, source_quote: 'between 100000 and 140000' };
+    expect(levelRangePointBasis({ ...os, range })).not.toBe('stated_figure');
+
+    expect(readUserTodayMember([{ factor_id: 'f', observed_state: os, basis: 'olumi_estimate' }])).toHaveLength(1);
+    for (const basis of [undefined, 'written_about', 'confirmed_by_approval']) {
+      expect(readUserTodayMember([{ factor_id: 'f', observed_state: os, basis, quote: '120000' }])).toBeUndefined();
+    }
+    expect(readUserTodayMember([{ factor_id: 'f', observed_state: SENIOR, basis: 'olumi_estimate' }])).toBeUndefined();
+    expect(isUserTodayObservedState({ ...os, extractionType: 'explicit' })).toBe(false);
+    expect(isUserTodayObservedState({ ...SENIOR, extractionType: 'inferred' })).toBe(false);
+    for (const value of [NaN, Infinity, -Infinity]) {
+      expect(isUserTodayObservedState({ value, unit: UNIT, source: 'cee_inference', extractionType: 'inferred' })).toBe(false);
+    }
   });
 });
 
@@ -131,14 +154,43 @@ describe('PJ-E-FIG — the builder (pure)', () => {
     expect(r).toEqual({ matched: false, reason: 'target_not_allowed' });
   });
 
-  it('B3: an outcome and an observable/external factor are the targets it takes — and NOT the goal (no validator admits factor → goal)', () => {
+  /**
+   * ⭐ RECOVERY BATCH B (B1, factor → goal: ONE rule; CLAUDE.md §7.5 "replace the factor → goal refusal test only together
+   * with the agreed edit rule, and keep its negatives for invalid targets"). This row used to pin "NOT the goal (no validator
+   * admits factor → goal)". The served drafter writes factor → goal (`build-model.ts`, kept by `admit-model.ts`),
+   * `propose_new_option`'s new-factor rule takes the goal, and Paul's hiring test was refused here ("the available update
+   * cannot connect a new factor directly to the goal"). The negatives are B2's rows, unchanged: an option, the decision, a
+   * risk, a lever the options set.
+   */
+  it('B3: the goal, an outcome and an observable/external factor are the targets it takes; the goal link is ONE placeholder new factor → goal', () => {
     const withExternal = { nodes: [...STORED.nodes, { id: 'fac_market_rate', kind: 'factor', label: 'Market rate', category: 'external' }],
       edges: [...STORED.edges, { from: 'fac_market_rate', to: OUTCOME }] } as never;
-    expect(buildAddFactorTransaction(params({ factors: [{ label: 'Senior engineer salary', link: { to_id: 'ship_the_new_platform', effect_direction: 'positive' } }] }), withExternal))
-      .toEqual({ matched: false, reason: 'target_not_allowed' });
-    for (const to of [OUTCOME, 'fac_market_rate']) {
+    for (const to of ['ship_the_new_platform', OUTCOME, 'fac_market_rate']) {
       const r = buildAddFactorTransaction(params({ factors: [{ label: 'Senior engineer salary', link: { to_id: to, effect_direction: 'positive' } }] }), withExternal);
       expect(r.matched, `${to}: ${JSON.stringify(r)}`).toBe(true);
+    }
+    const toGoal = buildAddFactorTransaction(params({ factors: [{ label: 'Non-development time', link: { to_id: 'ship_the_new_platform', effect_direction: 'negative' } }] }), withExternal);
+    expect(toGoal.matched, JSON.stringify(toGoal)).toBe(true);
+    if (!toGoal.matched) return;
+    expect(toGoal.proposal.operations).toEqual([
+      { op: 'add_node', path: 'fac_non_development_time', value: { id: 'fac_non_development_time', kind: 'factor', label: 'Non-development time', category: 'external' } },
+      { op: 'add_edge', path: 'fac_non_development_time::ship_the_new_platform', value: hypothesisEdgeValue('fac_non_development_time', 'ship_the_new_platform', 'negative') },
+    ]);
+  });
+
+  it('B3′ (Batch B, ONE rule): the door takes exactly what the add-option new-factor rule takes, less a risk — the goal included', () => {
+    const shapes = [{ kind: 'goal' }, { kind: 'outcome' }, { kind: 'risk' }, { kind: 'option' }, { kind: 'decision' }, { kind: 'constraint' },
+      { kind: 'factor', category: 'observable' }, { kind: 'factor', category: 'external' }, { kind: 'factor', category: 'controllable' }, { kind: 'factor' }];
+    for (const node of shapes) {
+      expect(isNewFactorTarget(node), JSON.stringify(node)).toBe(node.kind !== 'risk' && isAffectsTarget(node));
+    }
+    expect(isNewFactorTarget({ kind: 'goal' })).toBe(true);
+    // A risk is a legal factor → risk link and the add-option rule takes it, but this door has never taken one (Canonical
+    // #72's door rule, outside Batch B's scope). Pinned so a change to either side is seen.
+    expect(isAffectsTarget({ kind: 'risk' })).toBe(true);
+    expect(isNewFactorTarget({ kind: 'risk' })).toBe(false);
+    for (const node of [{ kind: 'option' }, { kind: 'decision' }, { kind: 'factor', category: 'controllable' }, { kind: 'factor' }, undefined]) {
+      expect(isNewFactorTarget(node), JSON.stringify(node)).toBe(false);
     }
   });
 
@@ -193,6 +245,19 @@ describe('PJ-E-FIG — the hold carries the user\'s figures; the confirm lands t
     // Key-order-insensitive: the applier may reorder members; the spend node and the limit keep every value.
     expect(nodeOf(g, 'annual_salary_spend')).toEqual(nodeOf(STORED, 'annual_salary_spend'));
     expect(g.goal_constraints).toEqual(STORED.goal_constraints);
+  });
+
+  it('H3g (Batch B): a factor → GOAL batch is HELD by the real referee and the confirm lands it — the user\'s 25 % on the node, ONE placeholder link into the goal', () => {
+    const pct = { ...framedObservedState({ baseline_value: 25, unit: '%', provenance: 'explicit', plausible_max: defaultFrameFor(25) }), source: USER_TODAY_SOURCE };
+    const held = hold({ factors: [{ label: 'Non-development time', link: { to_id: 'ship_the_new_platform', effect_direction: 'negative' } }] }, [pct]);
+    expect(held.kind, JSON.stringify(held.reason ?? held.governing ?? '')).toBe('held');
+    const out = confirm(held.pendingActions[0]);
+    expect(out.status, JSON.stringify(out)).toBe('executed');
+    const g = out.mutatedGraph as Json;
+    expect(nodeOf(g, 'fac_non_development_time')!.observed_state).toEqual(pct);
+    const links = (g.edges as Json[]).filter((e) => e.from === 'fac_non_development_time');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ to: 'ship_the_new_platform', effect_direction: 'negative', defaulted: true, provenance: { source: 'cee_hypothesis' } });
   });
 
   it('H4: the member is FAIL-CLOSED — a malformed or wrong-source member declines the hold (no_payload), never lands the factors valueless', () => {

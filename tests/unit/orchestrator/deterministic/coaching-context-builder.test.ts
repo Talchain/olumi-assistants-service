@@ -584,7 +584,8 @@ describe("risk_factor_count — risk node kind", () => {
     const ctx = makeContext({
       graph: {
         nodes: [
-          { id: 'f1', kind: 'factor', label: 'Cost', observed_state: { value: 100 } },
+          // ONE PROVENANCE AUTHORITY: the user's figure carries its stamp; a stamp-less value is not established as theirs.
+          { id: 'f1', kind: 'factor', label: 'Cost', observed_state: { value: 100, extractionType: 'explicit' } },
           { id: 'f2', kind: 'factor', label: 'Speed', observed_state: { value: 50, extractionType: 'inferred' } },
           { id: 'r1', kind: 'risk', label: 'Compliance Risk', observed_state: {} },
           { id: 'opt_a', kind: 'option', label: 'A' },

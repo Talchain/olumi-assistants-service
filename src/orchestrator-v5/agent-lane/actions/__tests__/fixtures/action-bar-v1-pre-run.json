@@ -25,7 +25,7 @@
       "icon": "ListChecks",
       "group": "review",
       "press_id": "agent-next-review-decision",
-      "user_line": "Review this decision: what should I check before relying on it?",
+      "user_line": "Review this model: what should I check before relying on it?",
       "enabled": false,
       "disabled_reason": "Needs a current analysis.",
       "offer_key": "96cb59a484d78d94"

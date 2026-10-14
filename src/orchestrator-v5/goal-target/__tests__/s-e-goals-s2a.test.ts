@@ -25,9 +25,7 @@ import * as shareRun from '../share-by-date-run.js';
 import { GOAL_CHANCE_LICENSED, goalChanceLicenceOf, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE, withShareByDateChanceGate } from '../goal-chance-range.js';
 import { goalChanceRangeDisplayForAgent, goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
-import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
-import { goalChanceSideOf } from '../goal-chance-sides.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
 const DEADLINE = '2027-04-07';
@@ -269,7 +267,7 @@ describe('recognition and persisted carrier survival', () => {
       sum + g.nodes.find((n: Rec) => n.id === e.from).observed_state.value * e.strength.mean, 0))
       .toBeCloseTo(0.766, 3);
   });
-  it('new regex: whitespace 20k then 160k, less than 22x growth', () => {
+  timingIt('new regex: whitespace 20k then 160k, less than 22x growth', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     const small = ' '.repeat(20000), large = ' '.repeat(160000);
     const m = scalingRatio(() => { SHARE_BY_DATE_UNIT.lastIndex = 0; return SHARE_BY_DATE_UNIT.test(small); },
@@ -279,32 +277,28 @@ describe('recognition and persisted carrier survival', () => {
 });
 
 describe('Run frame and licence by identity', () => {
-  it('P1-d: pace carry-on range keeps its scope and hire licensed at 50%', () => {
+  // ⭐ AIE 6125204695 (b1), 12 Oct: the deadline chance is the Run's own approximate point; the uniform law's slow-to-fast ranges
+  // and exact extremes (`gate`, `exactChance`) are references only, never served. The rows below are re-pinned to that ruling.
+  it('P1-d (AIE b1): pace carry-on gets the Run’s own point beside hire’s 50%, no old-law range and nothing withheld', () => {
     const g = paceGraph(), raw = result(); raw.option_comparison[1].probability_of_goal = 0.5;
     const out = withShareByDateChanceGate(raw, g, 'launch_share');
     const stored = { enrichment: withGoalChanceLicence(out, g, 'launch_share') };
-    const facts = goalChanceFactsForAgent(stored, g, true), withheld = goalChanceWithheldForAgent(stored, g)!;
-    expect(facts.goal_chance_display).toEqual({ hire: 'about 50%' });
-    expect(facts.goal_chance_range_display?.status_quo).toBeDefined();
-    expect(withheld.option_ids).toEqual(['status_quo']);
-    expect(withheld.say).toContain(out.inference_warnings.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).message);
-    expect(withheld.note).toContain('Other options');
-    expect(withheld.note).toContain('licensed points and ranges');
-    expect(withheld.note).not.toContain('EVERY option');
+    const facts = goalChanceFactsForAgent(stored, g, true);
+    expect(facts.goal_chance_display).toEqual({ status_quo: 'about 2%', hire: 'about 50%' });
+    expect(facts.goal_chance_range_display?.status_quo).toBeUndefined();
+    expect(out.inference_warnings?.some((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION) ?? false).toBe(false);
   });
-  it('P2-e: equal displayed stated-time endpoints withhold status_quo without a range', () => {
-    const g = paceGraph(), original = shareRun.shareGateForOption;
-    const spy = vi.spyOn(shareRun, 'shareGateForOption').mockImplementation((graph, id) => id === 'status_quo'
-      ? { form: 'range', low: 0.249, high: 0.251, error_points: 3 } : original(graph, id));
+  it('P2-e (AIE b1, supersedes the equal-ends GO): the served chance never consults the old-law gate; the Run’s point stands', () => {
+    const g = paceGraph(), spy = vi.spyOn(shareRun, 'shareGateForOption');
     try {
       const out = withShareByDateChanceGate(result(), g, 'launch_share');
       const stored = { enrichment: withGoalChanceLicence(out, g, 'launch_share') };
-      expect(out.option_comparison.find((r: Rec) => r.option_id === 'status_quo').probability_of_goal).toBeUndefined();
-      expect(out.inference_warnings.some((w: Rec) => w.code === GOAL_CHANCE_RANGE)).toBe(false);
-      expect(out.inference_warnings.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).message).not.toContain('shown as a range');
+      expect(spy).not.toHaveBeenCalled();
+      expect(out.inference_warnings?.some((w: Rec) => w.code === GOAL_CHANCE_RANGE) ?? false).toBe(false);
+      expect(JSON.stringify(out.inference_warnings ?? [])).not.toMatch(/is not shown|shown as a range/);
       expect(goalChanceRangeDisplayForAgent(stored, g)).toBeUndefined();
-      expect(goalChanceSideOf(stored, 'status_quo')).toEqual({ kind: 'withheld' });
-      expect(goalChanceWithheldForAgent(stored, g)?.say).not.toContain('shown as a range');
+      const licence = (stored.enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_CHANCE_LICENSED)!;
+      expect(licence.pct_by_option.status_quo).toBe(2);
     } finally { spy.mockRestore(); }
   });
   it('actual PLoT call carries delta 1.0 and the persisted forecast remains unchanged', async () => {
@@ -313,22 +307,23 @@ describe('Run frame and licence by identity', () => {
     expect(g).toEqual(before);
     const warnings = ran.result.enrichment.inference_warnings as Rec[];
     expect(warnings.some(w => w.code === GOAL_FIGURES_SHARE_APPROXIMATION)).toBe(false);
-    expect(warnings.find(w => w.code === GOAL_CHANCE_LICENSED)?.pct_by_option).toEqual({ status_quo: 0, hire: 39 });
+    // AIE b1: the Run's own points (status quo 0.019 → 2), never the old law's exact 0.
+    expect(warnings.find(w => w.code === GOAL_CHANCE_LICENSED)?.pct_by_option).toEqual({ status_quo: 2, hire: 39 });
     expect(warnings.some(w => w.code === GOAL_CHANCE_RANGE)).toBe(false);
   });
-  it('TIME licence: raw Run points survive while carry-on uses its exact extreme class', () => {
+  it('TIME licence (AIE b1): raw Run points survive and are the served points, carry-on included (no old-law extreme)', () => {
     const g = graph(), before = result();
     const out = withShareByDateChanceGate(before, g, 'launch_share');
     expect(out).toBe(before);
     expect(out.option_comparison.map((r: Rec) => r.probability_of_goal)).toEqual([0.019, 0.390]);
     const saved = withGoalChanceLicence(out, g, 'launch_share');
     const licence = goalChanceLicenceOf(out, g, 'launch_share')!;
-    expect(licence.pct_by_option).toEqual({ status_quo: 0, hire: 39 });
+    expect(licence.pct_by_option).toEqual({ status_quo: 2, hire: 39 });
     expect(licence.target).toEqual({ comparator: 'at_least', value: 100, unit: UNIT, by_date: DEADLINE });
     expect(licence.withheld_option_ids).toBeUndefined();
     expect(goalChanceRangeDisplayForAgent({ enrichment: saved }, g)).toBeUndefined();
     expect(goalChanceFactsForAgent({ enrichment: JSON.parse(JSON.stringify(saved)) }, g, true).goal_chance_display)
-      .toEqual({ status_quo: 'less than 1%', hire: 'about 39%' });
+      .toEqual({ status_quo: 'about 2%', hire: 'about 39%' });
   });
   it.each(['level', 'change_abs', 'chance_of_event'])('actual full request twin with branch disabled: %s', async kind => {
     const g = graph(); goal(g).goal_threshold_unit = kind === 'chance_of_event' ? '% likelihood of launch' : 'GBP';
@@ -353,26 +348,19 @@ describe('Run frame and licence by identity', () => {
     expect(JSON.stringify({ ...request, graph: withShareByDateFrame(base, g) })).toBe(JSON.stringify(request));
     expect(withShareByDateFrame(base, g)).toBe(base);
   });
-  it('PACE range withholds carry-on only; point gate keeps ISL’s 0.500 and original rounding', () => {
+  it('PACE (AIE b1): carry-on keeps the Run’s 0.0416 as about 4% beside ISL’s 0.500, no old-law range or withhold', () => {
     const g = paceGraph(), before = result();
     before.option_comparison[0].probability_of_goal = 0.0416;
     before.option_comparison[1].probability_of_goal = 0.500;
     const out = withShareByDateChanceGate(before, g, 'launch_share');
-    expect(out.option_comparison[0].probability_of_goal).toBeUndefined();
-    expect(out.option_comparison[0].probability_of_goal_precision).toBeUndefined();
-    expect(out.option_comparison[1].probability_of_goal).toBe(0.500);
-    expect(before.option_comparison[0].probability_of_goal).toBe(0.0416);
-    const range = out.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_RANGE);
-    expect(range.range_by_option.status_quo).toMatchObject({ basis: 'stated_time', low: 0, high: 1, low_pct: 0, high_pct: 100 });
-    expect(range.target.by_date).toBe(DEADLINE);
-    expect(out.inference_warnings.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).option_ids).toEqual(['status_quo']);
+    expect(out.option_comparison.map((r: Rec) => r.probability_of_goal)).toEqual([0.0416, 0.500]);
+    expect(out.inference_warnings?.some((w: Rec) => w.code === GOAL_CHANCE_RANGE || w.code === GOAL_FIGURES_SHARE_APPROXIMATION) ?? false).toBe(false);
     const licence = goalChanceLicenceOf(out, g, 'launch_share')!;
-    expect(licence.target.by_date).toBe(DEADLINE); expect(licence.pct_by_option).toEqual({ hire: 50 });
-    expect(licence.withheld_option_ids).toEqual(['status_quo']);
+    expect(licence.target.by_date).toBe(DEADLINE); expect(licence.pct_by_option).toEqual({ status_quo: 4, hire: 50 });
+    expect(licence.withheld_option_ids).toBeUndefined();
     const saved = withGoalChanceLicence(out, g, 'launch_share');
-    expect(goalChanceRangeDisplayForAgent({ enrichment: saved }, g)?.status_quo.depends_on.kind).toBe('stated_time');
-    expect(goalChanceFactsForAgent({ enrichment: saved }, g, true).goal_chance_display).toEqual({ hire: 'about 50%' });
-    expect(goalChanceLicenceOf(before, g, 'launch_share')?.pct_by_option).toEqual({ hire: 50 }); // cannot bypass gate
+    expect(goalChanceRangeDisplayForAgent({ enrichment: saved }, g)).toBeUndefined();
+    expect(goalChanceFactsForAgent({ enrichment: saved }, g, true).goal_chance_display).toEqual({ status_quo: 'about 4%', hire: 'about 50%' });
   });
   it('by_date absent on a conventional level target; existing points unchanged', () => {
     const g = graph(); goal(g).goal_threshold_unit = 'GBP';

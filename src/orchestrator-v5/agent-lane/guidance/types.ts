@@ -34,6 +34,8 @@ export interface GoalPathEdit {
   readonly label?: string;
 }
 export interface GuidanceRecord {
+  readonly variant_id?: Variant;
+  readonly slot?: number;
   readonly status: 'offered' | 'pressed' | 'completed' | 'dismissed';
   readonly state_key_fields?: StateKeyFields;
   readonly state_key_hash?: string;

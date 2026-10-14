@@ -7,7 +7,10 @@ import type { GuidanceSignals, GuidanceState, GoalPathEdit, JsonValue, PolicyId,
 const IDS = POLICY.rows.map(r => r.policy_id);
 const compareId = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const sorted = (ids: readonly string[]) => [...ids].sort(compareId);
-const SETTLED = new Set(['pressed', 'dismissed', 'completed']);
+/** E6 (Paul's test 12 Oct, DL): SHOWN counts. Served: RC-WIDEN W6 was offered with one state key on 8 replies in a row,
+ * each with the same "Why?" and "Suggest risks". A row is said once per state; it returns only when its key changes.
+ * Items cool per item and fall through to the next item (selection.cooldown_scope), as on staging (Batch R check P1). */
+const SETTLED = new Set(['offered', 'pressed', 'dismissed', 'completed']);
 const LIMIT_REASONS = ['no_option_meets_limit', 'every_option_likely_breaks_limit'];
 const EDIT_KINDS = new Set(['factor_value_edit', 'edge_strength_edit', 'link_effect_edit', 'option_intervention_edit',
   'goal_target_edit', 'limit_edit', 'prior_range_edit', 'structural_add', 'structural_add_edge', 'structural_remove', 'structural_delete']);
@@ -28,12 +31,24 @@ export function entryKey(policy_id: PolicyId, item?: string): string {
   return item === undefined ? policy_id : `${policy_id}:${stateKeyHash({ item_id: item })}`;
 }
 
-/** A pressed, dismissed or completed entry hides its row until the row's state key changes. */
+/** A shown, pressed, dismissed or completed entry hides its row until the row's state key changes. */
 function cooled(draft: Draft, guidance: GuidanceState): boolean {
   const record = guidance[entryKey(draft.policy_id, draft.policy_id === 'RC-STRENGTHEN-ITEM' ? draft.item : undefined)];
   if (!record || !SETTLED.has(record.status)) return false;
   const recorded = record.state_key_hash ?? (record.state_key_fields ? stateKeyHash(record.state_key_fields) : undefined);
   return recorded === stateKeyHash(draft.fields);
+}
+
+/**
+ * E6 Why-once (DL 12 Oct, after Batch R's check): a policy's "Why?" (its science basis) is said once per state of the
+ * policy; items are still offered. It was said when an item of this policy shown before is still offered and every such
+ * item is unchanged (cooled). A shown item whose key has changed re-arms it; a resolved item, no longer offered, is
+ * not part of the state. A whole-policy row is never said twice on one state, so this holds only for items. Display only.
+ */
+export function policyWhySaid(policy_id: PolicyId, signals: GuidanceSignals, guidance: GuidanceState): boolean {
+  const shown = evaluate(policy_id, signals).candidates.filter(draft =>
+    SETTLED.has(guidance[entryKey(draft.policy_id, draft.policy_id === 'RC-STRENGTHEN-ITEM' ? draft.item : undefined)]?.status ?? ''));
+  return shown.length > 0 && shown.every(draft => cooled(draft, guidance));
 }
 
 type Candidate = { variant: Variant; priority: Priority; items: string[]; kind: 'link' | 'factor' };

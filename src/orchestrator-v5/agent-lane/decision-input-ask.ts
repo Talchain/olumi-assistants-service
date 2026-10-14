@@ -13,12 +13,14 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { goalHasStatedTarget, isProvisionalObjective } from '../goal-target/goal-target-gap.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
 import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalDeadline, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
-import { goalHorizonSteadyWhyLine } from '../goal-target/goal-horizon-detail.js';
+import { goalHorizonSteadyWhyLine, goalStockMethodWhyLine } from '../goal-target/goal-horizon-detail.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
+import { goalTargetGapOf } from '../goal-target/goal-target-gap.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
@@ -27,11 +29,11 @@ import { withoutProposalIds } from './display-ids.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
+import type { PressBlocker } from './press-next-step.js';
 import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
-const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
 const TARGET_ASK_TAIL = "I'll propose it as your target.";
 
@@ -50,15 +52,8 @@ function goalOf(graph: unknown): Rec | undefined {
   return goals.length === 1 ? goals[0] : undefined;
 }
 
-/**
- * Whether the goal carries a target the user stated: any of the fields the goal-target writer sets, or (RT-10 B′ R3) the
- * goal's own limit row, read by the ONE target reader — "at most 400" is a target, so it is never asked for again.
- */
-export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
-  const g = recordOf(graph);
-  return finite(goal.goal_threshold_raw) || finite(goal.success_threshold) || finite(goal.goal_threshold)
-    || (g !== undefined && statedGoalTargetOf(g, goal) !== null);
-}
+// The target predicate and the provisional-objective rule live with the "no target" gap (ONE authority, C1 r1).
+export { goalHasStatedTarget };
 
 export interface DecisionInputAskContext {
   /**
@@ -244,8 +239,9 @@ export function statedTargetWords(graph: unknown): string | null {
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
 export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean; normalizationOnly?: boolean }): string | null {
+  // Batch C (amendment 2): an at-horizon basis is the timing assumption said beside the chance; this line would deny it.
   if (goalKindOf(graph) === 'share_by_date' || (!opts?.normalizationOnly
-    && goalHorizonVerdict(graph) === 'computed_at_h')) return null;
+    && (goalHorizonVerdict(graph) === 'computed_at_h' || goalHorizonVerdict(graph) === 'basis_at_h'))) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
@@ -283,13 +279,15 @@ export function withUntestedHorizonWarning<E>(
  */
 export function withShortHorizonBesideChance<E>(
   envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = [], accumulationWithdrawn = false,
+  submittedOptions: readonly { interventions?: unknown }[] = [],
 ): E {
-  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn);
+  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn, submittedOptions);
 }
 
 /** Replace any intermediate wording with the final cell form; the warning and licence stay in agreement. */
 function withCellHorizonWarning<E>(
   envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean,
+  submittedOptions: readonly { interventions?: unknown }[] = [],
 ): E {
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
@@ -303,7 +301,8 @@ function withCellHorizonWarning<E>(
       ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const hasRange = cells.some(cell => cell.kind === 'range');
-  const steadyLine = verdict === 'steady_attested' && hasChance ? goalHorizonSteadyWhyLine(graph) : null;
+  const steadyLine = !hasChance ? null : verdict === 'steady_attested' ? goalHorizonSteadyWhyLine(graph)
+    : verdict === 'computed_at_h' ? goalStockMethodWhyLine(graph, submittedOptions) : null;
   let changed = false;
   let wroteHorizon = false;
   let wroteSteady = false;
@@ -390,8 +389,13 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
   if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineFromRecord(graph, goal.id) === undefined ? chanceGoalDeadlineAsk(label) : null;
-  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`
+  return isProvisionalObjective(goal) ? provisionalObjectiveAsk(label)
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+}
+
+/** The objective ask for Olumi's own provisional objective: the one ask writer's words, shared with the coach step. */
+function provisionalObjectiveAsk(label: string): string {
+  return `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`;
 }
 
 /** Normalise only exact narrator copies of this graph's host ask before placement. */
@@ -428,6 +432,33 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
   if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? ${TARGET_ASK_TAIL}`;
   if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? ${TARGET_ASK_TAIL}`;
   return `What figure should "${label}" reach or stay under${within}? ${TARGET_ASK_TAIL}`;
+}
+
+/**
+ * A goal met by an event by a date (a drafted team part, or a `chance_of_event` goal): its step is the event's own (deadline,
+ * team time), never a level target or "today's level" (Paul's hiring test: no "% today" question on any surface).
+ */
+export function isChanceGoalModel(graph: unknown): boolean {
+  return draftedTeamPartOf(graph) !== null || goalKindOf(goalOf(graph)) === 'chance_of_event';
+}
+
+/**
+ * ⭐ COACH (Paul's funding test; DL 00:21Z and 00:3xZ 14 Oct): the goal's missing target as a typed blocker, ranked FIRST by
+ * `oneNextStep`: with no target, no sizing ask can unlock a chance. The ONE "no target" authority decides and words it
+ * (`goalTargetGapOf`, C1: the standing gap, the action bar's "Set target" and the Run cells read the same); never for an
+ * event model's chain (its step is the event's own). Olumi's own provisional objective (Run 3's "Development speed") is
+ * NOT a missing target (DL ruling on C1's check 3005; the AIE's Q4 never puts a target in place of the purpose): its
+ * step is the objective ask, in the one ask writer's words, ranked before any target.
+ */
+export function goalTargetMissingBlockerOf(graph: unknown): PressBlocker | null {
+  if (isChanceGoalModel(graph)) return null;
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal?.provenance === 'ai_inferred' && label !== '') {
+    return { kind: 'missing_input', ask: provisionalObjectiveAsk(label), cause: 'objective_provisional' };
+  }
+  const gap = goalTargetGapOf(graph);
+  return gap === null ? null : { kind: 'missing_input', ask: gap.question, cause: 'goal_target_missing' };
 }
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */

@@ -1,5 +1,8 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
+import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
@@ -38,7 +41,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -55,6 +58,7 @@ import {
   assessConstructionSize,
   retryInstruction,
   keepsEveryUserStatedIdentity,
+  keepsEveryUserStatedIdentityWhenGoalRechosen,
   nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
@@ -63,23 +67,24 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
-import { admitAccumulationIdentities, withAccumulationCarriers } from '../accumulation-identity.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructuralGoalAccumulation } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { clampForPersist, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
 import { heldEventRiskLine, holdStatedEventRisks, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
+import { preparingDraftReplacementFor } from './draft-replacement-context.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -143,7 +148,8 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
-        if (!providerBoundary && name === 'stated_evidence') continue;
+        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence' || name === 'source_quote'
+          || name === 'unknown_concerns')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -155,6 +161,10 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
 
 export function buildCandidateSchema(): Record<string, unknown> {
   const provenance = { type: 'string', enum: ['explicit', 'inferred', 'ai_proposed'] };
+  // ⭐ THE INTRODUCTION CLAIM (AIE packet 6e52e896 `introduction.description`, byte for byte; DL 14 Oct): who introduced an
+  // option, factor, risk or outcome, never who supplied a value (`baseline_provenance`, `effect_provenance` keep the bare enum).
+  // The drafter's claim only: it is not carried to the graph (the AIE's consumer condition: no wider `proposed_by` yet).
+  const introducedBy = { ...provenance, description: "Who introduced this item, independently of who supplied its values. \u201cexplicit\u201d: it is stated in the retained user or source material. \u201cinferred\u201d: it interprets that material, or its introduction is uncertain. \u201cai_proposed\u201d: a genuinely new item you are adding beyond that material. Reformulating a supplied purpose, condition or concern is not a new AI addition. Use \u201cai_proposed\u201d only for your own additions after reading the relevant source; absence of a label or figure is not evidence. If source is missing, unread or ambiguous, use \u201cinferred\u201d and preserve that uncertainty. Label your own additions as Olumi\u2019s suggestions; approval does not change their origin or approve their numbers." };
   const obj = (properties: Record<string, unknown>, required: string[]) => ({
     type: 'object', additionalProperties: false, properties, required,
   });
@@ -204,6 +214,28 @@ export function buildCandidateSchema(): Record<string, unknown> {
         stated_in_brief: { type: 'boolean', description: 'True only when the brief itself says which.' },
       }, ['modelled', 'alternative', 'stated_in_brief'])], description:
         'Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole.' },
+      // ⭐ RECOVERY BATCH C (rulings 1–2, 11; amendments 2–5). PROMPT HUNK — science sign-off required before ship.
+      // Optional in the candidate contract (a recorded candidate validates unchanged); required in what is sent
+      // (`strictForTheDrafter`). Admission validates them (`goal-target-basis.ts`); nothing is inferred from their absence.
+      quantity_frame: { type: 'string', enum: ['level', 'change'], description:
+        '"change" ONLY when the goal metric is itself measured as a change from today (see the CHANGE QUANTITIES rule); otherwise "level".' },
+      basis: { anyOf: [{ type: 'null' }, obj({
+        reference: { type: 'string', enum: ['today', 'launch'] },
+        denominator: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        period_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+        period_kind: { type: 'string', enum: ['at_end', 'over_period'] },
+        effect_unit: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        effects_at_period_end: { type: 'boolean' },
+        also_required: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+        open_question: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      }, ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'])],
+      description: 'What the target is measured against (see the TARGET SEMANTICS rule). null when the goal states no target.' },
+      // ⭐ THE SOURCE CONTRACT (DL 02:0xZ 14 Oct, recovery/gen/PLAN.md): the user's own words for the target; the host checks it
+      // (session 4, D3). Optional in the contract, required in what is sent;
+      // LAST so the one-pass and two-pass strict schemas order `required` alike (the manifest sha). The AIE's whole text
+      // (packet 20dfa110, item 6).
+      source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'For a target actually stated in the brief, including a stated event or deliverable, copy the complete relevant statement VERBATIM. Preserve any stated speaker, subject, figure, comparator, unit, reference, denominator, period, qualifications, conditions and negation. Include consecutive complete sentences when they are needed for that meaning; do not shorten qualifications, stitch unrelated passages or add words or a speaker name not present in the source. null when the brief states no target. A quote does not itself verify the claim, create a numerical target or confirm that its complete meaning is saved.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -212,6 +244,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the contract's three writable frames. Legacy `delta` (a change
       // from the MODEL'S ORIGIN) gets no new writers.
       frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
+      // ⭐ RECOVERY BATCH C (ruling 15) — PROMPT HUNK, science sign-off required. Optional in the contract.
+      role: { type: 'string', enum: ['limit', 'target'], description:
+        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit".' },
     }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
@@ -234,7 +269,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
      */
     options: { type: 'array', items: obj({
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
-      provenance,
+      provenance: introducedBy,
       changes: { type: 'array', description:
         'Factor labels this option acts on for which no defensible level exists \u2014 each one leaves the user a value question before anything can be calculated, so prefer a level in `interventions` (your ai_proposed estimate when the brief states none). Use the factor labels exactly. The option marked is_status_quo leaves this empty. An option (other than the one marked is_status_quo) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
@@ -265,9 +300,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // price 15%" registered with no level because "% from current list price" was marked unknown). Known-zero is what
       // lets admission restate a signed change as "% of today" (restateSignedPercentChanges, rows 4a/4b); the restated
       // factor carries no source, so no authority is claimed for the zero.
-      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. "% change from the current price", "extra hires") is 0 today by definition: baseline_known true, baseline_value 0.' },
+      // AIE (#94 6159308321; AIE-CONSTRUCTOR-D4-FIELD-AND-SOURCE-RULING-20261014.json): the whole description, byte for byte.
+      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or supported evidence. A provisional AI estimate keeps this false. EXCEPTION: for a factor explicitly defined as a CHANGE FROM TODAY, today\'s structural value is 0: baseline_known true, baseline_value 0. This is a definition, not a newly stated measurement, and does not state its value at a future horizon. For the existing NO-CHANGE FORECAST representation, derive the future change as the stated no-change forecast at its specified horizon minus the supported current level of the SAME quantity, with compatible units and reference. Preserve both sources, the horizon and conditions. Do not apply today\'s structural-zero exception to this future value: a valid derived change may be positive, negative or zero. Identify it as a derived conditional forecast, not a newly stated measurement or observed current level. Missing or incompatible operands remain unknown; never invent a value or probability law.' },
+      baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
-      unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance,
+      unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance: introducedBy,
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
@@ -275,8 +312,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
     // out of an outcome or a risk can be read, so a goal they feed could never be sized in its own unit.
     // ⛔ OPTIONAL HERE, REQUIRED ONLY WHERE IT IS SENT (DL 5916270318, option D): a candidate recorded before the frames
     // existed still validates against this contract, and `strictForTheDrafter` requires both keys of the drafter itself.
-    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
-    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance: introducedBy, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance: introducedBy, ...QUANTITY_FRAME }, ['label', 'provenance']) },
     links: { type: 'array', description:
       'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.',
       items: obj({
@@ -287,22 +324,25 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // \u2b50 THE MAGNITUDE CONTRACT (D1). A size in NATURAL units, read on each end's own frame by admission
       // (`cee/magnitude/link-effect.ts`). REQUIRED so strict output must say "not known" (null) rather than omit it.
       effect_amount: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
-        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage target, in points: 4% to 3% is -1. null when you cannot give a defensible size.' },
+        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage-level target, use percentage points: 4% to 3% is -1. For a goal measured as percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points. null when you cannot give a defensible size.' },
       effect_per_source_change: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
         'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
       effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
         '"explicit" only when the user stated this size; null when `effect_amount` is null.' },
       // ⭐ DL #75 5916504679: the drafter's word that a link holds by definition. Optional in the contract (a recorded
       // candidate validates unchanged), required in what is sent (`strictForTheDrafter`); checked before any edge has it.
+      // AIE (#94 6159308321; AIE-CONSTRUCTOR-D4-FIELD-AND-SOURCE-RULING-20261014.json): the whole description, byte for byte.
       definitional: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
-        'true ONLY when this link holds BY DEFINITION, not by estimate: the source is part of the target\u2019s own quantity, in the SAME unit, '
-        + 'so one unit of the source moves the target by exactly one unit (money lost to a risk is money the goal does not get: '
-        + 'effect_amount -1, effect_per_source_change 1). null for every other link.' },
+        'true ONLY when this link holds BY DEFINITION, not by estimate: the source is a defined contribution to the target\'s own quantity, in the SAME unit and reference, so one unit of the source contributes exactly one unit to the target (money lost to a risk is money the goal does not get: effect_amount -1, effect_per_source_change 1; a supported derived no-change forecast change contributes one for one to that SAME quantity at its stated horizon: effect_amount 1, effect_per_source_change 1). The forecast case is an additive modelling definition, not a causal size estimated from two levels. Preserve the signed change, the original current level and forecast conditions, and count the shared change once. Do not set this for another quantity, an ordinary causal hypothesis or a unit/reference mismatch. null for every other link.' },
       // ⭐ SCIENCE §(p)(1) + §(u)(b) (#2842 follow-up): the one-line reason Olumi's own size holds. Optional in the
       // contract (a recorded candidate validates unchanged), required in what is sent (`strictForTheDrafter`).
       basis: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
         'One short line, from the brief, saying why this size and its direction hold (for example "a higher price pushes '
         + 'more customers to cancel"). null when `effect_amount` is null or the user stated the size.' },
+      // ⭐ THE SOURCE CONTRACT: the user's own words for a relation they stated; the host checks it (HIRING). Optional in the
+      // contract, required in what is sent; LAST, as the goal's (the manifest sha). The AIE's whole text (packet 20dfa110, item 7).
+      source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'For a relation claimed as stated in the brief (provenance explicit), copy its complete applicable statement VERBATIM, preserving any stated speaker, both directed subjects, its size if supplied, and all units, reference, period, qualifications, conditions and negation. Include consecutive complete sentences when needed; never invent an endpoint, direction, size or speaker, shorten qualifications or stitch unrelated passages. null when no applicable stated relation exists. Preserve attributed or disputed views as such; do not turn a question, denial or superseded statement into a current unqualified causal claim. Quote presence or a shared figure alone does not verify the relation\'s meaning or authorship.' },
     }, ['from', 'to', 'direction', 'provenance', 'effect_amount', 'effect_per_source_change', 'effect_provenance']) },
     /**
      * ⛔ C46: a product the analysis can only ADD UP must be DECLARED, never read off a label.
@@ -312,28 +352,42 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * marks whether its sign is provable. REQUIRED so "none" is an empty list, never an omission.
      */
     identities: { type: 'array', description:
-      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline. Empty when none.',
+      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline, including the goal itself. Empty when none.',
       items: obj({
         outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product, or the stock at the deadline.' },
         operation: { type: 'string', enum: ['product', 'accumulation'] },
-        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month.' },
+        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month; for a stated net change EXACTLY two: the level today, the net amount added per month.' },
         provenance,
+        reading: { anyOf: [{ type: 'string', enum: ['net', 'gross'] }, { type: 'null' }] },
       }, ['outcome', 'operation', 'factors', 'provenance']) },
-    unknowns: { type: 'array', items: { type: 'string' } },
+    // DRAFTER TEXT 3 item 3 (AIE packet 281e8b3d): the drafter describes the decision, never what Olumi will do with its draft.
+    unknowns: { type: 'array', description: 'Questions people could answer, scientific uncertainties and competing interpretations relevant to the shared work, in plain words. Preserve retained questions and viewpoints with their complete wording, speakers, qualifications and unresolved status; do not turn them into established causal facts. Do not predict how the host will treat, admit, verify, record or count a figure: Olumi’s current readback states what is actually held.', items: { type: 'string' } },
     // ⭐ THE QUESTION CARD'S TITLE (Paul, 27 Sep: served "Decision: MRR"). COPIED, never written: admission takes it only
     // when it is verbatim brief text (`admit-model.ts` `decisionEntityFor`). REQUIRED so strict output must say "no
     // question" (null) rather than omit it.
     decision_question: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
-      'The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none.' },
+      'The brief\'s own governing question or statement of intent, copied VERBATIM as one span of 8–240 characters. Include statements such as \'We need to decide whether ...\'. Keep every purpose and condition within that span. Use null only when the brief contains no such span. Do not reword it or turn exploration into a decision.' },
+    // ⭐ THE SOURCE CONTRACT: what each question is about, by the model's own labels; the host binds it to node and link ids
+    // (HIRING; it replaces matching a question by its figures). Optional in the contract, required in what is sent.
+    // The AIE's whole text (packet 20dfa110, item 8).
+    unknown_concerns: { type: 'array', description:
+      'One entry for each entry in unknowns, in the same order: copy the complete question exactly and identify what every substantive part is about. concerns lists only the EXACT declared labels of the goal, factors, options, risks or outcomes, with a directed link written as "<from label> → <to label>". Include referents in quoted facts, ranges, forecasts, qualifications, conditions or dissent within the question. Use an empty list when the question concerns the model as a whole or its complete meaning cannot be bound uniquely to the declared labels and directed pairs. Never invent a label, guess a link from a shared number or omit a substantive referent. These are proposed bindings, not evidence that a question is resolved or may be removed.',
+      items: obj({ unknown: { type: 'string' }, concerns: { type: 'array', items: { type: 'string' } } }, ['unknown', 'concerns']) },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 
+// ⭐ DRAFTER TEXT 3 (DL 14 Oct; the AIE's texts, packet 281e8b3d, #94 6162120876): the goal is the user's governing aim, and a
+// date keeps its role (hiring raw 9d75b605 chose "Urgent launch"); the deadline is asked once, by the host
+// (`chanceGoalDeadlineAsk`); today's level of the same whole goal quantity, stated in other words, is its level (capacity).
 export const BUILD_INSTRUCTIONS = [
-  'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
+  'The goal carries the user’s governing aim and its stated target. A date is not automatically the goal: preserve whether it is a deadline for achieving the aim, a launch or start reference, or a measurement or learning window. Use event_by_date only when delivering the stated event is itself an aim; do not replace a quantity goal with an unrelated event or move its governing target into constraints to do so. Further mandatory targets of the same purpose may stay as target constraints: preserve their AND meaning, common reference and window, and all limits and conditions. If the governing meaning is unclear, retain the original words and ask; do not invent a target or a launch-completion percentage. For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. For an event-by-date model, the host supplies the deadline question; do not add that same question to unknowns. Ask only relevant remaining timing questions, such as how long the current team would take or when new capacity becomes effective, when those facts are genuinely missing. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
+  'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
-  'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
-  'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
+  // GEN D4 item A (the AIE's text, packet fc17c200, #94 6163023819): T5-integrated D4 drafted the drift at
+  // today's 0 and carried the +2 on the link (r2 at 2 per 1), so no-change stayed at 8 weeks; the derived change is the drift's value.
+  'Preserve exact user facts, numbers, constraint semantics and time horizon. NO-CHANGE FORECAST. When the brief gives both a current level and a forecast without an intervention at a later horizon, preserve both with their distinct references and the forecast\'s exact wording and qualifiers. Represent the forecast once as a shared external drift by that horizon, in the goal\'s own units, using the existing factor and definitional-link shape. Derive the drift as forecast minus current level and identify it as derived from the stated forecast, never as a newly stated measurement. For 8 weeks today and a forecast of 10 weeks next quarter, retain 8 weeks as today\'s level and a forecast of 2 additional weeks by that horizon. That forecast affects carrying on and the alternatives unless an alternative changes its cause. Do not replace today\'s level or the target with the forecast, replace a supported non-zero future change with today\'s structural zero, count it twice, or retain it only as a question. Keep the original forecast sentence and its source alongside the derived change in the available evidence and question carriers. For the existing NO-CHANGE FORECAST representation, put the supported derived future change in the drift factor’s baseline_value, in the same native unit and at the forecast’s stated horizon: 2 weeks for 10 minus 8 in this example, not today’s structural 0. Set baseline_known true only when both operands and their shared quantity, unit, reference, horizon and conditions are supported; this records a supported conditional derivation, not an observed current level or certain future outcome. Mark this interpreted drift item provenance inferred, and leave baseline_evidence null because that field is for a stated current level. Retain the complete original current-level and forecast statements, their sources, horizon and conditions in the existing evidence and question carriers, alongside the derivation. Link this signed drift to the same goal quantity as a definition: definitional true, effect_amount 1, effect_per_source_change 1. Mark the interpreted definition and its size inferred, with their supported derivation in the existing basis; do not claim a newly human-stated link magnitude. Carry the derived change in the factor’s value, never in the link’s size, and count the shared change once. Missing, conflicting or incompatible operands leave the derived value null and baseline_known false; a separately disclosed provisional estimate remains an estimate, never this supported derivation. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
+  'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target. When the retained brief states today’s level of the same whole goal quantity in other words, at the same reference and scope, set goal.baseline_value to that level with baseline_known true and baseline_provenance explicit. Matching units or a figure alone is insufficient: a component’s output, another service’s level, a target, a ceiling or a future forecast is not today’s whole-goal level. A level derived through an existing supported definition must retain its validated operands and conditions and its derived or inferred origin, not become an explicitly measured figure. If the whole-goal equivalence is unsupported, missing or conflicting, keep the baseline unknown; do not borrow a component or assume a zero.',
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   // ⛔ ONE QUANTITY, ONE MEANING (R3 #75 5914500931; AIQ 5914532431; DL 5915507578 item 4). Paul's brief weighs angel
@@ -419,6 +473,7 @@ export const BUILD_INSTRUCTIONS = [
   // deadline, which a model of today's levels cannot see. Admission (`accumulation-identity.ts`) refuses any shape below
   // that does not hold, and says why.
   'A STOCK AT THE DEADLINE IS WORKED OUT, NEVER GUESSED. Only when the goal states a deadline in months AND the goal depends on a stock that loses a share each month and gains an amount each month (paying subscribers with monthly churn and new sign-ups): add an outcome labelled with the stock and the deadline (e.g. "Pro subscribers at month 12"), link the stock today, its monthly churn and its monthly new additions each DIRECTLY to that outcome, and add one entry to `identities` with `operation` "accumulation", `outcome` that label, and `factors` EXACTLY [the stock today, the churn as a percentage per month (unit "%"), the amount added per month], in that order. Each of the three needs today\u2019s level. Whenever an accumulation is declared, the goal\u2019s PRODUCT in `identities` over [the price-like part, "<stock> at month N"] is REQUIRED; link both parts directly to the goal. Never use it for a churn stated per year, or without a stated deadline.',
+  'When the brief states the goal’s level today and its monthly change, the accumulation outcome may be the GOAL itself, with no product required. Use TWO factors [the level today, the net amount added per month] and reading "net" ONLY for a stated net change or an amount it "grows by"; a gross inflow with no stated losses has reading "gross" and is refused without assuming losses.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
@@ -439,7 +494,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
-  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in percentage points when the target is a percentage level, so 4% to 3% is -1; for a goal measured as percentage change from today\'s level, use % of today\'s level as specified in CHANGE QUANTITIES, not percentage points) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
   // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
   // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
   // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general
@@ -455,8 +510,14 @@ export const BUILD_INSTRUCTIONS = [
   // ("keep a risk only for a separate harm … otherwise leave it out") also dropped separate harms: risks 23 → 10 (lsD).
   'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already carries the limited quantity moving the wrong way, so do not size that loss a second time: keep that risk as a node, linked to the goal metric with all three size fields null. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
+  // ⭐⭐ RECOVERY BATCH C — THE PROMPT HUNK FOR SCIENCE SIGN-OFF (rulings 1–5, 11, 15; amendments 2–5). ONE instruction.
+  // AIE C drafter changeset (12 Oct), three clauses verbatim: the additive hiring assumption is disclosed, effect timing
+  // matches period_kind, and each secondary target keeps its own frame/reference/period (unsupported ones are retained).
+  'CHANGE QUANTITIES. When the goal is a percentage change of a quantity that has no unit of its own in the brief and whose level today the brief does not give ("increase productivity by at least 10%"), measure the goal AS that change: goal.quantity_frame "change", goal.frame "change_abs", goal.unit "%", goal.value the signed percentage (10), and the metric named for the quantity ("Productivity"). Every link into that goal then states effect_amount in % of today\u2019s level of it, per effect_per_source_change of its source, as the size AT the end of the goal\u2019s period, including recruitment, notice and ramp-up \u2014 never a steady-state size. For the provisional hiring calculation, use additive per-person effects at that horizon; this assumes no diminishing returns or additional onboarding interaction beyond the stated per-person estimate. Keep that assumption explicit rather than presenting linear scaling as a fact. A quantity with a unit of its own (money, customers, a rate in %) keeps goal.quantity_frame "level" and the frames above. '
+  + 'TARGET SEMANTICS. Whenever the goal states a target, give goal.basis: reference "today", or "launch" when the targets are measured from a launch; denominator, for a change, what 100% is, in words (for example "today\u2019s monthly development capacity"), null for a level target; period_months, the months at which or over which the target is measured; period_kind "at_end" for the level or change AT that month, "over_period" for a rate or a count over the first period_months; effect_unit, the unit every link into the goal states its effect in; effects_at_period_end is true only when every incoming effect is sized for the selected period_kind: the effect at that month for at_end, or the cumulative count/period rate over the stated window for over_period, including relevant recruitment and ramp-up. Otherwise false. A deadline or period label alone does not establish the timing basis. also_required, the other conditions the user says the goal needs that this target does not include, in their words (for example "code quality maintained", "spend within \u00a3200,000"), else null; open_question, when the user\u2019s own words let the target be read more than one way (for example productivity described as a share of time, so "+10%" could mean 10% more than today or 10 more percentage points), the ONE question that asks which \u2014 never pick a reading \u2014 else null. With no stated target, basis is null. '
+  + 'SEVERAL TARGETS. When the user names several success targets, keep one as the goal and each other as a constraint with role target. Give each its stated comparator and target frame by the same level/change rules; never force a change target into level. For the conversion/new-customer example both are level targets over the same first three months after launch, conversion>15% and new customers>=20. Preserve any distinct reference or period the user states; where this contract cannot represent or support it, retain the condition in also_required/unknowns with a focused clarification, rather than inventing a shared period or claiming the full conjunction. Budget, time and other constraints keep role limit. A period count is the cumulative total from that period\'s start, and a period conversion rate is the conversion rate over that window, never a month-end snapshot.',
   'Labels are NAMES, not sentences.',
-  'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
+  'Set decision_question to the brief\'s governing question or statement of intent, copied VERBATIM as one span of 8–240 characters, including a statement such as \'We need to decide whether ...\'. Preserve its compound purposes and conditions. Use null only when no such span exists. Never reword it or turn exploration into a decision.',
   'Output only the schema.',
 ].join(' ');
 
@@ -504,6 +565,7 @@ export function constructionOperationId(scenarioId: string, brief: string): stri
 export interface ConstructionVersion {
   readonly version_id: string;
   readonly version_number: number;
+  readonly created_at?: string;
   readonly mutation_id: string | null;
   readonly creation_kind: string;
   readonly source_turn_id: string;
@@ -547,6 +609,7 @@ export async function findConstructionVersion(
       return {
         version_id: String(hit.version_id),
         version_number: Number(hit.sequence),
+        ...(typeof hit.created_at === 'string' ? { created_at: hit.created_at } : {}),
         mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
         creation_kind: String(creation.kind),
         // The id the ROW carries, not the one we searched for: equal under a
@@ -575,6 +638,79 @@ export async function findConstructionVersion(
  * the model links to it by its exact label; the unchanged identity check still
  * refuses anything else.
  */
+/** Recovery Batch C: the drafted basis pinned value by value (strict output must return it unchanged), or `null`. */
+function pinnedBasis(b: CandidateModel['goal']['basis']): Record<string, unknown> {
+  if (b === null || b === undefined || typeof b !== 'object') return { type: 'null' };
+  const str = (v: unknown): Record<string, unknown> => (typeof v === 'string' ? { type: 'string', enum: [v] } : { type: 'null' });
+  const also = Array.isArray(b.also_required) ? b.also_required.filter((x): x is string => typeof x === 'string') : null;
+  return {
+    type: 'object', additionalProperties: false,
+    required: ['reference', 'denominator', 'period_months', 'period_kind', 'effect_unit', 'effects_at_period_end', 'also_required', 'open_question'],
+    properties: {
+      reference: { type: 'string', enum: [b.reference === 'launch' ? 'launch' : 'today'] },
+      denominator: str(b.denominator),
+      period_months: typeof b.period_months === 'number' ? { type: 'integer', enum: [b.period_months] } : { type: 'null' },
+      period_kind: { type: 'string', enum: [b.period_kind === 'over_period' ? 'over_period' : 'at_end'] },
+      effect_unit: str(b.effect_unit),
+      effects_at_period_end: { type: 'boolean', enum: [b.effects_at_period_end === true] },
+      // ⛔ The grammar pins only the length and the vocabulary ([A, B] admits [A, A]); each condition's identity is named here
+      // and enforced on adoption (`keepsEveryGoalCondition`, independent check C-cee r1 item 5).
+      also_required: also === null ? { type: 'null' }
+        : {
+          type: 'array', minItems: also.length, maxItems: also.length,
+          ...(also.length > 0 ? { description: `Exactly these conditions, each once: ${also.map((a) => JSON.stringify(a)).join(', ')}.` } : {}),
+          items: also.length === 0 ? { type: 'string' } : { type: 'string', enum: also },
+        },
+      open_question: str(b.open_question),
+    },
+  };
+}
+
+/**
+ * ⛔ A RETRY KEEPS EVERY GOAL CONDITION, BY IDENTITY (independent check C-cee r1 item 5). The pinned retry schema can hold
+ * `goal.basis.also_required` only by length and vocabulary, so `[A, B]` may come back `[A, A]`. Each condition the first
+ * draft carried, qualitative ones included, must come back exactly once (order free; spelling by `canonicalLabel`), and
+ * no condition may be added. A retry that fails this is not adopted.
+ */
+export function keepsEveryGoalCondition(first: CandidateModel['goal'], retry: CandidateModel['goal']): boolean {
+  const conditions = (g: CandidateModel['goal']): string[] => {
+    const also = g?.basis?.also_required;
+    return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string').map(canonicalLabel).sort() : [];
+  };
+  const a = conditions(first);
+  const b = conditions(retry);
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/** A redraft that re-chooses the goal may add conditions, never lose one the first goal held (by identity, as above). */
+function keepsTheFirstGoalConditions(first: CandidateModel['goal'], retry: CandidateModel['goal']): boolean {
+  const conditions = (g: CandidateModel['goal']): string[] => {
+    const also = g?.basis?.also_required;
+    return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string').map(canonicalLabel) : [];
+  };
+  const kept = conditions(retry);
+  return conditions(first).every((c) => kept.includes(c));
+}
+
+/**
+ * The construction retry's issue for an unattested event goal (`unattestedEventGoal`), and the Agent's clarification when the
+ * redraft still holds it: the AIE's texts (packet `AIE-UNATTESTED-GOAL-RETRY-AND-CLARIFICATION-TEXTS-20261014.json`, sha256
+ * 5b8c2f0e…, #94 6163837638), byte for byte, extracted programmatically. Each optional source clause follows the whole core
+ * text only with a COMPLETE verbatim statement of the brief (`wholeStatementIn`); otherwise it is omitted. The event's words
+ * and the drafted question are retained wording, never verified goal ownership (packet quotation_rules 1).
+ */
+export const UNATTESTED_GOAL_RETRY_ISSUE = 'The drafted event goal has not been verified as the brief’s governing aim. Read the complete retained brief and choose its supported governing goal, preserving that goal’s own quantity, unit, comparator, reference, period and conditions. Keep every further target of the same purpose with its AND meaning, and retain all limits, source qualifications and unresolved viewpoints. Preserve the event in its actual stated role, such as a goal deadline, launch reference, measurement or learning window, or separate aim; do not assign it a role the source does not support. A matching figure, unit, comparator, number of targets or copied goal label does not establish quantity identity. If the full meaning is missing, conflicting or ambiguous, retain the original words and unresolved issue instead of inventing a goal or converting a condition into one.';
+export const UNATTESTED_GOAL_CLARIFICATION = 'Olumi could not prepare a draft that faithfully preserves the brief’s governing aim and conditions. This draft was not saved. Read the complete retained brief and explain the specific unresolved meaning or preparation limitation. Ask a focused clarification only if the goal or success reading is genuinely missing, conflicting or ambiguous; do not re-ask a purpose or target that is already clear. When the retained aim is clear but this preparation path cannot preserve it, say so and continue with useful reasoning or evidence review supported by the current model. Offer another draft or approval step only through an actual available permitted preparation path, with the full current source and conditions; do not promise that another attempt will save a model or calculate a chance.';
+const retainedWording = (u: UnattestedEventGoal, brief: string): string =>
+  (u.words !== null && wholeStatementIn(brief, u.words) ? ` Retained event wording: "${u.words}".` : '')
+  + (u.governing !== null && wholeStatementIn(brief, u.governing) ? ` Retained intent wording: "${u.governing}".` : '');
+function unattestedEventIssue(u: UnattestedEventGoal, brief: string): string {
+  return UNATTESTED_GOAL_RETRY_ISSUE + retainedWording(u, brief);
+}
+function unattestedEventClarification(u: UnattestedEventGoal, brief: string): string {
+  return UNATTESTED_GOAL_CLARIFICATION + retainedWording(u, brief);
+}
+
 export function retrySchemaPinningGoal(
   goal: CandidateModel['goal'],
   /**
@@ -583,6 +719,8 @@ export function retrySchemaPinningGoal(
    * before the key) pins to "no question" (null).
    */
   decisionQuestion?: string | null,
+  /** False only for the redraft of an unattested event goal (`unattestedEventIssue`): the goal is re-chosen, the question stays pinned. */
+  pinGoal = true,
 ): Record<string, unknown> {
   const schema = buildCandidateSchema();
   const properties = schema['properties'] as Record<string, Record<string, unknown>>;
@@ -590,8 +728,14 @@ export function retrySchemaPinningGoal(
     ? { type: 'string', enum: [decisionQuestion] }
     : { type: 'null' };
   const goalSchema = properties['goal'];
-  if (goalSchema === undefined) return schema;
+  if (goalSchema === undefined || !pinGoal) return schema;
   goalSchema['properties'] = {
+    // Recovery Batch C (AIE request check, 12 Oct): an EVENT goal's kind and deliverable are part of the goal, so a pinned
+    // retry keeps them (else the retry could not say "event_by_date" and the event reading was lost); a quantity goal pins
+    // both to null, so no event attestation is ever added to a quantity brief.
+    kind: goal.kind === 'event_by_date' ? { type: 'string', enum: ['event_by_date'] } : { type: 'null' },
+    deliverable: typeof goal.deliverable === 'string' && goal.deliverable.trim() !== ''
+      ? { type: 'string', enum: [goal.deliverable] } : { type: 'null' },
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
     // A pinned `null` must stay expressible: `{type:'number', enum:[null]}` is
@@ -614,6 +758,10 @@ export function retrySchemaPinningGoal(
       ? { type: 'number', enum: [goal.baseline_value] }
       : { type: 'null' },
     baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
+    // Recovery Batch C: the quantity's frame and the target's semantics are part of the goal, so a compaction cannot drop
+    // or change them. Absent (a candidate from before the fields) pins to "level" and "none" (null).
+    quantity_frame: { type: 'string', enum: [goal.quantity_frame === 'change' ? 'change' : 'level'] },
+    basis: pinnedBasis(goal.basis),
     // C46: the scope is part of the goal, so a compaction cannot switch readings or drop the
     // question. An absent scope (a candidate from before the field) pins to "none" (null).
     scope: goal.scope === null || goal.scope === undefined || typeof goal.scope !== 'object'
@@ -791,10 +939,14 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
+        // ⛔ THE USER'S STATED SETTING IS NEVER OLUMI'S (capacity authorship row 7, DL 14 Oct). A setting the drafter called the
+        // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
+        // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
+        // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
         if (intervention.provenance === 'explicit' && unknownBaseline
           && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
-          interventions.push({ ...intervention, provenance: 'ai_proposed' });
+          interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
         } else {
           interventions.push(intervention);
         }
@@ -950,11 +1102,33 @@ function perOneRangeRule(written: string): string {
  * writes outside a question gets the retry's own per-one words; the retry stays the backstop, unchanged. A brief that
  * writes no range is sent exactly as before, byte for byte.
  */
-export function firstConstructInput(brief: string): string {
+export function firstConstructInput(brief: string, context?: ConstructionContext): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
-  return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  const input = notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  if (context === undefined) return input;
+  return `${input}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`
+    + (context.messages !== undefined && context.messages.length > 0 ? `\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(context.messages)}` : '')
+    + (context.objections !== undefined && context.objections.length > 0 ? `\n\n${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}` : '');
 }
+
+/**
+ * ⭐ A REVISED DRAFT SEES THE CURRENT SAVED MODEL (current-model caller, DL 14 Oct; AIE 6807d4e3 `completion_scope`): the
+ * model as the agent already reads it (`projectModelContext`), so the revision keeps its structure. It is CONTEXT ONLY: it
+ * goes into the drafter's input and never into the text every quote, attestation and number check reads (`brief`), so
+ * nothing in the saved model can pass as the user's words. What the user set in it is carried by the caller with its own
+ * stamp, never re-authored by this draft. (Drafter text: AIE pending.)
+ */
+export interface ConstructionContext {
+  readonly current_model: Record<string, unknown>;
+  /** The conversation's later messages (PL #94 07:32Z Q1): context, never verified words of the user. */
+  readonly messages?: readonly string[];
+  /** The objections the user recorded (S8 `statement`, verbatim): context the revision must not contradict. */
+  readonly objections?: readonly string[];
+}
+export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model, to revise (Olumi\'s record of the model, not the user\'s words; keep its structure and the labels of what you keep):';
+export const LATER_MESSAGES_CONTEXT_LEAD = 'Messages in this conversation after the brief (context only: their origin is not verified, so never quote them as the user\'s words or take a figure from them as stated):';
+export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier findings (context: keep the revised draft consistent with them):';
 
 /** A missing option-to-goal mechanism, read from what admission actually kept. */
 export interface OutcomePathIssue {
@@ -1487,6 +1661,8 @@ export type ConstructionTrace =
     readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number; readonly chain?: number };
     /** `adopted`: the retry's model registered · `kept_first`: an adoption gate refused it · `retry_failed`: the call or its parse threw. */
     readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
+    /** The second bounded size retry's own outcome, present only when it ran (the model was still over the limit after the first). */
+    readonly second?: 'adopted' | 'kept_first' | 'retry_failed';
   };
 
 /**
@@ -1547,6 +1723,8 @@ export async function buildModelFromBrief(
   wideningCallStructured?: CallStructuredModel,
   /** Test-only observer of the candidate and shared admission path at the widening boundary. */
   observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
+  /** A revised draft's current saved model, as context only (`firstConstructInput`); omitted → today's input, byte for byte. */
+  context?: ConstructionContext,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
@@ -1559,7 +1737,7 @@ export async function buildModelFromBrief(
     const out = await callStructured({
       model: budget.model,
       instructions: buildInstructions,
-      input: firstConstructInput(brief),
+      input: firstConstructInput(brief, context),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
       schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),
@@ -1603,8 +1781,7 @@ export async function buildModelFromBrief(
     const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
     return (label: string): boolean => named.has(canonicalLabel(label));
   };
-  // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
-  candidate = creditStatedFactorLevels(apart.model, brief);
+  candidate = apart.model;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
@@ -1622,7 +1799,7 @@ export async function buildModelFromBrief(
     // first and waits for the user's Yes like the mint's, or dropped (and said) when its units don't compose.
     const { model: c1, dropped } = unconfirmGoalProducts(c0, brief);
     // ⛔ Olumi's gap residual beside the user's two parts is taken out first (and said), so the reading and card apply.
-    const gap = withoutGapResidual(c1, brief);
+    const gap = withoutGapResidual(c1, brief, (f) => verifiedFactorLevel(c1, f, brief));
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
     // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
@@ -1687,6 +1864,14 @@ export async function buildModelFromBrief(
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
   const firstCandidate = candidate;
+  // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
+  const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
+  /**
+   * The redraft still holds the unattested event as its goal: as an event, or under ANY kind with the event's own label
+   * (⛔ Codex FAIL 3026 r1: a retry keeping "Urgent launch" with `kind: null` registered). Identity, never a word match.
+   */
+  const stillTheUnattestedEvent = (c: CandidateModel): boolean => unattestedEventGoal(c, brief, false) !== null
+    || (unattested !== null && canonicalLabel(c.goal.metric) === canonicalLabel(unattested.event));
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
@@ -1735,8 +1920,9 @@ export async function buildModelFromBrief(
   // ⚠ Counted WITHOUT the first pass's own degraded additions (#1841 B1): a retry that
   // echoes the prepared candidate carries each such pair in `changes`, and that figure
   // is the user's to give — it is never a new gap, so it can never refuse the retry.
+  // Read ONCE, from the first pass: a retry is judged against the first draft whichever attempt returns it.
+  const userOwned = preparation.additions_without_total;
   const gapCount = (p: typeof preparation): number => {
-    const userOwned = preparation.additions_without_total;
     return p.level_gaps.filter((g) => !userOwned.some((a) => a.option === g.option && a.factor === g.factor)).length
       + p.baseline_gaps.filter((g) => !userOwned.some((a) => a.reason === 'baseline_unknown' && a.factor === g.factor)).length;
   };
@@ -1783,7 +1969,8 @@ export async function buildModelFromBrief(
   // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue),
+    ...(unattested !== null ? [unattestedEventIssue(unattested, brief)] : [])];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1797,130 +1984,196 @@ export async function buildModelFromBrief(
       chain: chainsAsked.length,
     };
     trace = { retried: true, reasons, outcome: 'kept_first' };
-    try {
-      const retry = await callStructured({
-        model: budget.model,
-        // The delta is APPENDED, so every rule the first pass obeyed still holds —
-        // provenance, wiring, plausible_max and clearly labelled estimates.
-        // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
-        // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
-        // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
-        // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
-        // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
-        instructions: asked.length === 0 && needsSizeRetry
-          ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
-          : needsSizeRetry
-            ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
-            : `${buildInstructions}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
-        input: asked.length > 0
-          ? `${brief}\n\nConstruction issues: ${JSON.stringify(asked)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(firstCandidate)}`
-          : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
-        max_output_tokens: budget.max_output_tokens,
-        reasoning_effort: budget.reasoning_effort,
-        schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question), { providerBoundary: false }),
+    /**
+     * ⭐ ONE EVALUATION OF A RETRY DRAFT (Codex FAIL 3011 r1 and r2; DL class ruling 14 Oct). Every retry draft is judged by
+     * this one function against the FIRST draft's frozen state (`first`), so a draft gets the SAME verdict whichever attempt
+     * returns it: no gate is anchored one by one (r1 found the risk gate keyed on the moving issues, r2
+     * `compactionKeepsWhatOptionsDo` on the moving candidate). It returns what adoption sets, against the first draft, or null.
+     */
+    const first = { candidate, admitted, preparation, size, keptApart, linksSetAside, mechanismsUnmodelled, costsOffRevenue } as const;
+    /**
+     * `accepted`: the model the retry edits (the first draft, or the redraft a first retry adopted). Its goal conditions are
+     * the ones a second size retry must keep (⛔ Codex post-merge 3026: compaction was checked against the ORIGINAL event
+     * draft, so a condition the accepted redraft added was lost).
+     */
+    const judgeRetry = (text: string, accepted: CandidateModel) => {
+      const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(text) as CandidateModel));
+      const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: first.keptApart, setAside: first.linksSetAside }, retryApart);
+      // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
+      // (Only where the first draft's cut applied: elsewhere the retry is read exactly as before.)
+      const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
+        : { model: retryHeld.model, mechanisms: [], costs: [] };
+      const retryRaw = keepLimitedQuantityAuthor(
+        neverTheLimitAsTodaysLevel(retryUnsupported.model, firstCandidate, first.preparation.baseline_gaps),
+        firstCandidate, first.preparation.baseline_gaps,
+      );
+      const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
+      const retryCandidate = retryPrepared.candidate;
+      const retryIdentity = mintOrFold(retryCandidate);
+      const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
+      // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
+      const firstGone = new Set((first.admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
+      const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
+      const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
+        options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
       });
-      if (retry.text.length > 0) {
-        const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
-        const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
-        // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
-        // (Only where the first draft's cut applied: elsewhere the retry is read exactly as before.)
-        const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
-          : { model: retryHeld.model, mechanisms: [], costs: [] };
-        const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
-          firstCandidate, preparation.baseline_gaps,
-        );
-        const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
-        const retryCandidate = retryPrepared.candidate;
-        const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
-        // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
-        const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
-        const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
-        const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
-          options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
+      const retrySize = assessConstructionSize(retryAdmitted);
+      // ⛔ COVERAGE ALONE NEVER COSTS A REGISTERED OPTION (adversarial verify of 58a22db8, P2-A/P2-E: COMBINED rows 2h/2i).
+      // The count above stays honest, the registered model need not: a retry that levels £64 AND makes Olumi's
+      // registered £54 indistinct still covers 1 < 2 (or levels £54's own gap while re-pricing it like the user's £59,
+      // 0 < 1), and admission withholds £54. So a retry asked only about gaps must register every option the first did.
+      const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+      const keepsEveryRegisteredOption = first.admitted.nodes.filter((n) => n.kind === 'option').every((n) => kept.has(nodeIdentity(n)));
+      // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
+      // trades 4 nodes for 11 links is not a compaction, and taking it on faith
+      // would let a second model call make the problem worse.
+      // ⭐⭐ AND IT MUST NOT HAVE COST THE USER ANYTHING. Smaller is not
+      // sufficient: a retry that sheds two widened factors while also dropping a
+      // relationship the user stated is a worse model, and the size numbers alone
+      // cannot tell the difference. So the brief-stated counts must not regress —
+      // that is what makes "the cap never overrides the user" true of RETRIES and
+      // not merely of the refusal path.
+      // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
+      // fact and relationship the user stated must still be there by name.
+      // A redraft that re-chose an unattested event goal keeps the user's material with the goal node exempt and the user's
+      // target kept as its goal (`keepsEveryUserStatedIdentityWhenGoalRechosen`); every other retry exactly as before.
+      // ⛔ The redraft goal's own target is credited only as ADMISSION RETAINED it (Codex post-merge 3026: a redraft with
+      // `target_stated: false` registered productivity without its ≥10% target, credited from the raw candidate).
+      const admittedGoal = retryAdmitted.nodes.find((n) => n.kind === 'goal') as Record<string, unknown> | undefined;
+      // Read through the one goal-record authority (S5), never the node's fields.
+      const held = admittedGoal === undefined ? null : readGoalRecord(retryAdmitted, String(admittedGoal.id))?.target ?? null;
+      const retainedTarget = {
+        metric: String(admittedGoal?.description ?? admittedGoal?.label ?? ''),
+        // The comparator is the goal's own claim (admission writes the node's comparator later, from it); the figure is what it RETAINED.
+        operator: String(held?.comparator ?? retryCandidate.goal.operator),
+        value: typeof held?.raw === 'number' && Number.isFinite(held.raw) ? held.raw : null,
+        unit: held?.unit ?? null,
+        frame: held?.frame ?? null,
+      };
+      const keepsUserMaterial = unattested === null ? keepsEveryUserStatedIdentity(first.size, retrySize)
+        : keepsEveryUserStatedIdentityWhenGoalRechosen(first.size, retrySize, retainedTarget);
+      // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
+      const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(first.preparation, retryPreparation, retryRaw, retryAdmitted);
+      if (!(
+        (needsSizeRetry ? retrySize.nodes <= first.size.nodes && retrySize.edges <= first.size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
+        keepsUserMaterial && keepsEveryUserNumber(firstCandidate, first.candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
+        // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
+        // A redraft of an unattested event goal re-chooses the goal: adopted only when it is no longer one, losing no condition.
+        (unattested === null ? keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal)
+          : (accepted === firstCandidate ? keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal)
+            : keepsEveryGoalCondition(accepted.goal, retryCandidate.goal)) && !stillTheUnattestedEvent(retryCandidate)) &&
+        // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
+        // gap — but it must never cover LESS, and when coverage is the only reason
+        // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
+        // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
+        retryOpen <= gapCount(first.preparation) &&
+        (needsSizeRetry || first.preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+          || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(first.admitted))
+          || (retryOpen < gapCount(first.preparation) && keepsEveryRegisteredOption)
+          // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
+          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(first.admitted).size && keepsEveryRegisteredOption)
+          || (chainsAsked.length > 0 && keepsEveryRegisteredOption) || unattested !== null) &&
+        // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
+        (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(first.admitted))) &&
+        // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
+        chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
+        // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
+        (needsSizeRetry || keepsTheHeldStatusQuo(first.admitted, retryAdmitted)) &&
+        // The collapsed quantity is the one risk the chain issue asks the retry to replace.
+        (asked.length === 0 || retainsRiskHypotheses({ ...first.candidate, risks: first.candidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
+        // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
+        (needsSizeRetry ? compactionKeepsWhatOptionsDo(first.candidate, retryCandidate) : keepsEveryAction(first.candidate, retryCandidate))
+      )) return null;
+      // What adoption sets, said against the FIRST draft: what it shed, what it had withheld, what its own pass took out.
+      const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
+      return {
+        carriedWithheld: carryWithheldOptions(first.admitted, retryAdmitted),
+        leftOut: first.admitted.nodes
+          .filter((n) => !kept.has(nodeIdentity(n)))
+          .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) })),
+        candidate: retryCandidate,
+        identity: retryIdentity,
+        admitted: retryAdmitted,
+        keptApart: retryHeld.renamed,
+        notToldApart: retryApart.ambiguous,
+        linksSetAside: retryHeld.setAside,
+        // What the first draft took out stays said; the retry's own are added once. ⛔ Never said as not modelled when the
+        // adopted model carries it (Codex #2662 r1 P2-4), nor a cost as off the revenue when the adopted model still links it in.
+        mechanismsUnmodelled: [...first.mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !first.mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))]
+          .filter((m) => !adoptedLabels.has(canonicalLabel(m.label))),
+        costsOffRevenue: costsAgainst([...first.costsOffRevenue, ...retryUnsupported.costs.filter((c) => !first.costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))], retryCandidate),
+        size: retrySize,
+        // ⛔ An adopted retry must not erase what the first pass had to disclose (review 5822933692, B3).
+        preparation: carryFindingsAcrossRetry(first.preparation, retryPreparation),
+        // What the adopted model still asks: a second size retry is told these (its gates stay the first draft's).
+        stillAsked: repairIssues(retryPreparation),
+      };
+    };
+    // ⭐ A SECOND BOUNDED SIZE RETRY (DL rulings 04:00Z/04:07Z 14 Oct; T5 D2 r1). When the first retry is ADOPTED and the model
+    // is still over the limit, ONE more edits that model, with the current counts and the same frozen source, and is judged
+    // by `judgeRetry` exactly as the first was. A rejection is never retried away; never a third; never off the size route.
+    let previous: CandidateModel = firstCandidate;
+    let askedNow = asked;
+    const outcomes: Array<'adopted' | 'kept_first' | 'retry_failed'> = [];
+    const traceOf = (): ConstructionTrace => ({ retried: true, reasons, outcome: outcomes[0]!, ...(outcomes[1] === undefined ? {} : { second: outcomes[1] }) });
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      if (attempt === 2 && (!needsSizeRetry || outcomes[0] !== 'adopted' || size.within || size.user_material_exceeds_limit)) break;
+      outcomes[attempt - 1] = 'kept_first';
+      trace = traceOf();
+      try {
+        const retry = await callStructured({
+          model: budget.model,
+          // The delta is APPENDED, so every rule the first pass obeyed still holds —
+          // provenance, wiring, plausible_max and clearly labelled estimates.
+          // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
+          // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
+          // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
+          // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
+          // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
+          instructions: askedNow.length === 0 && needsSizeRetry
+            ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
+            : needsSizeRetry
+              ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
+              : `${buildInstructions}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+          input: askedNow.length > 0
+            ? `${brief}\n\nConstruction issues: ${JSON.stringify(askedNow)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(previous)}`
+            : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
+          max_output_tokens: budget.max_output_tokens,
+          reasoning_effort: budget.reasoning_effort,
+          // The redraft of an unattested event goal re-chooses the goal (unpinned); a second size retry keeps the goal it chose.
+          schema: strictForTheDrafter(unattested === null ? retrySchemaPinningGoal(first.candidate.goal, first.candidate.decision_question)
+            : retrySchemaPinningGoal(previous.goal, first.candidate.decision_question, attempt === 2), { providerBoundary: false }),
         });
-        const retrySize = assessConstructionSize(retryAdmitted);
-        // ⛔ COVERAGE ALONE NEVER COSTS A REGISTERED OPTION (adversarial verify of 58a22db8, P2-A/P2-E: COMBINED rows 2h/2i).
-        // The count above stays honest, the registered model need not: a retry that levels £64 AND makes Olumi's
-        // registered £54 indistinct still covers 1 < 2 (or levels £54's own gap while re-pricing it like the user's £59,
-        // 0 < 1), and admission withholds £54. So a retry asked only about gaps must register every option the first did.
-        const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
-        const keepsEveryRegisteredOption = admitted.nodes.filter((n) => n.kind === 'option').every((n) => kept.has(nodeIdentity(n)));
-        // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
-        // trades 4 nodes for 11 links is not a compaction, and taking it on faith
-        // would let a second model call make the problem worse.
-        // ⭐⭐ AND IT MUST NOT HAVE COST THE USER ANYTHING. Smaller is not
-        // sufficient: a retry that sheds two widened factors while also dropping a
-        // relationship the user stated is a worse model, and the size numbers alone
-        // cannot tell the difference. So the brief-stated counts must not regress —
-        // that is what makes "the cap never overrides the user" true of RETRIES and
-        // not merely of the refusal path.
-        // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
-        // fact and relationship the user stated must still be there by name.
-        const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
-        // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
-        const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(preparation, retryPreparation, retryRaw, retryAdmitted);
-        if (
-          (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-          keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
-          // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
-          // gap — but it must never cover LESS, and when coverage is the only reason
-          // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
-          // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
-          retryOpen <= gapCount(preparation) &&
-          (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
-            || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(admitted))
-            || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
-            // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
-            || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
-          // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
-          (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(admitted))) &&
-          // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
-          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
-          // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
-          (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
-          // The collapsed quantity is the one risk the chain issue asks the retry to replace.
-          (asked.length === 0 || retainsRiskHypotheses({ ...candidate, risks: candidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
-          // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
-          (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
-        ) {
-          carriedWithheld = carryWithheldOptions(admitted, retryAdmitted);
-          leftOut = admitted.nodes
-            .filter((n) => !kept.has(nodeIdentity(n)))
-            .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
-          candidate = retryCandidate;
-          admissionCandidate = retryIdentity.model;
-          admitted = retryAdmitted;
-          admissionLevelCandidate = retryCandidate;
+        const adopted = retry.text.length > 0 ? judgeRetry(retry.text, previous) : null;
+        if (adopted !== null) {
+          carriedWithheld = adopted.carriedWithheld;
+          leftOut = adopted.leftOut;
+          candidate = adopted.candidate;
+          admissionCandidate = adopted.identity.model;
+          admitted = adopted.admitted;
+          admissionLevelCandidate = adopted.candidate;
           // #2854 sets admissionCandidate here
-          foldedCarrier = retryIdentity.folded;
-          droppedProducts = retryIdentity.dropped;
-          gapResidual = retryIdentity.residual;
-          keptApart = retryHeld.renamed;
-          notToldApart = retryApart.ambiguous;
-          linksSetAside = retryHeld.setAside;
-          // What the first draft took out stays said; the retry's own are added once.
-          mechanismsUnmodelled = [...mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))];
-          costsOffRevenue = [...costsOffRevenue, ...retryUnsupported.costs.filter((c) => !costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))];
-          // ⛔ Never said as not modelled when the adopted model carries it (Codex #2662 r1 P2-4: a retry may draw it again as
-          // the brief's), nor a cost as off the revenue when the adopted model still links it in.
-          const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
-          mechanismsUnmodelled = mechanismsUnmodelled.filter((m) => !adoptedLabels.has(canonicalLabel(m.label)));
-          costsOffRevenue = costsAgainst(costsOffRevenue, retryCandidate);
-          size = retrySize;
-          // ⛔ An adopted retry must not erase what the first pass had to disclose
-          // (review 5822933692, B3): a retry that echoes the prepared candidate
-          // re-prepares to nothing, and the user's 7 would read as Olumi's again.
-          preparation = carryFindingsAcrossRetry(preparation, retryPreparation);
-          trace = { retried: true, reasons, outcome: 'adopted' };
+          foldedCarrier = adopted.identity.folded;
+          droppedProducts = adopted.identity.dropped;
+          gapResidual = adopted.identity.residual;
+          keptApart = adopted.keptApart;
+          notToldApart = adopted.notToldApart;
+          linksSetAside = adopted.linksSetAside;
+          mechanismsUnmodelled = adopted.mechanismsUnmodelled;
+          costsOffRevenue = adopted.costsOffRevenue;
+          size = adopted.size;
+          preparation = adopted.preparation;
+          previous = adopted.candidate;
+          askedNow = adopted.stillAsked;
+          outcomes[attempt - 1] = 'adopted';
+          trace = traceOf();
         }
+      } catch {
+        // A failed retry costs the retry, never the turn: the refusal below reports
+        // the FIRST model's real counts rather than inventing a reason.
+        outcomes[attempt - 1] = 'retry_failed';
+        trace = traceOf();
       }
-    } catch {
-      // A failed retry costs the retry, never the turn: the refusal below reports
-      // the FIRST model's real counts rather than inventing a reason.
-      trace = { retried: true, reasons, outcome: 'retry_failed' };
     }
   }
   // Separate from projection losses: a missing path must not change existing disclosure counts or readers.
@@ -1930,6 +2183,12 @@ export async function buildModelFromBrief(
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
   // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
   const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
+
+  // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
+  // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
+  if (unattested !== null && stillTheUnattestedEvent(candidate)) {
+    return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) };
+  }
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {
@@ -1967,7 +2226,7 @@ export async function buildModelFromBrief(
   /**
    * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE, WHEN THE BRIEF STATES THEM
    * (G1; `holdStatedGoalAttributes`). A factor named in the brief is not a baseline the brief states (DL #70
-   * 5851742282): `withdrawUnstatedBaselineStamps`. What the node now holds is no longer a loss, so its ledger line —
+   * 5851742282): admission now verifies its level with `verifiedFactorLevel`; no second text reader changes that verdict. What the node now holds is no longer a loss, so its ledger line —
    * "GraphV3 has nowhere to put it" / "a consumer cannot tell a floor from a ceiling" — would be false, and goes.
    * What is NOT held keeps its line, exactly as before.
    */
@@ -2043,7 +2302,7 @@ export async function buildModelFromBrief(
         } as AdmittedModel['loss'][number]])],
       };
     }
-    let heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
@@ -2117,19 +2376,30 @@ export async function buildModelFromBrief(
     // ⭐ CEE #4 (Science goals §(v)): a stock worked out to the goal's deadline is carried only on the HELD deadline
     // (`goal_horizon_months`, set above where the brief attests it), so it is admitted here, after the hold. Each refusal
     // is said; a model with no accumulation declared is byte-identical.
-    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, candidate.identities);
+    // THE TIME CLASS (`goal-target/time-class.ts`): a brief that states a timing shape the carrier cannot hold ("starting in month 3")
+    // is carried no stock reading at all, declared or structural; the Run then withholds the at-H chance and says why. Withhold only.
+    const inTimeClass = timeClassOf(brief).supported;
+    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, inTimeClass ? candidate.identities : undefined);
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
+    const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    const accumulated = inTimeClass ? admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges) : declaredAccumulated;
+    // ⭐ Recovery Batch C (adjudication (c), served c85817f2): the goal's OWN target row no longer refuses the fit
+    // (`goalOwnRows`, as F4's retirement passes it): it holds the raw figure, and the widen rescales the goal's threshold,
+    // level and spread with every link it touches, so the user's size fits and nothing moves in natural units.
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-      nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
-      edges: admitted.edges,
+      nodes: markOlumiOptions(accumulated.nodes, candidate, brief),
+      edges: accumulated.edges,
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
-    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    // The goal's OWN target row rescales with its frame (AIE 0418: "the constructor's own raw target row may be rescaled
+    // together with its frame through existing goalOwnRows"), as the Olumi pass below already does. Capacity A′: the user's
+    // 20 tickets a week per specialist was cut at β 1.6 because the goal's own ≥100 row refused the widen.
+    } as Record<string, any>, { goalOwnRows: true }).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
     const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
     const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
     // Retire every obsolete disclosure for fitted endpoint identities at their one source of truth.
@@ -2142,10 +2412,11 @@ export async function buildModelFromBrief(
 
     const parked = (candidate as { unknowns?: unknown }).unknowns;
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
-    // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
-    // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
+    // words ("… the model doesn't hold it yet"). A drafter question is left out beside it only when its verified concerns are
+    // all set-aside links (`withoutSetAsideQuestions`); a question quoting the same amount with no such binding is asked.
     const setAside = setAsideEstimatesOf(admitted.loss);
-    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
+    const openQuestions = withoutSetAsideQuestions(userFacingDrafterQuestions(parked), setAside,
+      (candidate as { unknown_concerns?: unknown }).unknown_concerns, admitted.nodes);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -2195,7 +2466,9 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
-    const horizon = candidate.goal?.horizon_months;
+    const claimedHorizon = candidate.goal?.horizon_months;
+    const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
+      ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
     // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
     // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
     // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
@@ -2203,7 +2476,7 @@ export async function buildModelFromBrief(
     // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
     if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
       openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
-    } else if (statedGoal.horizon.status === 'unresolved') {
+    } else if (statedGoal.horizon.status === 'unresolved' && statedGoal.horizon.proposed_months === undefined) {
       const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
       openQuestions.unshift(deadlineHeld
         ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
@@ -2294,9 +2567,12 @@ export async function buildModelFromBrief(
   const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
   observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
+  // ⭐ RESTORED (Paul, #94 6166259456): both arms run on the served seam: non-obvious options through a different mechanism,
+  // and risks against the options. Every added item is Olumi's (`markOlumiOptions`, `draft_widening`, `proposed_by`), the
+  // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
-    admit: admitWidened });
+    admit: admitWidened, optionsArm: true, risksArm: true });
   if (widened !== null) {
     admitted = widened.admitted;
     size = assessConstructionSize(admitted);
@@ -2344,6 +2620,10 @@ export async function buildModelFromBrief(
    * throwing away a build we have already paid for because a READ failed would
    * cost the user their turn for no gain.
    */
+  // ⭐ B RESTATED GOAL (`draft-replacement-context.ts`): a revised draft of an unreviewed scaffold is PREPARED, never
+  // written here. The caller offers these exact bytes as one card and registers them on approval, with compare-and-set
+  // on the base it read; so the empty-model guard and the create-only registration below are not this call's.
+  if (preparingDraftReplacementFor(scenarioId)) return { ok: true, mutated: false, prepared_graph: graph };
   // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   if (stillEmpty.status === 200) {
@@ -2488,6 +2768,9 @@ export async function buildModelFromBrief(
     ...(admitted.loss.some((l) => /\.event_risk$/.test(l.field_path)) ? {
       event_risk_disclosures: admitted.loss.filter((l) => /\.event_risk$/.test(l.field_path)).map((l) => l.reason),
     } : {}),
+    // ⭐ EBD E4 (DL GO): what the deadline model set aside from the brief, said ONCE on the build turn in the reply's detail
+    // (the same composer channel). Not in open_questions: there it was counted as "1 more question remains unresolved".
+    ...(eventSetAsideLine(admitted) !== null ? { event_forecast_disclosures: [eventSetAsideLine(admitted)!] } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
@@ -2583,12 +2866,51 @@ function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
   });
 }
 
-/** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */
-function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[]): string[] {
-  const amounts = setAside.map((s) => s.amount).filter((a): a is number => a !== null && a !== 0).map(Math.abs);
-  if (amounts.length === 0) return questions;
-  const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
-  return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
+/**
+ * ⭐ GEN #2 BY ENTITY (DL ruling 14 Oct 02:0xZ; the #3000 Codex check failed the number match twice: "60% churn", "£60
+ * support" and "60 new customers" vanished beside Olumi's withheld 60, and a user-value exemption let a set-aside link's
+ * question back). When the draft says what each question is ABOUT (`unknown_concerns`, #3004: `unknown` the question copied
+ * exactly, `concerns` the exact labels it is about, a link as "<from> → <to>"), a question is left out only when EVERY one
+ * of its concerns is a link Olumi set aside, by that link's labels: it is then asked once, in the contract's words. The
+ * AIE's text calls these "proposed bindings, not evidence that a question is resolved or may be removed", and served
+ * drafts bind one question to several referents ("… from an agency campaign, a small internal campaign, and a partner
+ * launch" → three links), so a question that is also about anything else is asked. Nothing is matched by number; a
+ * question with no entry, an empty list, or an entry that is not all labels is asked. A draft without the field, or with it
+ * absent, null or malformed, has every question asked: no verified concerns, no removal (DL ruling 02:0xZ; the #3012 check
+ * found the number fallback still deleting "10–20% churn", "400 customers at £20" and the 60-customer campaign). Duplicate
+ * entries for one question must bind it alike; any conflicting or malformed entry keeps it asked.
+ */
+function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsideEstimate[], concerns: unknown,
+  nodes: readonly { readonly id: string; readonly label?: unknown }[]): string[] {
+  if (!Array.isArray(concerns)) return questions;
+  // The set-aside link is keyed by its admitted ends; a concern's label names a node only when exactly one has that label.
+  const idOf = (label: string): string | undefined => {
+    const named = nodes.filter((n) => typeof n.label === 'string' && canonicalLabel(n.label) === canonicalLabel(label));
+    return named.length === 1 ? named[0]!.id : undefined;
+  };
+  const asideLinks = new Set(setAside.map((s) => `${s.from}\u0000${s.to}`));
+  if (asideLinks.size === 0) return questions;
+  // One binding per question: a duplicate entry must bind it alike, and a malformed or conflicting one leaves it unbound.
+  const about = new Map<string, readonly string[] | null>();
+  for (const entry of concerns) {
+    const e = entry as { unknown?: unknown; concerns?: unknown } | null;
+    if (e === null || typeof e !== 'object' || typeof e.unknown !== 'string') continue;
+    const q = e.unknown.trim();
+    const bound = Array.isArray(e.concerns) && e.concerns.every((c) => typeof c === 'string')
+      ? [...new Set((e.concerns as string[]).map((c) => c.trim()))].sort() : null;
+    const earlier = about.get(q);
+    about.set(q, bound === null || (earlier !== undefined && JSON.stringify(earlier) !== JSON.stringify(bound)) ? null : bound);
+  }
+  const namesAsideLink = (c: string): boolean => {
+    const ends = /^(.+?)\s*(?:\u2192|->)\s*(.+)$/u.exec(c.trim());
+    const from = ends === null ? undefined : idOf(ends[1]!), to = ends === null ? undefined : idOf(ends[2]!);
+    return from !== undefined && to !== undefined && asideLinks.has(`${from}\u0000${to}`);
+  };
+  return questions.filter((q) => {
+    const aboutQ = about.get(q.trim()) ?? [];
+    if (aboutQ === null) return true;
+    return !(aboutQ.length > 0 && aboutQ.every(namesAsideLink));
+  });
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {

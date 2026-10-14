@@ -17,7 +17,7 @@ import {
 import { readMayNameLeadingOptionVerdictForFact } from '../../context/claim-safety-read.js';
 import { goalFiguresLeaderWithheldWithoutConstraintCause } from '../unsized-path-cause.js';
 import { agentNoLeaderSentence, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../withheld-leader-fail-closed.js';
-import { goalChanceLineOwed, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, SAY_SHOWN_NOTE } from '../goal-chance-withheld.js';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -199,13 +199,19 @@ describe('(c) the Run tool hands the route its #416 ask (`identity_ask_say`), re
   };
 
   it('RED: a #416 Run → identity_ask_say, the same words the route owes', async () => {
-    const r = await caps([W416]).runAnalysis(ctx, { reason: 'Run it.' }) as Rec;
+    const r = await caps([W416]).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Rec;
     expect(r.identity_ask_say).toBe(identityAskLineFor(blocks([W416])[0], T1B));
+    // SAY-SHOWN: the ask owns this cause, so the AI is never told `say` is shown (the route says the ask instead).
+    expect(r.goal_chance).toMatchObject({ withheld: true });
+    expect(r.goal_chance).not.toHaveProperty('say_shown');
     expect(r.identity_ask_say).toContain('How many ‘Starter-tier subscribers’ would ‘Launch starter tier’ lead to?');
   });
 
-  it('CONTROL: a #422 Run carries none', async () => {
-    expect(await caps([W422]).runAnalysis(ctx, { reason: 'Run it.' })).not.toHaveProperty('identity_ask_say');
+  it('CONTROL: a #422 Run carries none, and its `say` (no ask owns it, and it asks nothing) is promised as shown', async () => {
+    const r = await caps([W422]).runAnalysis(ctx, { reason: 'Run it.', effects_timing: null }) as Rec;
+    expect(r).not.toHaveProperty('identity_ask_say');
+    expect(r.goal_chance.say).not.toContain('?');
+    expect(r.goal_chance.say_shown).toBe(SAY_SHOWN_NOTE);
   });
 });
 

@@ -77,6 +77,14 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // untruth 2.714 was reverted for, one seam downstream.
   "orchestrator-v5/tools/handlers/set-factor-value.ts":
     "the stamp site — user_override for a user-consented structured edit; stamps panel_elicited instead when CEE has VERIFIED the value is a named participant's panel answer",
+  // ── E5 hiring times (Batch B, 12 Oct 2026; strings ACKed by AIE 6122738619). Reviewed against the one truth condition.
+  // A figure is stamped user_override ONLY when its role is `stated`: the number is in the user's own quoted words,
+  // bound to a verified human statement (`quoteStatedFor`), and it is written ONLY by `applyHiringTimes` after the user
+  // PRESSES that card (`typed_approval_of` = the card; a typed "yes" authorises nothing), which shows their quote AND the
+  // modelled figure. Olumi's and derived figures carry user_assumption + reviewed_by_user {intent: 'confirm'}; a missing
+  // or mismatched stamp reads as unknown, never as theirs. The value arrives through an operation the user consented to.
+  "orchestrator-v5/goal-target/hiring-times.ts":
+    "E5 stamp site — user_override only for a role 'stated' hiring figure in the user's verified quote, written only after the user presses that card (quote and figure shown); Olumi's/derived figures stamp user_assumption",
   // F1b 52f8cd (schemas 0.73.0, lease #85 5945475375): a READER. `VALUE_WRITE_USER_SOURCE` pins set-factor-value's own
   // stamp (equal to USER_EDIT_SOURCE, bound by run-input-residual.test) so the Run input digest can recognise a factor
   // whose authorship is EXACTLY that writer's output. It compares `observed_state.source`; it writes nothing.
@@ -193,7 +201,9 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // field the withdrawal does not reach. They map to `null` (defer), so the
   // only stamps this module will act on are those a genuine user-edit writer
   // wrote — i.e. precisely the ones the entries above establish as truthful.
-  "cee/transforms/provenance-display.ts":
+  // ONE PROVENANCE AUTHORITY (Batch C): the display tables moved VERBATIM from `cee/transforms/provenance-display.ts`
+  // (now a re-export shim with no literal) into `cee/provenance/provenance-of.ts`; the same reader-only justification holds.
+  "cee/provenance/provenance-of.ts":
     "reader only — maps the stamp to the display vocabulary (from_brief/ai_inferred/user_set) that reaches the LLM context; the literal is a lookup key, the module has no write path, and the two synthesised-from-extractionType literals DEFER so it can only act on a genuine user-edit writer's stamp",
   // ── The analysis-admission census. Reviewed 21 Sep 2026 against this guard's
   // ── one truth condition, while registering it for the provenance-widening

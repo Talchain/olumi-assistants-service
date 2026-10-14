@@ -69,8 +69,8 @@ async function authorise(value: number, startFramed = false) {
   const p = product(startFramed);
   const caps = createAgentCapabilities(p.d, new ProposalStore());
   const prop = await caps.proposeAssumptions(
-    ctx as never,
-    { assumptions: [{ factor_label: 'Monthly churn rate', value, unit: '%', basis: 'stated' }] } as never,
+    { ...ctx, user_text: `Monthly churn rate is ${value}%.` },
+    { assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value, unit: '%', basis: 'stated' }] } as never,
   );
   const r = await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
   return { p, r: r as Record<string, unknown> };

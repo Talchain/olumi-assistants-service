@@ -46,6 +46,10 @@ export interface ProviderPolicy {
    * Never serialised — `recordedProviderCalls` copies `calls` only.
    */
   startedAt?: number[];
+  /** Host identity; never provider-authored. */
+  readonly request_id?: string;
+  readonly scenario_id?: string;
+  readonly turn_id?: string;
 }
 
 export interface GenerativeCall {
@@ -62,6 +66,18 @@ export interface GenerativeCall {
    * any caller that has not been wired yet.
    */
   usage?: ProviderUsage;
+  readonly request_id?: string;
+  readonly scenario_id?: string;
+  readonly turn_id?: string;
+  readonly settings?: Readonly<Record<string, unknown>>;
+  attempt?: {
+    readonly transport_status: number | null;
+    readonly result: string;
+    readonly response_sha256?: string;
+    readonly outcome: 'success' | 'transport_error' | 'cancelled' | 'timeout' | 'rate_limited' | 'http_error' | 'invalid_response';
+    retry: boolean;
+    retry_reason?: 'transport' | 'instructions_carrier_fallback';
+  };
   /**
    * ⭐ HOW LONG THIS CALL TOOK, measured here rather than reported by anyone.
    *
@@ -113,9 +129,9 @@ export interface GenerativeCall {
 /** What a caller may say about its call; every field is optional and recorded only when given. */
 export type ProviderCallDetail = Readonly<Partial<Pick<GenerativeCall,
   'model' | 'purpose' | 'prompt_alias' | 'prompt_sha256' | 'tools_sha256' | 'schema_sha256' | 'reasoning_effort'
-  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source' | 'instructions_carrier'>>>;
+  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source' | 'instructions_carrier' | 'settings'>>>;
 /** The identity fields, in the order a row carries them. */
-const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source', 'instructions_carrier'] as const;
+const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source', 'instructions_carrier', 'settings'] as const;
 
 /**
  * ⭐ WHAT A CALL COST, SO CACHING CAN BE MEASURED RATHER THAN ASSUMED.
@@ -297,6 +313,13 @@ export function assertProviderAllowed(
       model: detail?.model ?? 'unknown',
       purpose: detail?.purpose ?? site ?? 'unspecified',
       outcome: allowed ? 'allowed' : 'refused_before_network',
+      // Migrated Responses sites opt into host receipts; nested legacy rows keep their shape.
+      // SYS1 (B2): the factor review (`extraction.openai`) is reached inside Agent turns; its row is correlated to the turn too.
+      ...(['agent-v1-turn.callModel', 'agent-v1-turn.callResearch', 'agent-v1-turn.callStructured', 'agent-v1-turn.callBriefReading', 'extraction.openai'].includes(site ?? '') ? {
+        ...(policy.request_id !== undefined ? { request_id: policy.request_id } : {}),
+        ...(policy.scenario_id !== undefined ? { scenario_id: policy.scenario_id } : {}),
+        ...(policy.turn_id !== undefined ? { turn_id: policy.turn_id } : {}),
+      } : {}),
       // Additive: a caller that passes no identity gets a row with NONE of these keys, byte for byte as before.
       ...Object.fromEntries(IDENTITY_FIELDS.filter((k) => detail?.[k] !== undefined).map((k) => [k, detail![k]])),
     });
@@ -339,4 +362,22 @@ export function providerCallsMade(): number | undefined {
 /** The current request's ledger, or `[]` outside a policy. A copy — the wire must not alias it. */
 export function recordedProviderCalls(): GenerativeCall[] {
   return [...(store.getStore()?.calls ?? [])];
+}
+
+/** Close a physical attempt under its own request-scoped handle, including failures without usage. */
+export function recordProviderAttempt(handle: ProviderCallHandle, attempt: NonNullable<GenerativeCall['attempt']>): void {
+  if (handle === undefined) return;
+  const call = store.getStore()?.calls[handle];
+  if (call === undefined || call.outcome !== 'allowed') return;
+  call.attempt = { ...attempt };
+  recordProviderUsage(handle, undefined);
+}
+
+/** The caller may retry an explicitly refused carrier; record that existing fallback on the failed attempt. */
+export function recordProviderRetry(handle: ProviderCallHandle, reason: NonNullable<NonNullable<GenerativeCall['attempt']>['retry_reason']>): void {
+  if (handle === undefined) return;
+  const attempt = store.getStore()?.calls[handle]?.attempt;
+  if (attempt === undefined) return;
+  attempt.retry = true;
+  attempt.retry_reason = reason;
 }

@@ -1,0 +1,492 @@
+{
+ "_source": {
+  "capture": "recovery/live/runs/2026-10-14T041420Z-capacity-post3010/capacity/turns/01.json",
+  "sha256_of_capture": "321410c3d76ebf8f524443d75a3d453a7bc3910645fcdf9551470de71f81bace",
+  "turn": "capacity turn 1 (build), CEE staging post #3010",
+  "note": "response_body.draft_graph and the analysis_result block's enrichment.inference_warnings, verbatim; the capture stored UTF-8 read as cp1252, reversed here (cp1252→utf-8), no other change"
+ },
+ "served_assistant_text": "I’ve built the comparison around **Weekly support capacity**, with your target of **at least 100 tickets per week** and no deadline.\n\nThe first pass is provisional and unvalidated. It cannot yet show a target chance because the draft introduced an Olumi-added risk, **Specialist capacity shortfall**, but has no stated relationship from additional specialists to that shortfall. You did not provide that relationship.\n\nI tried to record your statement that **Add one specialist** adds **1 specialist** as a user-supplied option level. The model refused because that option already has a level recorded for **Additional specialists**; nothing was changed.\n\nA useful next reasoning move is to decide whether any capacity shortfall should be modelled at all. If it should, say how strongly adding a specialist affects that shortfall — slight, moderate, strong, or very strong.\n\nOlumi's estimates: 6, see Check estimates.\n\nNot shown yet; why is under More detail\n\nQuestions this model does not answer yet: Will the added specialist deliver the central estimate of 20 tickets per week, or a different level within the stated range of 10 to 30 tickets per week? What specialist capacity shortfall should be allowed for in the comparison, for example during onboarding or because the specialist performs below the expected rate?\n\nThe chance isn't shown yet: the model doesn't yet say how strongly ‘Additional specialists’ affects ‘Specialist capacity shortfall’, so any figure would be a guess. Give a rough strength for it to see the chance.",
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "we_are_comparing_two_staffing_options_labelled_exactly_keep_current_staffing_and_add_one_specialist",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "We are comparing two staffing options, labelled exactly \"Keep current…",
+    "provenance": "from_brief",
+    "description": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\"."
+   },
+   {
+    "id": "weekly_support_capacity",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Weekly support capacity",
+    "provenance": "from_brief",
+    "goal_direction": ">=",
+    "goal_threshold": 0.2,
+    "observed_state": {
+     "cap": 500,
+     "unit": "tickets per week",
+     "value": 0.16,
+     "source": "brief_extraction",
+     "baseline": 0.16,
+     "raw_value": 80,
+     "extractionType": "explicit"
+    },
+    "threshold_source": "brief_extraction",
+    "goal_threshold_cap": 500,
+    "goal_threshold_raw": 100,
+    "goal_threshold_unit": "tickets per week",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "stated_effect_fit"
+   },
+   {
+    "id": "keep_current_staffing",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Keep current staffing",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "add_one_specialist",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Add one specialist",
+    "provenance": "from_brief",
+    "interventions": {
+     "additional_specialists": {
+      "unit": "specialists",
+      "value": 0.1,
+      "source": "cee_hypothesis",
+      "raw_value": 1,
+      "target_match": {
+       "node_id": "additional_specialists",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "add_part_time_specialist",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Add part-time specialist",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "additional_specialists": {
+      "unit": "specialists",
+      "value": 0.05,
+      "source": "cee_hypothesis",
+      "raw_value": 0.5,
+      "target_match": {
+       "node_id": "additional_specialists",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "existing_team_capacity",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Existing team capacity",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 500,
+     "unit": "tickets per week",
+     "value": 0.16,
+     "source": "brief_extraction",
+     "raw_value": 80,
+     "declared_scale": "unit_interval",
+     "extractionType": "explicit"
+    }
+   },
+   {
+    "id": "additional_specialists",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Additional specialists",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 10,
+    "observed_state": {
+     "unit": "specialists",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "capacity_per_additional_specialist",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Capacity per additional specialist",
+    "category": "observable",
+    "provenance": "unverified_brief",
+    "observed_state": {
+     "cap": 100,
+     "unit": "tickets per week per specialist",
+     "range": {
+      "low": 10,
+      "high": 30,
+      "source": "user_override",
+      "meaning": "min_max",
+      "source_quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+     },
+     "value": 0.2,
+     "source": "cee_inference",
+     "raw_value": 20,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "specialist_capacity_shortfall",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Specialist capacity shortfall",
+    "provenance": "ai_inferred",
+    "scale_frame": 30
+   },
+   {
+    "id": "additional_specialist_capacity",
+    "ref": "OC1",
+    "kind": "outcome",
+    "label": "Additional specialist capacity",
+    "provenance": "from_brief",
+    "scale_frame": 200
+   }
+  ],
+  "edges": [
+   {
+    "to": "keep_current_staffing",
+    "from": "we_are_comparing_two_staffing_options_labelled_exactly_keep_current_staffing_and_add_one_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "add_one_specialist",
+    "from": "we_are_comparing_two_staffing_options_labelled_exactly_keep_current_staffing_and_add_one_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "add_part_time_specialist",
+    "from": "we_are_comparing_two_staffing_options_labelled_exactly_keep_current_staffing_and_add_one_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_specialists",
+    "from": "add_one_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_specialists",
+    "from": "add_part_time_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_specialists",
+    "from": "keep_current_staffing",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "weekly_support_capacity",
+    "from": "existing_team_capacity",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "tickets per week",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "tickets per week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "additional_specialist_capacity",
+    "from": "additional_specialists",
+    "strength": {
+     "std": 0.49999999999999994,
+     "mean": 0.9999999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "tickets per week",
+      "stated_range": {
+       "end": "centre",
+       "low": 10,
+       "high": 30,
+       "text": "between 10 and 30"
+      },
+      "strength_mean": 0.9999999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "specialists"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "additional_specialist_capacity",
+    "from": "capacity_per_additional_specialist",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "tickets per week",
+      "strength_mean": 0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "tickets per week per specialist"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "weekly_support_capacity",
+    "from": "additional_specialist_capacity",
+    "strength": {
+     "std": 0.2,
+     "mean": 0.4
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "tickets per week",
+      "strength_mean": 0.4,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "tickets per week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "specialist_capacity_shortfall",
+    "from": "additional_specialists",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "weekly_support_capacity",
+    "from": "specialist_capacity_shortfall",
+    "strength": {
+     "std": 0.030000000000000002,
+     "mean": -0.060000000000000005
+    },
+    "defaulted": true,
+    "provenance": {
+     "basis": "Each ticket of specialist capacity not realised reduces total weekly capacity by one ticket.",
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": -1,
+      "amount_unit": "tickets per week",
+      "strength_mean": -0.060000000000000005,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "tickets per week"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ],
+  "node_count": 10,
+  "edge_count": 12
+ },
+ "inference_warnings": [
+  {
+   "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+   "message": "3 edge E-value entries were omitted from edge_e_values: 3 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+   "severity": "info"
+  },
+  {
+   "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+   "links": [
+    {
+     "to": "specialist_capacity_shortfall",
+     "from": "additional_specialists"
+    }
+   ],
+   "message": "This comparison turns on the link from ‘Additional specialists’ to ‘Specialist capacity shortfall’, whose strength isn't sized in the model yet. Set it to see how much it matters.",
+   "node_ids": [
+    "additional_specialists",
+    "specialist_capacity_shortfall"
+   ],
+   "severity": "warning",
+   "first_ask": {
+    "to": "specialist_capacity_shortfall",
+    "from": "additional_specialists",
+    "kind": "link"
+   },
+   "option_ids": [
+    "add_one_specialist"
+   ],
+   "acceptable_links": [
+    {
+     "to": "specialist_capacity_shortfall",
+     "from": "additional_specialists"
+    }
+   ],
+   "win_shares_withheld": true
+  },
+  {
+   "say": "I can't yet say how likely ‘Add one specialist’ is to keep Weekly support capacity at or above 100 tickets per week: I need a size for the link from Additional specialists to Specialist capacity shortfall. Roughly how much does Specialist capacity shortfall change, in tickets per week, when Additional specialists rises by 1 specialists?",
+   "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+   "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 100 tickets per week), because it needs a size for the link from Additional specialists to Specialist capacity shortfall. Roughly how much does Specialist capacity shortfall change, in tickets per week, when Additional specialists rises by 1 specialists?",
+   "node_ids": [
+    "weekly_support_capacity"
+   ],
+   "severity": "warning",
+   "first_ask": {
+    "to": "specialist_capacity_shortfall",
+    "from": "additional_specialists",
+    "kind": "link"
+   },
+   "option_ids": [
+    "add_one_specialist"
+   ],
+   "per_option": {
+    "add_one_specialist": {
+     "message": "Not shown. It can't yet be tested against your target (at least 100 tickets per week), because it needs a size for the link from Additional specialists to Specialist capacity shortfall. Roughly how much does Specialist capacity shortfall change, in tickets per week, when Additional specialists rises by 1 specialists?"
+    }
+   },
+   "withheld_claims": [
+    "goal_probability",
+    "joint_probability",
+    "outcome",
+    "downside"
+   ]
+  },
+  {
+   "code": "GOAL_CHANCE_LICENSED",
+   "form": "each",
+   "target": {
+    "unit": "tickets per week",
+    "value": 100,
+    "comparator": "at_least"
+   },
+   "message": "",
+   "severity": "info",
+   "goal_label": "Weekly support capacity",
+   "option_ids": [
+    "keep_current_staffing",
+    "add_one_specialist"
+   ],
+   "goal_node_id": "weekly_support_capacity",
+   "pct_by_option": {},
+   "withheld_option_ids": [
+    "keep_current_staffing",
+    "add_one_specialist"
+   ],
+   "option_labels_by_option": {
+    "add_one_specialist": "Add one specialist",
+    "keep_current_staffing": "Keep current staffing"
+   },
+   "withheld_reason_by_option": {
+    "keep_current_staffing": {
+     "line": "Falls short of 100 tickets per week if today’s figures hold.",
+     "side": "falls_short",
+     "reason": "zero_spread"
+    }
+   }
+  }
+ ]
+}

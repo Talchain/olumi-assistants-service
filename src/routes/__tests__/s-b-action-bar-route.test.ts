@@ -235,7 +235,7 @@ describe('every press reaches its typed path, never the free Agent turn', () => 
     const payload = { kind: 'message', scenario_id: scenario, turn_id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1', message: 'pressed', source: 'chip', chip: { id: 'agent-next-review-decision' } };
     const first = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
     const again = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
-    expect(first.assistant_text).toBe('I can’t review this decision yet: it needs a current analysis first.');
+    expect(first.assistant_text).toBe('I can’t review this model yet: it needs a current analysis first.');
     expect(again.assistant_text).toBe(first.assistant_text);
     expect(again.suggested_actions.map((a) => a.id)).toEqual(['agent-run-analysis']);
   });
@@ -382,7 +382,9 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     expect(b._action?.science).toBeUndefined();
     expect(b.assistant_text.startsWith('Checked: Narrow framing, Anchoring.')).toBe(true);
     expect(b.assistant_text).toContain("Narrow framing: where the pattern could bite: ‘Phased GCP migration’, ‘Switch to GCP’. One test: press ‘More options’.");
-    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘Migration preparation effort’. One test: press ‘Anchoring’.");
+    // ONE PROVENANCE AUTHORITY: the served 'GCP workload share' (absent-type cee_inference) is Olumi's starting figure on every
+    // reader now (the disclosure already counted it), so it is the first figure Anchoring names (591cc1a0: 'Migration preparation effort').
+    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘GCP workload share’. One test: press ‘Anchoring’.");
     const claim = resolveDskClaimProvenance('DSK-B-001')!;
     expect(b.assistant_text).toContain(`Decision-science claim: ${claim.claim_title} · ${claim.evidence_strength} evidence`);
     expect(b.assistant_text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);

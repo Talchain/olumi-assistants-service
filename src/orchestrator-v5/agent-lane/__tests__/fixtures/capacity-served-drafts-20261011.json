@@ -1,0 +1,1860 @@
+{
+ "source": "Served drafter output for Paul's capacity level brief (DGAI J1 LEVEL_BRIEF; brief sha256 c5f2dacf88474c22ba4f84d82d1a5e5eb6904485cda15d7946490fd33bccef4f), staging 11-12 Oct 2026, builds 50530b5f / c87608e4 / c85817f2. cee_drafter_raw_responses.calls[0].raw_text, read SELECT-only by SYS2 (S4 V2); raw_sha256 is the server-side sha256 of raw_text.",
+ "brief": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.",
+ "drafts": [
+  {
+   "scenario_id": "b33bf531-af92-4a2f-9b67-fa32ee8a8f9a",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "a725544f82c90a61919786e914c1072c2f12ce97353951c1327476f0a13b1bb4",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 244,
+         "end": 283,
+         "amount_start": 269,
+         "option_quote": "Add one specialist",
+         "option_start": 216,
+         "option_end": 234
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing support capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 500
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Keep current staffing adds no specialist."
+      },
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "explicit",
+      "plausible_max": 20
+     },
+     {
+      "label": "Specialist capacity",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_evidence": null,
+      "baseline_value": 20,
+      "unit": "tickets per week per specialist",
+      "provenance": "ai_proposed",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist capacity shortfall",
+      "provenance": "explicit",
+      "unit": "tickets per week",
+      "plausible_max": 30
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 600
+     }
+    ],
+    "links": [
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null,
+      "basis": "Each additional specialist resolves about 20 tickets per week."
+     },
+     {
+      "from": "Specialist capacity",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": null,
+      "basis": "Additional specialist capacity is specialists multiplied by capacity per specialist."
+     },
+     {
+      "from": "Existing support capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Specialist capacity",
+      "to": "Specialist capacity shortfall",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist capacity shortfall",
+      "to": "Weekly support capacity",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Specialist capacity"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     },
+     {
+      "outcome": "Weekly support capacity",
+      "operation": "product",
+      "factors": [
+       "Existing support capacity",
+       "Additional specialist capacity"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "Specialist output is stated as about 20 tickets per week, with a range of 10 to 30; confirm whether 20 should be used for planning or whether a conservative 10-ticket case should determine the staffing decision."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "d51383eb-62b8-43fe-914f-fdfb0246142a",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "37bc764389bd3a6326f32c45908cea186510a0dfb5986f200a6d4ab4ef503e1a",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     },
+     {
+      "label": "Add two specialists",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "ai_proposed",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 500
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Keep current staffing adds no specialist."
+      },
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "explicit",
+      "plausible_max": 20
+     },
+     {
+      "label": "Tickets per additional specialist per week",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+      },
+      "baseline_value": 20,
+      "unit": "tickets per specialist per week",
+      "provenance": "explicit",
+      "plausible_max": 100
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist onboarding risk",
+      "provenance": "ai_proposed",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 500
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Tickets per additional specialist per week",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null,
+      "basis": "With one additional specialist, one more ticket per specialist per week adds one ticket of capacity."
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Specialist onboarding risk",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist onboarding risk",
+      "to": "Weekly support capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Tickets per additional specialist per week"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The stated specialist productivity is an estimate with a 10–30 tickets-per-week range; confirm the expected productivity to use for staffing planning.",
+     "How long would recruitment, onboarding, and ramp-up take before a new specialist reaches the stated productivity?",
+     "Would adding two specialists create coordination, training, or demand constraints that reduce tickets resolved per specialist?"
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "5cc14bb3-4814-4e8b-a177-ad7169b9b624",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "efe794e3fdfb9f7ed5431b3fbb7a537c6e3db62b2db80518351adcb7a4428bae",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 195,
+         "end": 234,
+         "amount_start": 219,
+         "option_quote": "\"Add one specialist\"",
+         "option_start": 83,
+         "option_end": 103
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     },
+     {
+      "label": "Add two specialists",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "ai_proposed",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 250
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Keep current staffing adds no specialist."
+      },
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "explicit",
+      "plausible_max": 10
+     },
+     {
+      "label": "Capacity per specialist",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 20,
+      "unit": "tickets per week per specialist",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist onboarding delay",
+      "provenance": "ai_proposed",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 200
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": "Existing team capacity is part of total weekly support capacity by definition."
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": "Each additional specialist resolves about 20 tickets per week."
+     },
+     {
+      "from": "Capacity per specialist",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": "Total weekly support capacity is defined as existing capacity plus additional specialist capacity."
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Specialist onboarding delay",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist onboarding delay",
+      "to": "Additional specialist capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Capacity per specialist"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The stated specialist productivity is approximate and ranges from 10 to 30 tickets per week; confirm the expected sustained capacity for planning.",
+     "How much, if any, onboarding delay or ramp-up reduces a new specialist's weekly capacity?",
+     "The \"Add two specialists\" option is an Olumi-proposed comparison point, not a stated staffing option."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "8547962d-345b-41f1-927e-d42493674f97",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "7af754c21c2708981475c2ff53df064400259bc2ecacc00dde868bc33db4e3f0",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 0,
+        "value_kind": "absolute",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Keep current staffing adds no specialist.",
+         "start": 209,
+         "end": 251,
+         "amount_start": 236,
+         "option_quote": "Keep current staffing",
+         "option_start": 209,
+         "option_end": 230
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 252,
+         "end": 292,
+         "amount_start": 276,
+         "option_quote": "Add one specialist",
+         "option_start": 252,
+         "option_end": 270
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     },
+     {
+      "label": "Add part-time specialist",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 0.5,
+        "value_kind": "absolute",
+        "unit": "specialists",
+        "provenance": "ai_proposed",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team support capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 500
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "inferred",
+      "plausible_max": 20
+     },
+     {
+      "label": "Specialist throughput per week",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 20,
+      "unit": "tickets per week per specialist",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist ramp-up shortfall",
+      "provenance": "ai_proposed",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 500
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team support capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist throughput per week",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": null,
+      "basis": "For each additional specialist, one more ticket per week of throughput adds one ticket per week of specialist capacity."
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Specialist ramp-up shortfall",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist ramp-up shortfall",
+      "to": "Weekly support capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Specialist throughput per week"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The stated throughput is about 20 tickets per week per specialist, with a range of 10 to 30; confirm the throughput expected for planning and any ramp-up period before relying on the 100-ticket target."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "dd0409d9-ad7d-4f2e-b3d3-e9331a7c3791",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "6bb15f8474bf810aa4d77229cf7da3ada55c649a312b4c7d7db4c9a162066bd2",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 247,
+         "end": 286,
+         "amount_start": 271,
+         "option_quote": "Add one specialist",
+         "option_start": 247,
+         "option_end": 265
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     },
+     {
+      "label": "Add part-time specialist",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 0.5,
+        "value_kind": "absolute",
+        "unit": "specialists",
+        "provenance": "ai_proposed",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 500
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "inferred",
+      "plausible_max": 20
+     },
+     {
+      "label": "Specialist ticket capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+      },
+      "baseline_value": 20,
+      "unit": "tickets per week per specialist",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist capacity shortfall",
+      "provenance": "ai_proposed",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 500
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": "Existing team capacity is part of total weekly support capacity."
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": "Each additional specialist resolves about 20 tickets per week."
+     },
+     {
+      "from": "Specialist ticket capacity",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist ticket capacity",
+      "to": "Specialist capacity shortfall",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist capacity shortfall",
+      "to": "Additional specialist capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": "Additional specialist capacity is part of total weekly support capacity."
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Specialist ticket capacity"
+      ],
+      "provenance": "explicit",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The stated specialist capacity is an estimate between 10 and 30 tickets per week; validate the expected capacity for the intended specialist before committing.",
+     "The part-time specialist option is an Olumi modelling alternative and assumes 0.5 specialist-equivalent capacity."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "ba87b2fb-6038-4a01-869e-f91637330978",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "1caee380c2993cdb921fadd7180f6a3db97b41fa05bbae09e5e157c5eeecd03d",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets/week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 247,
+         "end": 286,
+         "amount_start": 271,
+         "option_quote": "Add one specialist",
+         "option_start": 247,
+         "option_end": 265
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets/week",
+      "provenance": "explicit",
+      "plausible_max": 200
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "inferred",
+      "plausible_max": 10
+     },
+     {
+      "label": "Specialist resolution rate",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+      },
+      "baseline_value": 20,
+      "unit": "tickets/week per specialist",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist hiring shortfall",
+      "provenance": "ai_proposed",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "explicit",
+      "unit": "tickets/week",
+      "plausible_max": 100
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist resolution rate",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": null,
+      "basis": "With one additional specialist, each extra ticket per week resolved adds one ticket per week of specialist capacity."
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Specialist hiring shortfall",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist hiring shortfall",
+      "to": "Weekly support capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Specialist resolution rate"
+      ],
+      "provenance": "explicit",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "Whether the additional specialist's realised weekly resolution rate will be closer to 10, 20, or 30 tickets per week.",
+     "Whether a suitable specialist can be hired and retained as planned."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "c2a3f477-f3cf-4092-a286-388794963c57",
+   "cee_build": "50530b5f3f9048ab8c348141f138dcf5d520e3f1",
+   "raw_sha256": "5e63639afb29198c3e8a6c6d762ac313db2af72309ac6adcb268ad63350d363f",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 247,
+         "end": 286,
+         "amount_start": 271,
+         "option_quote": "Add one specialist",
+         "option_start": 247,
+         "option_end": 265
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team support capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 200
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "explicit",
+      "plausible_max": 10
+     },
+     {
+      "label": "Tickets resolved per specialist per week",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 20,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist capacity shortfall",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 30
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 300
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team support capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Tickets resolved per specialist per week",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null,
+      "basis": "With one additional specialist, one more resolved ticket per specialist adds one ticket of weekly capacity."
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Specialist capacity shortfall",
+      "to": "Weekly support capacity",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": -1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": true,
+      "basis": "Each ticket of specialist capacity not realised reduces total weekly support capacity by one ticket."
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Tickets resolved per specialist per week"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The stated specialist productivity is approximately 20 tickets per week, with a range of 10 to 30; confirm the expected realised level for the hiring decision."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "14b66c8e-5016-4414-807e-27412c92107a",
+   "cee_build": "c87608e40f0a9ee97be016f8fa85e3b01b9e793a",
+   "raw_sha256": "c19f0fc01c7469accff16233604dd05439a774932d3d3c0b675c5e11c4cc3454",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     },
+     {
+      "label": "Add two specialists",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "specialists",
+        "provenance": "ai_proposed",
+        "stated_evidence": null
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 300
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "inferred",
+      "plausible_max": 10
+     },
+     {
+      "label": "Tickets resolved per specialist",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+      },
+      "baseline_value": 20,
+      "unit": "tickets per week per specialist",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist throughput below estimate",
+      "provenance": "inferred",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 200
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": "Total weekly support capacity includes the existing team's resolved tickets."
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": null,
+      "basis": "One specialist is estimated to resolve 20 tickets per week."
+     },
+     {
+      "from": "Tickets resolved per specialist",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null,
+      "basis": "At one additional specialist, each extra ticket resolved per specialist adds one ticket of capacity."
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": "Total weekly support capacity is defined as existing capacity plus additional specialist capacity."
+     },
+     {
+      "from": "Tickets resolved per specialist",
+      "to": "Specialist throughput below estimate",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist throughput below estimate",
+      "to": "Weekly support capacity",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Tickets resolved per specialist"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The stated specialist throughput is an estimate of about 20 tickets per week, with a stated range of 10 to 30; confirm the expected throughput for planning."
+    ],
+    "decision_question": null
+   }
+  },
+  {
+   "scenario_id": "cd3d9c25-fa98-4d26-a519-8dd7178ec8f6",
+   "cee_build": "c85817f2f77a21813dcad833e1d631c21ed95de3",
+   "raw_sha256": "91a3a03df3f5e1243d71d5376acdcfcd5c82016ee6da0c8393ae3af32b323bad",
+   "candidate": {
+    "goal": {
+     "kind": null,
+     "deliverable": null,
+     "metric": "Weekly support capacity",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100,
+     "unit": "tickets per week",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 80,
+     "baseline_provenance": "inferred",
+     "scope": null
+    },
+    "constraints": [
+     {
+      "metric": "Weekly support capacity",
+      "operator": ">=",
+      "value": 100,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "frame": "level"
+     }
+    ],
+    "options": [
+     {
+      "label": "Keep current staffing",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "added_capacity": null,
+      "is_status_quo": true
+     },
+     {
+      "label": "Add one specialist",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional specialists",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "specialists",
+        "provenance": "explicit",
+        "stated_evidence": {
+         "quote": "Add one specialist adds one specialist.",
+         "start": 246,
+         "end": 285,
+         "amount_start": 271,
+         "option_quote": "Add one specialist",
+         "option_start": 246,
+         "option_end": 264
+        }
+       }
+      ],
+      "added_capacity": null,
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing team capacity",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Our existing team resolves 80 tickets per week."
+      },
+      "baseline_value": 80,
+      "unit": "tickets per week",
+      "provenance": "explicit",
+      "plausible_max": 300
+     },
+     {
+      "label": "Additional specialists",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_evidence": {
+       "quote": "Keep current staffing adds no specialist."
+      },
+      "baseline_value": 0,
+      "unit": "specialists",
+      "provenance": "explicit",
+      "plausible_max": 10
+     },
+     {
+      "label": "Tickets per specialist per week",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_evidence": null,
+      "baseline_value": 20,
+      "unit": "tickets per week per specialist",
+      "provenance": "explicit",
+      "plausible_max": 50
+     }
+    ],
+    "risks": [
+     {
+      "label": "Specialist underperformance",
+      "provenance": "ai_proposed",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Additional specialist capacity",
+      "provenance": "inferred",
+      "unit": "tickets per week",
+      "plausible_max": 300
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing team capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 20,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Tickets per specialist per week",
+      "to": "Additional specialist capacity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null,
+      "basis": "With one added specialist, each extra ticket resolved per specialist adds one ticket of weekly specialist capacity."
+     },
+     {
+      "from": "Additional specialists",
+      "to": "Specialist underperformance",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Specialist underperformance",
+      "to": "Additional specialist capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null,
+      "basis": null
+     },
+     {
+      "from": "Additional specialist capacity",
+      "to": "Weekly support capacity",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": true,
+      "basis": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Additional specialist capacity",
+      "operation": "product",
+      "factors": [
+       "Additional specialists",
+       "Tickets per specialist per week"
+      ],
+      "provenance": "inferred",
+      "reading": null
+     }
+    ],
+    "unknowns": [
+     "The expected specialist capacity is stated as about 20 tickets per week, with a range of 10 to 30; confirm the planning assumption to use within that range.",
+     "How much weekly capacity, if any, should be discounted for specialist ramp-up or underperformance?"
+    ],
+    "decision_question": null
+   }
+  }
+ ]
+}

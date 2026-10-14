@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
@@ -394,7 +394,7 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
 
   // DL #2712 r1 BLOCKER: an unbounded run inside the clause-opening lookbehind was rescanned at every position
   // (quadratic: "Sensitivity" + 20,000 spaces took 9.6 s). Every run is bounded; each input is linear time.
-  it.each([
+  timingIt.each([
     ['"Sensitivity" + 2,000 spaces + "x"', `Sensitivity${' '.repeat(2000)}x`],
     ['newline + 2,000 spaces + "x"', `\n${' '.repeat(2000)}x`],
     ['"." + 2,000 spaces + "x"', `.${' '.repeat(2000)}x`],
@@ -537,7 +537,7 @@ describe('Wave B unseen brief, keys untouched: a range line is a screen driver, 
   });
 
   // DL: every new pattern at 20,000 whitespace stays linear (8× input costs under 22×).
-  it.each([
+  timingIt.each([
     ['"changes" + 20,000 spaces', `changes${' '.repeat(20000)}x`],
     ['"changes the" + 20,000 spaces', `changes the${' '.repeat(20000)}x`],
     ['"investigation" + 20,000 spaces', `investigation${' '.repeat(20000)}x`],
@@ -620,7 +620,7 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  it.each([
+  timingIt.each([
     ['denial + "which assumption" + 20,000 spaces', `has not established which assumption${' '.repeat(20000)}x`],
     ['denial + gap word + 20,000 spaces + "most"', `has not established which assumption deserves${' '.repeat(20000)}most`],
     ['"priority" + 20,000 spaces + "."', `does not establish which factor priority${' '.repeat(20000)}.`],
@@ -633,7 +633,7 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
     expect(m.ratio, m.detail).toBeLessThan(22);
   }, 30_000);
-  it('LINEAR TIME: 8× the repeated limb costs under 22× (quadratic would be 64×)', () => {
+  timingIt('LINEAR TIME: 8× the repeated limb costs under 22× (quadratic would be 64×)', () => {
     const [small, large] = [1000, 8000].map((n) => 'does not establish which assumption deserves '.repeat(n));
     const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
     const m = scalingRatio(() => run(small), () => run(large));
@@ -712,7 +712,7 @@ describe('Wave B3, keys untouched: the "what changes the chances most" form and 
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
   });
 
-  it.each([
+  timingIt.each([
     ['negation + 20,000 spaces + coordinated tail', `has not tested${' '.repeat(20000)}or established investigation priority`],
     ['"or" + 20,000 spaces', `has not tested the deadline or${' '.repeat(20000)}established investigation priority`],
     ['"what" + 20,000 spaces', `does not establish what${' '.repeat(20000)}x`],
@@ -888,7 +888,7 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
   });
 
-  it.each([
+  timingIt.each([
     ['"withholds" + 20,000 spaces', `withholds${' '.repeat(20000)}x`],
     ['"no option" + 20,000 spaces', `no option${' '.repeat(20000)}x`],
     ['"chances" + 20,000 spaces', `chances${' '.repeat(20000)}x`],
@@ -908,7 +908,7 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     process.stdout.write(`egress timing ${_name}: ${m.detail}\n`);
     expect(m.ratio, m.detail).toBeLessThan(22);
   }, 30_000);
-  it.each([
+  timingIt.each([
     ['the verb-object limb', (n: number) => 'prevents goal chances for '.repeat(n)],
     ['the passive limb', (n: number) => 'chances are withheld for '.repeat(n)],
   ])('LINEAR TIME: 8× %s costs under 22× (quadratic would be 64×)', (_name, make) => {
@@ -961,7 +961,7 @@ describe('Wave B5, keys untouched: the modal "what would change the chances most
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  it.each([
+  timingIt.each([
     ['"what would" + 20,000 spaces', `doesn't establish what would${' '.repeat(20000)}x`],
     ['"what" + 20,000 spaces + modal', `doesn't establish what${' '.repeat(20000)}would change`],
   ])('LINEAR TIME: %s', (_name, text) => {
@@ -1028,7 +1028,7 @@ describe('Wave B6, keys untouched: "…or tipping point was established" and "no
     expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
-  it.each([
+  timingIt.each([
     ['"…assumption or" + 20,000 spaces', `no most-sensitive assumption or${' '.repeat(20000)}x`],
     ['"…assumption or" + one 20,000-character word', `no most-sensitive assumption or ${'x'.repeat(20000)}`],
     ['"no recorded" + 20,000 spaces', `no recorded${' '.repeat(20000)}x`],
@@ -1122,7 +1122,7 @@ describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () 
   });
 
   // Calibrated batches at 2,500 → 20,000 spaces replace the absolute bar that read 81 ms on CI (#2736).
-  it.each([
+  timingIt.each([
     ['"which change" + whitespace', "hasn't established which change"],
     ['"sensitivity and tipping points" + whitespace', 'sensitivity and tipping points'],
     ['"which assumption most affects the" + whitespace', 'which assumption most affects the'],
@@ -1191,7 +1191,7 @@ describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cu
     expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
   });
 
-  it.each([
+  timingIt.each([
     ['"which assumption matters most to the" + whitespace', 'which assumption matters most to the'],
     ['"does not establish a single most consequential" + whitespace', 'does not establish a single most consequential'],
   ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
@@ -1242,7 +1242,7 @@ describe('Wave B8, keys untouched: "the biggest driver" (S2j, a superlative noun
     expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
   });
 
-  it.each([
+  timingIt.each([
     ['"does not establish the biggest" + whitespace', 'does not establish the biggest'],
     ['"the biggest driver" + whitespace (predicative)', 'the biggest driver'],
     ['"does not establish the main driver of" + whitespace (another-quantity guard)', 'does not establish the main driver of'],

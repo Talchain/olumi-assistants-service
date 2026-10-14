@@ -8,6 +8,7 @@ const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 // DL #2895 P2: explicit file/reason pairs, never broad directory exemptions.
 const ALLOWLIST: Readonly<Record<string, string>> = {
   "orchestrator-v5/goal-target/goal-horizon-verdict.ts": "The sole goal-chance horizon verdict and read-time gate; heldGoalDeadline is the one schema-validated calendar deadline accessor for this permission and wording.",
+  "orchestrator-v5/goal-target/goal-horizon-write.ts": "The sole approved goal-horizon writer writes the deadline and held H, validates scoped postimages and landed retries; readGoalRecord / goalDeadlineFromRecord supply held facts, not chance permission.",
   "orchestrator-v5/goal-target/goal-record.ts": "S5 sole typed goal record reads protected goal fields; no chance permission.",
   "orchestrator-v5/goal-target/horizon-basis.ts": "S5 graph-only proof predicate; verifies door provenance and bound goal meaning.",
   "orchestrator-v5/goal-target/goal-steady-write.ts": "S5 approved door mints the proof and validates in-process write authority; not a consumer chance decision.",
@@ -29,6 +30,8 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
   "orchestrator-v5/agent-lane/runtime/build-model.ts": "Build-time deadline/carrier admission documentation; not a chance decision.",
   "orchestrator-v5/admission/target-testability.ts": "P1 current-level admission: validates every operand and unit, including accumulation horizon equality. Broader than evaluated goal-chance verdict; preserving existing behavior.",
   "orchestrator-v5/tools/handlers/run-analysis.ts": "withoutDriftedAccumulations removes every drifted carrier, even unbound ones and with no H, and formats its drift warning. Broader than goal-bound chance verdict; preserving existing behavior.",
+  "orchestrator-v5/agent-lane/ceiling-stock.ts": "S4 typed ceiling-stock pending: read-back (ceilingStockRecorded) compares the goal's held months with the approved pending after the user's Yes; it never decides a chance or a horizon, and the typed writer's postimage is re-attested by the canonical writer.",
+  "orchestrator-v5/agent-lane/ceiling-stock-carrier.ts": "S4 import-free leaf: matches the goal's held months to the exact ceiling-stock carrier id shape so admission never imports the verdict module (config init cycle); it grants no chance permission.",
 };
 
 const GATE_FILES = [

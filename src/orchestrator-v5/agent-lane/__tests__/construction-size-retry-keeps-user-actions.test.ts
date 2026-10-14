@@ -332,15 +332,17 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     return d;
   };
 
-  it.each<[string, () => Draft, string]>([
-    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level'],
-    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value'],
-    ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis'],
-  ])('RED: with %s, the ONE retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue) => {
+  it.each<[string, () => Draft, string, number]>([
+    // The calls: an echoed draft with a gap is ADOPTED yet still over, so one more retry runs (3); with a mechanism issue the
+    // echo is REJECTED (the issue is still open), and a rejection is never retried (2). DL rulings 04:00Z/04:07Z 14 Oct.
+    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level', 3],
+    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value', 3],
+    ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis', 2],
+  ])('RED: with %s, the FIRST retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue, calls) => {
     const first = draft();
     const { reqs, result } = await construct(first, first);
     expect(result.refusal ?? result.size_retried, 'PRECONDITION: the draft was oversized').toBeTruthy();
-    expect(reqs).toHaveLength(2);
+    expect(reqs).toHaveLength(calls);
     const retry = reqs[1]!;
     expect(retry.instructions).toContain(BUDGET);
     expect(retry.instructions).toMatch(COPY_RULE);
@@ -966,5 +968,39 @@ describe('(5) a link-oversized first draft: the size retry may drop Olumi\'s pla
     const r = firstVerdict(retry);
     expect(r.nodes <= COMPACT_LIMITS.maxNodes && r.edges <= COMPACT_LIMITS.maxEdges, 'PRECONDITION: the retry itself fits the budget').toBe(true);
     expectKeptFirstRefused(await construct(linkOversized(), retry));
+  });
+});
+
+/**
+ * Batch C: independent check C-cee r1 item 5 — A RETRY KEEPS EVERY GOAL CONDITION, BY IDENTITY. The retry schema can pin
+ * `goal.basis.also_required` only by length and vocabulary (the provider grammar has no per-position pin), so `[A, B]` could
+ * come back as `[A, A]`: "spend within £200,000" silently gone from the goal while every count still matched. Adoption now
+ * checks each condition by identity (each once, qualitative ones included); a retry that loses one is not adopted.
+ */
+describe('(6) Batch C r1 item 5: a compaction retry keeps every goal condition by identity', () => {
+  const CODE = 'code quality maintained';
+  const SPEND = 'spend within £200,000';
+  const withConditions = (d: Draft, also: string[]): Draft => ({
+    ...d,
+    goal: { ...d.goal, basis: { reference: 'today', denominator: null, period_months: 3, period_kind: 'at_end', effect_unit: null,
+      effects_at_period_end: false, also_required: also, open_question: null } },
+  }) as unknown as Draft;
+  const first = (): Draft => withConditions(oversized(covered()), [CODE, SPEND]);
+
+  it('PRECONDITION: the pinned retry schema accepts [A, A] for [A, B] (length and vocabulary only) — so the grammar alone cannot keep the conditions', () => {
+    const pinned = new Ajv({ strict: false }).compile(retrySchemaPinningGoal(first().goal as unknown as CandidateModel['goal']));
+    expect(pinned(withConditions(covered(), [CODE, CODE]))).toBe(true);
+  });
+
+  it('RED: a compaction whose conditions come back as [A, A] (one condition lost) is NOT adopted', async () => {
+    expectRefusedNotAdopted(await construct(first(), withConditions(covered(), [CODE, CODE])));
+  });
+
+  it('CONTROL: the same compaction with every condition kept IS adopted, in either order', async () => {
+    for (const also of [[CODE, SPEND], [SPEND, CODE]]) {
+      const out = await construct(first(), withConditions(covered(), also));
+      expect(out.result.ok, JSON.stringify(also)).toBe(true);
+      expect(out.registered).toHaveLength(1);
+    }
   });
 });

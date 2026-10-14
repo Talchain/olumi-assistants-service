@@ -1331,7 +1331,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
    * `fd4c483` measured it twice (`f-20260926T083927Z`, `f-20260926T084243Z`). The Agent's `get_canonical_state`,
    * admissibility ("a strength this system chose") and coaching then read the user's own strength as a placeholder.
    */
-  describe('a strength the user sets or confirms is no longer marked defaulted', () => {
+  describe('Batch A: a set clears defaulted; a confirm keeps defaulted and records review', () => {
     type LooseGraph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } & Record<string, unknown>;
     function withDefaultedEdges(): LooseGraph {
       const graph = buildPersistedGraph() as LooseGraph;
@@ -1380,21 +1380,21 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(body.assistant_text).toContain("Confirmed the current strength of the link between Demand and Growth.");
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
       expect(committedEdge()).toMatchObject({
         strength: { mean: -0.4, std: 0.1 },
-        // L4 (DL 5929790081): Olumi's default, approved, is sized as Olumi's estimate — authorship kept.
-        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } },
+        // Batch A ruling 1: approving an unmarked default never invents an estimate.
+        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', reviewed_by_user: { intent: 'confirm' } },
         provenance_display: 'ai_inferred',
         defaulted: true,
       });
       expect(committedEdge()).not.toHaveProperty('exists_defaulted');
-      // The analysis hash moves by that sizing ALONE (the Run correctly reads out of date), and by nothing else.
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
-      const sizedOnly = structuredClone(persisted) as { edges: Array<{ from: string; to: string; provenance?: Record<string, unknown> }> };
-      const target = sizedOnly.edges.find((e) => e.from === 'f-demand' && e.to === 'g-growth')!;
-      target.provenance = { ...(target.provenance ?? {}), magnitude: 'olumi_estimate' };
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(computeAnalysisAffectingGraphHash(sizedOnly as never));
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(committedEdge()?.provenance).not.toHaveProperty('magnitude');
       expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
     });
 
@@ -1450,7 +1450,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
+      // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+      expect(body.assistant_text).toContain("Confirmed the current strength of the link between Demand and Growth.");
       expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
       expect((committedEdge()?.strength as { std: number }).std).not.toBe(edgeBandStd('strong'));
       expect(committedEdge()).toMatchObject({

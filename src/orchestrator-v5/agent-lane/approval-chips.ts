@@ -29,6 +29,7 @@ import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { CONFIRM_GOAL_READING_OP } from '../goal-target/held-change-target.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -41,6 +42,15 @@ const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
 // and £ never meets % (#2641's twins).
 const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
   || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
+
+/** AIE_TEXT_PENDING: the button on the card answering the goal's open question (`goal-target/held-change-target.ts`). */
+export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' } as const;
+
+/** AIE packet 6e52e896 `event_risk.Q3`: the button on the card of Olumi's range for a risk root (`risk-occurrence.ts`). */
+const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message: 'Yes, use that.' } as const;
+
+/** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
+const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -62,6 +72,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
   propose_team_time: { label: 'Yes', message: 'Yes' },
+  // E5: the user's hiring times per option, on ONE card (`hiring-times.ts`). Two buttons: [Use these times] [Change].
+  propose_hiring_times: { label: 'Use these times', message: 'Yes, use these hiring times.' },
   propose_new_limit: { label: 'Yes', message: 'Yes, record that limit.' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
@@ -203,14 +215,24 @@ export function approvalChipsFor(
   // cannot prove that its omitted operations were gap-free. Offer no approval.
   if (labelSourceFor !== undefined && stored === undefined
     && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
+  // ⭐ G (card-only, so before the generic card-only button): the answer to the goal's open question has its own button, never "Set this target" (it sets none); the card's words
+  // ride in `detail`, only when the proposer's own result for that id returned the same card.
+  if (stored?.operations.length === 1 && stored.operations[0]?.op === CONFIRM_GOAL_READING_OP) {
+    if (stored.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored.public_label !== 'string' || held.public_label !== stored.public_label) return [];
+    return [{ id: approvalChipIdFor(proposalId), ...CONFIRM_GOAL_READING_APPROVE, detail: stored.public_label }, AMEND_CHIP];
+  }
   if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
     // This must precede every generic/special chip path: the exact stored gap
     // card and its operands are the subject of the existing typed approval.
     if (stored!.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
       || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
       || held.public_label !== stored!.public_label) return [];
+    const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
+    const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
-      message: approve.message, detail: stored!.public_label }, AMEND_CHIP];
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message : approve.message,
+      detail: stored!.public_label }, AMEND_CHIP];
   }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
@@ -235,8 +257,11 @@ export function approvalChipsFor(
   if (tool === 'propose_identity') {
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
-      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') ? "Yes, that's how" : approve.label,
-        message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') && (stored === undefined || identityReadingOf(stored)?.operation !== 'sum') ? "Yes, that's how" : approve.label,
+        message: identityApproveMessage(words), detail: words },
+        ...(stored !== undefined && identityReadingOf(stored)?.one_off_words !== undefined
+          ? [{ id: approvalChipIdFor(proposalId) + ':one-off', label: identityReadingOf(stored)!.one_off_words!,
+            message: `No — ${words}`, detail: words }] : [AMEND_CHIP])];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
@@ -264,8 +289,9 @@ export function approvalChipsFor(
   // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
   if (tool === 'propose_new_limit' || tool === 'propose_limit_change') {
     if (stored?.operations.length === 1 && stored.operations[0]?.op === 'set_limit') {
-      const edit = APPROVE.propose_limit_change!;
-      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve'] };
+      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve']; role?: unknown };
+      // B (3): a row that is one of the goal's targets has the target's button, never "Change this limit".
+      const edit = value.role === 'goal_target' ? APPROVE.propose_goal_target! : APPROVE.propose_limit_change!;
       return [{ id: approvalChipIdFor(proposalId), label: edit.label, message: edit.message, detail: stored.public_label }, AMEND_CHIP,
         ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
           message: value.reserve.message, detail: value.reserve.detail }])];
@@ -278,14 +304,15 @@ export function approvalChipsFor(
       ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
         message: value.reserve.message, detail: value.reserve.detail }])];
   }
-  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time') {
+  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time' || tool === 'propose_hiring_times') {
     const source = labelSourceFor?.(proposalId);
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
       && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
-      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' } : DEADLINE_CHANGE_CHIP];
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' }
+        : tool === 'propose_hiring_times' ? { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' } : DEADLINE_CHANGE_CHIP];
   }
-  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
+  const detail = assumptionCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
 }
@@ -358,11 +385,13 @@ const allUsersOwnValues = (proposal: StructuredProposal): boolean =>
  * while the Agent said "Olumi's estimate". The STORED proposal's own card rides in `detail`, only when the proposer's
  * result for that same id returned the same words — never the Agent's prose.
  */
-function usersOwnCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
+// AIE B4: new assumptions and combined starting points use the same visible, bound carrier.
+function assumptionCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
   const proposal = source?.proposal;
   const result = source?.result;
-  if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  if (!allUsersOwnValues(proposal) || typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
+  if ((tool !== 'propose_assumptions' && tool !== 'propose_starting_point') || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  if (!proposal.operations.some(op => op.op === 'set_factor_value')) return undefined;
+  if (typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
   return proposal.public_label;
 }
 
@@ -624,6 +653,10 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const result = source?.result;
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;
   const ops = proposal.operations;
+  // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
+  if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
+  // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
+  if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the
@@ -648,9 +681,13 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const usersOwn = tool === 'propose_assumptions' && allUsersOwnValues(proposal);
   const ownFallback = usersOwn ? (ops.length === 1 ? 'Record your figure' : `Record your ${ops.length} figures`) : fallback;
   if (ops.length > 1) {
-    // A revision the user asked for replaces figures already there: it is not a set of starting figures.
-    const revises = ops.some((o) => o.op === 'set_factor_value' && (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated');
-    return revises ? ownFallback : `Use these ${ops.length} starting figures`;
+    // A figure the user WROTE is recorded as theirs, a revision or a first value alike (DL ruling, X8): never a starting
+    // figure or assumption. All theirs: recorded as theirs; some: named with how many are Olumi's (as a mixed level batch
+    // is, above); none: Olumi's starting figures.
+    const yours = ops.filter((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated').length;
+    const olumi = ops.length - yours;
+    return usersOwn ? ownFallback : yours === 0 ? `Use these ${ops.length} starting figures`
+      : `Record ${ops.length} figures (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
   }
   const op = ops[0]!;
   const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown };
@@ -682,7 +719,8 @@ export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
   const named = id.slice(APPROVE_PREFIX.length);
-  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length) : named;
+  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length)
+    : named.endsWith(':one-off') ? named.slice(0, -':one-off'.length) : named;
   // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
   return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }

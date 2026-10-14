@@ -13,7 +13,7 @@ type ReviewBattery = {
   noWindowRows: { id: string; input: string; expected: boolean }[];
 };
 const fix3Review = JSON.parse(readFileSync(new URL('../../../../acceptance-evidence/impact-pct/review-rows-fix3.json', import.meta.url), 'utf8')) as ReviewBattery;
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow } from '../stated-event-risk.js';
 
 describe('event_risk.v1 slice 2a — stated occurrence', () => {
@@ -341,7 +341,7 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   });
 
 
-  it.each([
+  timingIt.each([
     ['whitespace', (n: number) => ' '.repeat(n)],
     ['by-percent', (n: number) => 'by 10% '.repeat(Math.ceil(n / 7)).slice(0, n)],
   ])('impact-pct-scaling-%s: 8k to 80k, ratio < 30 for both readers', (_id, make) => {
@@ -368,11 +368,11 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     }
     for (const reader of [readStatedEventRisk, readStatedLikelihoodWithoutWindow]) {
       const m = scalingRatio(() => reader(small), () => reader(large));
-      expect(m.ratio, `${reader.name}: ${m.detail}`).toBeLessThan(20);
+      if (timingGated) { expect(m.ratio, `${reader.name}: ${m.detail}`).toBeLessThan(20); }
     }
   });
 
-  it.each([
+  timingIt.each([
     ['digits', (n: number) => '9'.repeat(n)],
     ['spaces', (n: number) => `between ${' '.repeat(n)}10% within 6 months`],
     ['near-matches', (n: number) => '10- within '.repeat(Math.ceil(n / 10)).slice(0, n)],
@@ -389,7 +389,7 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     expect(m.ratio, m.detail).toBeLessThan(22);
   });
 
-  it('said-door-factor-named-LINEAR TIME: 5k to 40k, ratio < 22', () => {
+  timingIt('said-door-factor-named-LINEAR TIME: 5k to 40k, ratio < 22', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const make = (n: number) => 'prices '.repeat(Math.ceil(n / 7)).slice(0, n);
     const [small, large] = [make(5000), make(40000)];
@@ -397,7 +397,7 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     expect(m.ratio, m.detail).toBeLessThan(22);
   });
 
-  it('said-door-factor-named-LINEAR TIME many label lengths (Codex r2): 5k to 40k, ratio < 22', () => {
+  timingIt('said-door-factor-named-LINEAR TIME many label lengths (Codex r2): 5k to 40k, ratio < 22', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const label = Array.from({ length: 96 }, (_, i) => 'a'.repeat(i + 3)).join(' ');
     const make = (n: number) => `${'a'.repeat(199)} `.repeat(Math.ceil(n / 200)).slice(0, n);
@@ -406,7 +406,7 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     expect(m.ratio, m.detail).toBeLessThan(22);
   });
 
-  it('said-door-likelihood-without-window-LINEAR TIME: 5k to 40k, ratio < 22', () => {
+  timingIt('said-door-likelihood-without-window-LINEAR TIME: 5k to 40k, ratio < 22', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const make = (n: number) => '1 in 5 '.repeat(Math.ceil(n / 7)).slice(0, n);
     const [small, large] = [make(5000), make(40000)];

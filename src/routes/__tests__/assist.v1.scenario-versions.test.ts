@@ -1,5 +1,6 @@
 import { goalHorizonVerdict } from '../../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
+import { modelVersionDoorOutcome } from "../../../tests/utils/model-version-door-outcome.js";
 /**
  * Model Management v1 — THE WIRING SLICE (versions list / save / restore).
  *
@@ -152,6 +153,23 @@ const getCurrentVersionPointer = vi.fn();
 // record because the return-leg binding needs its provenance, undo pointer and
 // identity envelope.
 const getCurrentVersion = vi.fn();
+// Real-adapter families must enter the real service's door ONCE. Other wiring
+// rows keep their original outcome spies behind the controlled test boundary.
+let realVersionWrites: Pick<ModelManagementService, 'saveVersion' | 'restoreVersionAtomic'> | undefined;
+
+function adapterOwnerRead() {
+  return vi.fn((table: string) => {
+    expect(table).toBe('scenarios');
+    return { select: (columns: string) => {
+      expect(columns).toBe('user_id');
+      return { eq: (key: string, scenarioId: string) => {
+        expect(key).toBe('id'); expect(scenarioId).toBe(SCENARIO);
+        return { maybeSingle: async () => ({ data: { user_id: await getScenarioOwner(scenarioId) }, error: null }) };
+      } };
+    } };
+  });
+}
+
 const compareVersions = vi.fn();
 
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
@@ -162,8 +180,13 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
     getModelManagementService: () => ({
       listVersions,
       getVersion,
-      saveVersion,
-      restoreVersionAtomic,
+      // The service façade was the old test seam. Checks now live at the
+      // controlled door, so keep the outcome spies behind that real boundary.
+      saveVersion: (request: any) => realVersionWrites ? realVersionWrites.saveVersion(request) : modelVersionDoorOutcome(() => commitModelChange({ operation: 'SAVE_VERSION',
+        store: { getScenarioOwner, saveVersion: () => saveVersion(request) } as any, write: request })),
+      restoreVersionAtomic: (request: any) => realVersionWrites ? realVersionWrites.restoreVersionAtomic(request) : modelVersionDoorOutcome(() => commitModelChange({ operation: 'RESTORE_VERSION',
+        store: { getScenarioOwner, restoreVersionAtomic: () => restoreVersionAtomic(request) } as any,
+        write: request, restoreHead: request.restore_head })),
       getCurrentVersionPointer,
       getCurrentVersion,
       compareVersions,
@@ -172,6 +195,7 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
 });
 
 import scenarioVersionsRoute from "../assist.v1.scenario-versions.js";
+import { commitModelChange } from "../../orchestrator-v5/persist-graph-write.js";
 import { ModelManagementService, SupabaseModelVersionStore } from "../../orchestrator-v5/model-management/index.js";
 // The REAL identity authority — the return-leg fixtures build the head's
 // envelope with the same function the route compares against, so the fixture
@@ -266,6 +290,7 @@ async function post(
 }
 
 beforeEach(() => {
+  realVersionWrites = undefined;
   vi.clearAllMocks();
   // Default posture: scenario exists, OWNED by OWNER, holds CURRENT_GRAPH,
   // and has two versions with A as head/current.
@@ -806,6 +831,32 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
 // ─────────────────────────────────────────────────────────────────────────────
 // RESTORE
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe("⭐ UNDO IS A COMMITTED CHANGE: the restored state is analysed (Paul, #94 6166259456)", () => {
+  it("a committed restore runs the existing Run turn ONCE (stage analyse, the Run chip) before its analysis is read; the response keeps its six keys", async () => {
+    const runs: Record<string, unknown>[] = [];
+    const app = Fastify({ requestIdHeader: "x-request-id" });
+    await installOwnershipHarness(app, () => resolveUserIdentity());
+    app.post("/orchestrate/v2/turn", { config: { scenarioId: { from: "body", key: "scenario_id" } } } as never,
+      async (req: { body: unknown }) => { runs.push(req.body as Record<string, unknown>); return { blocks: [] }; });
+    await scenarioVersionsRoute(app);
+    await app.ready();
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(res.statusCode).toBe(200);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ scenario_id: SCENARIO, stage: "analyse", chip: { id: "agent-run-analysis", action_type: "run_analysis" } });
+    expect(Object.keys(res.json()).sort()).toEqual(["analysis_state", "receipt", "request_id", "restored", "scenario_id", "schema"]);
+    await app.close();
+  });
+
+  it("a Run that cannot be started leaves the restore standing (200, the same receipt)", async () => {
+    const app = await buildApp();
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().restored).toBe(true);
+    await app.close();
+  });
+});
 
 describe("POST /versions/restore — C8-A atomic restore", () => {
   it("returns the one-transaction receipt with exact graph, undo and two hashes", async () => {
@@ -1785,11 +1836,13 @@ describe("version revision CAS through the RPC boundary", () => {
     const rpcError = { code: "OLRV1", message: "revision_conflict", details: JSON.stringify({ reason: "revision_conflict", expected: 7, current: 8 }) };
     const rpc = vi.fn(async () => ({ data: null, error: rpcError }));
     const emit = vi.fn();
-    const adapter = new SupabaseModelVersionStore({ rpc } as never);
+    const adapter = new SupabaseModelVersionStore({ rpc, from: adapterOwnerRead() } as never);
     const service = new ModelManagementService({ store: adapter, isEnabled: () => true, eventSink: { emit } });
     const results: unknown[] = [];
-    saveVersion.mockImplementation(async args => { const result = await service.saveVersion(args); results.push(result); return result; });
-    restoreVersionAtomic.mockImplementation(async args => { const result = await service.restoreVersionAtomic(args); results.push(result); return result; });
+    realVersionWrites = {
+      saveVersion: async args => { const result = await service.saveVersion(args); results.push(result); return result; },
+      restoreVersionAtomic: async args => { const result = await service.restoreVersionAtomic(args); results.push(result); return result; },
+    };
     const app = await buildApp();
     try {
       const res = await app.inject({ method: "POST", url: `/assist/v1/scenarios/${SCENARIO}/versions/${operation}`,
@@ -1815,9 +1868,8 @@ describe("version revision CAS through the RPC boundary", () => {
       ? { version_id: SNAPSHOT_VERSION, version_number: 3, graph_identity_hash: args.p_graph_identity_hash, deduped: false, event_id: "fresh-save" }
       : { ...atomicRestoreOk().value, graph: args.p_graph } }));
     const emit = vi.fn();
-    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never), isEnabled: () => true, eventSink: { emit } });
-    saveVersion.mockImplementation(args => service.saveVersion(args));
-    restoreVersionAtomic.mockImplementation(args => service.restoreVersionAtomic(args));
+    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc, from: adapterOwnerRead() } as never), isEnabled: () => true, eventSink: { emit } });
+    realVersionWrites = service;
     const app = await buildApp();
     try {
       const res = await post(app, `/versions/${operation}`, operation === "save" ? {} : { version_id: VERSION_A });
@@ -1890,20 +1942,20 @@ describe("version write-time ownership — real adapter RPC", () => {
         graph_identity_hash: HASH_SNAPSHOT, deduped: false, event_id: "evt-snap",
       } };
     });
+    const from = adapterOwnerRead();
     const service = new ModelManagementService({
-      store: new SupabaseModelVersionStore({ rpc } as never),
+      store: new SupabaseModelVersionStore({ rpc, from } as never),
       isEnabled: () => true,
       eventSink: { emit: vi.fn() },
     });
-    saveVersion.mockImplementation(request => service.saveVersion(request));
-    restoreVersionAtomic.mockImplementation(request => service.restoreVersionAtomic(request));
-    return { rpc, state };
+    realVersionWrites = service;
+    return { rpc, state, from };
   }
 
   for (const operation of ["save", "restore"] as const) {
     for (const reason of ["not_owner", "owner_unreadable"] as const) {
       it(`${operation}: ${reason} at the door → canonical 403, zero RPC, unchanged store`, async () => {
-        const { rpc, state } = realWrites();
+        const { rpc, state, from } = realWrites();
         const before = structuredClone(state);
         if (reason === "not_owner") getScenarioOwner.mockResolvedValue(OTHER_USER);
         else getScenarioOwner.mockRejectedValue(new Error("owner reader unavailable"));
@@ -1912,6 +1964,7 @@ describe("version write-time ownership — real adapter RPC", () => {
           const res = await writePost(app, operation);
           expect(res.statusCode).toBe(403);
           expect(res.body).toBe(refusalBytes[reason]);
+          expect(from).toHaveBeenCalledExactlyOnceWith("scenarios");
           expect(getScenarioOwner.mock.calls).toEqual([[SCENARIO]]);
           expect(rpc).not.toHaveBeenCalled();
           expect(saveVersion).not.toHaveBeenCalled();
@@ -1919,16 +1972,26 @@ describe("version write-time ownership — real adapter RPC", () => {
           expect(appendSpy).not.toHaveBeenCalled();
           expect(ensureScenarioExists).not.toHaveBeenCalled();
           expect(state).toEqual(before);
+          // Positive control: permitting the SAME reader reaches the real RPC.
+          // If the refusal reader is mutated to allow, the 403/zero-write pins
+          // above are RED, rather than passing on a missing-from exception.
+          getScenarioOwner.mockResolvedValue(OWNER);
+          const allowed = await writePost(app, operation);
+          expect(allowed.statusCode).toBe(200);
+          expect(rpc).toHaveBeenCalledTimes(1);
+          expect(from).toHaveBeenCalledTimes(2);
+          expect(getScenarioOwner.mock.calls).toEqual([[SCENARIO], [SCENARIO]]);
         } finally { await app.close(); }
       });
     }
 
     it(`${operation}: owner at the door → 200, exactly one owner read and one RPC`, async () => {
-      const { rpc, state } = realWrites();
+      const { rpc, state, from } = realWrites();
       const app = await buildApp();
       try {
         const res = await writePost(app, operation);
         expect(res.statusCode).toBe(200);
+        expect(from).toHaveBeenCalledExactlyOnceWith("scenarios");
         expect(getScenarioOwner.mock.calls).toEqual([[SCENARIO]]);
         expect(rpc).toHaveBeenCalledTimes(1);
         expect(readExistingScenario.mock.invocationCallOrder.at(-1)).toBeLessThan(getScenarioOwner.mock.invocationCallOrder[0]);

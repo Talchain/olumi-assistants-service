@@ -675,10 +675,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const bothSentences = (text: string, label: string) => {
     // Quote-agnostic first: the defect is the sentence being DROPPED.
-    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the decision and acting on "?${esc(label)}"?\\.`));
+    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the question and acting on "?${esc(label)}"?\\.`));
     expect(text, text).toMatch(new RegExp(`Its level for "?${esc(label)}"? is Olumi's estimate, for you to correct\\.`));
     // Then the exact sentences: each label quoted, as the user's data.
-    expect(text, text).toContain(`Added "Test £54 at release", linked from the decision and acting on "${label}".`);
+    expect(text, text).toContain(`Added "Test £54 at release", linked from the question and acting on "${label}".`);
     expect(text, text).toContain(`Its level for "${label}" is Olumi's estimate, for you to correct.`);
   };
   for (const label of ['Size of the user base', 'cost_per_hire']) {
@@ -1685,7 +1685,9 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const GF = 'Existing Pro customers grandfathered';
   const GF_FAC = 'fac_existing_pro_customers_grandfathered';
   /** Today's £49, exactly as admission frames a baseline the brief states (`framedObservedState`): raw kept, on 0–100. */
-  const STATED_49 = { value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' };
+  // The typed door verified £49 against Paul's words, so it writes the attestation beside the stamp (`explicit`, DL 12 Oct).
+  const STATED_49 = { value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction',
+    extractionType: 'explicit' };
   /**
    * Journey A's add, as served: the option acts on a NEW graded price (Olumi's £59 for the option — left for its own
    * level write, as today) and a NEW switch. `today` is what the Agent gives for the price, if anything.

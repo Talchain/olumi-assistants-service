@@ -3265,6 +3265,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           await claimSafety.turnContext(),
           currentGraphHash,
           modelSnapshot?.graph ?? null,
+          // This legacy snapshot carries an analysis hash, not a scenario row revision.
+          undefined,
         );
 
         const turn = await handleReplacementTurn(
@@ -4293,6 +4295,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // `dispatchAddOptionTransaction`'s gate.
             {
               currentGraph: addOptionFrameGraph,
+              currentScenarioRevision: turnContext.persistedGraph != null ? turnContext.persistedRevision : undefined,
               analysisInvalidatedAt: turnContext.analysis_invalidated_at,
               priorFactsWithTurn: turnContext.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),
@@ -8024,6 +8027,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // from a THROWN read must not read as "never analysed".
             {
               currentGraph: textFrameGraph,
+              currentScenarioRevision: turnContext.persistedGraph != null ? turnContext.persistedRevision : undefined,
               analysisInvalidatedAt: turnContext.analysis_invalidated_at,
               priorFactsWithTurn: turnContext.prior_facts_with_turn,
               legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),

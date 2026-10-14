@@ -105,7 +105,7 @@ function otherOffers(bar: ActionBarV1, not: ActionId | null, max: number): Actio
 const CANT_YET: Record<ActionId, string> = {
   confirm_reading: 'I can’t confirm a reading yet',
   set_current_level: 'I can’t ask for the current level yet',
-  review: 'I can’t review this decision yet',
+  review: 'I can’t review this model yet',
   what_changes: 'I can’t say what would change this yet',
   strengthen: 'I can’t strengthen the model yet',
   pre_mortem: 'I can’t run a pre-mortem yet',
@@ -140,8 +140,11 @@ function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFact
     return { text: `${CANT_YET[action]}: ${BECAUSE[reasonKey]}`, reason: reasonKey, exits: exits.length > 0 ? exits : runExits(f) };
   }
   // Not offered at all on this state: its typed contract has nothing in scope here.
+  // SYS2 S1: every link is sized, yet the result may still wait on the user's current level; end with that ask, in the
+  // exact persisted words the `set_current_level` press says (same gate as its offer in rank.ts), never a dead end.
+  const levelAsk = f.currentLevelQuestion !== null && !f.approvalWaiting ? f.currentLevelQuestion : null;
   return action === 'strengthen'
-    ? { text: 'There is nothing to strengthen in this step: every link on your goal’s path already has a size.', reason: 'nothing_in_scope',
+    ? { text: ['There is nothing to strengthen in this step: every link on your goal’s path already has a size.', ...(levelAsk !== null ? [levelAsk] : [])].join('\n\n'), reason: 'nothing_in_scope',
       exits: otherOffers(bar, action, 2).length > 0 ? otherOffers(bar, action, 2) : runExits(f) }
     : { text: `${CANT_YET[action]}: it has nothing to act on in this model.`, reason: 'nothing_in_scope',
       exits: otherOffers(bar, action, 2).length > 0 ? otherOffers(bar, action, 2) : runExits(f) };
@@ -170,7 +173,7 @@ function gapReply(action: ActionId, f: ActionFacts, bar: ActionBarV1): ActionTyp
   if (action === 'set_current_level' && f.currentLevelQuestion !== null) return { text: f.currentLevelQuestion, exits: [], outcome: 'ran' };
   const goalWords = f.goalLabel !== '' ? `‘${f.goalLabel}’` : 'your goal';
   const elements: { name: string; present: boolean; question: string; action?: ActionId }[] = [
-    { name: 'goal', present: f.goalPresent, question: 'What are you trying to achieve with this decision?' },
+    { name: 'goal', present: f.goalPresent, question: 'What are you trying to achieve here?' },
     ...(f.goalKind !== null ? [f.goalKind === 'chance_of_event'
       ? { name: 'deadline', present: f.deadline !== null, question: chanceGoalDeadlineAsk(f.goalLabel), action: 'set_deadline' as const }
       : { name: 'target', present: f.targetPresent, question: composeGoalTargetQuestion(), action: 'set_goal' as const }] : []),

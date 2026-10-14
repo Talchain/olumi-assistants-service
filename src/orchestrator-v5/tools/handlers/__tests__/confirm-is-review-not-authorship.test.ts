@@ -171,21 +171,14 @@ function expectReviewed(graph: unknown, band?: string): void {
   else expect(review!.band).toBe(band);
 }
 
-/**
- * Everything on the target edge except the review record, (for a band) the std and — L4 — a placeholder's magnitude must
- * be byte-identical. ⭐ L4 AMENDMENT (DL ruling #85 5929790081 on 52f8cd's trace 5929778726): a review on a PLACEHOLDER
- * sizes it — `olumi_placeholder` becomes `olumi_estimate` (Olumi's band, now accepted). Authorship stays R11's: `source`,
- * `reasoning`, `provenance_display` and the `defaulted` flags are kept, and the licence rows below still read NO licence.
- */
+/** Batch A ruling 2: review preserves sizing, authorship, flags and spread byte-for-byte. */
 function expectKeptExactly(before: GraphV3T, after: unknown, opts: { bandStd?: number } = {}): void {
   const b = structuredClone(edgeOf(before));
   const a = structuredClone(edgeOf(after));
   const ap = a.provenance as Record<string, unknown>;
   delete ap.reviewed_by_user;
-  if ((b.provenance as Record<string, unknown> | undefined)?.magnitude === 'olumi_placeholder') {
-    expect(ap.magnitude, 'L4: an approved placeholder is sized — Olumi\u2019s estimate, accepted').toBe('olumi_estimate');
-    ap.magnitude = 'olumi_placeholder';
-  }
+  // Batch A ruling 2: compare the original magnitude without normalising away a forbidden relabel.
+  expect(ap.magnitude).toBe((b.provenance as Record<string, unknown> | undefined)?.magnitude);
   if (opts.bandStd !== undefined) {
     expect((a.strength as { std: number }).std).toBe(opts.bandStd);
     (a.strength as { std: number }).std = (b.strength as { std: number }).std;
@@ -310,7 +303,7 @@ describe('R11 — an in-band pick is review, not authorship', () => {
     expect(licensed(result.mutatedGraph)).toBe(false);
   });
 
-  it('RED (R7 finding 3, through the approval door): Price → Revenue projected user-drawn prior is reviewed at its stored mean, never credited', async () => {
+  it('RED (R7 finding 3 × D1, through the approval door): the user\'s same-band words SIZE the drawn Price → Revenue placeholder as theirs, never keep its 0.5', async () => {
     let persisted = graphWith({ strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'user_specified', mean_projected: true } as Edge['provenance'] });
     persisted.nodes.find(n => n.id === TO)!.label = 'Revenue';
@@ -339,34 +332,36 @@ describe('R11 — an in-band pick is review, not authorship', () => {
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const proposal = proposals.get(String(proposed.proposal_id))!;
     expect(proposal.scenario_id).toBe(SCENARIO_ID);
+    // D1 (DL ruling 12 Oct, recovery Batch D; the class closed for the single-link door): a placeholder has no current band,
+    // so the band the user named sizes it at the band's midpoint, as theirs (was: a review keeping μ=0.5 / σ=0.125 unsized).
+    // Science 393023 LICENCE ruling 3 still holds: the projected 0.5 is nobody's, so it is never what gets stamped.
     expect(proposal.operations).toEqual([expect.objectContaining({ op: 'update_edge', path: `${FROM}::${TO}`,
-      value: expect.objectContaining({ magnitude: 0.5, intent: 'confirm_current', band: 'strong' }) })]);
-    // Science 393023 LICENCE ruling 3, re-derived:
-    // Price → Revenue source=user_specified + mean_projected was rejected (carrier lost); now it records review only,
-    // with μ=0.5 / σ=0.125 held and no promotion to the user's own strength.
+      value: expect.objectContaining({ magnitude: 0.55, intent: 'set', band: 'strong' }) })]);
     const approved = await caps.authoriseChange(context, { proposal_id: proposal.proposal_id });
     expect(approved.ok, JSON.stringify(approved)).toBe(true);
-    expect(events).toEqual([expect.objectContaining({ from: FROM, to: TO, magnitude: 0.5, intent: 'confirm_current' })]);
-    expect(edgeOf(persisted).strength).toStrictEqual(before.strength);
-    expectReviewed(persisted, 'strong');
-    const { reviewed_by_user: _review, ...kept } = provenanceOf(persisted);
-    expect(kept).toStrictEqual(before.provenance);
-    expect(linkSizing(edgeOf(persisted))).toBe('placeholder');
-    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edgeOf(persisted)))).toBe(false);
-    expect(String(approved.follow_up)).not.toMatch(/your (?:own )?estimate|you set/i);
+    expect(events).toEqual([expect.objectContaining({ from: FROM, to: TO, magnitude: 0.55, intent: 'set' })]);
+    expect(before.strength).toStrictEqual({ mean: 0.5, std: 0.125 });
+    expect((edgeOf(persisted).strength as { mean: number }).mean).toBe(0.55);
+    expect(provenanceOf(persisted)).not.toHaveProperty('mean_projected');
+    expect(linkSizing(edgeOf(persisted))).toBe('user');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edgeOf(persisted)))).toBe(true);
+    expect(String(approved.follow_up)).not.toMatch(/Olumi[’']s (?:first )?estimate/);
   });
 
-  it('CONTROL (R7): reviewing a non-user projected placeholder permits only the canonical magnitude/carrier transition', async () => {
+  it('Batch A: reviewing a non-user projected placeholder keeps its magnitude and carrier', async () => {
     const before = graphWith({ strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'cee_hypothesis', mean_projected: true } as Edge['provenance'] });
     const result = await canvas(before, eventFor({ band: 'strong' }));
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     if (result.kind !== 'mutated') throw new Error('non-user projection was not reviewed');
     expect(edgeOf(result.mutatedGraph).strength).toStrictEqual(edgeOf(before).strength);
-    expect(provenanceOf(result.mutatedGraph)).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
-    expect(provenanceOf(result.mutatedGraph)).not.toHaveProperty('mean_projected');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(provenanceOf(result.mutatedGraph)).toMatchObject({ source: 'cee_hypothesis', mean_projected: true });
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(provenanceOf(result.mutatedGraph)).not.toHaveProperty('magnitude');
     expectReviewed(result.mutatedGraph, 'strong');
-    expect(linkSizing(edgeOf(result.mutatedGraph))).toBe('olumi_accepted');
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(linkSizing(edgeOf(result.mutatedGraph))).toBe('placeholder');
     expect(earnsAuthorshipCredit(edgeStrengthProvenance(edgeOf(result.mutatedGraph)))).toBe(false);
     expect(isProvenanceOnlyEdgeConfirmation({ before, after: result.mutatedGraph, from: FROM, to: TO, statedBand: 'strong' })).toBe(true);
   });
@@ -516,7 +511,8 @@ describe('R11 — the confirm guard (isProvenanceOnlyEdgeConfirmation)', () => {
     const promoted = reviewed(before);
     provenanceOf(promoted).magnitude = 'olumi_estimate';
     delete provenanceOf(promoted).mean_projected;
-    expect(guard(before, promoted), 'CONTROL: exactly the canonical promotion is permitted').toBe(true);
+    // Batch A rulings 1 and 2: L4 superseded; confirmation preserves sizing and records review.
+    expect(guard(before, promoted), 'Batch A: confirmation cannot promote a placeholder').toBe(false);
     for (const mutate of [
       (g: GraphV3T) => { g.edges.find(e => e.from === FROM && e.to === TO)!.strength.mean = 0.55; },
       (g: GraphV3T) => { g.edges.find(e => e.from === FROM && e.to === TO)!.strength.std = 0.2; },

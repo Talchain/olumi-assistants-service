@@ -3474,6 +3474,8 @@ export async function dispatchEditGraph(
       {
         ...freshnessReadOptionsForRecovery,
         currentGraph: persistedPostEditGraph,
+        // A candidate edit has no recorded revision until commit.
+        currentScenarioRevision: undefined,
       },
     );
     emitFreshnessTelemetry(
@@ -3720,6 +3722,7 @@ export async function dispatchEditGraph(
             {
               ...freshnessReadOptionsForRecovery,
               currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
             },
           ).freshness;
     // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
@@ -4108,6 +4111,7 @@ export async function dispatchEditGraph(
         {
           ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
         },
       );
     }
@@ -4158,6 +4162,7 @@ export async function dispatchEditGraph(
         {
           ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
         },
       );
     }
@@ -4250,6 +4255,7 @@ export async function dispatchEditGraph(
         {
           ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
         },
       );
     }
@@ -5644,6 +5650,7 @@ export async function dispatchEditGraph(
             {
               ...freshnessReadOptionsForRecovery,
               currentGraph: gmFrameBase,
+              currentScenarioRevision: gmFrameBase != null && gmFrameBase === editBase?.graph ? editBase.revision : undefined,
             },
           );
         }

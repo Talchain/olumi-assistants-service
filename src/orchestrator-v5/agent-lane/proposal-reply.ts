@@ -193,7 +193,7 @@ function newRiskReply(r: Rec): string | null {
 }
 
 /**
- * ⭐ NEW FACTORS WITH THE USER'S FIGURES (PJ-E-FIG): each figure is the user's (`stated_by: 'user'`), what it affects is the
+ * NEW FACTORS: each figure keeps the source returned by the capability; what it affects is the
  * capability's own typed phrase, and how strongly is its one fixed disclosure. The figures are named here because the
  * consent subject is minted from the ops, which never carry them. Anything else keeps the second call.
  */
@@ -207,12 +207,19 @@ function newFactorReply(r: Rec): string | null {
     const cv = recordOf(f?.current_value);
     if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects)
       || typeof cv.value !== 'number' || !Number.isFinite(cv.value) || f.how_strongly !== FACTOR_PLACEHOLDER_STRENGTH) return null;
+    // Recovery Batch B (SYS3 TRACE L6): the range the user gave, beside the figure they chose, in their own sentence.
+    const range = recordOf(cv.range);
+    if (cv.range !== undefined && (range === undefined || typeof range.low !== 'number' || typeof range.high !== 'number' || !nonEmpty(range.quote))) return null;
+    const within = range === undefined ? ''
+      : `, within your range of ${proposalFigure(range.low as number, cv.unit)} to ${proposalFigure(range.high as number, cv.unit)} (“${(range.quote as string).trim()}”)`;
     if (cv.stated_by === 'user') {
-      lines.push(`${q(f.label)} is ${twoStateLevelWords(cv.value, cv.unit) === null ? proposalFigure(cv.value, cv.unit) : `switched ${twoStateLevelWords(cv.value, cv.unit)}`}, the figure you gave, and affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)} is ${twoStateLevelWords(cv.value, cv.unit) === null ? proposalFigure(cv.value, cv.unit) : `switched ${twoStateLevelWords(cv.value, cv.unit)}`}, the figure you gave${within}, and affects ${f.affects.trim()}.`);
     } else if (cv.stated_by === 'user_to_confirm' && nonEmpty(cv.quote)) {
       // ⛔ DL ruling on #2235: the PAIRING is Olumi's until the user approves it, so the card shows it with their own words.
       toConfirm = true;
-      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”; it affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”${within}; it affects ${f.affects.trim()}.`);
+    } else if (cv.stated_by === 'olumi_estimate') {
+      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, Olumi’s estimate${within}; it affects ${f.affects.trim()}.`);
     } else {
       return null;
     }

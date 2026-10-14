@@ -83,7 +83,7 @@ const REQUEST_2OPT: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
     { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
-    { id: 'f1', kind: 'factor', label: 'Commercial impact' },
+    { id: 'f1', kind: 'factor', label: 'Commercial impact', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     { id: 'opt_a', kind: 'option', label: 'A', interventions: { f1: { value: 1 } } },
     { id: 'opt_b', kind: 'option', label: 'B', interventions: { f1: { value: 0 } } },
   ],
@@ -105,7 +105,7 @@ const PERSISTED_1OPT: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
     { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
-    { id: 'f1', kind: 'factor', label: 'Commercial impact' },
+    { id: 'f1', kind: 'factor', label: 'Commercial impact', observed_state: { value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' } },
     { id: 'opt_a', kind: 'option', label: 'A', interventions: { f1: { value: 1 } } },
   ],
   edges: [

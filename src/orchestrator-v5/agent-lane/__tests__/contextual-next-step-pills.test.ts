@@ -61,7 +61,9 @@ for (const [name, capture] of [['1 W6 T1b draft', draft], ['2 W6 example after R
     assert.equal(selection?.slot1?.policy_id, capture === draft ? 'RC-STRENGTHEN-ITEM' : 'RC-WIDEN');
     assert.equal(selection?.slot1?.variant, capture === draft ? 'S1' : 'W6');
     assert.equal(selection?.slot1?.target, capture === draft ? undefined : 'risks');
-    assert.deepEqual(offered[0], capture === draft ? { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' } : SUGGEST_RISKS_CHIP);
+    // R3-3: "Give your estimate" asks for that estimate (the card's link, by its labels), never the generic question.
+    assert.deepEqual(offered[0], capture === draft ? { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate',
+      message: 'How strongly does ‘Price-rise churn’ affect ‘Price-rise customer losses’?' } : SUGGEST_RISKS_CHIP);
     assert.equal(offered[0]!.label, selection?.slot1?.primary_action.label);
     assert.equal('action_type' in offered[0]!, false);
     assert.equal(offered.length, 3);
@@ -78,8 +80,10 @@ it('3 served S6 now offers the S1 card and Give your estimate', () => {
   assert.equal(offered[0]!.id, 'agent-next-strengthen');
   assert.ok(strengthenCardFor(inputs(strengthen).state));
   assert.equal(selection?.slot1?.primary_action.label, 'Give your estimate');
-  assert.deepEqual(offered[0], { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' });
-  assert.equal(offered[0]!.message, NEXT_STEP_CHIPS[2].message);
+  // R3-3: the chip asks for THIS card's estimate; the served generic "What would most strengthen this model?" is gone.
+  assert.deepEqual(offered[0], { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate',
+    message: 'How strongly does ‘Annual advisory-service revenue’ affect ‘Annual revenue’?' });
+  assert.notEqual(offered[0]!.message, NEXT_STEP_CHIPS[2].message);
   assert.equal(offered.filter(chip => chip.id === 'agent-next-strengthen').length, 1);
 });
 it('4 W5: the witnessed pills, with the guidance press (Suggest options) leading; once each (DL 7 Oct re-pin)', () => {
@@ -181,7 +185,8 @@ it('Give your estimate is used only for the actual S1 card target; a different i
   const row = actual.selection!.slot1!;
   assert.equal(row.variant, 'S1');
   assert.equal(row.item, `${card.target.from_id}->${card.target.to_id}`);
-  assert.deepEqual(actual.offered[0], { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' });
+  assert.deepEqual(actual.offered[0], { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate',
+    message: 'How strongly does ‘Enterprise prospect signing likelihood’ affect ‘Quarterly revenue’?' });
   assert.deepEqual(nextStepsFromGuidance(NEXT_STEP_CHIPS, { slot1: { ...row, item: 'different->link' } }, false, state)[0], NEXT_STEP_CHIPS[2]);
 });
 

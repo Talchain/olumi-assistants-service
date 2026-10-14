@@ -262,6 +262,9 @@ export function definitionalLink(link: CandidateLink, sized: LinkSizing): boolea
   const ne = sized.natural_effect;
   if (link.definitional !== true || ne === undefined || sized.outcome === 'placeholder') return false;
   if (!Number.isFinite(ne.amount) || !Number.isFinite(ne.per_source_change) || ne.per_source_change === 0) return false;
+  if (typeof link.effect_amount !== 'number' || typeof link.effect_per_source_change !== 'number'
+    || Math.abs(link.effect_amount / link.effect_per_source_change) !== 1
+    || Math.sign(link.effect_amount / link.effect_per_source_change) !== (link.direction === 'negative' ? -1 : 1)) return false;
   const unit = (u: string) => u.trim().toLowerCase();
   return Math.abs(ne.amount / ne.per_source_change) === 1 && unit(ne.amount_unit) !== '' && unit(ne.amount_unit) === unit(ne.per_source_change_unit);
 }

@@ -401,7 +401,12 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     expect(p.codeLine).toBe(LINE);
     expect(p.fallback).toBe(LINE);
     expect(p.instruction).toContain(LINE);
-    expect(p.instruction).toContain('never say whether the inputs changed or stayed the same');
+    // ⛔ CHANGED EXPECTATION (prompt P16, AIE one-pass packet 94ad9c8f…; the AIE's signed rerun sentence 75e053e8…): input
+    // changes are stated only where the verified comparison establishes them; the code line stays the record and still leads.
+    expect(p.instruction).not.toContain('never say whether the inputs changed or stayed the same');
+    expect(p.instruction).toContain('Use the supplied run_delta rows to explain what changed between those actual Runs.');
+    expect(p.instruction).toContain('When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.');
+    expect(p.instruction).toContain(`Run record: "${LINE}"`);
   });
 
   it('INERT: no run_delta (a first Run) → no plan (the explanation path is exactly as before)', () => {

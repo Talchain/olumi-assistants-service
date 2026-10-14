@@ -7,8 +7,8 @@ exports[`event-risk disclosure through the served build reply > ER-2-control: no
 - Check the delivery assumptions.
 - Discuss the staffing choices.
 
-The first analysis could not run yet: What is "Delivery capacity" today, before any option changes it? Without a current level the analysis would treat it as zero.
+The first analysis could not run yet: Review all 2 readiness issues together before analysis.
 
-Questions this model does not answer yet: Which date does "in the next 6 months" mean? It is the deadline your brief sets for "Delivery"; the model keeps your words but no date, so no result answers whether it is met by then. The analysis can't run yet. What is "Delivery capacity" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+Questions this model does not answer yet: Which date does "in the next 6 months" mean? It is the deadline your brief sets for "Delivery"; the model keeps your words but no date, so no result answers whether it is met by then. The analysis can't run yet. What is "Delivery capacity" today, before any option changes it? Without a current level the analysis would treat it as zero. How likely or how large is "Key developer leaves" today? The numerical analysis is withheld until this risk has a supported value.",
 }
 `;

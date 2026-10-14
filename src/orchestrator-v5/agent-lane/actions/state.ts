@@ -37,17 +37,17 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
-import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
-import { InterventionV3 } from '../../../schemas/cee-v3.js';
+import { goalChanceEstimateCensus } from '../goal-chance-estimate-attribution.js';
+import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
+import { settingAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
-const settingProvenance = InterventionV3.pick({ value: true, source: true });
 type OptionSetting = NonNullable<Parameters<typeof olumiEstimatesFeedingResult>[0]['optionSettings']>[number];
 
 /** Distinct option settings from this read, restricted to the bound Run's options and goal-path factors. */
-function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFactor[]): OptionSetting[] {
+export function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFactor[]): OptionSetting[] {
   const result = rec(read.analysisResult);
   const enrichment = rec(result?.enrichment) ?? rec(rec(result?.data)?.enrichment) ?? {};
   // Current-first, like the shared result reader: a legacy copy must not widen a current option set.
@@ -68,14 +68,42 @@ function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFa
     for (const [factorId, intervention] of Object.entries(rec(option.interventions) ?? rec(rec(option.data)?.interventions) ?? {})) {
       const factor = factors.get(factorId);
       if (factor === undefined) continue;
-      const setting = settingProvenance.safeParse(intervention);
-      if (!setting.success) continue;
-      // Approved Olumi levels retain cee_hypothesis; this read has no distinct acceptance marker.
-      settings.push({ id: `${option.id}:${factorId}`, label: `${factor.label} under ${optionLabel}`,
-        authorship: setting.data.source === 'cee_hypothesis' ? 'olumi_estimate' : 'user' });
+      // A cell with a figure is an input, whatever its stamp (the census's rule): an unrecognised or missing stamp is no
+      // longer dropped here while the census counts it.
+      const figure = typeof intervention === 'number' ? intervention : rec(intervention)?.value;
+      if (typeof figure !== 'number' || !Number.isFinite(figure)) continue;
+      // ⭐ ONE PROVENANCE AUTHORITY (DL AMEND, 12 Oct): whose the setting is, by `provenanceOf` — never the old two-way
+      // polarity (anything not `cee_hypothesis` was "the user's"). A structural switch cell is not an input; an
+      // unestablished one is `unknown` (never counted as Olumi's, never the person's). Approved Olumi levels retain
+      // `cee_hypothesis`: a cell has no distinct acceptance marker.
+      const authorship = settingAuthorshipOf(intervention, (nodes as unknown[]).map(rec).find(n => n?.id === factorId));
+      if (authorship === 'structural') continue;
+      settings.push({ id: `${option.id}:${factorId}`, label: `${factor.label} under ${optionLabel}`, authorship });
     }
   }
   return settings;
+}
+
+/**
+ * ⭐ ONE CENSUS FOR THE FACE AND THE PANEL (DL 12 Oct; last check BLOCKING 4, narrow re-check r2): Check estimates lists exactly
+ * the figures the chance face counts — the SAME census function (`goalChanceEstimateCensus`) over the licence's OWN recorded
+ * inputs: its options, its scored goal and, when its joint is licensed, every node of the joint's event
+ * (`targets.conditions[].node_id`, the face's `jointEstimates` inputs). The panel enumerates nothing of its own.
+ * ⛔ Only on the model's CURRENT Run (graph hash = the Run's): on any other, no census is said — never "none are Olumi's" —
+ * and the existing needs-a-current-analysis words stand. (Residual, follow-on lease: the census result stored on the
+ * licence record itself, so the face and the panel read one object.)
+ */
+export function checkEstimatesOf(read: ActionRead): OlumiEstimates | null {
+  const result = rec(read.analysisResult);
+  if (typeof result?.computed_against_hash !== 'string' || result.computed_against_hash !== read.graphHash) return null;
+  const licence = goalChanceLicenceForAgent(read.analysisResult);
+  const enrichment = rec(result.enrichment) ?? rec(rec(result.data)?.enrichment) ?? {};
+  const runOptionIds = readOptionResultSources(enrichment).map(rows => rows
+    .map(row => typeof row.option_id === 'string' ? row.option_id : row.id)
+    .filter((id): id is string => typeof id === 'string' && id !== '')).find(ids => ids.length > 0);
+  const jointEventNodes = licence?.targets?.joint.status === 'licensed' ? licence.targets.conditions.map(c => c.node_id) : [];
+  // The face's own inputs where there is a face; else this Run's option rows and the census's first goal.
+  return goalChanceEstimateCensus(read.graph, licence?.option_ids ?? runOptionIds, licence?.goal_node_id, jointEventNodes).estimates;
 }
 
 /** The persisted state the bar is a function of. The same fields at the turn's end and on the reload GET. */
@@ -216,7 +244,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       if (typeof graphHash === 'string' && applyIdentityConfirmEdit({ persistedGraph: raw, ...card,
         expected_graph_hash: graphHash, reading_token: identityConfirmReadingToken(card) }).kind === 'mutated') {
         const label = (id: string) => { const n = nodes.find(n => n?.id === id); return typeof n?.label === 'string' ? n.label : id; };
-        identityReading = { goalLabel: label(card.outcome_id), a: label(card.factor_ids[0]), b: label(card.factor_ids[1]) };
+        if (card.operation === 'product') identityReading = { goalLabel: label(card.outcome_id), a: label(card.factor_ids[0]), b: label(card.factor_ids[1]) };
       }
     }
     const signals = assembleGuidanceSignals({
@@ -234,13 +262,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       readable: true,
       identityReading,
       canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
-      olumiEstimates: runKey === null || !guidanceModelReadable(read.graph) ? null : olumiEstimatesFeedingResult({
-        validatedDefinitionForLink: validatedDefinitionForGraph(read.graph),
-        goalPathFactors: signals['model.goal_path_factors'],
-        goalPathLinks: signals['model.goal_path_links'],
-        optionSettings: optionSettingsOf(read, signals['model.goal_path_factors']),
-        driverIds: [],
-      }),
+      olumiEstimates: runKey === null || !guidanceModelReadable(read.graph) ? null : checkEstimatesOf(read),
       estimateCandidates: signals['model.goal_path_factors'].flatMap(f => {
         if (f.value_authorship !== 'olumi_estimate' && f.value_authorship !== 'olumi_accepted') return [];
         const node = nodes.find(n => n?.id === f.factor_id);

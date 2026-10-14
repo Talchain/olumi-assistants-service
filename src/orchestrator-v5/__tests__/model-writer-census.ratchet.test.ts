@@ -8,10 +8,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts/census/model-writer-census.mjs');
 
-// RATCHET: the outside-door count may ONLY DECREASE. Never raise it to admit a writer.
-// A PR that moves a writer through the door must lower BASELINE in the same PR (stale-baseline row).
-// Door callers are reported, not capped: routing a writer through the door raises that count.
-const BASELINE = 10;
+// Shared with the SYS10 physical spec: one assertion, one shrink-only list.
+import { BASELINE, BYPASS_EXEMPTIONS, requireOnlyExemptedWrites } from '../../../scripts/census/model-writer-exemptions.mjs';
 
 interface Site { file: string; line: number; kind: string; callee: string; reason?: string }
 interface Census {
@@ -41,6 +39,28 @@ describe('model writer census ratchet', () => {
 
   it('refuses a stale baseline: a fixed writer lowers BASELINE in the same PR', () => {
     expect(measured.outside_door, `lower baseline to ${measured.outside_door}`).toBe(BASELINE);
+  });
+
+  it('allows only the shrink-only file:symbol bypass list, with no duplicate call sites', () => {
+    requireOnlyExemptedWrites(measured);
+    expect(new Set(BYPASS_EXEMPTIONS).size).toBe(BYPASS_EXEMPTIONS.length);
+    expect(BYPASS_EXEMPTIONS.length).toBe(BASELINE);
+  });
+
+  it('the ordinary turn commit already takes the controlled door and has no exempted write', () => {
+    const commitSites = measured.sites.filter(s => s.file === 'src/orchestrator-v5/commit.ts');
+    expect(commitSites.map(s => ({ kind: s.kind, callee: s.callee })))
+      .toEqual([{ kind: 'door_caller', callee: 'appendCheckedGraphWrite' }]);
+  });
+
+  it('a reintroduced guest writer is RED; zero has no stale exemptions', () => {
+    const bypass = { file: 'src/orchestrator-v5/guest-copy/index.ts', line: 1,
+      kind: 'rpc', callee: 'copy_guest_scenario' };
+    expect(() => requireOnlyExemptedWrites({ ...measured, sites: [...measured.sites, bypass] }))
+      .toThrow('Unexempted graph write');
+    expect(BYPASS_EXEMPTIONS).toEqual([]);
+    expect(() => requireOnlyExemptedWrites({ ...measured, outside_door: 1 }))
+      .toThrow('Lower baseline to 1');
   });
 
   it('every production RPC must have resolved migration SQL or named deployed evidence', () => {
@@ -75,6 +95,17 @@ describe('model writer census ratchet', () => {
       "// client.rpc('append_turn_atomic_v5', {});",
       "const prose = `client.rpc('append_turn_atomic_v5', {})`; void prose;",
       "client.rpc('census_unclassified_rpc_control', {});",
+      `import type { SessionStore } from ${JSON.stringify(join(ROOT, 'src/orchestrator-v5/session/store.js'))};`,
+      'declare const store: SessionStore;',
+      'store.append({ graph: { nodes: [], edges: [] } } as any);',
+      'const directAppend = store.append;',
+      'directAppend({ graph: { nodes: [], edges: [] } } as any);',
+      'declare const db: any;',
+      "db.from('scenarios').insert({ graph: { nodes: [], edges: [] } });",
+      "db.from('model_versions').upsert({ graph: { nodes: [], edges: [] } });",
+      'function nestedWriter() {',
+      "  client.rpc('append_turn_atomic_v6', {});",
+      '}',
     ].join('\n'));
     // Import in a subprocess: avoid loading a compiler and service dependencies
     // into the Vitest worker. The fixture uses the exact production instrument.
@@ -91,7 +122,19 @@ describe('model writer census ratchet', () => {
     const local = (s: Site) => s.file === relative(ROOT, fixture);
     expect(controls.sites.filter(local).filter(s => s.kind === 'rpc')).toEqual([
       { file: relative(ROOT, fixture), line: 2, kind: 'rpc', callee: 'append_turn_atomic_v5' },
+      { file: relative(ROOT, fixture), line: 23, kind: 'rpc', callee: 'append_turn_atomic_v6' },
     ]);
+    expect(controls.sites.filter(local).filter(s => s.kind === 'store_method').map(s => s.callee))
+      .toEqual(['store.append', 'directAppend']);
+    expect(controls.sites.filter(local).filter(s => s.kind === 'table').map(s => s.callee))
+      .toEqual(['scenarios.insert', 'model_versions.upsert']);
+    // Run the SAME acceptance assertion used on production. Planted writes
+    // make it RED; each primitive/alias is tested independently so an earlier
+    // mutant cannot conceal a hole in detection of the later ones.
+    for (const mutant of controls.sites.filter(local).filter(s => s.kind !== 'door_caller')) {
+      expect(() => requireOnlyExemptedWrites({ ...measured, sites: [...measured.sites, mutant] }))
+        .toThrow(`Unexempted graph write: ${mutant.file}:${mutant.callee}`);
+    }
     expect(controls.excluded.filter(local).filter(s => s.kind === 'rpc')).toHaveLength(2);
     expect(controls.sites.filter(local).filter(s => s.kind === 'door_caller')).toHaveLength(1);
     expect(controls.diagnostics).toEqual([

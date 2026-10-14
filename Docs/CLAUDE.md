@@ -1,3 +1,5 @@
+@../AGENTS.md
+
 ## Schema & Type Safety Rules
 
 ### Default values and enum literals

@@ -348,7 +348,12 @@ describe('Science §(ad) through the producer and reply route', () => {
     delete goal(graph).goal_horizon_months;
     const body = await turn();
     expect(lastView.options).toHaveLength(3);
-    expect(lastView.options.every(row => row.cell.kind === 'figure')).toBe(true);
+    // Batch C: AIE status-quo disposition (12 Oct) — with no held month this goal is the same-draw reference (anchored at
+    // 120,000, reached through ‘Monthly revenue change’, set by no option), and Keep's synthetic row spreads around it: a
+    // disagreement, withheld with that reason, never a figure. The two other current-number chances survive, as before.
+    expect(lastView.options.filter(row => row.option_id !== 'keep_current_pricing').every(row => row.cell.kind === 'figure')).toBe(true);
+    expect(lastView.options.find(row => row.option_id === 'keep_current_pricing')!.cell).toMatchObject({ kind: 'withheld',
+      reasons: [{ code: 'reference_moved' }] });
     expect(currentFact!.result.enrichment.inference_warnings.some((warning: Rec) => warning.code === HORIZON_WITHHOLD)).toBe(false);
     expect(body.assistant_text).toContain('%');
     const captureDir = process.env.S2_CAPTURE_REPLY_DIR;

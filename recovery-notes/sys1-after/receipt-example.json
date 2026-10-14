@@ -1,0 +1,74 @@
+[
+  {
+    "site": "agent-v1-turn.callModel",
+    "provider": "openai",
+    "model": "gpt-6.1-sol",
+    "purpose": "conversation",
+    "outcome": "allowed",
+    "request_id": "req-3",
+    "scenario_id": "11111111-1111-4111-8111-111111111111",
+    "prompt_alias": "agent.converse",
+    "prompt_sha256": "a8a9845b846a3739da5e2ec4d0f5c084b7034548de36e2fbc85b9348db99b45e",
+    "tools_sha256": "f0f4fb0895b416587fc1ad54c8c0e14c372f7e98a3c4344d87a5cbfb4036ec4b",
+    "reasoning_effort": "high",
+    "max_output_tokens": 3400,
+    "cee_build": "5af724f693d99be090da16f470b59615a8b2dbed",
+    "environment": "test",
+    "environment_source": "node_env",
+    "instructions_carrier": "developer_breakpoint",
+    "settings": {
+      "reasoning": {
+        "effort": "high"
+      },
+      "max_output_tokens": 3400
+    },
+    "attempt": {
+      "transport_status": null,
+      "result": "TypeError",
+      "outcome": "transport_error",
+      "retry": true,
+      "retry_reason": "transport"
+    },
+    "duration_ms": 0
+  },
+  {
+    "site": "agent-v1-turn.callModel",
+    "provider": "openai",
+    "model": "gpt-6.1-sol",
+    "purpose": "conversation",
+    "outcome": "allowed",
+    "request_id": "req-3",
+    "scenario_id": "11111111-1111-4111-8111-111111111111",
+    "prompt_alias": "agent.converse",
+    "prompt_sha256": "a8a9845b846a3739da5e2ec4d0f5c084b7034548de36e2fbc85b9348db99b45e",
+    "tools_sha256": "f0f4fb0895b416587fc1ad54c8c0e14c372f7e98a3c4344d87a5cbfb4036ec4b",
+    "reasoning_effort": "high",
+    "max_output_tokens": 3400,
+    "cee_build": "5af724f693d99be090da16f470b59615a8b2dbed",
+    "environment": "test",
+    "environment_source": "node_env",
+    "instructions_carrier": "developer_breakpoint",
+    "settings": {
+      "reasoning": {
+        "effort": "high"
+      },
+      "max_output_tokens": 3400
+    },
+    "duration_ms": 1,
+    "usage": {
+      "raw": {
+        "input_tokens": 12,
+        "output_tokens": 4
+      },
+      "input_tokens": 12,
+      "output_tokens": 4
+    },
+    "attempt": {
+      "transport_status": 200,
+      "result": "completed",
+      "outcome": "success",
+      "retry": false,
+      "response_sha256": "219bd3ccd6b1f600ee692cc899fb661e9b9e38b4ebfa915c51e23890f73fcc58"
+    }
+  }
+]

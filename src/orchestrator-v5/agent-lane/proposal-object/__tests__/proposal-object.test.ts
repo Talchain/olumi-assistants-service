@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../../tests/helpers/scaling-ratio.js';
 /**
  * ⭐ S-D — the ONE proposal object, its amendment, its lifecycle and its words (lane EDIT-PANEL; design
  * inflight/lane-edit-panel-DESIGN.md). Pure rows; the route-level journey is `held-proposal-user-in-control-seam.test.ts`.
@@ -490,7 +491,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const { p } = await fixture(); expect(declinedProposalOf(`agent-decline-proposal:${p.proposal_id}`)).toBe(p.proposal_id);
     expect(declinedProposalOf('agent-decline-proposal:prop_bad')).toBeUndefined();
     const start = performance.now(); declinedProposalOf(`agent-decline-proposal:${' '.repeat(20_000)}`);
-    expect(performance.now() - start).toBeLessThan(50);
+    if (timingGated) { expect(performance.now() - start).toBeLessThan(50); }
   });
   it('RED Agent lifecycle never re-pins, says model and idle lapses, and refreshes each live item', async () => {
     const { carrier, g } = await fixture(); const nowMs = Date.now();

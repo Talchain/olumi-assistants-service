@@ -204,8 +204,15 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_direction',
   'goal_sense_reading',
   'goal_level_reading',
+  // Recovery Batch C: Olumi's validated reading of the target's semantics; written only by construction (`goal-target-basis.ts`)
+  // and the approved answer to its open question (`goal-reading-write.ts`, which removes that one member).
+  'goal_target_basis',
   'goal_scope',
   'goal_horizon_months',
+  // The S4 deadline door and the one-off door are the only writers of these pipeline-owned fields.
+  'goal_horizon_reference_date',
+  'goal_horizon_stated_months',
+  'goal_stock_reading',
   // §(ad): the user unlock is parked; no producer may forge a horizon attestation.
   'horizon_basis',
   'horizon_basis_source',
@@ -257,7 +264,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
  * `threshold-source-j2.test.ts`.
  */
 export const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
-  // event_risk.v1 slice 2a: only CEE's validated hold stamp may author this block.
+  // event_risk.v1 slice 2a: only CEE's validated hold stamp may author this block; and the approved card of Olumi's range for
+  // a risk root (`risk-occurrence.ts`, through the atomic level door), never a producer.
   'event_risk',
   ...CEE_ANALYSIS_OWNED_ROOTS,
   ...provenanceOwnedSegments(),

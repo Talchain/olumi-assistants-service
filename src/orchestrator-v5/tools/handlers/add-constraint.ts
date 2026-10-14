@@ -904,6 +904,9 @@ export function createAddConstraintHandler(): HandlerFn {
             ? { value_frame: inheritedValueFrame }
             : {}),
         ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
+        // Batch B (SYS1 trace, DL 12 Oct): an edit of one of the goal's TARGETS stays a target. The row is rebuilt from
+        // this edit, so a marker it does not restate would be dropped, and the joint would read the target as a limit.
+        ...(existing?.role !== undefined ? { role: existing.role } : {}),
       };
 
       const newConstraint: GoalConstraintT = {

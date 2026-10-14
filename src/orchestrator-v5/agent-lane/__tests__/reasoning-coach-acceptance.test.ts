@@ -12,9 +12,9 @@ const EXPECTED_WIDEN_WHY = {
   "W1": "Finding another route could give you a way to reach the goal within your limit.",
   "W2": "Alternatives expose trade-offs that a single proposed route leaves untested.",
   "W3": "A different mechanism can reveal possibilities that variations on one lever miss.",
-  "W4": "A baseline separates the effect of changing course from what would happen anyway.",
+  "W4": "Comparing with carrying on as now helps distinguish the modelled change from what is assumed to happen anyway.",
   "W5": "Combining complementary strengths may offer a useful route when the comparison is close.",
-  "W6": "Risks drive how far each option could fall short; one risk leaves most of that unexamined.",
+  "W6": "Considering other plausible risks can reveal ways each option could fall short.",
   "W7": "Missing drivers can hide dependencies that change how your routes affect the goal.",
   "W2Z": "Concrete routes let you test how different actions could move the goal."
 } as const;
@@ -39,7 +39,11 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
     // R2 re-pin: claim predicates, duration exemption, kind-correct fallback and licensed control; historical fixtures stay intact.
     // Q4 DL re-pin: one bounded contrary-change class predicate, clause-scoped uncertainty and metadata-only drop logs.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('233f8606d1858b53800b2879ef14a0231996ac634dda3fcfc911195cab6c02fb');
+    // E6 DL re-pin (12 Oct, Paul's test): cooldown_default counts a SHOWN row (status offered); no case or other constant changes.
+    // Batch R: staging's bytes plus only the E6 cooldown_default line (E6 on B-on-C pinned aafa47a1's different base).
+    // Batch R round 2 (independent check P1): the line no longer claims a shown item quiets its whole item row.
+    // Batch B (merge of staging after R, 12 Oct): R's bytes (354e8e0a) plus ONLY SYS2 G1's W4/W6 why_now corrections (dfc52dc8).
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('d97b918fda14a15b534ff545a6e9ca892ea1be01e5c7beb567d6011e71b8a58a');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
@@ -379,6 +383,6 @@ describe('Widen explains why the condition matters', () => {
   it('W6 keeps the invitation and explains the coverage gap', () => {
     expect(POLICY.rows[0].why_now).toEqual(EXPECTED_WIDEN_WHY);
     expect(POLICY.rows[0].short_copy.W6).toBe('Only one risk is on the map. What else could go wrong?');
-    expect(POLICY.rows[0].why_now.W6).toBe('Risks drive how far each option could fall short; one risk leaves most of that unexamined.');
+    expect(POLICY.rows[0].why_now.W6).toBe('Considering other plausible risks can reveal ways each option could fall short.');
   });
 });

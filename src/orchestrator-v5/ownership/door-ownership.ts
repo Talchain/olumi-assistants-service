@@ -64,6 +64,12 @@ export function bindWriteCaller<T>(caller: { userId: string | null; verified: bo
   return writeCallerStorage.run(context, done);
 }
 
+/** Destination identity for create/copy operations, from the same trusted request binding. */
+export function readVerifiedWriteCaller(): string | null {
+  const caller = writeCallerStorage.getStore();
+  return caller?.verified === true ? caller.userId : null;
+}
+
 export class ModelWriteOwnershipRefused extends Error {
   readonly code = 'model_write_ownership_refused';
   constructor(readonly reason: 'not_owner' | 'owner_unreadable') {

@@ -31,6 +31,7 @@
  * `carrierCompatible`), and a period the label names (full reader) must not conflict with U's.
  */
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
+import { hasUserStatedSize } from '../../cee/provenance/provenance-of.js';
 import { resolveMagnitudeFrame, unitOf, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
@@ -126,7 +127,7 @@ export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
   const setByOption = new Set(nodes.filter(n => n.kind === 'option').flatMap(o => Object.keys(mergeInterventionSourceObjects(o))));
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), graph.edges.filter(isRec));
-  const figureOn = (e: Rec): boolean => isRec(e.provenance) && (isRec(e.provenance.natural_effect) || e.provenance.magnitude === 'user_stated');
+  const figureOn = (e: Rec): boolean => isRec(e.provenance) && (isRec(e.provenance.natural_effect) || hasUserStatedSize(e));
   for (const m of nodes) {
     if (typeof m.id !== 'string' || !['factor', 'risk', 'outcome'].includes(String(m.kind))) continue;
     const mv = view.get(m.id);

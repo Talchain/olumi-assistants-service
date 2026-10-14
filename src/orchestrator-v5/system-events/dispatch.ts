@@ -74,6 +74,8 @@ import { executeOptionInterventionBatch, executeOptionInterventionEdit, type App
 import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
 import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import type { ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
+import type { ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -148,6 +150,7 @@ function deriveWriteReplyFreshness(
   persistedAnalysisGraphHash: string | null,
   currentGraph: unknown,
   allowLegacyWindowAbsence = false,
+  currentScenarioRevision?: number,
 ): FreshnessDerivation {
   const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
   const derived = deriveAnalysisFreshness(
@@ -160,7 +163,7 @@ function deriveWriteReplyFreshness(
         || (allowLegacyWindowAbsence && read.factSet.status === 'degraded'
           && read.factSet.reason === 'durable_unavailable' && read.hotWindow.status === 'ok'),
       analysisInvalidatedAt: read.analysisInvalidatedAt,
-      currentGraph, priorFactsWithTurn: read.priorFactsWithTurn,
+      currentGraph, currentScenarioRevision, priorFactsWithTurn: read.priorFactsWithTurn,
       legacyEditFacts: legacyEditFactsForFreshness(read.factSet) },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
@@ -170,7 +173,7 @@ function deriveWriteReplyFreshness(
   // (no fact-bound hashes: `unknown` only where data is genuinely missing, its
   // invariant 3). Independent pre-review 5828334202 on #1892.
   if (!read.analysisInvalidatedAtReadOk && derived.freshness === 'fresh') {
-    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph });
+    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph, currentScenarioRevision });
   }
   return derived;
 }
@@ -597,6 +600,7 @@ function replyForAttemptThatWroteNothing(args: {
   readonly requestId: string;
   readonly committedResponse: OlumiResponse;
   readonly persistedGraphBytes: unknown;
+  readonly persistedScenarioRevision?: number;
   readonly persistedAnalysisGraphHash: string | null;
   /**
    * The writer's own analysis read — the durable record, the hot window and the
@@ -686,7 +690,7 @@ function replyForAttemptThatWroteNothing(args: {
   }
   // The shared rule, against the SNAPSHOT's hash: the durable record when it is
   // authority, the restore marker, and `unknown` when the marker is unread.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes, false, args.persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -1181,6 +1185,8 @@ export async function dispatchSystemEvent(
   // the presentation graph may have lost fields that participate in the hash.
   try {
     return await withAnalysisReadDeadline(async () => {
+      // This existing graph-only read supplies no revision. Freshness must not
+      // expand its read surface just to enable the legacy no-hash fallback.
       const persistedGraph = await loadPersistedGraphStrict(params.payload.scenario_id);
       const parsed = GraphV3.safeParse(persistedGraph);
       if (!parsed.success) return result;
@@ -1190,7 +1196,7 @@ export async function dispatchSystemEvent(
       );
       return { ...result, graph: parsed.data,
         analysisReady: result.analysisReady ?? buildCanonicalAnalysisReadyFromGraph(persistedGraph),
-        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph) };
+        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph, false, undefined) };
     });
   } catch (error) {
     // Observational only: a failed reread cannot suppress the user's answer or
@@ -1744,6 +1750,7 @@ async function dispatchEdgeStrengthEdit(
 
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See `replyForAttemptThatWroteNothing`.
   let thisAttemptWrote: boolean | null = null;
@@ -1797,6 +1804,7 @@ async function dispatchEdgeStrengthEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -1860,6 +1868,7 @@ async function dispatchEdgeStrengthEdit(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The edit is in the model iff the unique (from, to) edge carries what the
@@ -1940,7 +1949,7 @@ async function dispatchEdgeStrengthEdit(
     return { response: result.response, commitPerformed: false, graph: null };
   }
   const graphForReadiness = committedParse.data;
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   // The exact graph this commit projected and handed to the atomic store is
   // the UI's authoritative readback. It is load-bearing for confirm_current:
   // graph_patch honestly stays `noop` for the unchanged scientific tuple,
@@ -2216,6 +2225,7 @@ async function dispatchStructuralDelete(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See `replyForAttemptThatWroteNothing`.
   let thisAttemptWrote: boolean | null = null;
@@ -2284,6 +2294,7 @@ async function dispatchStructuralDelete(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -2347,6 +2358,7 @@ async function dispatchStructuralDelete(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The removal is in the model iff every removed id and edge pair is ABSENT
@@ -2441,7 +2453,7 @@ async function dispatchStructuralDelete(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2570,7 +2582,7 @@ async function dispatchFactorValueEdit(
       },
       commitPerformed: false,
       commitSkippedReason: 'verified_no_op', graph: result.baseGraph as GraphV3T,
-      freshness: deriveWriteReplyFreshness(analysisInputs, graphHash, result.baseGraph),
+      freshness: deriveWriteReplyFreshness(analysisInputs, graphHash, result.baseGraph, false, persistedGraph != null ? expectedRevision : undefined),
     };
   }
   if (event.kind === 'prior_range_edit' && (result.kind === 'refused' || rangeFactParse?.success !== true)) {
@@ -2645,6 +2657,7 @@ async function dispatchFactorValueEdit(
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let committedResponse: OlumiResponse = result.response;
   try {
     const mutationPriorPendings = factorPriorPendings;
@@ -2696,6 +2709,7 @@ async function dispatchFactorValueEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     committedResponse = commitResult.response;
   } catch (err) {
     if (event.kind === 'factor_value_edit' && err instanceof UntouchedLevelRescaledError) {
@@ -2855,7 +2869,7 @@ async function dispatchFactorValueEdit(
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
     analysisInputs,
     persistedAnalysisGraphHash,
-    persistedGraphBytes,
+    persistedGraphBytes, false, persistedScenarioRevision,
   );
   emitFreshnessTelemetry(
     freshness,
@@ -2990,6 +3004,7 @@ async function dispatchOptionInterventionEdit(
     requestHash: computeRequestHash(payload) }, {
     targets: [{ optionId: event.option_id, factorId: event.factor_id, modelValue: event.value }],
     base_graph_hash: event.base_graph_hash,
+    canvasEdit: true,
   }, requestId);
 }
 
@@ -3002,8 +3017,9 @@ function preWriteRefereeFreshness(
   read: WriteReplyAnalysisInputs,
   baseGraphHash: string,
   currentGraph: unknown,
+  currentScenarioRevision?: number,
 ): FrameFreshness {
-  return deriveWriteReplyFreshness(read, baseGraphHash, currentGraph, true).freshness;
+  return deriveWriteReplyFreshness(read, baseGraphHash, currentGraph, true, currentScenarioRevision).freshness;
 }
 
 /**
@@ -3037,15 +3053,28 @@ export async function dispatchOptionLevelsBatch(
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card (the goal's `goal_horizon` only): ONE commit, alone. */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    /** ⭐ G: the user's answer to the goal's open question (`goal-reading-write.ts`): ONE commit, alone. */
+    readonly goalReading?: ApprovedGoalReading;
+    /** ⭐ Olumi's occurrence range for a risk root (`risk-occurrence.ts`): ONE commit, alone. */
+    readonly riskOccurrence?: ApprovedRiskOccurrence;
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
+    /**
+     * ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (SYS3 L4, #94 6115410093; DL #75 5902916137 (3)). Only the wire's single
+     * `option_intervention_edit` sets this: its level is read on the factor's declared range, as the card showed it
+     * (`figureOnFactorRange`). Served 50530b5f stored the card's "2 people" as a bare 0.4 because #2919's batch rule
+     * (no inferred figure) also reached this one-target form. Approval batches still infer nothing.
+     */
+    readonly canvasEdit?: true;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
   const eventKind = batch.goalSteady !== undefined ? 'goal_steady_edit' : batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
+    : batch.goalReading !== undefined ? 'goal_reading_edit'
+    : batch.riskOccurrence !== undefined ? 'risk_occurrence_edit'
     : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
@@ -3106,10 +3135,10 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.riskOccurrence === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
-    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: false, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
+    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: batch.canvasEdit === true, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
       getSessionStore())
     : await executeOptionInterventionBatch({ ...common, inferFactorFigure: false, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
@@ -3121,6 +3150,8 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
       ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
       ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}),
+      ...(batch.goalReading !== undefined ? { goalReading: batch.goalReading } : {}),
+      ...(batch.riskOccurrence !== undefined ? { riskOccurrence: batch.riskOccurrence } : {}),
       ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
       ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
@@ -3152,7 +3183,7 @@ export async function dispatchOptionLevelsBatch(
     // original fact projection; the pre-write referee is unchanged.
     // Reread after every commit: even byte-identical graphs can have newer edit facts.
     const freshnessAfterCommit = deriveWriteReplyFreshness(
-      await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph, true,
+      await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph, true, undefined,
     );
     emitFreshnessTelemetry(
       freshnessAfterCommit,
@@ -3430,6 +3461,8 @@ export type CommitOptionLevelsInput = {
    * `reason: 'identity_<reason>'`; nothing is written.
    */
   readonly identity_confirm?: {
+    readonly ceiling_stock?: import('../agent-lane/ceiling-stock.js').CeilingStockPending;
+    readonly choice?: 'one_off';
     readonly outcome_id: string;
     readonly factor_ids: readonly string[];
     /** The card's displayed sentence. */
@@ -3445,7 +3478,16 @@ export type CommitOptionLevelsInput = {
    * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
-  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string };
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number };
+  /**
+   * #3024: the deadline card's bound goal (`still-applies.ts`) and whether THIS proposal's own write already landed, read by the
+   * store-reading writer. Kept out of the request identity: a retry is the same request.
+   */
+  readonly deadline_card?: { readonly expected_goal: unknown; readonly own_write_landed: boolean };
+  /** ⭐ G: ONE approved answer to the goal's open question — `expected_basis` is the stored reading the card showed. Alone. */
+  readonly goal_reading?: ApprovedGoalReading;
+  /** ⭐ ONE approved card of Olumi's occurrence range for a risk root — `expected_node` is the node the card showed. Alone. */
+  readonly risk_occurrence?: ApprovedRiskOccurrence;
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
@@ -3514,6 +3556,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
+      ...(input.goal_reading !== undefined ? { goal_reading: input.goal_reading } : {}),
+      ...(input.risk_occurrence !== undefined ? { risk_occurrence: (({ own_write_landed: _own, ...card }) => card)(input.risk_occurrence) } : {}),
       ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
@@ -3528,8 +3572,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
     ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { linkStrengths: input.link_strengths.map(l => ({
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
-      // L4 (c): Olumi's band on a placeholder already at it is a REVIEW (`confirm_current`), never an adoption — the adoption
-      // authority is for a `set` only (`adopted_estimate_not_a_set`).
+      // L4 (c): a `confirm_current` is a REVIEW, never an adoption — the adoption authority is for a `set` only
+      // (`adopted_estimate_not_a_set`). D1 (DL 12 Oct, Batch D): Olumi's band on a placeholder now arrives as a `set` at the
+      // band's midpoint (a placeholder has no current band), so it is adopted here as Olumi's estimate, never its default.
       adopted: l.author === 'model_proposed' && l.intent === 'set',
       // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
       ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
@@ -3544,13 +3589,22 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(effect.link_selected === true ? { link_selected: true as const } : {}),
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
+      ceiling_stock: input.identity_confirm.ceiling_stock,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
-      reading_token: input.identity_confirm.reading_token,
+      reading_token: input.identity_confirm.reading_token, choice: input.identity_confirm.choice,
       ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),
     ...(input.goal_steady !== undefined ? { goalSteady: input.goal_steady } : {}),
+    ...(input.goal_reading !== undefined ? { goalReading: { goal_id: input.goal_reading.goal_id, expected_basis: input.goal_reading.expected_basis,
+      ...(input.goal_reading.answer_words !== undefined ? { answer_words: input.goal_reading.answer_words } : {}),
+      ...(input.goal_reading.expected_goal !== undefined ? { expected_goal: input.goal_reading.expected_goal } : {}) } } : {}),
+    ...(input.risk_occurrence !== undefined ? { riskOccurrence: { risk_id: input.risk_occurrence.risk_id,
+      event_risk: input.risk_occurrence.event_risk, expected_node: input.risk_occurrence.expected_node,
+      goal_id: input.risk_occurrence.goal_id, expected_goal: input.risk_occurrence.expected_goal,
+      own_write_landed: input.risk_occurrence.own_write_landed === true } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
-      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),
+      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,
+      ...(input.deadline_card !== undefined ? { expected_goal: input.deadline_card.expected_goal, own_write_landed: input.deadline_card.own_write_landed } : {}) } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) {
     rethrowRevisionConflict(r.graphConflict);
@@ -3679,7 +3733,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
@@ -3806,7 +3860,7 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
 
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
@@ -4181,6 +4235,7 @@ async function dispatchStructuralRename(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
@@ -4226,6 +4281,7 @@ async function dispatchStructuralRename(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -4295,6 +4351,7 @@ async function dispatchStructuralRename(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The rename is in the model iff the node carries the new label.
@@ -4372,7 +4429,7 @@ async function dispatchStructuralRename(
     },
     'V5 structural_rename committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4551,6 +4608,7 @@ async function dispatchOptionStatusEdit(
 
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   // The commit's own typed account of the version mint (`CommitResult.modelVersionReceipt`: null = no version minted).
@@ -4586,6 +4644,7 @@ async function dispatchOptionStatusEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     versionMinted = commitResult.modelVersionReceipt !== null;
@@ -4644,6 +4703,7 @@ async function dispatchOptionStatusEdit(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       requestedChangeVisibleIn: (snapshot) => optionStatusHolds(snapshot, result.optionId, result.status),
@@ -4702,7 +4762,7 @@ async function dispatchOptionStatusEdit(
     },
     'V5 option_status_edit committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4933,6 +4993,7 @@ async function dispatchStructuralAdd(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   // `null` until the commit resolves. See the no-write branch below.
   let thisAttemptWrote: boolean | null = null;
@@ -4976,6 +5037,7 @@ async function dispatchStructuralAdd(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -5043,6 +5105,7 @@ async function dispatchStructuralAdd(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The add is in the model iff the requested node id is.
@@ -5113,7 +5176,7 @@ async function dispatchStructuralAdd(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -5312,6 +5375,7 @@ async function dispatchStructuralAddEdge(
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
@@ -5349,6 +5413,7 @@ async function dispatchStructuralAddEdge(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
@@ -5413,6 +5478,7 @@ async function dispatchStructuralAddEdge(
       requestId,
       committedResponse,
       persistedGraphBytes,
+      persistedScenarioRevision,
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The connection is in the model iff an edge between the endpoints carries
@@ -5468,7 +5534,7 @@ async function dispatchStructuralAddEdge(
     draft_graph: buildAppliedGraphWireField(graphForReadiness),
   };
 
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -5664,6 +5730,7 @@ async function dispatchAddConstraintEdit(
   // ── the mutation path: ONE atomic commit, exactly as fve commits ─────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let persistedScenarioRevision: number | undefined;
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
@@ -5698,6 +5765,7 @@ async function dispatchAddConstraintEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    persistedScenarioRevision = commitResult.revision;
     committedResponse = commitResult.response;
   } catch (err) {
     // The store refused before writing: nothing was saved, so this is never "commit failed, may have been saved".
@@ -5760,7 +5828,7 @@ async function dispatchAddConstraintEdit(
       ? { draft_graph: buildAppliedGraphWireField(committedParse.data) }
       : {}),
   };
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes, false, persistedScenarioRevision);
   emitFreshnessTelemetry(freshness, {
     request_id: requestId,
     scenario_id: payload.scenario_id,

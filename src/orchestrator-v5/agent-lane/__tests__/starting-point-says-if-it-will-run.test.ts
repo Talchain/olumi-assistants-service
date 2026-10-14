@@ -39,8 +39,15 @@ const levels = (testPrice: number, aiLevel = 1) => [
   { option_label: 'Test £59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available' },
 ];
 type View = { checked: boolean; may_run?: boolean; needs_from_user: { message: string }[]; reason?: string };
-type G = { nodes: { id: string; kind: string }[]; edges: { from: string; to: string }[] };
-const copy = (): G => JSON.parse(JSON.stringify(served)) as G;
+type G = { nodes: { id: string; kind: string; observed_state?: { value: number; raw_value: number; source: string; extractionType: string } }[]; edges: { from: string; to: string }[] };
+const copy = (): G => {
+  const g = JSON.parse(JSON.stringify(served)) as G;
+  // Explicit AI held state for comparison/structure controls, independent of the proposal's option levels.
+  g.nodes.find(n => n.id === 'ai_feature_availability')!.observed_state = {
+    value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred',
+  };
+  return g;
+};
 /** The served graph without its held status quo: since #1963 that status quo is a comparator, so identical levels on
  *  the two other options only leave nothing to compare when it is absent. Order-independent with #1963. */
 const noStatusQuo = (): G => {
@@ -92,7 +99,7 @@ describe('propose_starting_point says whether one approval will make the analysi
   });
 
   it('CONTRAST: the same starting point with a different test price → it says the analysis can run after approval', async () => {
-    const r = await capsOver(served).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(54) });
+    const r = await capsOver(copy()).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(54) });
     const v = r.readiness_if_approved as View | undefined;
     expect(v?.may_run, JSON.stringify(v)).toBe(true);
     expect(String(r.note)).not.toMatch(/could still not run/i);

@@ -227,7 +227,8 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     const nodeId = text(c.node_id);
     const raw = finite(c.value);
     if (constraintId === undefined || nodeId === undefined || raw === undefined) return [];
-    if (c.operator !== '>=' && c.operator !== '<=') return [];
+    // Recovery Batch C (ruling 16; schemas 0.83.0): a strict `>` / `<` is recorded AS SENT, never dropped or coerced.
+    if (c.operator !== '>=' && c.operator !== '<=' && c.operator !== '>' && c.operator !== '<') return [];
     return [{
       constraint_id: constraintId,
       node_id: nodeId,

@@ -46,6 +46,26 @@ const APPLIED = { ok: true, mutated: true, applied: true, receipts: [{ version: 
 const REFUSED = { ok: false, mutated: false, refusal: 'superseded' };
 
 describe('the write-status line is composed from the tool results', () => {
+  // R2 T1 (friction audit row T1): typed "Yes, that is my deadline." met "Not saved: the change could not be made this time —
+  // ask me to try again", which was false: the change was waiting for its card, not failed.
+  it('R2 T1: approval_required says the change waits for its card (AIE AMENDED 6128697025: the button only), never "try again"', () => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, true);
+    expect(n.status).toBe('Not saved yet: press the approval button on the card.');
+    expect(n.status).not.toContain('type its words');
+    expect(n.status).not.toContain('could not be made this time');
+  });
+  // Independent check, non-blocking (recovery/bR2/check): typed words bind only when exactly ONE card waits.
+  it.each([['more than one card waits', false], ['the count is not known', undefined]] as const)(
+    'R2 T1: when %s, approval_required names the button only, never "or type its words"', (_name, one) => {
+      const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, one);
+      expect(n.status).toBe('Not saved yet: press the approval button on the card.');
+      expect(n.status).not.toContain('type its words');
+    });
+  it('R2 T1 CONTRAST: an unworded refusal keeps the generic line', () => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'some_new_code' }]);
+    expect(n.status).toBe('Not saved: the change could not be made this time — ask me to try again.');
+  });
+
   it('RED: nothing landed + the model claims a save → the claim is removed and the server says nothing was saved', () => {
     const text = 'Applied proposal `prop_7584aa939980c0257ad2ef0b58d9f2ad` successfully. The comparison can now run.';
     const n = narrateWriteOutcome(text, [{ name: 'authorise_change' }], [REFUSED]);

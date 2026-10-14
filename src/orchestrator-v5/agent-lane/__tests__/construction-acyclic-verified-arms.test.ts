@@ -131,7 +131,7 @@ describe('acyclic: arms a surviving mutant could not see (verifier rows)', () =>
     const r = await build(servedCandidate(links));
     const said = loopSaid(r.out);
     expect(loopWithheld(r.out)).toEqual([]);
-    expect(said.some((s) => /what that option sets|how the decision holds/.test(s))).toBe(false);
+    expect(said.some((s) => /what that option sets|how the question holds/.test(s))).toBe(false);
   });
 
   it('P-M14: a within-limit looped draft; the retry clears the loop by DELETING Olumi’s risk — not adopted, first draft kept (backstop)', async () => {

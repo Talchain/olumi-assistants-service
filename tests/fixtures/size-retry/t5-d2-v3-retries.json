@@ -1,0 +1,2386 @@
+{
+ "_source": {
+  "r2_first_draft": "olumi-work/recovery/gen/T5-baseline/raw/B/D2-launch-two-conditions-r2-call1.json (sha256 1d15e8ad0942bc656bbaef3ef795056d639f180f44521df08ae6fcd07cc72537), output_text parsed verbatim",
+  "retry_rep6": "olumi-work/recovery/gen/T5-size-retry/raw/S/D2-launch-two-conditions-r6-call2.json (sha256 a5923f0acef581a4b4574ba16fa0d649b2f4a99419d2ed1c5b1de50d1cd30dd2), output_text parsed verbatim; a REAL provider retry (gpt-5.6-terra) sent the v3 size-retry text over the replayed r1 first draft",
+  "retry_rep7": "olumi-work/recovery/gen/T5-size-retry/raw/S/D2-launch-two-conditions-r7-call2.json (sha256 17d9e5eebcbd9e88a7219138fd5aca182d3446b82664ba875319385f5c95e3ba), output_text parsed verbatim; a REAL provider retry (gpt-5.6-terra) sent the v3 size-retry text over the replayed r1 first draft",
+  "retry_rep8": "olumi-work/recovery/gen/T5-size-retry/raw/S/D2-launch-two-conditions-r8-call2.json (sha256 17f678eb9e5413fb3e0bc56f3ff6999ff1854bb01886418ac4a2a197a37459a1), output_text parsed verbatim; a REAL provider retry (gpt-5.6-terra) sent the v3 size-retry text over the replayed r1 first draft",
+  "retry_rep9": "olumi-work/recovery/gen/T5-size-retry/raw/S/D2-launch-two-conditions-r9-call2.json (sha256 b5171e44602252b46c77000aafbbfb3f9b2c5a9429707c94984de03141a46edf), output_text parsed verbatim; a REAL provider retry (gpt-5.6-terra) sent the v3 size-retry text over the replayed r1 first draft",
+  "retry_rep10": "olumi-work/recovery/gen/T5-size-retry/raw/S/D2-launch-two-conditions-r10-call2.json (sha256 86ceb0877bb6c4b336e3948bd2ced40c480b6bcaf390b7a9498c42d0dcb41638), output_text parsed verbatim; a REAL provider retry (gpt-5.6-terra) sent the v3 size-retry text over the replayed r2 first draft",
+  "note": "Served live outcome with ONE retry: rep 6 registered, rep 7 adopted at 31 links and refused, rep 8 refused (kept first), rep 9 registered, rep 10 (r2) registered. recovery/gen/T5-size-retry/NOTES.txt."
+ },
+ "r2_first_draft": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "feature launch",
+   "metric": "Feature launch",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "%",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "scope": null,
+   "quantity_frame": "level",
+   "basis": null
+  },
+  "constraints": [
+   {
+    "metric": "Conversion rate in first 3 months",
+    "operator": ">",
+    "value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "New customers in first 3 months",
+    "operator": ">=",
+    "value": 20,
+    "unit": "customers",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "Annual marketing spend",
+    "operator": "<=",
+    "value": 100000,
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   },
+   {
+    "metric": "Working time on launch marketing",
+    "operator": "<=",
+    "value": 25,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Continue as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   },
+   {
+    "label": "Agency campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Agency campaign involvement",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 100000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Small internal campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Internal campaign intensity",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 25000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Partner launch",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Partner launch involvement",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 40000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Feature delivery progress",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Annual marketing spend",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "GBP/year",
+    "provenance": "ai_proposed",
+    "plausible_max": 200000
+   },
+   {
+    "label": "Working time on launch marketing",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Agency campaign involvement",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Internal campaign intensity",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Partner launch involvement",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Conversion rate in first 3 months",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Qualified launch prospects in first 3 months",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 150,
+    "unit": "prospects",
+    "provenance": "ai_proposed",
+    "plausible_max": 2000
+   }
+  ],
+  "risks": [
+   {
+    "label": "Launch delay from marketing distraction",
+    "provenance": "ai_proposed",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "New customers in first 3 months",
+    "provenance": "ai_proposed",
+    "unit": "customers",
+    "plausible_max": 500
+   }
+  ],
+  "links": [
+   {
+    "from": "Feature delivery progress",
+    "to": "Feature launch",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": null,
+    "basis": "More completed delivery progress increases completion of the feature launch."
+   },
+   {
+    "from": "Annual marketing spend",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Working time on launch marketing",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Working time on launch marketing",
+    "to": "Launch delay from marketing distraction",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Launch delay from marketing distraction",
+    "to": "Feature launch",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign involvement",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign involvement",
+    "to": "Conversion rate in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign involvement",
+    "to": "Working time on launch marketing",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign intensity",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign intensity",
+    "to": "Conversion rate in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch involvement",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch involvement",
+    "to": "Conversion rate in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch involvement",
+    "to": "Working time on launch marketing",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Qualified launch prospects in first 3 months",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Conversion rate in first 3 months",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What exact calendar date is the feature launch due, six months from today?",
+   "How long would today’s delivery team take to complete the feature launch if launch-marketing work did not distract them?",
+   "When would any new people or external delivery support start, if you decide to add them?",
+   "What conversion lift, if any, do you expect from an agency, small internal campaign, and partner launch?",
+   "Are the provisional annual spend and working-time allocations for each option realistic, or should they be replaced with your planned levels?",
+   "How many qualified launch prospects do you currently expect during the first three months after launch?",
+   "Does launch completion require a campaign to be ready, or should marketing options be evaluated only against the post-launch conversion and customer targets?"
+  ],
+  "decision_question": null
+ },
+ "retry_rep6": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "feature launch",
+   "metric": "Feature launch",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "% complete",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "quantity_frame": "level",
+   "basis": null,
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Conversion rate",
+    "operator": ">",
+    "value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "New customers in first 3 months",
+    "operator": ">=",
+    "value": 20,
+    "unit": "customers",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "Annual marketing spend",
+    "operator": "<=",
+    "value": 100000,
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   },
+   {
+    "metric": "Working time on launch marketing",
+    "operator": "<=",
+    "value": 25,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Agency campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Agency campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 60000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Internal campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Internal campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 25000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Partner launch",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Partner launch effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 35000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Continue as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   }
+  ],
+  "factors": [
+   {
+    "label": "Agency campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Internal campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Partner launch effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Annual marketing spend",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "GBP/year",
+    "provenance": "ai_proposed",
+    "plausible_max": 200000
+   },
+   {
+    "label": "Working time on launch marketing",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Conversion rate",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   }
+  ],
+  "risks": [
+   {
+    "label": "Unknown conversion lift",
+    "provenance": "inferred",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "Qualified launch visitors",
+    "provenance": "ai_proposed",
+    "unit": "visitors over first 3 months",
+    "plausible_max": 10000
+   },
+   {
+    "label": "New customers in first 3 months",
+    "provenance": "explicit",
+    "unit": "customers",
+    "plausible_max": 1000
+   }
+  ],
+  "links": [
+   {
+    "from": "Agency campaign effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Annual marketing spend",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Unknown conversion lift",
+    "to": "Conversion rate",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Qualified launch visitors",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Conversion rate",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "New customers in first 3 months",
+    "to": "Feature launch",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What exact calendar date is the feature launch due?",
+   "How many months would today’s team take to deliver the feature launch without additional people or scope changes?",
+   "If new people may be added, when would they actually start work after recruitment, notice and onboarding?",
+   "What is the expected conversion lift, if any, for an agency, internal campaign and partner launch? This is currently unknown, so the proposed spend and effort levels are provisional modelling assumptions rather than measurements.",
+   "How many qualified launch visitors can each campaign approach generate during the first three months after launch?",
+   "Do the £100,000 annual marketing budget and the 25% working-time cap apply only to this launch, or to all marketing work during the year?"
+  ],
+  "decision_question": null
+ },
+ "retry_rep7": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "feature launch",
+   "metric": "Feature launch",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "% complete",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "quantity_frame": "level",
+   "basis": null,
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Conversion rate",
+    "operator": ">",
+    "value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "New customers in first 3 months",
+    "operator": ">=",
+    "value": 20,
+    "unit": "customers",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "Annual marketing spend",
+    "operator": "<=",
+    "value": 100000,
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   },
+   {
+    "metric": "Working time on launch marketing",
+    "operator": "<=",
+    "value": 25,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Agency campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Agency campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 60000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Internal campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Internal campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 25000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Partner launch",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Partner launch effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 35000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Continue as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   }
+  ],
+  "factors": [
+   {
+    "label": "Agency campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Internal campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Partner launch effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Annual marketing spend",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "GBP/year",
+    "provenance": "ai_proposed",
+    "plausible_max": 200000
+   },
+   {
+    "label": "Working time on launch marketing",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Conversion rate",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 5,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   }
+  ],
+  "risks": [
+   {
+    "label": "Unknown conversion lift",
+    "provenance": "inferred",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "Qualified launch visitors",
+    "provenance": "ai_proposed",
+    "unit": "visitors over first 3 months",
+    "plausible_max": 10000
+   },
+   {
+    "label": "New customers in first 3 months",
+    "provenance": "explicit",
+    "unit": "customers",
+    "plausible_max": 1000
+   },
+   {
+    "label": "Commercial launch readiness",
+    "provenance": "ai_proposed",
+    "unit": "%",
+    "plausible_max": 100
+   }
+  ],
+  "links": [
+   {
+    "from": "Agency campaign effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Annual marketing spend",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Working time on launch marketing",
+    "to": "Commercial launch readiness",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Unknown conversion lift",
+    "to": "Conversion rate",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Qualified launch visitors",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Conversion rate",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "New customers in first 3 months",
+    "to": "Commercial launch readiness",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Commercial launch readiness",
+    "to": "Feature launch",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What exact calendar date is the feature launch due?",
+   "How many months would today’s team take to deliver the feature launch without additional people or scope changes?",
+   "If new people may be added, when would they actually start work after recruitment, notice and onboarding?",
+   "What is the expected conversion lift, if any, for an agency, internal campaign and partner launch? This is currently unknown, so the proposed spend and effort levels are provisional modelling assumptions rather than measurements.",
+   "How many qualified launch visitors can each campaign approach generate during the first three months after launch?",
+   "Do the £100,000 annual marketing budget and the 25% working-time cap apply only to this launch, or to all marketing work during the year?"
+  ],
+  "decision_question": null
+ },
+ "retry_rep8": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "feature launch",
+   "metric": "Feature launch",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "% complete",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "quantity_frame": "level",
+   "basis": null,
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Conversion rate",
+    "operator": ">",
+    "value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "New customers in first 3 months",
+    "operator": ">=",
+    "value": 20,
+    "unit": "customers",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "Annual marketing spend",
+    "operator": "<=",
+    "value": 100000,
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   },
+   {
+    "metric": "Working time on launch marketing",
+    "operator": "<=",
+    "value": 25,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Agency campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Agency campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 60000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Internal campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 25000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Partner launch",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Partner launch effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 35000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Continue as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   }
+  ],
+  "factors": [
+   {
+    "label": "Agency campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Partner launch effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Annual marketing spend",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "GBP/year",
+    "provenance": "ai_proposed",
+    "plausible_max": 200000
+   },
+   {
+    "label": "Working time on launch marketing",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Conversion rate",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   }
+  ],
+  "risks": [
+   {
+    "label": "Unknown conversion lift",
+    "provenance": "inferred",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "Qualified launch visitors",
+    "provenance": "ai_proposed",
+    "unit": "visitors over first 3 months",
+    "plausible_max": 10000
+   },
+   {
+    "label": "New customers in first 3 months",
+    "provenance": "explicit",
+    "unit": "customers",
+    "plausible_max": 1000
+   },
+   {
+    "label": "Commercial launch readiness",
+    "provenance": "ai_proposed",
+    "unit": "%",
+    "plausible_max": 100
+   }
+  ],
+  "links": [
+   {
+    "from": "Agency campaign effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Annual marketing spend",
+    "to": "Qualified launch visitors",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Working time on launch marketing",
+    "to": "Commercial launch readiness",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Unknown conversion lift",
+    "to": "Conversion rate",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Qualified launch visitors",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Conversion rate",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "New customers in first 3 months",
+    "to": "Commercial launch readiness",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Commercial launch readiness",
+    "to": "Feature launch",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What exact calendar date is the feature launch due?",
+   "How many months would today’s team take to deliver the feature launch without additional people or scope changes?",
+   "If new people may be added, when would they actually start work after recruitment, notice and onboarding?",
+   "What is the expected conversion lift, if any, for an agency, internal campaign and partner launch? This is currently unknown, so the proposed spend and effort levels are provisional modelling assumptions rather than measurements.",
+   "How many qualified launch visitors can each campaign approach generate during the first three months after launch?",
+   "Do the £100,000 annual marketing budget and the 25% working-time cap apply only to this launch, or to all marketing work during the year?"
+  ],
+  "decision_question": null
+ },
+ "retry_rep9": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "feature launch",
+   "metric": "Feature launch",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "% complete",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "quantity_frame": "level",
+   "basis": null,
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Conversion rate",
+    "operator": ">",
+    "value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "New customers in first 3 months",
+    "operator": ">=",
+    "value": 20,
+    "unit": "customers",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "Annual marketing spend",
+    "operator": "<=",
+    "value": 100000,
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   },
+   {
+    "metric": "Working time on launch marketing",
+    "operator": "<=",
+    "value": 25,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Agency campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Agency campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 60000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Internal campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Internal campaign effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 25000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Partner launch",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Partner launch effort",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of proposed test scope",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 35000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Continue as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   }
+  ],
+  "factors": [
+   {
+    "label": "Agency campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Internal campaign effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Partner launch effort",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "% of proposed test scope",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Annual marketing spend",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "GBP/year",
+    "provenance": "ai_proposed",
+    "plausible_max": 200000
+   },
+   {
+    "label": "Working time on launch marketing",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Current-team delivery duration",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 6,
+    "unit": "months",
+    "provenance": "ai_proposed",
+    "plausible_max": 24
+   },
+   {
+    "label": "Conversion rate",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   }
+  ],
+  "risks": [
+   {
+    "label": "Unknown conversion lift",
+    "provenance": "inferred",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "New customers in first 3 months",
+    "provenance": "explicit",
+    "unit": "customers",
+    "plausible_max": 1000
+   },
+   {
+    "label": "Commercial launch readiness",
+    "provenance": "ai_proposed",
+    "unit": "%",
+    "plausible_max": 100
+   }
+  ],
+  "links": [
+   {
+    "from": "Working time on launch marketing",
+    "to": "Commercial launch readiness",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Current-team delivery duration",
+    "to": "Commercial launch readiness",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch effort",
+    "to": "Unknown conversion lift",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Unknown conversion lift",
+    "to": "Conversion rate",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Conversion rate",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "New customers in first 3 months",
+    "to": "Commercial launch readiness",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Commercial launch readiness",
+    "to": "Feature launch",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What exact calendar date is the feature launch due?",
+   "How many months would today’s team take to deliver the feature launch without additional people or scope changes?",
+   "If new people may be added, when would they actually start work after recruitment, notice and onboarding?",
+   "What is the expected conversion lift, if any, for an agency, internal campaign and partner launch? This is currently unknown, so the proposed spend and effort levels are provisional modelling assumptions rather than measurements.",
+   "Do the £100,000 annual marketing budget and the 25% working-time cap apply only to this launch, or to all marketing work during the year?"
+  ],
+  "decision_question": null
+ },
+ "retry_rep10": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "feature launch",
+   "metric": "Feature launch",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "%",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "quantity_frame": "level",
+   "basis": null,
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Conversion rate in first 3 months",
+    "operator": ">",
+    "value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "New customers in first 3 months",
+    "operator": ">=",
+    "value": 20,
+    "unit": "customers",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "target"
+   },
+   {
+    "metric": "Annual marketing spend",
+    "operator": "<=",
+    "value": 100000,
+    "unit": "GBP/year",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   },
+   {
+    "metric": "Working time on launch marketing",
+    "operator": "<=",
+    "value": 25,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Continue as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   },
+   {
+    "label": "Agency campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Agency campaign involvement",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 100000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Small internal campaign",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Internal campaign intensity",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 25000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Partner launch",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Partner launch involvement",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Annual marketing spend",
+      "value": 40000,
+      "value_kind": "absolute",
+      "unit": "GBP/year",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     },
+     {
+      "factor_label": "Working time on launch marketing",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Annual marketing spend",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "GBP/year",
+    "provenance": "ai_proposed",
+    "plausible_max": 200000
+   },
+   {
+    "label": "Working time on launch marketing",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Agency campaign involvement",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Internal campaign intensity",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Partner launch involvement",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Conversion rate in first 3 months",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Qualified launch prospects in first 3 months",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 150,
+    "unit": "prospects",
+    "provenance": "ai_proposed",
+    "plausible_max": 2000
+   }
+  ],
+  "risks": [],
+  "outcomes": [
+   {
+    "label": "New customers in first 3 months",
+    "provenance": "ai_proposed",
+    "unit": "customers",
+    "plausible_max": 500
+   }
+  ],
+  "links": [
+   {
+    "from": "Annual marketing spend",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Working time on launch marketing",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign involvement",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign involvement",
+    "to": "Conversion rate in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Agency campaign involvement",
+    "to": "Working time on launch marketing",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign intensity",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Internal campaign intensity",
+    "to": "Conversion rate in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch involvement",
+    "to": "Qualified launch prospects in first 3 months",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch involvement",
+    "to": "Conversion rate in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Partner launch involvement",
+    "to": "Working time on launch marketing",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Qualified launch prospects in first 3 months",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Conversion rate in first 3 months",
+    "to": "New customers in first 3 months",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What exact calendar date is the feature launch due, six months from today?",
+   "How long would today’s delivery team take to complete the feature launch if launch-marketing work did not distract them?",
+   "When would any new people or external delivery support start, if you decide to add them?",
+   "What conversion lift, if any, do you expect from an agency, small internal campaign, and partner launch?",
+   "Are the provisional annual spend and working-time allocations for each option realistic, or should they be replaced with your planned levels?",
+   "How many qualified launch prospects do you currently expect during the first three months after launch?",
+   "Does launch completion require a campaign to be ready, or should marketing options be evaluated only against the post-launch conversion and customer targets?"
+  ],
+  "decision_question": null
+ }
+}
