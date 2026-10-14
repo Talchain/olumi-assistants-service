@@ -1,4 +1,5 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
+import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { latestLinkBands } from '../../goal-target/input-claim-context.js';
@@ -4204,6 +4205,10 @@ export function createAgentCapabilities(
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
+        // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
+        // host contract tells the AI to end its reply with that step; no host line says it.
+        ...((step) => step === null ? {} : { next_step_blocker: step })(nextStepBlockerForAgent({
+          raw: g.raw, analysis_state: g.analysis_state, analysis_ready: g.analysis_ready, analysis_result: g.analysis_result })),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),

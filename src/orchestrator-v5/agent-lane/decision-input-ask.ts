@@ -27,6 +27,7 @@ import { withoutProposalIds } from './display-ids.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
+import type { PressBlocker } from './press-next-step.js';
 import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, unknown>;
@@ -432,6 +433,21 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
   if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? ${TARGET_ASK_TAIL}`;
   if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? ${TARGET_ASK_TAIL}`;
   return `What figure should "${label}" reach or stay under${within}? ${TARGET_ASK_TAIL}`;
+}
+
+/**
+ * ⭐ COACH (Paul's funding test; DL 00:21Z 14 Oct): the goal's missing target as a typed blocker, ranked FIRST by
+ * `oneNextStep`: with no target, no sizing ask can unlock a chance. The same branch and words as the one ask writer
+ * (`rawDecisionInputAsk`): never for an event model's chain, a chance goal (its date is its own step) or Olumi's own
+ * provisional objective (its objective ask comes first).
+ */
+export function goalTargetMissingBlockerOf(graph: unknown): PressBlocker | null {
+  if (draftedTeamPartOf(graph) !== null) return null;
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '' || goalKindOf(goal) === 'chance_of_event' || goal.provenance === 'ai_inferred') return null;
+  return goalHasStatedTarget(goal, graph) ? null
+    : { kind: 'missing_input', ask: targetAsk(graph, goal, label, withinMonths(goal)), cause: 'goal_target_missing' };
 }
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
