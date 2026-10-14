@@ -236,6 +236,21 @@ describe('PL 6135017311 item 3: a live compiler — r follows the SAVED figures 
     expect(extra(after).ratio_basis.factors[1]).toMatchObject({ label: 'Time on feature work', today: 80, withOption: 85 });
     expect(after.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength.mean).toBeLessThan(before.mean);
     expect(shareOptionEstimateWords(after, LEGACY)).toContain('‘Time on feature work’ at 80% of development time today');
+    // PL (14 Oct): one value everywhere — feature time's OWN saved figure follows (the card and the AI input read it), still Olumi's.
+    expect(node(after, FEATURE).observed_state).toMatchObject({ raw_value: 80, value: 0.8, source: 'cee_inference' });
+  });
+
+  it('⛔ PL (14 Oct): the user\'s own edit to feature time (70%) wins — kept, never overwritten, and the derivation ends', async () => {
+    const g = await saved();
+    Object.assign(node(g, FEATURE).observed_state, { raw_value: 70, value: 0.7, source: 'user_override' });
+    const after = commit(g);
+    expect(node(after, FEATURE).observed_state).toMatchObject({ raw_value: 70, source: 'user_override' });
+    expect(extra(after).ratio_source.derived).toEqual({});
+    // 70% today; the option's 15% legacy frees 10 points through the drafted −1-per-1 link: 80% with it.
+    expect(extra(after).capacity_ratio).toBeCloseTo(80 / 70, 12);
+    expect(extra(after).ratio_basis.factors[1]).toMatchObject({ label: 'Time on feature work', today: 70, withOption: 80 });
+    expect(extra(after).ratio_basis.factors[1].derived).toBeUndefined();
+    expect(shareOptionEstimateWords(after, LEGACY)).not.toContain('worked out on Olumi’s assumption');
   });
 
   it('⭐ the option\'s setting (15% → 10%) recompiles r; an edit to the 6 developers is read live and cancels in this option\'s ratio', async () => {
@@ -356,32 +371,37 @@ describe('DL (14 Oct): a stated deadline keeps its forecast whatever options the
   });
 });
 
-describe('AIE 6174736249 (retained origins): a figure today the brief did not state is said as Olumi\'s — the served draft e635a126', () => {
-  it('⭐ RED→GREEN: the 75% feature time is Olumi\'s split of the stated 25% (and follows an edit to it); the 6 developers are the brief\'s', async () => {
-    const S = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-e635a126-raw-20261014.json', import.meta.url), 'utf8')) as { raw_text: string };
-    const dated = withEventShareDate(await construct(JSON.parse(S.raw_text) as Rec), '2027-04-14', '2026-10-14') as Rec;
+describe('AIE 6174736249 (retained origins) + PL (14 Oct): a figure the brief did not state is Olumi\'s; a split only from a DECLARED relation', () => {
+  const served = (): Rec => JSON.parse(JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-e635a126-raw-20261014.json', import.meta.url), 'utf8')).raw_text) as Rec;
+  const withTeam = async (d: Rec): Promise<Rec> => {
+    const dated = withEventShareDate(await construct(d), '2027-04-14', '2026-10-14') as Rec;
     const r = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: 5, high_months: 7,
       deadline: '2027-04-14', reference_date: '2026-10-14' } as never, computeAnalysisAffectingGraphHash(dated as never)!);
     if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
-    const g = r.mutatedGraph as Rec;
+    return r.mutatedGraph as Rec;
+  };
+
+  it('⭐ the served draft (no declared split): the 75% feature time is "Olumi’s estimate", with NO dependency on the 25%', async () => {
+    const g = await withTeam(served());
     expect(shareOptionEstimateWords(g, 'event_option_2')).toBe('using Olumi’s reading that ‘Feature development capacity’ = '
-      + '‘Development team headcount’ × ‘Time on feature work’ (with ‘Time on feature work’ at 75% today, worked out on Olumi’s '
-      + 'assumption that the time is split only between it and ‘Time on legacy fixes’), Olumi’s proposed setting of ‘Time on legacy '
-      + 'fixes’ at 10% and ‘Time on feature work’ at 90%, and Olumi’s provisional assumption that delivery pace changes in '
-      + 'proportion to ‘Feature development capacity’ from now');
-    // Live: the stated 25% edited to 20% re-derives today's feature time (80%); the option's own 90% stands.
-    const legacyFix = g.nodes.find((n: Rec) => n.label === 'Time on legacy fixes');
-    Object.assign(legacyFix.observed_state, { raw_value: 20, value: 0.2 });
-    const after = projectGraphForPersistence(g) as Rec;
-    expect(node(after, 'event_capacity_2').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(90 / 80, 12);
+      + '‘Development team headcount’ × ‘Time on feature work’ (with ‘Time on feature work’ at 75% today, Olumi’s estimate), '
+      + 'Olumi’s proposed setting of ‘Time on legacy fixes’ at 10% and ‘Time on feature work’ at 90%, and Olumi’s provisional '
+      + 'assumption that delivery pace changes in proportion to ‘Feature development capacity’ from now');
+    // ⛔ CONTRAST (PL): 25% + 75% = 100% by coincidence creates no link — an edit to the 25% leaves the ratio at 90/75.
+    Object.assign(g.nodes.find((n: Rec) => n.label === 'Time on legacy fixes').observed_state, { raw_value: 20, value: 0.2 });
+    expect(node(projectGraphForPersistence(g) as Rec, 'event_capacity_2').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(90 / 75, 12);
   });
 
-  it('CONTRAST: a figure Olumi did not state and that splits nothing is labelled Olumi\'s estimate (never presented as the brief\'s)', async () => {
-    const d = JSON.parse(JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-e635a126-raw-20261014.json', import.meta.url), 'utf8')).raw_text) as Rec;
-    d.factors.find((f: Rec) => f.label === 'Time on legacy fixes').baseline_value = 30; // 30 + 75 ≠ 100: no two-way split
-    const g = await construct(d);
-    expect(node(g, 'event_capacity_2').observed_state.extra_share_by_date.ratio_basis.factors[1]).toMatchObject({
-      label: 'Time on feature work', today: 75, estimated: true });
-    expect(node(g, 'event_capacity_2').observed_state.extra_share_by_date.ratio_basis.factors[1].derived).toBeUndefined();
+  it('⭐ a DECLARED sum of the two shares (total 100%) is Olumi\'s split: named, and re-derived when the stated 25% is edited', async () => {
+    const d = served();
+    d.factors.push({ label: 'Development time', role: 'observable', baseline_known: true, baseline_evidence: null, baseline_value: 100,
+      unit: '%', provenance: 'inferred', plausible_max: 100 });
+    d.identities.push({ outcome: 'Development time', operation: 'sum', factors: ['Time on legacy fixes', 'Time on feature work'],
+      provenance: 'inferred', reading: null, evidence: null });
+    const g = await withTeam(d);
+    expect(shareOptionEstimateWords(g, 'event_option_2')).toContain('(with ‘Time on feature work’ at 75% today, worked out on Olumi’s '
+      + 'assumption that the time is split only between it and ‘Time on legacy fixes’)');
+    Object.assign(g.nodes.find((n: Rec) => n.label === 'Time on legacy fixes').observed_state, { raw_value: 20, value: 0.2 });
+    expect(node(projectGraphForPersistence(g) as Rec, 'event_capacity_2').observed_state.extra_share_by_date.capacity_ratio).toBeCloseTo(90 / 80, 12);
   });
 });
