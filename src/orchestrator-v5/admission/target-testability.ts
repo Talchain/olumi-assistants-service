@@ -34,6 +34,8 @@ import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { LAUNCH_WINDOW_UNBUILT, launchWindowOf, launchWindowQuestion, periodWords } from '../goal-target/goal-target-basis.js';
+import { readCohortForecast } from '../goal-target/cohort-forecast.js';
+import { COHORT_MIDDLE_HALF_QUESTION } from '../goal-target/cohort-forecast-write.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -474,8 +476,9 @@ export interface UntestableTargetParts {
   readonly askedIn: string | null;
   /**
    * ⭐ AIE MA1: (a) on a goal measured over a window from launch (`launchWindowOf`) — it has no level today, so (a) asks
-   * for the window (its forecast, or first whether a second target counts the same people), never "today's level". No
-   * writer yet takes that answer into the Run, so the step carries `LAUNCH_WINDOW_UNBUILT` beside it.
+   * for the window (its forecast, or first whether a second target counts the same people), never "today's level". With a
+   * second target the answers build the chance (science PR-4b, each option's cohort forecast), so this is set only for a
+   * lone launch-window target, whose step carries `LAUNCH_WINDOW_UNBUILT` beside it.
    */
   readonly launchWindow: boolean;
 }
@@ -546,10 +549,19 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const rows: unknown = launch === undefined ? undefined : graph.goal_constraints;
   const otherTarget = !Array.isArray(rows) ? undefined : rows.filter(isRec).flatMap((r) => r.role === 'goal_target'
     && typeof r.node_id === 'string' && r.node_id !== goal.id ? [labelOf(r.node_id)] : [])[0];
+  // ⭐ Science PR-4b: with a second target counted on the same people, the chance is built from each option's cohort forecast
+  // (`cohort-forecast-write.ts`). The step asks what is still missing, never what the user already gave: the same-cohort
+  // question until any forecast holds their answer, then the next option's forecast, then nothing.
+  const options = launch === undefined || otherTarget === undefined ? [] : nodes.filter((n) => n.kind === 'option');
+  const awaiting = options.filter((n) => readCohortForecast(n) === undefined);
+  const cohortQuestion = options.length === 0 ? undefined : awaiting.length === options.length ? launchWindowQuestion(name, launch!, otherTarget)
+    : awaiting.length > 0 ? `For ‘${labelOf(String(awaiting[0]!.id))}’: how many people would it reach ${periodWords(launch!)}, and `
+      + `${COHORT_MIDDLE_HALF_QUESTION[0]!.toLowerCase()}${COHORT_MIDDLE_HALF_QUESTION.slice(1)}` : null;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? launch !== undefined
-      ? [`it needs a forecast of ${name} ${periodWords(launch)}`, `a forecast of ${name} ${periodWords(launch)}`, launchWindowQuestion(name, launch, otherTarget)]
+      ? cohortQuestion === null ? ['', null, null]
+        : [`it needs a forecast of ${name} ${periodWords(launch)}`, `a forecast of ${name} ${periodWords(launch)}`, cohortQuestion ?? launchWindowQuestion(name, launch, otherTarget)]
       : [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
@@ -563,7 +575,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     name,
     target,
     tailTarget: tailWords === undefined ? null : change ?? `${tailWords} ${figure}`,
-    clauses: cases.map((c) => said(c)[0]),
+    // An empty clause is a case with nothing left to say (every option's cohort forecast held): it adds no clause.
+    clauses: cases.map((c) => said(c)[0]).filter((c) => c !== ''),
     needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
     untestableComparator: cases.includes('b') ? `'${comparatorTarget}'` : null,
     untestableComparatorUnlock: !cases.includes('b') ? null : (stated.frame ?? 'level') === 'level' ? 'target_write' : 'unbuilt',
@@ -572,7 +585,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
       // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
       : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
-    launchWindow: launch !== undefined && cases.includes('a'),
+    // Unbuilt only where no cohort route exists (one target): with two, the answers build the chance.
+    launchWindow: launch !== undefined && cases.includes('a') && options.length === 0,
   };
 }
 

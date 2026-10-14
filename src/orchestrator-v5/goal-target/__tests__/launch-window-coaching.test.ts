@@ -46,12 +46,14 @@ describe('a target measured over the window from launch: no "today\'s level"; th
     expect(targetTestabilityOf(F.graph)).toMatchObject({ kind: 'not_testable', failures: expect.arrayContaining([expect.objectContaining({ precondition: 'P1', case: 'a' })]) });
   });
 
-  it('RED: the step asks whether the two targets count the same people, with what stays unbuilt beside it; never today\'s level', () => {
+  it('RED: the step asks whether the two targets count the same people; never today\'s level', () => {
     const parts = partsOf(F.graph);
     expect(parts.question).toBe(COHORT);
     expect(parts.clauses[0]).toBe('it needs a forecast of Conversion rate over the first three months after launch');
     expect(parts.needs[0]).toBe('a forecast of Conversion rate over the first three months after launch');
-    expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: COHORT, also_unbuilt: LAUNCH_WINDOW_UNBUILT });
+    // ⛔ Science PR-4b, EXPECTATION CHANGED: with two targets the answers now BUILD the chance (each option's cohort forecast,
+    // `cohort-forecast-capture.test.ts`), so nothing is said to stay unbuilt beside the question. One target alone keeps it (below).
+    expect(targetBlockerOf(parts)).toEqual({ kind: 'missing_input', ask: COHORT });
     expect(JSON.stringify(parts)).not.toMatch(/today's level/);
   });
 

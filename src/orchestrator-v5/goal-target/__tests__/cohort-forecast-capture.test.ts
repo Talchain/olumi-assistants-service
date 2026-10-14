@@ -24,6 +24,7 @@ import { executeOptionInterventionBatch } from '../../system-events/option-inter
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { targetForecastWireOf } from '../cohort-forecast.js';
 import { applyCohortForecastEdit, COHORT_MIDDLE_HALF_QUESTION, percentRangesIn, peopleFiguresIn, storedTargetRowsOf } from '../cohort-forecast-write.js';
+import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../../admission/target-testability.js';
 
 type Rec = Record<string, any>;
 const F = JSON.parse(readFileSync('tests/fixtures/marketing-withheld-once/run-08.json', 'utf8')) as Rec;
@@ -162,6 +163,22 @@ describe("the user's cohort forecast: their words → one card → their press �
     expect(applyCohortForecastEdit(g, { ...base, cohort_forecast: { ...f, author: 'olumi' }, statements } as never)).toEqual({ kind: 'refused', reason: 'invalid_forecast' });
     const noQuestion = { ...statements, conversion: st('range', { low: 12, high: 18 }) };
     expect(applyCohortForecastEdit(g, { ...base, cohort_forecast: f, statements: noQuestion } as never)).toEqual({ kind: 'refused', reason: 'invalid_forecast' });
+  });
+
+  it('the next step asks only what is still missing: the cohort answer, then the next option\'s forecast, then nothing about the window', () => {
+    const forecast = { people_reached: 500, conversion_middle_half_pct: [12, 18],
+      same_cohort: { rate_target_node_id: 'conversion_rate', count_target_node_id: 'new_customers_in_first_3_months', stated_by: 'user' }, author: 'user' };
+    const stepOf = (g: Rec) => { const parts = untestableTargetParts(g, targetTestabilityOf(g)); return parts === null ? null : targetBlockerOf(parts); };
+    const g = plain(F.graph);
+    expect(stepOf(g)).toEqual({ kind: 'missing_input', ask: 'Do your ‘New customers in first 3 months’ come from the same people your ‘Conversion rate’ is measured on?' });
+    option(g).cohort_forecast = forecast;
+    expect(stepOf(g)).toEqual({ kind: 'missing_input', ask: 'For ‘Carry on as now’: how many people would it reach over the first three months after launch, '
+      + 'and which range is the conversion as likely to fall inside as outside (an even chance)?' });
+    for (const n of g.nodes as Rec[]) if (n.kind === 'option') n.cohort_forecast = forecast;
+    // Nothing about the window is asked again; the model's own link gap (case c) is still its own, separate question.
+    const parts = untestableTargetParts(g, targetTestabilityOf(g))!;
+    expect(parts.clauses.filter((c) => /forecast|same people/.test(c))).toEqual([]);
+    expect(stepOf(g)).toEqual({ kind: 'missing_input', ask: 'Roughly how much Conversion rate in % does a change in Launch messaging mismatch bring?' });
   });
 
   it('the readers: whole people and percentage ranges only', () => {
