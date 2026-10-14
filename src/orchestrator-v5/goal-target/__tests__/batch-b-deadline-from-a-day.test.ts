@@ -129,8 +129,12 @@ describe('the deadline door on Paul\'s marketing turns', () => {
   it('RED (Paul\'s second turn): "Last Friday was the 9th of October." places his first turn\'s deadline — the card "Is your deadline 9 April 2027 (6 months from 9 October 2026)?"', async () => {
     const d = door();
     const r = await d.caps.proposeGoalDeadline!(saying(TURN_B, [TURN_A]), { deadline_words: A_WORDS, rationale: TURN_B }) as Rec;
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “6 months to launch our new features from last Friday”. Basis supplied for this interpretation: ' + TURN_B }));
-    expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: TURN_B });
+    // ⛔ DLf5 (#2997 Codex check, DL rule): EXPECTATION CHANGED, old "Your words: …" / user_stated → new "… Olumi’s
+    // interpretation; check the date and reference before approving." / model_proposed. His first turn holds two durations
+    // ("6 months … from last Friday", "the initial 3-month sales cycle"), so which is the deadline is Olumi's reading for
+    // him to check. The date (9 April 2027), the reference and the saved horizon are unchanged.
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)? Your words: “6 months to launch our new features from last Friday”. Olumi’s interpretation; check the date and reference before approving. Basis supplied for this interpretation: ' + TURN_B }));
+    expect(d.proposals.get(String(r.proposal_id))!.provenance).toEqual({ authored_by: 'model_proposed', basis: TURN_B });
     expect(r.deadline.words).toBe(A_WORDS);
     expect(d.graph.nodes.find((n: Rec) => n.id === GOAL_ID).goal_horizon).toBeUndefined();
     const op = d.proposals.get(String(r.proposal_id))!.operations[0]!;
