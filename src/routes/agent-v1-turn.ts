@@ -5109,9 +5109,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The gate owns a duplicate concept only when its typed reason is actually present. A clean, non-ranking
     // narrator does not cause the gate to append a closing; availability alone must never silence the owed producer.
     const gateGoalChance = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
-    const gateOwnsGoalChance = gateGoalChance !== undefined && typeof wireBody.assistant_text === 'string'
+    // ⭐ SAY-SHOWN: the latest Run told the AI its `say` is shown (`say_shown`), so the host shows it: once, an AI copy counting
+    // as that once, and no other owner silences it. Only an unknown current state still wins (DL 14 Oct): the withheld reason
+    // may itself be stale.
+    const sayPromised = goalChanceSayPromisedThisTurn(result.tool_results);
+    const gateOwnsGoalChance = !sayPromised && gateGoalChance !== undefined && typeof wireBody.assistant_text === 'string'
       && wireBody.assistant_text.includes(gateGoalChance.why);
-    const identityAskOwnedByCard = ((wireBody.suggested_actions ?? []) as readonly OfferedAction[]).some((action) => {
+    const identityAskOwnedByCard = !sayPromised && ((wireBody.suggested_actions ?? []) as readonly OfferedAction[]).some((action) => {
       const id = typedApprovalOf({ chip: { id: action.id } });
       const proposal = id === undefined ? undefined : proposals.get(id);
       const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
@@ -5121,15 +5125,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // or explains the current Run keeps the line with the rest of the chance face (never-reask, one-reply-build rows).
     const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
       || (fastPath === 'explain' && narrationStatus !== 'stale');
-    // ⭐ SAY-SHOWN: the latest Run told the AI its `say` is shown (`say_shown`), so the host shows it: once, an AI copy counting
-    // as that once, and no other owner silences it. Only an unknown current state still wins (DL 14 Oct): the withheld reason
-    // may itself be stale.
-    const sayPromised = goalChanceSayPromisedThisTurn(result.tool_results);
     goalChanceOwed = stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn) ? null
-      : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), {
-        ...(sayPromised ? {} : { gateReasonOwed: gateOwnsGoalChance,
-          identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null }),
-        graph: readbackGraph });
+      : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
+        identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
       const goalLines = [goalChanceOwed];
       askEachOnce(goalLines, await repliesToCheckAsks(goalLines, historyReader, scenarioId, undefined));
