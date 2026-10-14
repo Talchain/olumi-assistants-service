@@ -1,0 +1,185 @@
+/**
+ * ⭐ S2 — ONE USER-STATED-QUANTITY CONTRACT (RCA-PAUL-TEST-1617Z Symptom 2; AIE #94 6173489813). Paul (scenario c1494f4d,
+ * 14 Oct) gave today's team time as "At least 7 months", then "8 months" when Olumi asked for the likely upper end. The
+ * one-quote low/high door could hold neither: a bound had no form, two messages had no shape, and a lone figure got
+ * Olumi's 6–10, below his own minimum. Nothing was saved and the Run stayed closed.
+ *
+ * A statement is ONE verified quote of the user's own typed words, with Olumi's reading of it (its form, figure, qualifier,
+ * negation and conditions) kept beside the words. The reading is shown on the card and adopted only by the user's press;
+ * approval never makes the reading human-authored. Statements about the same quantity under the same conditions combine
+ * only by their ends: a bound is never turned into a point, and Olumi adds no spread beside a user's bound. Pure.
+ */
+import { wholeStatementIn } from '../goal-target/input-claim-context.js';
+import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
+
+export type StatementForm = 'point' | 'range' | 'lower_bound' | 'upper_bound' | 'holds_now';
+export const STATEMENT_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now'];
+
+/** What a quantity a statement is about: set by the tool that verifies it, never by the Agent's words. */
+export interface StatementSubject {
+  readonly quantity: string;
+  readonly node_id?: string;
+  readonly option_id?: string;
+}
+
+export interface UserStatement {
+  readonly speaker: 'user';
+  /** The user's words, verbatim, as the Agent quoted them. */
+  readonly quote: string;
+  /** The complete line of the user's typed words that holds the quote. */
+  readonly source: string;
+  readonly subject: StatementSubject;
+  readonly form: StatementForm;
+  /** The figure(s) the quote states, in `unit`: a point holds both ends equal; a lower bound only `low`; an upper bound only `high`. */
+  readonly low?: number;
+  readonly high?: number;
+  readonly unit?: string;
+  readonly reference?: string;
+  readonly period?: string;
+  /** Words that qualify the figure ("likely", "about", "low confidence"), verbatim; `qualifier_in_quote` says whether the user typed them. */
+  readonly qualifier?: string;
+  readonly qualifier_in_quote?: boolean;
+  readonly negated?: true;
+  readonly conditions?: string;
+  /** The form and figure are Olumi's reading of the words until the user's press adopts it. */
+  readonly reading: 'olumi';
+}
+
+/** One statement as the Agent passes it. */
+export interface StatementArgs {
+  readonly quote?: unknown;
+  readonly form?: unknown;
+  readonly value?: unknown;
+  readonly low?: unknown;
+  readonly high?: unknown;
+  readonly qualifier?: unknown;
+  readonly negated?: unknown;
+  readonly conditions?: unknown;
+}
+
+export interface StatementTexts {
+  /** The user's words typed this turn. */
+  readonly now?: string | null;
+  /** The user's verified earlier messages. */
+  readonly conversation?: string | null;
+  /** Retained words whose origin is not verified (reseeded history): never a source. */
+  readonly unverified?: string | null;
+}
+
+export interface StatementRules {
+  readonly subject: StatementSubject;
+  readonly unit: string;
+  readonly forms: readonly StatementForm[];
+  readonly reference?: string;
+  readonly period?: string;
+  /** The figures the quote states, in `unit`, each as its two ends (a single figure has both equal). */
+  readonly figuresIn: (quote: string) => readonly { readonly low: number; readonly high: number }[];
+  /** Whether the Agent's figure is the stated one (the server keeps the stated one, never the Agent's rendering). */
+  readonly sameFigure?: (quote: string, given: number, stated: number) => boolean;
+}
+
+export type StatementsVerdict =
+  | { readonly kind: 'verified'; readonly statements: readonly UserStatement[] }
+  | { readonly kind: 'refused'; readonly refusal: 'statement_not_found' | 'origin_unknown' | 'statement_malformed' | 'figure_not_in_quote' | 'different_conditions'; readonly detail: string };
+
+const MAX_STATEMENTS = 6;
+const trimmed = (v: unknown, max: number): string | undefined =>
+  typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined;
+const figure = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+
+/** Every statement verified, or the first refusal. A quote must stand verbatim in the user's own typed words. */
+export function verifyStatements(raw: unknown, texts: StatementTexts, rules: StatementRules): StatementsVerdict {
+  const malformed = (detail: string): StatementsVerdict => ({ kind: 'refused', refusal: 'statement_malformed', detail });
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_STATEMENTS) {
+    return malformed(`Give one to ${MAX_STATEMENTS} statements, each the user's exact words with your reading of them. Nothing was prepared.`);
+  }
+  const same = rules.sameFigure ?? ((_q: string, a: number, b: number) => a === b);
+  const out: UserStatement[] = [];
+  for (const given of raw as StatementArgs[]) {
+    const quote = trimmed(given?.quote, 400);
+    const form = STATEMENT_FORMS.find((f) => f === given?.form && rules.forms.includes(f));
+    if (quote === undefined || form === undefined) {
+      return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
+    }
+    // T2A5's one quote check (`wholeStatementIn`): a WHOLE statement of a verified message, this one or an earlier one.
+    const whole = (t: string | null | undefined): boolean => typeof t === 'string' && wholeStatementIn(t, quote);
+    if (!whole(texts.now) && !whole(texts.conversation)) {
+      return whole(texts.unverified)
+        ? { kind: 'refused', refusal: 'origin_unknown', detail: `The words “${quote}” are retained, but their origin is not verified, so nothing was prepared. Ask the user to confirm that figure in their own words.` }
+        : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not a whole statement in the user's own messages, so nothing was prepared. Quote their complete statement, verbatim, from any of their messages.` };
+    }
+    const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
+    const qualifier = trimmed(given?.qualifier, 80);
+    const conditions = trimmed(given?.conditions, 160);
+    const negated = given?.negated === true;
+    const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
+      ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),
+      ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
+      ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}), reading: 'olumi' as const };
+    if (form === 'holds_now') { out.push(base); continue; }
+    const stated = rules.figuresIn(quote);
+    if (form === 'range') {
+      const low = figure(given?.low), high = figure(given?.high);
+      if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
+      const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
+      if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+      out.push({ ...base, low: read.low, high: read.high });
+      continue;
+    }
+    const value = figure(given?.value);
+    if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
+    const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
+    if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+    out.push({ ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) });
+  }
+  const conditionsOf = (s: UserStatement): string => plainQuoteWords(s.conditions ?? '').toLowerCase();
+  if (new Set(out.map(conditionsOf)).size > 1) {
+    return { kind: 'refused', refusal: 'different_conditions', detail: 'These statements are about different conditions, so they cannot be combined into one figure. '
+      + 'Propose only the statements about today\'s situation, or ask the user which conditions the model should use. Nothing was prepared.' };
+  }
+  return { kind: 'verified', statements: out };
+}
+
+export type CombinedEnds =
+  /** Both ends come from the user's statements; a qualified end ("likely") is not a hard limit. */
+  | { readonly kind: 'range'; readonly low: number; readonly high: number; readonly low_qualified: boolean; readonly high_qualified: boolean }
+  /** One figure and no bound: the only case where a tool may add its own labelled spread. */
+  | { readonly kind: 'point'; readonly value: number; readonly statement: UserStatement }
+  /** One end is the user's; the other is not stated. Never filled by a point or by Olumi's spread. */
+  | { readonly kind: 'one_end'; readonly have: 'lower' | 'upper'; readonly value: number; readonly statement: UserStatement }
+  | { readonly kind: 'conflict'; readonly detail: string };
+
+/** The ends the statements give. A negated statement ("not 7 months") gives no end. */
+export function combineStatementEnds(statements: readonly UserStatement[]): CombinedEnds {
+  const used = statements.filter((s) => s.negated !== true && s.form !== 'holds_now');
+  const lows = used.filter((s) => (s.form === 'lower_bound' || s.form === 'range') && s.low !== undefined);
+  const highs = used.filter((s) => (s.form === 'upper_bound' || s.form === 'range') && s.high !== undefined);
+  const points = used.filter((s) => s.form === 'point' && s.low !== undefined);
+  const distinct = (xs: readonly UserStatement[], end: 'low' | 'high'): number[] => [...new Set(xs.map((s) => s[end]!))];
+  const lowValues = distinct(lows, 'low'), highValues = distinct(highs, 'high'), pointValues = distinct(points, 'low');
+  if (lowValues.length > 1) return { kind: 'conflict', detail: `The user's words give two different lower ends (${lowValues.join(' and ')}). Ask which one holds.` };
+  if (highValues.length > 1) return { kind: 'conflict', detail: `The user's words give two different upper ends (${highValues.join(' and ')}). Ask which one holds.` };
+  const low = lowValues[0], high = highValues[0];
+  if (low !== undefined && high !== undefined && !(low < high)) {
+    return { kind: 'conflict', detail: `The user's lower end (${low}) is not below their upper end (${high}). Ask which one holds.` };
+  }
+  const outside = pointValues.find((p) => (low !== undefined && p < low) || (high !== undefined && p > high));
+  if (outside !== undefined) return { kind: 'conflict', detail: `The user's figure ${outside} falls outside their own bound. Ask which one holds.` };
+  const qualified = (xs: readonly UserStatement[]): boolean => xs.some((s) => s.qualifier !== undefined);
+  if (low !== undefined && high !== undefined) return { kind: 'range', low, high, low_qualified: qualified(lows), high_qualified: qualified(highs) };
+  if (low !== undefined) return { kind: 'one_end', have: 'lower', value: low, statement: lows[0]! };
+  if (high !== undefined) return { kind: 'one_end', have: 'upper', value: high, statement: highs[0]! };
+  if (pointValues.length > 1) return { kind: 'conflict', detail: `The user's words give different figures (${pointValues.join(' and ')}). Ask which one holds.` };
+  if (pointValues.length === 1) return { kind: 'point', value: pointValues[0]!, statement: points[0]! };
+  return { kind: 'conflict', detail: 'None of these statements gives a figure. Quote the words that state one.' };
+}
+
+/** How a statement's reading reads on a card: "at least 7 months", "a likely upper end of 8 months". */
+export function statementReadingWords(s: UserStatement, unit: string): string {
+  const q = s.qualifier !== undefined ? `${s.qualifier} ` : '';
+  if (s.form === 'lower_bound') return `a ${q}lower end of ${s.low} ${unit}`;
+  if (s.form === 'upper_bound') return `a ${q}upper end of ${s.high} ${unit}`;
+  if (s.form === 'range') return `a ${q}range of ${s.low}–${s.high} ${unit}`;
+  if (s.form === 'point') return `${q}${s.low} ${unit}`;
+  return 'a condition that holds now';
+}

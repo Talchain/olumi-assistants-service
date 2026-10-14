@@ -559,6 +559,76 @@ describe('E2 — a team-time card is stale only when what it read changed (the o
     expect(presses).toBe(CORPUS.length * 2);
     expect(new Set(CORPUS.map((s) => s.kind))).toEqual(new Set(['point', 'range', 'bound', 'mismatch', 'unquoted']));
   });
+
+  /**
+   * ⭐ S2 (RCA-PAUL-TEST-1617Z Symptom 2; AIE #94 6173489813): Paul's own two messages, c1494f4d 14 Oct 16:25–16:27Z. "At least
+   * 7 months", then "8 months" when Olumi asked for the likely upper end. Before: each was a single forecast with Olumi's range
+   * (6–10 for "8 months", below his minimum), both cards were withdrawn, nothing was saved and the Run stayed closed.
+   */
+  const PAUL_LOWER = 'At least 7 months', PAUL_UPPER = '8 months';
+  const paulTurn = (): Rec => ({ ...ctx(PAUL_UPPER), user_text: [PAUL_LOWER, PAUL_UPPER].join('\n') });
+  const PAUL_STATEMENTS = [{ quote: PAUL_LOWER, form: 'lower_bound', value: 7 }, { quote: PAUL_UPPER, form: 'upper_bound', value: 8, qualifier: 'likely' }];
+  it('S2 RED→GREEN: Paul\'s "At least 7 months" + "8 months" (likely upper end) → ONE card quoting both → his press → the Run admits; 7 stays his floor, 8 is never a point or a cap', async () => {
+    const w = world();
+    const before = JSON.stringify(w.graph());
+    const card = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: PAUL_STATEMENTS }) as Rec;
+    expect(card.ok).toBe(true);
+    expect(card.public_label).toBe(`From your messages: ‘${PAUL_LOWER}’ and ‘${PAUL_UPPER}’ Do you want to use Olumi’s provisional model for today's team to finish `
+      + 'next feature launch, based on your lower end of 7 months and your likely upper end of 8 months? A likely end is not a hard limit, so Olumi assumes a '
+      + '7–8.25-month range from your words. It informs this approximate calculation; modelled outcomes can fall outside those time bounds.');
+    // Never a point of 8, never Olumi's 6–10: his floor is the range's low end, and his likely upper end is not its cap.
+    expect(card.team_time).toMatchObject({ low_months: 7, high_months: 8.25, range_origin: 'olumi_estimate', range_rule: 'likely_end' });
+    expect(card.team_time).not.toHaveProperty('forecast_months');
+    expect((card.team_time as Rec).statements.map((x: Rec) => [x.quote, x.form, x.low, x.high, x.qualifier, x.qualifier_in_quote, x.speaker, x.reading]))
+      .toEqual([[PAUL_LOWER, 'lower_bound', 7, undefined, undefined, undefined, 'user', 'olumi'], [PAUL_UPPER, 'upper_bound', undefined, 8, 'likely', false, 'user', 'olumi']]);
+    expect(resolveRunAdmission(w.graph()).willProceed, 'nothing opens the Run before the press').toBe(false);
+    expect(await noPress(w, card.proposal_id)).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+    expect(JSON.stringify(w.graph())).toBe(before);
+    expect(await approve(w, card.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const g = w.graph();
+    const time = draftedTeamPartOf(g)!.team.observed_state.stated_time;
+    expect(time).toMatchObject({ quantity: 'months_to_finish', low: 7, high: 8.25, range_origin: 'olumi_estimate', range_rule: 'likely_end',
+      selection: { by: 'user_press', interpretation: 'olumi', source: `${PAUL_LOWER}\n${PAUL_UPPER}`, quote: `${PAUL_LOWER}\n${PAUL_UPPER}` } });
+    expect(time.statements.map((x: Rec) => [x.quote, x.form, x.subject])).toEqual([[PAUL_LOWER, 'lower_bound', { quantity: 'months_to_finish', node_id: draftedTeamPartOf(g)!.team.id }],
+      [PAUL_UPPER, 'upper_bound', { quantity: 'months_to_finish', node_id: draftedTeamPartOf(g)!.team.id }]]);
+    // Approval never makes Olumi's assumed range the user's.
+    expect(time).not.toHaveProperty('forecast_origin');
+    expect(resolveRunAdmission(g).willProceed).toBe(true);
+    expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(true);
+  });
+  it('S2: a lone bound prepares nothing and asks ONLY for the other end; two hard ends are his own range; disagreeing ends ask which holds', async () => {
+    const w = world(), before = JSON.stringify(w.graph());
+    const lone = await w.caps.proposeTeamTime!({ ...ctx(PAUL_LOWER) } as never, { statements: [PAUL_STATEMENTS[0]] }) as Rec;
+    expect(lone).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_needs_other_end' });
+    expect(lone.detail).toContain('the latest time today\'s team could take');
+    expect(lone.detail).toContain(`without asking them to repeat the 7 months`);
+    // Two hard ends, from two messages: his range as given, no assumed end, no Olumi range.
+    const hard = await w.caps.proposeTeamTime!({ ...ctx('No more than 9 months.'), user_text: [PAUL_LOWER, 'No more than 9 months.'].join('\n') } as never,
+      { statements: [PAUL_STATEMENTS[0], { quote: 'No more than 9 months.', form: 'upper_bound', value: 9 }] }) as Rec;
+    expect(hard.ok).toBe(true);
+    expect(hard.team_time).toMatchObject({ low_months: 7, high_months: 9 });
+    expect(hard.team_time).not.toHaveProperty('range_origin');
+    expect(hard.public_label).toBe(`From your messages: ‘${PAUL_LOWER}’ and ‘No more than 9 months.’ Do you want to use 7–9 months for today's team to finish next feature launch, `
+      + 'from your lower end of 7 months and your upper end of 9 months? The calculation uses bell-curve approximations of progress and can include outcomes outside those time bounds.');
+    const clash = await w.caps.proposeTeamTime!({ ...ctx('8 months'), user_text: ['At least 9 months', '8 months'].join('\n') } as never,
+      { statements: [{ quote: 'At least 9 months', form: 'lower_bound', value: 9 }, { quote: '8 months', form: 'upper_bound', value: 8 }] }) as Rec;
+    expect(clash).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_statements_conflict' });
+    expect(JSON.stringify(w.graph())).toBe(before);
+    expect(w.rows).toHaveLength(0);
+  });
+  it('S2 provenance: a quote must be a WHOLE statement of a verified message (T2A5); retained unverified words are unknown origin; the figure must be in the quote', async () => {
+    const w = world(), before = JSON.stringify(w.graph());
+    // "7 months" drops his "At least": not his whole statement, so it can never become a point.
+    const part = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: [{ quote: '7 months', form: 'point', value: 7 }, PAUL_STATEMENTS[1]] }) as Rec;
+    expect(part).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_not_stated' });
+    const unverified = await w.caps.proposeTeamTime!({ ...ctx(PAUL_UPPER), user_text: PAUL_UPPER, unverified_user_text: PAUL_LOWER } as never, { statements: PAUL_STATEMENTS }) as Rec;
+    expect(unverified).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    const notInQuote = await w.caps.proposeTeamTime!(paulTurn() as never, { statements: [PAUL_STATEMENTS[0], { ...PAUL_STATEMENTS[1], value: 9 }] }) as Rec;
+    expect(notInQuote).toMatchObject({ ok: false, mutated: false, refusal: 'team_time_not_stated' });
+    expect(JSON.stringify(w.graph())).toBe(before);
+    // Contrast: the same words, correctly quoted, reach the card.
+    expect(await w.caps.proposeTeamTime!(paulTurn() as never, { statements: PAUL_STATEMENTS })).toMatchObject({ ok: true });
+  });
 });
 
 describe('E2 — a range line never calls Olumi\'s range "yours" (AIE 6122738619 words)', () => {

@@ -13,7 +13,7 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
   SET_RISK_OCCURRENCE_OP, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
-import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
@@ -5864,9 +5864,15 @@ export function createAgentCapabilities(
     /** Propose the current-team duration from the Agent's reading of the user's words; a single time carries Olumi's assumed range. */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const typed = readTeamTime(ctx.user_turn_text);
+      // S2: the user's statements, from any of their messages, through the one shared contract (`teamTimeFromStatements`).
+      const fromStatements = Array.isArray(args?.statements)
+        ? teamTimeFromStatements({ now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text }, args.statements) : undefined;
+      if (fromStatements?.kind === 'refused') {
+        return { ok: false, mutated: false, refusal: fromStatements.refusal, detail: fromStatements.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : fromStatements.detail };
+      }
+      const typed = fromStatements !== undefined ? null : readTeamTime(ctx.user_turn_text);
       // A single typed time carries Olumi's assumed range (`withAssumedTeamRange`), so its approval opens the Run.
-      const typedNow = typed !== null && teamTimeArgumentsMatch(ctx.user_turn_text, args, typed)
+      const typedNow = typed !== null && teamTimeArgumentsMatch(ctx.user_turn_text, { low_months: Number(args?.low_months), high_months: Number(args?.high_months) }, typed)
         ? withAssumedTeamRange(typed, String(ctx.user_turn_text).trim(), String(ctx.user_turn_text)) : null;
       /**
        * ⭐ B2-c CONFIRMATION (DL re-scope, 12 Oct; PL #94 6131809231; AIE #94 6132054663), AI-first Lane 1 (DL 12 Oct, PL
@@ -5875,7 +5881,8 @@ export function createAgentCapabilities(
        * verbatim in their typed words (`quotedTeamTime`, never whose it is), and only its press records the figure as their
        * selected forecast (`hasCardOnlyOperations`).
        */
-      const quoted = typedNow === null ? quotedTeamTime({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never) : undefined;
+      const quoted = fromStatements !== undefined ? fromStatements
+        : typedNow === null ? quotedTeamTime({ now: ctx.user_turn_text, conversation: ctx.user_text }, args as never) : undefined;
       if (quoted?.kind === 'refused') return { ok: false, mutated: false, refusal: 'team_time_not_stated', detail: quoted.detail };
       const stated = typedNow ?? (quoted as Extract<NonNullable<typeof quoted>, { kind: 'found' }>).time;
       const confirmation = quoted?.kind === 'found' ? quoted.confirmation : undefined;
@@ -5884,9 +5891,11 @@ export function createAgentCapabilities(
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
         detail: 'First type and confirm the deadline, for example "7 April 2027".' };
-      const read = teamTimeReadDigest(g.raw);
+      const read = teamTimeReadDigest(g.raw), today = todayInLondon((opts.now ?? (() => new Date()))());
       const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()), ...(read !== null ? { read_digest: read } : {}),
+        // S2: each statement is about THIS team part's time from today.
+        ...(stated.statements !== undefined ? { statements: stated.statements.map((s) => ({ ...s, subject: { ...s.subject, node_id: String(part.team.id) }, reference: today })) } : {}),
+        reference_date: today, ...(read !== null ? { read_digest: read } : {}),
         ...(confirmation !== undefined ? { confirmation } : {}) };
       if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
         detail: 'That deadline has passed. Type a future deadline and confirm it.' };
