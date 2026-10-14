@@ -456,7 +456,10 @@ export async function runAgentTurn(
   const selectionItem = input.selectionNote !== undefined && input.selectionNote !== ''
     ? { role: 'developer', content: [{ type: 'input_text', text: input.selectionNote }] }
     : undefined;
-  const todayItem = { role: 'developer', content: [{ type: 'input_text', text: todayLine(new Date((input.now ?? Date.now)())) }] };
+  // The day comes from the turn's own start reading (`startedAt`), so the clock is read no more often than before.
+  const now = input.now ?? (() => Date.now());
+  const startedAt = now();
+  const todayItem = { role: 'developer', content: [{ type: 'input_text', text: todayLine(new Date(startedAt)) }] };
   const items: unknown[] = [
     ...input.history,
     todayItem,
@@ -469,8 +472,6 @@ export async function runAgentTurn(
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
-  const now = input.now ?? (() => Date.now());
-  const startedAt = now();
   let providerMs = 0;
   let toolMs = 0;
   let toolProviderMs = 0;
