@@ -51,7 +51,7 @@ function upperTail(z: number): number {
     + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
   return z >= 0 ? erfc / 2 : 1 - erfc / 2;
 }
-const LEGACY = 'event_option_2', CARRY_ON = 'event_option_1', HIRE = 'event_option_3', LEGACY_SWITCH = 'event_capacity_2';
+const LEGACY = 'event_option_2', CARRY_ON = 'event_option_1', LEGACY_SWITCH = 'event_capacity_2';
 
 describe('L2: an event option with no Olumi pace acts through the brief\'s own capacity chain', () => {
   it('PRECONDITION: the persisted answer is byte-exact; the legacy option has no pace and a stated product identity reaches the goal', () => {

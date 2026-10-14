@@ -387,9 +387,9 @@ const sameLabel = (a: unknown, b: unknown): boolean => typeof a === 'string' && 
  * linear link into an identity factor (e.g. legacy time → feature time, −1 per 1). Anything it cannot read gives no ratio
  * (fail closed): no such identity, a missing or non-positive baseline, a non-absolute setting, or no change.
  */
-export function eventCapacityRatios(candidate: CandidateModel): ReadonlyMap<number, EventCapacityRatio> {
+export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, EventCapacityRatio> {
   const out = new Map<number, EventCapacityRatio>();
-  const c = candidate as unknown as Rec;
+  const c: Rec = candidate !== null && typeof candidate === 'object' ? candidate as Rec : {};
   const factors: Rec[] = Array.isArray(c.factors) ? c.factors : [];
   const links: Rec[] = Array.isArray(c.links) ? c.links : [];
   const baseline = (label: string): number | undefined => {
@@ -554,10 +554,11 @@ export function withRatioCarrierSizes(graph: Rec): Rec {
       continue;
     }
     const mean = (r - 1) * m, std = Math.sqrt(r * r - 1) * sd;
+    // The team part's unit is the goal's (the share attestation requires it), so the goal record is not read again here.
     edge.strength = { mean, std };
     delete edge.defaulted;
     c.ratio_sizing = { team_mean: m, team_sd: sd, rule: 'marginal_exact' };
-    edge.provenance = { ...(edge.provenance ?? {}), natural_effect: { amount: mean * 100, amount_unit: graph.nodes.find((n: Rec) => n.id === carrier.goal_id)?.goal_threshold_unit,
+    edge.provenance = { ...(edge.provenance ?? {}), natural_effect: { amount: mean * 100, amount_unit: team.unit,
       per_source_change: 1, per_source_change_unit: 'switch', strength_mean: mean, strength_mean_frame: 'edge_strength' } };
   }
   return graph;
