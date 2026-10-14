@@ -23,6 +23,9 @@
  * `'retained_excluded'`, so this guard must ACT on exactly the same predicate
  * the surface may SPEAK on. A guard that excluded on "not 'included'" would
  * silently drop every one of those 182,015 nodes from their owner's analysis.
+ * ⭐ T4i P1 adds ONE more positive mark, never a negation: a risk Olumi stamped `proposed_by: 'olumi'` that is
+ * undecided and holds no level ({@link isWithheldFromRun}). It is never a refusal (Olumi's suggestion never disables
+ * the Run), and readiness hands the Agent its label as a fact, so the AI says it was left out.
  *
  * ⚠ EDGES MUST GO WITH THE NODE, AND THIS IS NOT TIDINESS — IT IS MEASURED.
  * PLoT's `/v2/run` preflight (`src/validation/preflight-v2.ts`
@@ -61,6 +64,7 @@
  * user-facing sentence.
  */
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
+import { isOptionalOlumiRisk } from '../../../graph/optional-olumi-risk.js';
 
 /** The one literal that excludes. Not exported as a predicate — see the file docblock. */
 const RETAINED_EXCLUDED = 'retained_excluded';
@@ -133,6 +137,16 @@ export function isRetainedExcluded(node: unknown): boolean {
 }
 
 /**
+ * ⭐ T4i P1 (DL 14 Oct): withheld from the Run — a `'retained_excluded'` node, or an OPTIONAL OLUMI RISK
+ * (`graph/optional-olumi-risk.ts`: positively stamped `proposed_by: 'olumi'`, undecided, no level), the option precedent
+ * one kind over (an unadopted Olumi option leaves the Run the same way, `olumi-option-filter.ts`). Never an absence or a
+ * negation: both need a positive mark. Readiness reads the same predicate (`analysis-ready-helper.ts`).
+ */
+export function isWithheldFromRun(node: unknown): boolean {
+  return isRetainedExcluded(node) || isOptionalOlumiRisk(node);
+}
+
+/**
  * Return a deep CLONE of `graph` with every `'retained_excluded'` node — and
  * every edge incident to one — withheld from the calculation. The input graph
  * is never mutated, so `scenarios.graph`, the parsed snapshot and
@@ -170,7 +184,7 @@ export function guardAnalysisParticipation<T = unknown>(
 
     // Cheap pre-pass on the INPUT: if nothing is excluded there is nothing to
     // do, and the overwhelmingly common graph pays only one scan and no clone.
-    const anyExcluded = nodes.some((n) => isRetainedExcluded(n));
+    const anyExcluded = nodes.some((n) => isWithheldFromRun(n));
     if (!anyExcluded) {
       return { graph, excludedNodeIds: [], prunedEdgeCount: 0, refusals: [] };
     }
@@ -183,12 +197,15 @@ export function guardAnalysisParticipation<T = unknown>(
     const dropIds = new Set<string>();
 
     for (const node of nodes) {
-      if (!isRetainedExcluded(node)) continue;
+      if (!isWithheldFromRun(node)) continue;
       const id = readNodeId(node);
       // A retained-excluded node with no usable id cannot be matched to an
       // edge endpoint, so it cannot be dropped safely. Keep it (fail towards
       // including, never towards silently shrinking the model).
       if (id === null) continue;
+      // T4i P1: an optional Olumi risk the Run NEEDS (the goal, a compared option, a lever's target) is kept, never a
+      // refusal: Olumi's own suggestion never disables the Run. Kept, it is an ordinary root (T4: withhold, and ask).
+      if (!isRetainedExcluded(node) && (id === goalNodeId || submittedOptionIds.has(id) || interventionTargets.has(id))) continue;
 
       if (goalNodeId !== null && id === goalNodeId) {
         refusals.push({ node_id: id, reason: 'goal_node' });

@@ -40,6 +40,12 @@ export interface ReadinessView {
   /** Non-factor roots the admitted analysis treats as zero, by label. */
   readonly treated_as_zero?: readonly string[];
   /**
+   * ⭐ T4i P1 (DL 14 Oct): risks OLUMI suggested that the Run leaves out until the user adds them, by label
+   * (`excluded_optional_risks`, `graph/optional-olumi-risk.ts`). A fact for the AI to say, with the step to add one
+   * (adding it makes it part of the model, and then it needs its level). Never a gap the user owes.
+   */
+  readonly olumi_suggestions_left_out_until_added?: readonly string[];
+  /**
    * Option levels no one has set (`MISSING_OPTION_VALUE`, not waived by leaving the option out), by label — whether
    * the verdict demands them or only offers help: either way the figure is the user's to give. A run can still be
    * admitted without them (AI Conversation #70 5849012990 U3), so they are named on their own.
@@ -83,6 +89,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
   const offers: ReadinessItem[] = [];
   const levelsNotSet: { option: string; factor: string }[] = [];
   const treatedAsZero = (verdict.unvalued_roots ?? []).map((root) => root.label);
+  const leftOutSuggestions = (verdict.excluded_optional_risks ?? []).map((risk) => risk.label);
   for (const issue of verdict.readiness_issues) {
     const item = itemOf(issue);
     if (item === undefined) continue;
@@ -121,6 +128,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     will_run_without: excluded,
     levels_not_set: levelsNotSet,
     ...(treatedAsZero.length > 0 ? { treated_as_zero: treatedAsZero } : {}),
+    ...(leftOutSuggestions.length > 0 ? { olumi_suggestions_left_out_until_added: leftOutSuggestions } : {}),
     ...(reason !== undefined ? { reason } : {}),
     ...(target !== null ? { target_not_testable: target } : {}),
   };

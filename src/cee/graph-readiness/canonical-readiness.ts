@@ -225,6 +225,8 @@ export interface RouteAdmissionVerdict {
   readonly readiness_issues: RouteReadinessBlocker[];
   /** Non-factor roots disclosed separately from refusal and repair issues. */
   readonly unvalued_roots?: readonly { node_id: string; label: string; kind: string }[];
+  /** T4i P1: Olumi's optional risks this Run leaves out until the user adds them (never an issue: nothing is owed). */
+  readonly excluded_optional_risks?: readonly { node_id: string; label: string }[];
   readonly issues: string[];
   readonly options_ready: number;
   readonly options_total: number;
@@ -436,6 +438,9 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
     readiness_issues: readinessIssues,
     ...(assessment.analysisReady?.unvalued_roots !== undefined
       ? { unvalued_roots: assessment.analysisReady.unvalued_roots }
+      : {}),
+    ...(assessment.analysisReady?.excluded_optional_risks !== undefined
+      ? { excluded_optional_risks: assessment.analysisReady.excluded_optional_risks }
       : {}),
     issues: readinessIssues.map((issue) => issue.message),
     options_ready: optionsReady,

@@ -311,6 +311,8 @@ export const AnalysisReadyPayload = z.object({
    * Optional so every pre-`may_run` dispatch path still validates.
    */
   may_run: z.boolean().optional(),
+  /** T4i P1: Olumi's stamped, undecided risks with no level, left out of this Run until the user adds them. */
+  excluded_optional_risks: z.array(z.object({ node_id: z.string(), label: z.string() })).optional(),
   /** Non-factor roots the engine treats as zero until a figure is supplied. */
   unvalued_roots: z.array(z.object({
     node_id: z.string(),

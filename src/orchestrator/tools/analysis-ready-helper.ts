@@ -41,6 +41,7 @@ import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analys
 import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
+import { isOptionalOlumiRisk } from "../../graph/optional-olumi-risk.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
 import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
 import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
@@ -195,6 +196,8 @@ export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_rea
     kind: string;
     treated_as: 'zero';
   }>;
+  /** T4i P1: Olumi's stamped, undecided, unvalued risks this Run leaves out (`graph/optional-olumi-risk.ts`). */
+  readonly excluded_optional_risks?: Array<{ node_id: string; label: string }>;
   /** Exhaustive structural + semantic issues from the canonical assessment. */
   readonly readiness_issues?: CanonicalReadinessIssue[];
   /** Present only for two-or-more blocking issues. */
@@ -1252,7 +1255,9 @@ function optionsTheRunSubmits(graph: GraphV3T, rawGraph: unknown, payload: Analy
     unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options;
 }
 
-function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
+/** What the guard drops from the Run's sent graph: the retained-excluded nodes and the optional Olumi risks it does not need. */
+function withheldFromRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string):
+  { readonly excluded: readonly string[]; readonly optional: ReadonlyArray<{ node_id: string; label: string }> } {
   const options = optionsTheRunSubmits(graph, rawGraph, payload) as ReadonlyArray<{ option_id?: unknown; interventions?: unknown }>;
   const refusing = new Set<string>([
     goalId,
@@ -1260,7 +1265,26 @@ function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReady
     ...options.flatMap((option) => (isPlainObject(option.interventions) ? Object.keys(option.interventions) : [])),
   ]);
   const excluded = graph.nodes.filter(isRetainedExcluded).map((node) => node.id);
-  return excluded.some((id) => refusing.has(id)) ? new Set() : new Set(excluded);
+  // The guard refuses the Run instead: it withholds nothing.
+  if (excluded.some((id) => refusing.has(id))) return { excluded: [], optional: [] };
+  return { excluded, optional: optionalOlumiRisksLeftOut(rawGraph, refusing) };
+}
+
+function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
+  const held = withheldFromRun(graph, rawGraph, payload, goalId);
+  return new Set([...held.excluded, ...held.optional.map((risk) => risk.node_id)]);
+}
+
+/**
+ * ⭐ T4i P1: the optional Olumi risks this Run leaves out, as the guard drops them (`isWithheldFromRun`): every
+ * `isOptionalOlumiRisk` node the Run does not NEED (never the goal, a compared option or a lever's target: those are kept
+ * and owe a level, T4). Read on the stored node (the stamp and the V1 level live there). The labels go to the Agent as a
+ * fact (`excluded_optional_risks`), so the AI says what was left out and that it can be added.
+ */
+function optionalOlumiRisksLeftOut(rawGraph: unknown, needed: ReadonlySet<string>): Array<{ node_id: string; label: string }> {
+  const rawNodes = isPlainObject(rawGraph) && Array.isArray(rawGraph.nodes) ? rawGraph.nodes : [];
+  return rawNodes.filter(isPlainObject).filter((node) => isOptionalOlumiRisk(node) && !needed.has(node.id as string))
+    .map((node) => ({ node_id: node.id as string, label: readNonEmptyString(node.label) ?? (node.id as string) }));
 }
 
 function goalRootsWithoutStatusQuoLevel(
@@ -1629,6 +1653,8 @@ export function assessCanonicalAnalysisReadiness(
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
+    // T4i P1: the optional Olumi risks this Run leaves out, for the Agent to say (never an issue: nothing is owed).
+    const optionalLeftOut = semantic ? withheldFromRun(parsed.data, graph, semantic, semantic.goal_node_id).optional : [];
     levelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,
@@ -1740,6 +1766,7 @@ export function assessCanonicalAnalysisReadiness(
             : {}),
           ...(allIssues.length > 0 ? { readiness_issues: allIssues } : {}),
           ...(proposal ? { repair_proposal: proposal } : {}),
+          ...(optionalLeftOut.length > 0 ? { excluded_optional_risks: optionalLeftOut } : {}),
         }
       : {
           ...blockedIdentityCarrier(),
@@ -1983,6 +2010,11 @@ export function carryCanonicalOnlyFields(
   const roots = canonical.unvalued_roots;
   if (roots !== undefined && (payload as AnalysisReadyPayload).unvalued_roots !== roots) {
     patch.unvalued_roots = roots;
+  }
+
+  const optional = canonical.excluded_optional_risks;
+  if (optional !== undefined && (payload as AnalysisReadyPayload).excluded_optional_risks !== optional) {
+    patch.excluded_optional_risks = optional;
   }
 
   const proposal = canonical.repair_proposal;
