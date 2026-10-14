@@ -597,15 +597,6 @@ export const DECISIONS: readonly Decision[] = [
   },
   // ── F1 semantic model (schemas 0.69.0) ────────────────────────────────
   {
-    id: "orphan:goal_period",
-    status: "ACCEPTED",
-    decision:
-      "ACCEPTED, TEMPORARY. `goal_period` (0.69.0, F1 spec §1: the period the goal's figures are per (month / quarter / year …)) is declared on cee.NodeV3 so the strict mirror KEEPS " +
-      "it rather than stripping it. This PR is F1 T1 + T6 (option status) split out to land first (DL 380e54 on #2454); " +
-      "its writer is F1 T5 `set_goal` (CEE #2454, `goal_target_edit` → `add_constraint`), which lands next. When T5 " +
-      "lands, this finding stops reproducing and the guard demands this entry be deleted.",
-  },
-  {
     id: "orphan:goal_stated_as",
     status: "ACCEPTED",
     decision:
