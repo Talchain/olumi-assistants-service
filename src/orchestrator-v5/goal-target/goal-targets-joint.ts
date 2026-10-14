@@ -146,8 +146,8 @@ export function olumiBaseTargetsOf(graph: unknown, targets: readonly GoalConditi
  * named target in its own unit (`olumiBase`, from `olumiBaseTargetsOf`: today's level, as target-testability's case (d)
  * asks it); a writer takes that answer and the joint no longer waits on it. A missing precision or result is the line's
  * own "Run the analysis again". No typed cause, no step: a condition that can't be named or a figure not used as stated
- * (an input might or might not unlock it), an `olumi_base` whose target is not identified, and `no_option` (the reason
- * does not say whether the options are missing or were not scored).
+ * (an input might or might not unlock it), an `olumi_base` whose target is not identified, `no_option` (the reason
+ * does not say whether the options are missing or were not scored), and a condition withheld or unscored (its own note).
  */
 export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupported: readonly string[] = [],
   olumiBase: readonly GoalCondition[] = []): PressBlocker | null {
@@ -167,9 +167,12 @@ export function jointBlockerOf(n: number, reason: JointWithholdReason, unsupport
     case 'precision_missing':
     case 'not_returned':
       return { kind: 'run_again', why: reason };
+    // #2992: a condition withheld or unscored has its own note saying why, so the joint has no step of its own.
     case 'figure_not_preserved':
     case 'condition_not_named':
     case 'no_option':
+    case 'condition_unscored':
+    case 'condition_withheld':
       return null;
   }
 }

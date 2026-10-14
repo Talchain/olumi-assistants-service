@@ -191,8 +191,9 @@ describe('Explain scoped assembly safety', () => {
       // 39,914 → 36,786 bytes. Captured from the SENT body against staging's; only `instructions` differs, by those sentences.
       // #2994 AMEND (AIE Q2/Q3/C5, rulings 1ad7f7b2…): 36,786 → 36,964 bytes. Captured from the SENT body against the previous
       // head's (which reproduces 111192bc…); every changed leaf is exactly the five AIE constants, nothing else.
-      // BYPASS1: the two AIE_TEXT_PENDING host entries only: 36,964 → 38,312 bytes (captured against the #2994 head's body).
-      .toBe('0ec39943e4ea6b1abaa3b41b8287474ebd7cf165c3e267d04e7b95366fd059f2');
+      // BYPASS1: the AIE's Q4 host entry only: 36,964 → 38,001 bytes (captured against staging's body; the tool-less Explain
+      // carries no stated-figure rule).
+      .toBe('22670bbd50f8c219bf262af8b8bff60d3adbbfb7207c8c8a8374ed60e2a0ff49');
   },60000);
 });
 

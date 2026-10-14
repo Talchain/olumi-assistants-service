@@ -1017,6 +1017,19 @@ const deadlineRefusalDetail = {
   horizon_not_modelled: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. No full month completes between the reference date and deadline.`,
 } as const;
 
+/**
+ * ⭐ COACH (BYPASS1 fold-in): the ONE typed next step of a read (`next-step-blocker.ts`), for every result that hands the
+ * AI the model's state: `get_canonical_state`, the build's post-build state and an approval's `readiness_after`. The host
+ * no longer says the step on a reply the AI wrote, so the AI must hold it wherever it reads the model.
+ */
+function nextStepFactOf(read: { readonly raw: unknown; readonly analysis_state?: unknown; readonly analysis_ready?: unknown;
+  readonly analysis_result?: unknown } | null | undefined): { next_step_blocker?: NonNullable<ReturnType<typeof nextStepBlockerForAgent>> } {
+  if (read === null || read === undefined) return {};
+  const step = nextStepBlockerForAgent({ raw: read.raw, analysis_state: read.analysis_state, analysis_ready: read.analysis_ready,
+    analysis_result: read.analysis_result });
+  return step === null ? {} : { next_step_blocker: step };
+}
+
 interface GraphRead {
   readonly scenario_revision?: number;
   readonly run_revision?: number | null;
@@ -4207,8 +4220,7 @@ export function createAgentCapabilities(
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
         // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
         // host contract tells the AI to end its reply with that step; no host line says it.
-        ...((step) => step === null ? {} : { next_step_blocker: step })(nextStepBlockerForAgent({
-          raw: g.raw, analysis_state: g.analysis_state, analysis_ready: g.analysis_ready, analysis_result: g.analysis_result })),
+        ...nextStepFactOf(g),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
@@ -8627,6 +8639,8 @@ export function createAgentCapabilities(
        * the turn deadline and the (K, H) prior fact before the one dispatch.
        */
       let firstAnalysis: Record<string, unknown> | undefined;
+      /** The read after the first pass, when one ran: the next step is that Run's (its joint, its targets). */
+      let postRunState: { raw: unknown; analysis_state: unknown; analysis_ready: unknown; analysis_result: unknown } | undefined;
       if (built.mutated === true && built.replayed !== true && opts.firstAnalysis !== undefined) {
         const outcome = await opts.firstAnalysis({
           scenarioId: ctx.scenario_id,
@@ -8640,6 +8654,8 @@ export function createAgentCapabilities(
         // typed leader permission — never the run's own receipt. A failed read describes nothing.
         const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
         const read = postRun !== null && postRun.status === 200 ? postRun.json : {};
+        if (postRun !== null && postRun.status === 200) postRunState = { raw: read.graph, analysis_state: read.analysis_state,
+          analysis_ready: read.analysis_ready, analysis_result: read.analysis_result };
         firstAnalysis = describeFirstAnalysisForAgent(outcome, {
           analysisState: read.analysis_state,
           analysisResult: read.analysis_result,
@@ -8694,6 +8710,8 @@ export function createAgentCapabilities(
         // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
         // get_canonical_state, so the first reply never contradicts the Run control.
         ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
+        // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
+        ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
@@ -10434,7 +10452,7 @@ export function createAgentCapabilities(
         // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
-        return { ...r, readiness_after: readinessViewOf(after?.raw) };
+        return { ...r, readiness_after: readinessViewOf(after?.raw), ...nextStepFactOf(after) };
       }
       return r;
     },

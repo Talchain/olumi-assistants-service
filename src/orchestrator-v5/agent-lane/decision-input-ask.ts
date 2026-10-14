@@ -19,6 +19,7 @@ import { goalHorizonSteadyWhyLine, goalStockMethodWhyLine } from '../goal-target
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
+import { goalTargetGapOf } from '../goal-target/goal-target-gap.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
@@ -436,18 +437,23 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 }
 
 /**
- * ⭐ COACH (Paul's funding test; DL 00:21Z 14 Oct): the goal's missing target as a typed blocker, ranked FIRST by
- * `oneNextStep`: with no target, no sizing ask can unlock a chance. The same branch and words as the one ask writer
- * (`rawDecisionInputAsk`): never for an event model's chain, a chance goal (its date is its own step) or Olumi's own
- * provisional objective (its objective ask comes first).
+ * A goal met by an event by a date (a drafted team part, or a `chance_of_event` goal): its step is the event's own (deadline,
+ * team time), never a level target or "today's level" (Paul's hiring test: no "% today" question on any surface).
+ */
+export function isChanceGoalModel(graph: unknown): boolean {
+  return draftedTeamPartOf(graph) !== null || goalKindOf(goalOf(graph)) === 'chance_of_event';
+}
+
+/**
+ * ⭐ COACH (Paul's funding test; DL 00:21Z and 00:3xZ 14 Oct): the goal's missing target as a typed blocker, ranked FIRST by
+ * `oneNextStep`: with no target, no sizing ask can unlock a chance. The ONE "no target" authority decides and words it
+ * (`goalTargetGapOf`, C1: the standing gap, the action bar's "Set target" and the Run cells read the same), Olumi's own
+ * inferred goal included (Run 3's "Development speed"); never for an event model's chain (its step is the event's own).
  */
 export function goalTargetMissingBlockerOf(graph: unknown): PressBlocker | null {
-  if (draftedTeamPartOf(graph) !== null) return null;
-  const goal = goalOf(graph);
-  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
-  if (goal === undefined || label === '' || goalKindOf(goal) === 'chance_of_event' || goal.provenance === 'ai_inferred') return null;
-  return goalHasStatedTarget(goal, graph) ? null
-    : { kind: 'missing_input', ask: targetAsk(graph, goal, label, withinMonths(goal)), cause: 'goal_target_missing' };
+  if (isChanceGoalModel(graph)) return null;
+  const gap = goalTargetGapOf(graph);
+  return gap === null ? null : { kind: 'missing_input', ask: gap.question, cause: 'goal_target_missing' };
 }
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */

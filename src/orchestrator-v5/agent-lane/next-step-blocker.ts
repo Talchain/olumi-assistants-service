@@ -11,7 +11,7 @@ import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { chanceGoalBlockerOf } from '../goal-target/event-by-date-model.js';
 import { jointBlockerOf, olumiBaseTargetsOf } from '../goal-target/goal-targets-joint.js';
-import { goalTargetMissingBlockerOf } from './decision-input-ask.js';
+import { goalTargetMissingBlockerOf, isChanceGoalModel } from './decision-input-ask.js';
 import { oneNextStep, type PressBlocker } from './press-next-step.js';
 import { staleBlockerOf } from './write-outcome.js';
 
@@ -31,7 +31,9 @@ export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null
     && read.analysis_state.run_state.kind === 'complete_current';
   // THIS Run's identity evaluations, as every target reader takes them (`goal-chance-range.ts`, `run-analysis.ts`).
   const evaluations = Array.isArray(result?.identity_evaluations) ? result.identity_evaluations : undefined;
-  const parts = untestableTargetParts(read.raw, targetTestabilityOf(read.raw, evaluations));
+  // A goal met by an event by a date has no level target: its step is the event's own (`chanceGoalBlockerOf`), never
+  // "today's level" of its share (Paul's hiring test: no "% today" question on any surface).
+  const parts = isChanceGoalModel(read.raw) ? null : untestableTargetParts(read.raw, targetTestabilityOf(read.raw, evaluations));
   // The joint is the selected CURRENT Run's own record; a stale Run's is said by the stale step.
   const targets = current ? goalChanceLicenceForAgent(read.analysis_result)?.targets : undefined;
   const joint = targets?.joint.status === 'withheld' ? targets.joint : undefined;

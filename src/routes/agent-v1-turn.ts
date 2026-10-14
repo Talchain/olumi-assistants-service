@@ -116,7 +116,7 @@ import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-g
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
-import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
+import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
@@ -645,6 +645,23 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
   const first = line === null ? -1 : text.indexOf(line);
   if (line !== null && first >= 0) text = text.slice(0, first + line.length) + text.slice(first + line.length).replaceAll(line, '');
   return text;
+}
+
+/**
+ * BYPASS1: the goal-chance detail lines the Run's card says from this view (DGAI `goalChanceDetailLines`): the joint's
+ * withheld line and bound, each target on its own (matched by its words; the card names options by the canvas), the status
+ * quo by assumption, and the notes. `null` when the view carries no goal-chance detail.
+ */
+function cardDetailLinesOf(view: unknown): { has(line: string): boolean } | null {
+  const detail = (view as { goal_chance?: CanonicalGoalChanceDetail } | null | undefined)?.goal_chance;
+  if (detail === undefined || detail === null) return null;
+  const joint = detail.targets?.joint;
+  const exact = new Set([
+    ...(joint?.status === 'withheld' ? [joint.line, ...(joint.frechet_line !== undefined ? [joint.frechet_line] : [])] : []),
+    ...(detail.status_quo !== undefined ? [detail.status_quo.line] : []), ...(detail.notes ?? []),
+  ]);
+  const targetLeads = (detail.targets?.per_target ?? []).map((t) => `On its own, the chance of ${t.words}, in this model: `);
+  return { has: (line) => exact.has(line) || targetLeads.some((lead) => line.startsWith(lead)) };
 }
 
 /** The latest successful build's typed receipt owns the draft words; narrator prose is never a receipt. */
@@ -5135,8 +5152,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
       // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
       // BYPASS1 keeps the chance face on every Run/Explain reply (the screen's lines are the headline, K-pinned).
+      // ⭐ BYPASS1 (capacity witness on 351eeda0, turn 01 and the Run): on a turn that ran an analysis, the Run's card under
+      // this reply says the goal-chance detail from this response's `canonical_analysis_view.goal_chance`, in these same
+      // words (DGAI `goalChanceDetailLines`): "Doing nothing: … by assumption." was said twice. The reply does not repeat
+      // what the card says; a line the card does not say (the range census note) stays, and an Explain (no card) keeps all.
+      const cardDetail = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
+        ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
       const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
-        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent));
+        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
+          .filter((note) => cardDetail === null || !cardDetail.has(note)));
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),

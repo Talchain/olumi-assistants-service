@@ -18,7 +18,8 @@ import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { unreadGoalProductBlockerOf, type UnreadGoalProduct } from '../unread-goal-product.js';
 import { staleBlockerOf, staleResultLine } from '../write-outcome.js';
 import { oneNextStep, type PressBlocker } from '../press-next-step.js';
-import { goalTargetMissingBlockerOf } from '../decision-input-ask.js';
+import { goalTargetMissingBlockerOf, isChanceGoalModel } from '../decision-input-ask.js';
+import { modelGapOf } from '../method-turn/widen-turn.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 
 type Rec = Record<string, any>;
@@ -215,16 +216,36 @@ describe('goal_target_missing ranks FIRST (Paul\'s funding test, DL 00:21Z)', ()
   it('a goal with no target: the served target ask is the step, typed by its cause', () => {
     const step = goalTargetMissingBlockerOf(noTarget());
     expect(step).toMatchObject({ kind: 'missing_input', cause: 'goal_target_missing' });
-    expect((step as { ask: string }).ask).toMatch(/"Monthly revenue".*I'll propose it as your target\.$/);
-    // Controls: a chance goal's step is its date; Olumi's own provisional objective asks the objective first.
+    // The ONE authority's words (`goalTargetGapOf`, C1): the same question the standing gap and the Run cells say.
+    expect((step as { ask: string }).ask).toBe('One gap: ‘Monthly revenue’ has no target or deadline yet. What would count as meeting it, and by when?');
+    // Olumi's own inferred goal is no exception (Run 3's "Development speed" was one); a chance goal's step is its date.
+    expect(goalTargetMissingBlockerOf(noTarget({ provenance: 'ai_inferred' }))).toMatchObject({ cause: 'goal_target_missing' });
     expect(goalTargetMissingBlockerOf(noTarget({ goal_threshold_unit: '%', observed_state: { unit: '% likely' } }))).toBeNull();
-    expect(goalTargetMissingBlockerOf(noTarget({ provenance: 'ai_inferred' }))).toBeNull();
   });
   it('it outranks every other step, a stale result included', () => {
     const missing: PressBlocker = { kind: 'missing_input', ask: 'What figure should "Monthly revenue" reach or stay under?', cause: 'goal_target_missing' };
     const stale: PressBlocker = { kind: 'stale', say: 's' };
     const again: PressBlocker = { kind: 'run_again', why: 'not_returned' };
     expect(oneNextStep([stale, again, { kind: 'missing_input', ask: 'x' }, missing])).toBe(missing);
+  });
+  it('agrees with the ONE "no target" authority (`modelGapOf`, moved verbatim to C1\'s `goalTargetGapOf`) on Paul\'s served Run 3', () => {
+    // C1's fixture, byte for byte (tests/fixtures/c1, T1H): the goal "Development speed" held no target. Until C1 merges, this
+    // row pins the two equal; then `goalTargetMissingBlockerOf` calls `goalTargetGapOf` (DL inbox 00:3xZ).
+    const run3 = (JSON.parse(readFileSync('tests/fixtures/c1/served-funding-run3-20261014.json', 'utf8')) as Rec).graph as Rec;
+    const withTarget = { ...run3, nodes: (run3.nodes as Rec[]).map((n) => n.id === 'development_speed'
+      ? { ...n, goal_threshold_raw: 2, goal_direction: '>=' } : n) };
+    expect(modelGapOf(run3)?.kind).toBe('goal_target_missing');
+    expect(goalTargetMissingBlockerOf(run3)).toMatchObject({ kind: 'missing_input', cause: 'goal_target_missing' });
+    // Contrast: ONE change, the goal states a target; neither says a target is missing.
+    expect(modelGapOf(withTarget)?.kind).not.toBe('goal_target_missing');
+    expect(goalTargetMissingBlockerOf(withTarget)).toBeNull();
+  });
+  it('a goal met by an event by a date: the step is never "today\'s level" of its share (Paul\'s hiring test)', () => {
+    const hiring = { nodes: [{ id: 'g', kind: 'goal', label: 'Share of next feature launch done by the deadline', goal_threshold_unit: '%',
+      observed_state: { unit: '% likely' } }, { id: 'o1', kind: 'option', label: 'Hire a tech lead' }], edges: [] };
+    expect(isChanceGoalModel(hiring)).toBe(true);
+    const step = nextStepBlockerForAgent({ raw: hiring, analysis_state: { run_state: { kind: 'none' } } });
+    expect(JSON.stringify(step ?? null)).not.toMatch(/today's level/);
   });
   it('the served capture (unseen-1, a stated target): the fact is the target\'s own question, not a target ask', () => {
     const step = nextStepBlockerForAgent({ raw: graph, analysis_state: { run_state: { kind: 'complete_current' } }, analysis_result: envelope });

@@ -17,6 +17,12 @@ import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
 const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
+/** Capacity witness (CEE 351eeda0, `JUDGE-capacity-post2996-codex.md` row 4): the served graph read after its second Run. */
+const CAPACITY = ((): Json => {
+  const j = (JSON.parse(readFileSync(new URL('./fixtures/capacity-post2996-run2-read.json', import.meta.url), 'utf8')) as { j: Json }).j;
+  return { ...j, scenario_id: SCENARIO };
+})();
+const count = (text: string, part: string): number => text.split(part).length - 1;
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const store = {
@@ -33,7 +39,11 @@ const store = {
   readMostRecentPendingActions: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
+  // The canonical view ships only when the stored scenario still matches the read (`canonicalViewBasisUnchanged`): the
+  // served read's own graph and revision, else no view (as before).
+  readExistingScenario: vi.fn(async () => servedScenario()),
 };
+let servedScenario = (): { revision: unknown; graph: unknown } | null => null;
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
@@ -58,6 +68,8 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
   const sent: string[] = [];
   /** Scripted model outputs, one per provider call; empty → the plain answer below. */
   let outputs: Record<string, unknown>[][] = [];
+  /** A served graph read, verbatim (its own canonical view); null → the b9-1 read above. */
+  let served: Json | null = null;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
@@ -72,10 +84,11 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
-      blocks: [READ.analysis_result], analysis_ready: READ.analysis_ready, analysis_state: state,
+      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: served?.graph_hash ?? READ.graph_hash,
+      blocks: [served?.analysis_result ?? READ.analysis_result], analysis_ready: served?.analysis_ready ?? READ.analysis_ready,
+      analysis_state: served?.analysis_state ?? state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
+    app.post('/assist/v1/scenarios/:id/graph', async () => served ?? withCanonicalAnalysisView({
       graph, graph_hash: READ.graph_hash, analysis_state: state,
       analysis_ready: READ.analysis_ready, analysis_result: READ.analysis_result,
     }, SCENARIO));
@@ -83,7 +96,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; });
+  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; served = null; });
+  servedScenario = () => served === null ? null
+    : { revision: (served.canonical_analysis_view as Json | undefined)?.staleness?.revision, graph: served.graph };
 
   /** DGAI's own Run press (sendTurn → buildV5Payload, e218e3d2: turn_class 'frame', a bound run_analysis chip). */
   const runPress = async (): Promise<Json> => {
@@ -162,5 +177,32 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(reply.startsWith('The analysis ran.')).toBe(true);
     // No host target ask: the AI asks it from the fact (the conditional basis, whose sentence the AI lacks, stays).
     expect(reply).not.toMatch(/as your target\./);
+  });
+
+  /**
+   * ⭐ CAPACITY WITNESS (351eeda0): the Run's card (DGAI `goalChanceDetailLines`, from this response's
+   * `canonical_analysis_view.goal_chance`) says the status quo line and the notes; the reply said them again, so the user
+   * read "Doing nothing: … by assumption." twice. Each is now on screen ONCE: in the card, not repeated in the reply.
+   */
+  it('capacity Run press: the card says the status quo line and the notes, and the reply does not repeat them', async () => {
+    served = CAPACITY;
+    const run = await runPress();
+    const detail = run.canonical_analysis_view?.goal_chance as { status_quo: { line: string }; notes: string[] };
+    expect((run.blocks as { type: string }[])[0]?.type).toBe('analysis_result');
+    expect(detail.status_quo.line).toBe('Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.');
+    expect(detail.notes.length).toBeGreaterThan(0);
+    const reply = run.assistant_text as string;
+    for (const line of [detail.status_quo.line, ...detail.notes]) expect(count(reply, line), line).toBe(0);
+    // The headline stays in the reply: the chance and its shortfall sentence, once each.
+    expect(reply).toMatch(CHANCE_LINE);
+    expect(count(reply, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(1);
+  });
+
+  it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
+    const { canonical_analysis_view: _dropped, ...withoutView } = CAPACITY;
+    served = withoutView;
+    const run = await runPress();
+    expect(run.canonical_analysis_view).toBeUndefined();
+    expect(count(run.assistant_text as string, 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.')).toBe(1);
   });
 });
