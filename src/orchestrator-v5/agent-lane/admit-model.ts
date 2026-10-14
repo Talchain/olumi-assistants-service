@@ -1,6 +1,7 @@
 export { reencodedSiblingDiff } from './level-batch-frame.js';
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
+import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 import { readProductIdentityCarrier as readCarrier } from '../admission/identity-evaluations.js';
 /**
@@ -4798,6 +4799,21 @@ function admitOnce(
     if (optionIdSet.has(e.from) && USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')) && !userActsOn(e.from, e.to)) {
       e.provenance = { ...e.provenance, source: 'cee_hypothesis' };
     }
+  }
+  /**
+   * ⭐ THE BRIEF'S SENTENCE IS A LINK'S SOURCE, WHOEVER WROTE ITS SIZE (GEN D3; PROMPT's diagnosis, DL 06:55Z: "source ≠
+   * size authorship"). The Fi writer above keeps a bound sentence only beside a user-stated size, so a sizeless link the
+   * drafter typed as the user's, quoting the brief, was saved as `brief_extraction` with no quote, which the one authority
+   * reads as possibly a drafter-invented mediator (`provenance-of.ts` `userStatedLink`). Its quote is kept here when it is a
+   * WHOLE statement of the brief, verbatim (`wholeStatementIn`, #3022), and the link still holds the user's stamp after
+   * every demotion above. The size and its author are untouched; the mapping of that sentence onto this link is the
+   * drafter's reading (no host word match decides it).
+   */
+  for (const l of resolvable) {
+    const quote = typeof (l as { source_quote?: unknown }).source_quote === 'string' ? ((l as { source_quote: string }).source_quote).trim() : '';
+    if (l.provenance_source === 'user_specified' || quote === '' || typeof brief !== 'string' || !brief.includes(quote) || !wholeStatementIn(brief, quote)) continue;
+    const edge = causalEdges.find((e) => e.from === l.from && e.to === l.to);
+    if (edge?.provenance?.source === 'brief_extraction' && edge.provenance.source_quote === undefined) edge.provenance.source_quote = quote;
   }
 
   /**
