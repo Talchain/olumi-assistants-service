@@ -2567,9 +2567,12 @@ export async function buildModelFromBrief(
   const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
   observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
+  // ⭐ RESTORED (Paul, #94 6166259456): both arms run on the served seam: non-obvious options through a different mechanism,
+  // and risks against the options. Every added item is Olumi's (`markOlumiOptions`, `draft_widening`, `proposed_by`), the
+  // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
-    admit: admitWidened });
+    admit: admitWidened, optionsArm: true, risksArm: true });
   if (widened !== null) {
     admitted = widened.admitted;
     size = assessConstructionSize(admitted);

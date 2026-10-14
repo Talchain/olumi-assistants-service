@@ -711,6 +711,9 @@ export function constructionRegistrationTurnId(scenarioId: string, brief: string
 /** Offer the existing risks door after a thin first draft; the reply contract owns placement of the face. */
 export function thinDraftOffer(graph: unknown, mutated: boolean): { face: string; button: string; press: SuggestedAction } | null {
   const g = graphOf(graph);
+  // A risk the draft-time widening added (`draft_widening`) is Olumi's suggestion, never "in your brief": risks were
+  // already suggested, so no offer (and no face counting it as the brief's).
+  if (g.nodes.some((n) => n.kind === 'risk' && n.draft_widening !== undefined && n.draft_widening !== null)) return null;
   const risks = g.nodes.filter((n) => n.kind === 'risk').length;
   if (mutated !== true || !g.nodes.some((n) => n.kind === 'goal')
     || !g.nodes.some((n) => n.kind === 'option' && n.is_baseline !== true) || risks > 1) return null;
