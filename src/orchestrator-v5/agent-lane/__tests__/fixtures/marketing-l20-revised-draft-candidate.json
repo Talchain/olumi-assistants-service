@@ -1,12 +1,12 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "a5b2d99b-6a76-47db-aae3-45a5b2fffaa1",
+ "operation_id": "55f339cc-0052-4c9b-bc6f-f847fec5d49a",
  "candidate": {
   "nodes": [
    {
     "id": "decision_new_customers",
     "kind": "decision",
-    "label": "Decision: New customers",
+    "label": "Question: New customers",
     "provenance": "ai_inferred"
    },
    {
