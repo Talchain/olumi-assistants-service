@@ -1574,8 +1574,6 @@ export type ConstructionTrace =
     readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number; readonly chain?: number };
     /** `adopted`: the retry's model registered · `kept_first`: an adoption gate refused it · `retry_failed`: the call or its parse threw. */
     readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
-    /** The second bounded size retry's own outcome, present only when it ran (the model was still over the limit after the first). */
-    readonly second?: 'adopted' | 'kept_first' | 'retry_failed';
   };
 
 /**
@@ -1885,163 +1883,132 @@ export async function buildModelFromBrief(
       chain: chainsAsked.length,
     };
     trace = { retried: true, reasons, outcome: 'kept_first' };
-    // ⭐ A SECOND BOUNDED SIZE RETRY (DL rulings 04:00Z/04:07Z 14 Oct; T5 D2 r1, `recovery/outbox/PROMPT.md`). One retry left
-    // Paul's marketing brief with no model 1 time in 2: told its own links budget the drafter came back within the limit 9/10,
-    // but a retry adopted as smaller yet still over ended the build. So when the first retry is ADOPTED and the model is still
-    // over the limit, ONE more edits that model under the same gates, with the current counts and the same frozen source, the
-    // user's material still held to the first draft. A gate's rejection is never retried; never a third, never off the size
-    // route; a model still over after both is refused as before.
-    let previous = firstCandidate;
-    let askedNow = asked;
-    // What a retry shed is said against the FIRST draft, across both attempts (⛔ NEVER SILENTLY, above).
-    const firstAdmitted = admitted;
-    // The user's limits and levels are read against the FIRST draft and ITS gaps (paired with `firstCandidate`): after an
-    // adoption `preparation` is the carried one, and a second attempt read against it re-authored the user's limited quantity.
-    const firstPreparation = preparation;
-    // ⛔ EVERY retry passes the FIRST retry's gates (Codex FAIL 3011 r1): the risk check is keyed on what the first attempt was
-    // asked and judged against the first draft's risks. Keyed on `askedNow`, an adopted retry that cleared its repair issue left
-    // the second attempt unchecked, and it registered a kept risk's cut link (and a reversed one) the first would refuse.
-    const firstGateCandidate = candidate;
-    const outcomes: Array<'adopted' | 'kept_first' | 'retry_failed'> = [];
-    const traceOf = (): ConstructionTrace => ({ retried: true, reasons, outcome: outcomes[0]!, ...(outcomes[1] === undefined ? {} : { second: outcomes[1] }) });
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      // Only an ADOPTED (otherwise faithful) retry that is still over gets one more; a gate's rejection is never retried away.
-      if (attempt === 2 && (!needsSizeRetry || outcomes[0] !== 'adopted' || size.within || size.user_material_exceeds_limit)) break;
-      outcomes[attempt - 1] = 'kept_first';
-      trace = traceOf();
-      try {
-        const retry = await callStructured({
-          model: budget.model,
-          // The delta is APPENDED, so every rule the first pass obeyed still holds —
-          // provenance, wiring, plausible_max and clearly labelled estimates.
-          // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
-          // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
-          // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
-          // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
-          // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
-          instructions: askedNow.length === 0 && needsSizeRetry
-            ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
-            : needsSizeRetry
-              ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
-              : `${buildInstructions}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
-          input: askedNow.length > 0
-            ? `${brief}\n\nConstruction issues: ${JSON.stringify(askedNow)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(previous)}`
-            : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
-          max_output_tokens: budget.max_output_tokens,
-          reasoning_effort: budget.reasoning_effort,
-          schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question), { providerBoundary: false }),
+    try {
+      const retry = await callStructured({
+        model: budget.model,
+        // The delta is APPENDED, so every rule the first pass obeyed still holds —
+        // provenance, wiring, plausible_max and clearly labelled estimates.
+        // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
+        // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
+        // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
+        // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
+        // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
+        instructions: asked.length === 0 && needsSizeRetry
+          ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
+          : needsSizeRetry
+            ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
+            : `${buildInstructions}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+        input: asked.length > 0
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(asked)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(firstCandidate)}`
+          : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
+        max_output_tokens: budget.max_output_tokens,
+        reasoning_effort: budget.reasoning_effort,
+        schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question), { providerBoundary: false }),
+      });
+      if (retry.text.length > 0) {
+        const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
+        const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
+        // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
+        // (Only where the first draft's cut applied: elsewhere the retry is read exactly as before.)
+        const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
+          : { model: retryHeld.model, mechanisms: [], costs: [] };
+        const retryRaw = keepLimitedQuantityAuthor(
+          neverTheLimitAsTodaysLevel(retryUnsupported.model, firstCandidate, preparation.baseline_gaps),
+          firstCandidate, preparation.baseline_gaps,
+        );
+        const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
+        const retryCandidate = retryPrepared.candidate;
+        const retryIdentity = mintOrFold(retryCandidate);
+        const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
+        // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
+        const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
+        const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
+        const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
+          options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
         });
-        if (retry.text.length > 0) {
-          const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
-          const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
-          // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
-          // (Only where the first draft's cut applied: elsewhere the retry is read exactly as before.)
-          const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
-            : { model: retryHeld.model, mechanisms: [], costs: [] };
-          const retryRaw = keepLimitedQuantityAuthor(
-            neverTheLimitAsTodaysLevel(retryUnsupported.model, firstCandidate, firstPreparation.baseline_gaps),
-            firstCandidate, firstPreparation.baseline_gaps,
-          );
-          const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
-          const retryCandidate = retryPrepared.candidate;
-          const retryIdentity = mintOrFold(retryCandidate);
-          const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
-          // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
-          const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
-          const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
-          const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
-            options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
-          });
-          const retrySize = assessConstructionSize(retryAdmitted);
-          // ⛔ COVERAGE ALONE NEVER COSTS A REGISTERED OPTION (adversarial verify of 58a22db8, P2-A/P2-E: COMBINED rows 2h/2i).
-          // The count above stays honest, the registered model need not: a retry that levels £64 AND makes Olumi's
-          // registered £54 indistinct still covers 1 < 2 (or levels £54's own gap while re-pricing it like the user's £59,
-          // 0 < 1), and admission withholds £54. So a retry asked only about gaps must register every option the first did.
-          const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
-          const keepsEveryRegisteredOption = admitted.nodes.filter((n) => n.kind === 'option').every((n) => kept.has(nodeIdentity(n)));
-          // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
-          // trades 4 nodes for 11 links is not a compaction, and taking it on faith
-          // would let a second model call make the problem worse.
-          // ⭐⭐ AND IT MUST NOT HAVE COST THE USER ANYTHING. Smaller is not
-          // sufficient: a retry that sheds two widened factors while also dropping a
-          // relationship the user stated is a worse model, and the size numbers alone
-          // cannot tell the difference. So the brief-stated counts must not regress —
-          // that is what makes "the cap never overrides the user" true of RETRIES and
-          // not merely of the refusal path.
-          // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
-          // fact and relationship the user stated must still be there by name.
-          const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
-          // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
-          const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(preparation, retryPreparation, retryRaw, retryAdmitted);
-          if (
-            (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-            keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
-            // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
-            keepsEveryGoalCondition(candidate.goal, retryCandidate.goal) &&
-            // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
-            // gap — but it must never cover LESS, and when coverage is the only reason
-            // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
-            // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
-            retryOpen <= gapCount(preparation) &&
-            (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
-              || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(admitted))
-              || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
-              // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-              || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
-              || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
-            // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
-            (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(admitted))) &&
-            // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
-            chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
-            // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
-            (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
-            // The collapsed quantity is the one risk the chain issue asks the retry to replace.
-            (asked.length === 0 || retainsRiskHypotheses({ ...firstGateCandidate, risks: firstGateCandidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
-            // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
-            (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
-          ) {
-            // An option an earlier attempt already carried as withheld stays carried unless this retry registers it.
-            carriedWithheld = carryWithheldOptions({ ...admitted, options_withheld: [...carriedWithheld, ...(admitted.options_withheld ?? [])] }, retryAdmitted);
-            leftOut = firstAdmitted.nodes
-              .filter((n) => !kept.has(nodeIdentity(n)))
-              .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
-            candidate = retryCandidate;
-            admissionCandidate = retryIdentity.model;
-            admitted = retryAdmitted;
-            admissionLevelCandidate = retryCandidate;
-            // #2854 sets admissionCandidate here
-            foldedCarrier = retryIdentity.folded;
-            droppedProducts = retryIdentity.dropped;
-            gapResidual = retryIdentity.residual;
-            keptApart = retryHeld.renamed;
-            notToldApart = retryApart.ambiguous;
-            linksSetAside = retryHeld.setAside;
-            // What the first draft took out stays said; the retry's own are added once.
-            mechanismsUnmodelled = [...mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))];
-            costsOffRevenue = [...costsOffRevenue, ...retryUnsupported.costs.filter((c) => !costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))];
-            // ⛔ Never said as not modelled when the adopted model carries it (Codex #2662 r1 P2-4: a retry may draw it again as
-            // the brief's), nor a cost as off the revenue when the adopted model still links it in.
-            const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
-            mechanismsUnmodelled = mechanismsUnmodelled.filter((m) => !adoptedLabels.has(canonicalLabel(m.label)));
-            costsOffRevenue = costsAgainst(costsOffRevenue, retryCandidate);
-            size = retrySize;
-            // ⛔ An adopted retry must not erase what the first pass had to disclose
-            // (review 5822933692, B3): a retry that echoes the prepared candidate
-            // re-prepares to nothing, and the user's 7 would read as Olumi's again.
-            preparation = carryFindingsAcrossRetry(preparation, retryPreparation);
-            // The next attempt, if any, edits THIS model and is asked only what it still leaves open.
-            previous = retryCandidate;
-            askedNow = repairIssues(retryPreparation);
-            outcomes[attempt - 1] = 'adopted';
-            trace = traceOf();
-          }
+        const retrySize = assessConstructionSize(retryAdmitted);
+        // ⛔ COVERAGE ALONE NEVER COSTS A REGISTERED OPTION (adversarial verify of 58a22db8, P2-A/P2-E: COMBINED rows 2h/2i).
+        // The count above stays honest, the registered model need not: a retry that levels £64 AND makes Olumi's
+        // registered £54 indistinct still covers 1 < 2 (or levels £54's own gap while re-pricing it like the user's £59,
+        // 0 < 1), and admission withholds £54. So a retry asked only about gaps must register every option the first did.
+        const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+        const keepsEveryRegisteredOption = admitted.nodes.filter((n) => n.kind === 'option').every((n) => kept.has(nodeIdentity(n)));
+        // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
+        // trades 4 nodes for 11 links is not a compaction, and taking it on faith
+        // would let a second model call make the problem worse.
+        // ⭐⭐ AND IT MUST NOT HAVE COST THE USER ANYTHING. Smaller is not
+        // sufficient: a retry that sheds two widened factors while also dropping a
+        // relationship the user stated is a worse model, and the size numbers alone
+        // cannot tell the difference. So the brief-stated counts must not regress —
+        // that is what makes "the cap never overrides the user" true of RETRIES and
+        // not merely of the refusal path.
+        // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
+        // fact and relationship the user stated must still be there by name.
+        const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
+        // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
+        const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(preparation, retryPreparation, retryRaw, retryAdmitted);
+        if (
+          (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
+          keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
+          // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
+          keepsEveryGoalCondition(candidate.goal, retryCandidate.goal) &&
+          // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
+          // gap — but it must never cover LESS, and when coverage is the only reason
+          // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
+          // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
+          retryOpen <= gapCount(preparation) &&
+          (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+            || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(admitted))
+            || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
+            // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
+            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
+            || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
+          (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(admitted))) &&
+          // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
+          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
+          // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
+          (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
+          // The collapsed quantity is the one risk the chain issue asks the retry to replace.
+          (asked.length === 0 || retainsRiskHypotheses({ ...candidate, risks: candidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
+          // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
+          (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
+        ) {
+          carriedWithheld = carryWithheldOptions(admitted, retryAdmitted);
+          leftOut = admitted.nodes
+            .filter((n) => !kept.has(nodeIdentity(n)))
+            .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
+          candidate = retryCandidate;
+          admissionCandidate = retryIdentity.model;
+          admitted = retryAdmitted;
+          admissionLevelCandidate = retryCandidate;
+          // #2854 sets admissionCandidate here
+          foldedCarrier = retryIdentity.folded;
+          droppedProducts = retryIdentity.dropped;
+          gapResidual = retryIdentity.residual;
+          keptApart = retryHeld.renamed;
+          notToldApart = retryApart.ambiguous;
+          linksSetAside = retryHeld.setAside;
+          // What the first draft took out stays said; the retry's own are added once.
+          mechanismsUnmodelled = [...mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))];
+          costsOffRevenue = [...costsOffRevenue, ...retryUnsupported.costs.filter((c) => !costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))];
+          // ⛔ Never said as not modelled when the adopted model carries it (Codex #2662 r1 P2-4: a retry may draw it again as
+          // the brief's), nor a cost as off the revenue when the adopted model still links it in.
+          const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
+          mechanismsUnmodelled = mechanismsUnmodelled.filter((m) => !adoptedLabels.has(canonicalLabel(m.label)));
+          costsOffRevenue = costsAgainst(costsOffRevenue, retryCandidate);
+          size = retrySize;
+          // ⛔ An adopted retry must not erase what the first pass had to disclose
+          // (review 5822933692, B3): a retry that echoes the prepared candidate
+          // re-prepares to nothing, and the user's 7 would read as Olumi's again.
+          preparation = carryFindingsAcrossRetry(preparation, retryPreparation);
+          trace = { retried: true, reasons, outcome: 'adopted' };
         }
-      } catch {
-        // A failed retry costs the retry, never the turn: the refusal below reports
-        // the FIRST model's real counts rather than inventing a reason.
-        outcomes[attempt - 1] = 'retry_failed';
-        trace = traceOf();
       }
+    } catch {
+      // A failed retry costs the retry, never the turn: the refusal below reports
+      // the FIRST model's real counts rather than inventing a reason.
+      trace = { retried: true, reasons, outcome: 'retry_failed' };
     }
   }
   // Separate from projection losses: a missing path must not change existing disclosure counts or readers.

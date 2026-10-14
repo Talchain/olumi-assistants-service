@@ -332,17 +332,15 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     return d;
   };
 
-  it.each<[string, () => Draft, string, number]>([
-    // The calls: an echoed draft with a gap is ADOPTED yet still over, so one more retry runs (3); with a mechanism issue the
-    // echo is REJECTED (the issue is still open), and a rejection is never retried (2). DL rulings 04:00Z/04:07Z 14 Oct.
-    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level', 3],
-    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value', 3],
-    ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis', 2],
-  ])('RED: with %s, the FIRST retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue, calls) => {
+  it.each<[string, () => Draft, string]>([
+    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level'],
+    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value'],
+    ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis'],
+  ])('RED: with %s, the ONE retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue) => {
     const first = draft();
     const { reqs, result } = await construct(first, first);
     expect(result.refusal ?? result.size_retried, 'PRECONDITION: the draft was oversized').toBeTruthy();
-    expect(reqs).toHaveLength(calls);
+    expect(reqs).toHaveLength(2);
     const retry = reqs[1]!;
     expect(retry.instructions).toContain(BUDGET);
     expect(retry.instructions).toMatch(COPY_RULE);

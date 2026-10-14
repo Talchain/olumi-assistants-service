@@ -229,8 +229,7 @@ describe('⛔ the cap never overrides the user’s material plus its required sc
     const s = structuredSequence(c, c);
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
-    // DL rulings 04:00Z/04:07Z 14 Oct: the retry here is ADOPTED (no smaller rejection) yet still over, so ONE more runs; never a third.
-    expect(s.calls, 'the oversized model is retried, not exempted').toHaveLength(3);
+    expect(s.calls, 'the oversized model is retried, not exempted').toHaveLength(2);
     expect(out.ok).toBe(false);
     expect(out.refusal).toBe('model_too_large');
   });
