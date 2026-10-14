@@ -118,7 +118,7 @@ import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizing
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withNarratorCountGuarded, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -4098,7 +4098,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The AIE conflict copy is a source-owned limitation, not a narration to paraphrase.
     const hiringConflicts = result.tool_results.filter(r => r.refusal === 'hiring_bound_conflict' && typeof r.detail === 'string');
     if (hiringConflicts.length > 0) text = hiringConflicts.map(r => r.detail).join(' ');
-    if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
+    // BYPASS1: a host-composed exit of the loop (`reply_author: 'host'`) is not the narrator's words.
+    if (fastPath === undefined && result.stopped_reason === 'answered' && result.reply_author === 'ai') narratorWords = result.assistant_text;
 
     // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
     // (never a repair, never a second call). Then ONE card on the story's target, through the existing door, exactly as
@@ -4364,6 +4365,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
       narrationStatus = 'stale';
     }
+    /**
+     * ⭐ BYPASS1 (DL, 14 Oct; recovery/codex/BYPASS1.md): the reply is the AI's own words: a model wrote it (`narratorWords`, set
+     * only where one did) and no host swap above replaced it. Only then does the host stop restating, in prose, facts the AI
+     * was given (receipts, readiness, the D1 ask, disclosures, the withheld line, screen-line appends, the leader closing,
+     * More-detail folding, the Why? line); the code stays, dormant. A host-written reply keeps every host line. Every
+     * authority check (ranking redaction, the count guard, the final leader egress, the estimate-% binding, the completion-
+     * claim stripper, currentness) runs on both, and lines whose fact the AI lacks (stale, held lapse, goal not checked,
+     * A7, break-even, research-control truth) stay.
+     */
+    const aiWroteReply = narratorWords !== null && hiringConflicts.length === 0
+      && text !== RUN_RESULT_UNVERIFIED_TEXT && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT;
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -4844,7 +4856,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const readinessLine = (staleLine !== null || firstPassRan) && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     // ⭐ D1 + A7 (DL #75 5923918068; AIQ words 5923963470): on the brief and Run turns, at rest — the deadline the model holds
     // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
-    const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    const hostStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    // BYPASS1: the AI has the write results, `readiness_after` and `not_a_factor`; it lacks goal-not-checked, stale and held lapses.
+    const aiStatusText = [goalLine, staleLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     // The retained fresh scope question is this turn's existing step, even if the
     // narrator parked it behind the questions toggle. Count it before another ask.
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
@@ -4878,6 +4892,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
       : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
+    // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
+    const hostProse = !aiWroteReply || noDirectLink !== null;
+    const statusText = hostProse ? hostStatusText : aiStatusText;
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
@@ -4900,7 +4917,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
-    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
+    // BYPASS1: on the AI's reply the owed disclosures it was given (placeholder strengths, value changes, the first analysis,
+    // the identity ask) are not restated; the conditional basis and the Run lines it lacks stay, and so does every line
+    // when the current state is unknown (the no-present-claim rule).
+    const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed
+      : owed.filter((line) => line === basis || line === reasonLine || line === rootLine);
+    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
       // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
@@ -4918,10 +4940,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     };
     // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
-    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined);
+    // BYPASS1: the AI asks for a missing target, objective or deadline itself (R:784); the host keeps K3 and A7's facts.
+    const decisionLines = (await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined))
+      .filter((line) => hostProse || !isDecisionInputAsk(line));
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
-    const linkAsk = decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
+    const linkAsk = !hostProse || decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
       message, restingText: textAtRest(composedWithout), awaitingApproval: decisionTurn.awaitingApproval,
     });
     if (linkAsk !== null) decisionLines.push(linkAsk);
@@ -4932,7 +4956,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
+        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owedShown, ...decisionLines]), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
       answerKind: 'substantive',
@@ -5022,7 +5046,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
-        sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
+        // BYPASS1: on the AI's reply the ranking is still dropped, and the AI explains the withholding itself (Q2/#36).
+        sayWhyWithheld: hostProse && fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
         ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
       });
@@ -5051,7 +5076,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
       return reading !== undefined && action.detail === reading.words;
     });
-    goalChanceOwed = stateFacts.current_state_unknown === true ? null
+    // BYPASS1: the AI was given `goal_chance.say` and told to explain the withholding in its own words.
+    goalChanceOwed = stateFacts.current_state_unknown === true || !hostProse ? null
       : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
         identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
@@ -5097,8 +5123,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
       // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
-      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
-        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent));
+      // BYPASS1: the AI's reply was given each line's display, driver and notes; only RC4's count guard runs on it.
+      const ranged = hostProse ? withScreenLinesOwed(wireBody.assistant_text, screenLines,
+        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent))
+        : { text: withNarratorCountGuarded(wireBody.assistant_text, screenLines), added: 0 };
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
@@ -5396,28 +5424,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult,
         text: reply,
         // A host-only answer did not consume the carrier and keeps its existing bytes.
-        ...(eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
+        // BYPASS1: on the AI's reply the face host lines it was given (the Why? line, the build's widened receipt and note,
+        // the horizon, what would change, the estimates count, event-risk detail) are not added; the widened-risk marker,
+        // whose fact the AI lacks, stays.
+        ...(!hostProse || eligibleIntervention === undefined || !(result.timing.provider_calls > 0) ? {} : { eligibleIntervention, interventionActionLabel: preReplySelection?.wire?.slot1?.primary_action.label,
           interventionWhySaid: preReplySelection?.whySaid === true }),
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
-        ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),
-        ...(widenNote === null ? {} : { widenedRiskNote: widenNote }),
+        ...(!hostProse || widenReceipt === null ? {} : { widenedLine: widenReceipt }),
+        ...(!hostProse || widenNote === null ? {} : { widenedRiskNote: widenNote }),
         ...(runWidenWords.widenedRiskMarker === undefined ? {} : { widenedRiskMarker: runWidenWords.widenedRiskMarker }),
-        ...(horizonLine === null ? {} : { horizonLine }),
-        ...(whatChanges === null ? {} : { whatChanges }),
+        ...(!hostProse || horizonLine === null ? {} : { horizonLine }),
+        ...(!hostProse || whatChanges === null ? {} : { whatChanges }),
         ...(faceContract !== undefined && !runOrExplainTurn ? { notRunOrExplain: true as const } : {}),
-        ...((faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
+        ...(hostProse && (faceContract === 'draft' || runOrExplainTurn) && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
-        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
+        detailLines: !hostProse || stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,
         profile,
         // AI-first N1: on an ordinary model-written turn the AI's answer is the reply. A Draft build keeps its receipt face and
         // a Run/Explain its chance face (the horizon marker stays beside a chance).
+        // BYPASS1: every coaching reply the AI wrote is kept whole (no More-detail folding), Run/Explain/Draft included.
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
           : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const }
-            : profile === 'coaching' && !runOrExplainTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const } : {}),
+            : profile === 'coaching' && (!hostProse || (!runOrExplainTurn && faceContract !== 'draft')) ? { keepWhole: 'ai_answer' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
