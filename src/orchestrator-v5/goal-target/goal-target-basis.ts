@@ -325,9 +325,31 @@ export function statusQuoAssumptionWords(labels: string | readonly string[], bas
   return `This assumes carrying on as now leaves ${list} unchanged${through}; each option is measured against that.`;
 }
 
-/** Amendment 1: the status quo row's own line. Never a Monte Carlo figure or interval. */
-export function statusQuoRowWords(label: string): string {
-  return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+/** A level goal's held level today against its stated target, in the target's own unit (the status quo row's facts). */
+export interface StatusQuoLevel {
+  readonly today: number;
+  /** The held comparator (`>=`, `>`, `<=`, `<`). */
+  readonly comparator: string;
+  readonly target: number;
+  readonly unit: string;
+}
+
+/**
+ * Amendment 1: the status quo row's own line. Never a Monte Carlo figure or interval, never a chance.
+ * ⭐ Capacity judge row 3 (DL GO 14 Oct; AIE_TEXT_PENDING, `recovery/prompt/STATUS-QUO-ROW-DRAFT.txt`): on a LEVEL goal
+ * whose level today is held, the line says what "no change" means here (today's level against the stated target) and the
+ * one step that would give carrying on its own reading in the model. Every other case keeps the convention's own words.
+ */
+export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string {
+  const bound = level === undefined ? undefined : COMPARATOR_WORDS[level.comparator];
+  if (level === undefined || bound === undefined || !Number.isFinite(level.today) || !Number.isFinite(level.target)
+    || level.unit.trim() === '') return `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+  const { today, comparator: c, target } = level;
+  const meets = c === '>=' ? today >= target : c === '>' ? today > target : c === '<=' ? today <= target : today < target;
+  return `Carrying on as now: ‘${label}’ stays at ${sayFigureAsWritten(today, level.unit)} in this model, which `
+    + `${meets ? 'meets' : 'does not meet'} your target of ${bound} ${sayFigureAsWritten(target, level.unit)}, by assumption. `
+    + 'If it would change anyway, without any of these options, tell me what would change it and by how much, and Olumi '
+    + 'can add that to the model.';
 }
 
 /**
