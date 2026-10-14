@@ -2702,7 +2702,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && cell.reasons.some(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED'));
       const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText,
         horizonCell?.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES
-          ? horizonCell.reasons.find(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')?.message : horizonCell?.face) : null;
+          ? horizonCell.reasons.find(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')?.message ?? undefined : horizonCell?.face) : null;
       const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
         && replayChanceCells.some(cell => cell.kind === 'withheld')
         ? composedCandidate : null);
