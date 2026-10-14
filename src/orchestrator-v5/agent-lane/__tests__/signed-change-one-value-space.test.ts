@@ -416,6 +416,7 @@ describe('the drafter is told a change from today is a known zero', () => {
     const schema = buildCandidateSchema() as { properties: { factors: { items: { properties: { baseline_known: { description: string } } } } } };
     const d = schema.properties.factors.items.properties.baseline_known.description;
     expect(d).toContain('A provisional AI estimate keeps this false.');
-    expect(d).toMatch(/CHANGE FROM TODAY.*is 0 today by definition: baseline_known true, baseline_value 0/);
+    // DL ruling 14 Oct: re-bound to the AIE's item-4 wording (packet 20dfa110), the same instruction, equally strict.
+    expect(d).toMatch(/CHANGE FROM TODAY, today's structural value is 0: baseline_known true, baseline_value 0\./);
   });
 });
