@@ -1,4 +1,5 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
+import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { latestLinkBands } from '../../goal-target/input-claim-context.js';
@@ -1017,6 +1018,19 @@ const deadlineRefusalDetail = {
   reference_not_stated: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. State the reference date as “as of” and confirm it on the deadline card.`,
   horizon_not_modelled: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. No full month completes between the reference date and deadline.`,
 } as const;
+
+/**
+ * ⭐ COACH (BYPASS1 fold-in): the ONE typed next step of a read (`next-step-blocker.ts`), for every result that hands the
+ * AI the model's state: `get_canonical_state`, the build's post-build state and an approval's `readiness_after`. The host
+ * no longer says the step on a reply the AI wrote, so the AI must hold it wherever it reads the model.
+ */
+function nextStepFactOf(read: { readonly raw: unknown; readonly analysis_state?: unknown; readonly analysis_ready?: unknown;
+  readonly analysis_result?: unknown } | null | undefined): { next_step_blocker?: NonNullable<ReturnType<typeof nextStepBlockerForAgent>> } {
+  if (read === null || read === undefined) return {};
+  const step = nextStepBlockerForAgent({ raw: read.raw, analysis_state: read.analysis_state, analysis_ready: read.analysis_ready,
+    analysis_result: read.analysis_result });
+  return step === null ? {} : { next_step_blocker: step };
+}
 
 interface GraphRead {
   readonly scenario_revision?: number;
@@ -4137,7 +4151,9 @@ export function createAgentCapabilities(
   };
 
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true): Promise<ToolResult> => {
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true,
+    /** The sentence the words were read from, quoted on the card (the route's card, ruling A). */
+    readFrom?: string): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4198,6 +4214,7 @@ export function createAgentCapabilities(
       const rationale = typeof args.rationale === 'string' ? args.rationale : '';
       const sourceDetail = rationale.trim() === '' ? '' : ` Basis supplied for this interpretation: ${rationale}`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
+      const quoted = readFrom === undefined || readFrom.trim() === stated.words.trim() ? '' : ` in “${readFrom.trim().replace(/[.!?]+$/, '')}”`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4208,7 +4225,7 @@ export function createAgentCapabilities(
             ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
+        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”${quoted}.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
       });
       proposals.put(proposal);
       return {
@@ -4296,6 +4313,9 @@ export function createAgentCapabilities(
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
+        // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
+        // host contract tells the AI to end its reply with that step; no host line says it.
+        ...nextStepFactOf(g),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
@@ -8734,6 +8754,8 @@ export function createAgentCapabilities(
        * the turn deadline and the (K, H) prior fact before the one dispatch.
        */
       let firstAnalysis: Record<string, unknown> | undefined;
+      /** The read after the first pass, when one ran: the next step is that Run's (its joint, its targets). */
+      let postRunState: { raw: unknown; analysis_state: unknown; analysis_ready: unknown; analysis_result: unknown } | undefined;
       if (built.mutated === true && built.replayed !== true && opts.firstAnalysis !== undefined) {
         const outcome = await opts.firstAnalysis({
           scenarioId: ctx.scenario_id,
@@ -8747,6 +8769,8 @@ export function createAgentCapabilities(
         // typed leader permission — never the run's own receipt. A failed read describes nothing.
         const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
         const read = postRun !== null && postRun.status === 200 ? postRun.json : {};
+        if (postRun !== null && postRun.status === 200) postRunState = { raw: read.graph, analysis_state: read.analysis_state,
+          analysis_ready: read.analysis_ready, analysis_result: read.analysis_result };
         firstAnalysis = describeFirstAnalysisForAgent(outcome, {
           analysisState: read.analysis_state,
           analysisResult: read.analysis_result,
@@ -8801,6 +8825,8 @@ export function createAgentCapabilities(
         // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
         // get_canonical_state, so the first reply never contradicts the Run control.
         ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
+        // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
+        ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
@@ -10472,7 +10498,9 @@ export function createAgentCapabilities(
         return card === undefined ? undefined : { words: card.words,
           // A throw in the shared tail never takes the turn down: the same refusal the door already says.
           issue: async (subject, args) => {
-            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference); } catch {
+            // Ruling A (DL 14 Oct): the words are the user's, quoted with their sentence; that they are THIS goal's deadline is the
+            // drafter's reading, so every route card is Olumi's interpretation to check (approval stays approval, never authorship).
+            try { return await proposePlacedDeadline(subject, args, g, card.words, card.reference, undefined, true, false, card.quote); } catch {
               return { ok: false, mutated: false, refusal: 'deadline_not_placed', detail: deadlineRefusalDetail.horizon_not_modelled };
             }
           } };
@@ -10541,7 +10569,7 @@ export function createAgentCapabilities(
         // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
-        return { ...r, readiness_after: readinessViewOf(after?.raw) };
+        return { ...r, readiness_after: readinessViewOf(after?.raw), ...nextStepFactOf(after) };
       }
       return r;
     },

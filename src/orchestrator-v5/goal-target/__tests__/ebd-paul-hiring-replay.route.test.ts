@@ -289,6 +289,9 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     expect(draftedTeamPartOf(w.read()), 'the deadline model was built').not.toBeNull();
     const ask1 = expectOneVoice(w.read(), 'after the brief');
     expect(ask1).toBe(chanceGoalDeadlineAsk('next feature launch'));
+    // The ONE next step the AI holds after the build (the build's own result, as `get_canonical_state` gives it).
+    const builtNextStep = ((agentBodies.at(-1) as Rec).input as Rec[]).filter((i) => i.type === 'function_call_output')
+      .map((i) => JSON.parse(String(i.output)) as Rec).find((o) => o.next_step_blocker !== undefined)?.next_step_blocker;
     expect(readinessAsks(t1.analysis_ready).filter(m => !m.startsWith('Review'))).toContain(ask1);
     // E4 control: Paul's drafted event model set nothing aside, so no set-aside sentence.
     expect(JSON.stringify(t1)).not.toContain('set aside');
@@ -347,6 +350,10 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     const asks = [...new Set([ask1, ask2, ...seen.flatMap(b => readinessAsks(b.analysis_ready))])];
     for (const [k, body] of seen.entries()) for (const ask of asks) expect(timesSaid(body, ask), `turn ${k + 1}: ${ask}`).toBeLessThanOrEqual(1);
     expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(1);
+    // ⭐ BYPASS1 (DL, 14 Oct): the reply is the AI's own; the first analysis's server sentence still carries the question, and
+    // the AI holds it, by its exact words, as the ONE next step of the model it just built (never a "today's level").
+    expect(t1._diagnostic_trace.reply_author).toBe('ai');
+    expect(builtNextStep).toEqual({ kind: 'missing_input', ask: ask1 });
 
     // ── Run (the Run click). ⭐ DL (b1): PLoT answers with the REAL ENGINE's response to this exact request (`runOn`). The
     // engine gives no `probability_of_goal` at threshold 1; each chance is the goal's own constraint (`auto_goal_threshold`,

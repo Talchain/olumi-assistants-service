@@ -1,0 +1,340 @@
+{
+ "_provenance": "CEE staging 351eeda0 served capacity turn 01 (live run 2026-10-14T003921Z-capacity-post2996, codex/JUDGE-capacity-post2996-codex.md row 7): response_body.draft_graph verbatim; the user brief says \"Each additional specialist resolves about 20 tickets per week, between 10 and 30.\"",
+ "source_sha256": "4010d71f2cc78df817deae6582a2ba824e6cac904aec3ff290fcb3368c791de2",
+ "graph": {
+  "nodes": [
+   {
+    "id": "decision_weekly_support_capacity",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Decision: Weekly support capacity",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "weekly_support_capacity",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Weekly support capacity",
+    "provenance": "from_brief",
+    "goal_direction": ">=",
+    "goal_threshold": 0.2,
+    "observed_state": {
+     "cap": 500,
+     "unit": "tickets per week",
+     "value": 0.16,
+     "source": "brief_extraction",
+     "baseline": 0.16,
+     "raw_value": 80,
+     "extractionType": "explicit"
+    },
+    "threshold_source": "brief_extraction",
+    "goal_threshold_cap": 500,
+    "goal_threshold_raw": 100,
+    "goal_threshold_unit": "tickets per week",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "stated_effect_fit"
+   },
+   {
+    "id": "keep_current_staffing",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Keep current staffing",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "add_one_specialist",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Add one specialist",
+    "provenance": "from_brief",
+    "interventions": {
+     "additional_specialists": {
+      "unit": "specialists",
+      "value": 0.1,
+      "source": "brief_extraction",
+      "raw_value": 1,
+      "target_match": {
+       "node_id": "additional_specialists",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "add_half_time_specialist",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Add half-time specialist",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "additional_specialists": {
+      "unit": "specialists",
+      "value": 0.05,
+      "source": "cee_hypothesis",
+      "raw_value": 0.5,
+      "target_match": {
+       "node_id": "additional_specialists",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "existing_team_capacity",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Existing team capacity",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 500,
+     "unit": "tickets per week",
+     "value": 0.16,
+     "source": "brief_extraction",
+     "raw_value": 80,
+     "declared_scale": "unit_interval",
+     "extractionType": "explicit"
+    }
+   },
+   {
+    "id": "additional_specialists",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Additional specialists",
+    "category": "controllable",
+    "provenance": "unverified_brief",
+    "observed_state": {
+     "cap": 10,
+     "unit": "specialists",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "capacity_per_additional_specialist",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Capacity per additional specialist",
+    "category": "observable",
+    "provenance": "unverified_brief",
+    "observed_state": {
+     "cap": 50,
+     "unit": "tickets per week per specialist",
+     "range": {
+      "low": 10,
+      "high": 30,
+      "source": "user_override",
+      "meaning": "min_max",
+      "source_quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30."
+     },
+     "value": 0.4,
+     "source": "cee_inference",
+     "raw_value": 20,
+     "declared_scale": "unit_interval",
+     "extractionType": "inferred",
+     "user_material_unverified": true
+    }
+   },
+   {
+    "id": "additional_specialist_capacity",
+    "ref": "OC1",
+    "kind": "outcome",
+    "label": "Additional specialist capacity",
+    "provenance": "from_brief",
+    "scale_frame": 200,
+    "nonlinear_identity": {
+     "operation": "product",
+     "factor_ids": [
+      "additional_specialists",
+      "capacity_per_additional_specialist"
+     ],
+     "stated_in_brief": true
+    }
+   }
+  ],
+  "edges": [
+   {
+    "to": "keep_current_staffing",
+    "from": "decision_weekly_support_capacity",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "add_one_specialist",
+    "from": "decision_weekly_support_capacity",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "add_half_time_specialist",
+    "from": "decision_weekly_support_capacity",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_specialists",
+    "from": "add_one_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_specialists",
+    "from": "add_half_time_specialist",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_specialists",
+    "from": "keep_current_staffing",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "weekly_support_capacity",
+    "from": "existing_team_capacity",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "tickets per week",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "tickets per week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "additional_specialist_capacity",
+    "from": "additional_specialists",
+    "strength": {
+     "std": 0.49999999999999994,
+     "mean": 0.9999999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "tickets per week",
+      "stated_range": {
+       "end": "centre",
+       "low": 10,
+       "high": 30,
+       "text": "between 10 and 30"
+      },
+      "strength_mean": 0.9999999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "specialists"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "additional_specialist_capacity",
+    "from": "capacity_per_additional_specialist",
+    "strength": {
+     "std": 0.078125,
+     "mean": 0.3125
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "weekly_support_capacity",
+    "from": "additional_specialist_capacity",
+    "strength": {
+     "std": 0.2,
+     "mean": 0.4
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "tickets per week",
+      "strength_mean": 0.4,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "tickets per week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ]
+ }
+}
