@@ -42,7 +42,11 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     });
   });
 
-  it('the face line (Science 93 @0ecd69e4): "a month", never " / month"; rates + horizon with a carrier; figures without one', () => {
+  // ⛔ Capacity post3010 row 3 (PL #94 6135017311, 05:25Z): the PLAIN variant's "Meets / Falls short of … if today’s figures hold"
+  // said a future event and is retired for the line its predicate proves; side kept as data. The carrier's rates line and §(o′) stay.
+  it('the face line: §(o′) with no carrier and a horizon; the carrier’s rates line; the plain variant says only what is proven', () => {
+    const LINE = 'Chance not shown: the recorded results for this option do not establish that it is certain to meet or miss your goal. '
+      + 'You can review whether the model reflects the uncertainties that matter for this option.';
     const short = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 0, 0, 18500) : r));
     const acc = structuredClone(graph);
     acc.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').nonlinear_identity = { operation: 'accumulation',
@@ -62,12 +66,13 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     const evaluated = bound.nodes.filter((n: Rec) => n.nonlinear_identity).map((n: Rec) => ({
       node_id: n.id, ...n.nonlinear_identity, evaluated: true,
     }));
+    // The accumulation carrier's own projection words are unchanged (PL 05:25Z: only the plain variant moves).
     expect(lineOf(bound, fixedRates, evaluated)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 a month by month 12 if today’s rates hold.' });
     expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
-    expect(lineOf(noHorizon, fixedRates).line).toBe('Meets £20,000 a month if today’s figures hold.');
-    expect(lineOf(noHorizon, short).line).toBe('Falls short of £20,000 a month if today’s figures hold.');
+    expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
+    expect(lineOf(noHorizon, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     expect(lineOf(graph, short).line).toBe('Not shown yet: needs month-by-month changes');
     // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
     const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));
