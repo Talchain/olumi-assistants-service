@@ -1,4 +1,5 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine } from '../../goal-target/event-by-date-model.js';
+import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -124,6 +125,9 @@ const QUANTITY_FRAME = {
     'With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit.' },
 } as const;
 
+/** GEN D4 item B: the clause after the deadline question, carrying the goal's verified statement. AIE_TEXT_PENDING. */
+export const DEADLINE_QUOTE_CLAUSE = ' Your brief says: "<quote>"';
+
 /**
  * ⭐ STRICT ONLY AT THE OPENAI BOUNDARY (DL #75 5916270318, option D). OpenAI's strict json_schema needs every property in
  * `required`. The candidate contract (`buildCandidateSchema`) lets an outcome or a risk omit its frame, so a candidate
@@ -146,7 +150,7 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
         if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence' || name === 'source_quote'
-          || name === 'unknown_concerns')) continue;
+          || name === 'unknown_concerns' || name === 'deadline_words')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -233,6 +237,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // (packet 20dfa110, item 6).
       source_quote: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
         'For a target actually stated in the brief, including a stated event or deliverable, copy the complete relevant statement VERBATIM. Preserve any stated speaker, subject, figure, comparator, unit, reference, denominator, period, qualifications, conditions and negation. Include consecutive complete sentences when they are needed for that meaning; do not shorten qualifications, stitch unrelated passages or add words or a speaker name not present in the source. null when the brief states no target. A quote does not itself verify the claim, create a numerical target or confirm that its complete meaning is saved.' },
+      // ⭐ GEN D4 ITEM B (DL GO 14 Oct; AIE_TEXT_PENDING, `tests/fixtures/calendar-deadline-text/deadline-words.json`): the
+      // drafter's claim that the goal's deadline is a calendar point, in its own words; checked against `source_quote` and
+      // only asked, never stored (`calendar-deadline-claim.ts`). Optional in the contract, required in what is sent.
+      deadline_words: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'When the goal’s deadline is a calendar point rather than a number of months (for example the end of that quarter, by Q3, by March), copy the words that state that deadline VERBATIM from goal.source_quote, for example "by the end of that quarter". null when the deadline is a number of months, when the goal has no stated deadline, or when the words are a launch reference, runway, learning or measurement window rather than the goal’s deadline. These words are only used to ask the user which date is meant; they do not set a deadline.' },
     }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
@@ -2363,6 +2372,8 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
+    // The FIRST draft's goal: a retry is pinned to it, and its schema does not carry the claim or the quote.
+    const calendarDeadline = calendarDeadlineClaim(brief, firstCandidate.goal as Parameters<typeof calendarDeadlineClaim>[1]);
     const claimedHorizon = candidate.goal?.horizon_months;
     const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
       ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
@@ -2380,6 +2391,13 @@ export async function buildModelFromBrief(
         : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
     } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
       openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+    } else if (statedGoal.horizon.status === 'absent' && calendarDeadline !== undefined) {
+      // ⭐ GEN D4 ITEM B (DL GO 14 Oct): a calendar point the drafter claimed, checked inside the goal's own verified
+      // statement (`calendar-deadline-claim.ts`), is asked with today's not-held wording plus that statement, so "that
+      // quarter" is asked with the words that identify it. Only asked: nothing is stored. AIE_TEXT_PENDING (the clause).
+      const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
+      openQuestions.unshift(`Which date does "${calendarDeadline.words}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`
+        + DEADLINE_QUOTE_CLAUSE.split('<quote>').join(calendarDeadline.quote));
     }
     // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
     // its `goal_scope` entry). First, because the ruling requires it clarified or named before

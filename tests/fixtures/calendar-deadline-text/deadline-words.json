@@ -1,0 +1,5 @@
+{
+ "_source": "PROMPT draft texts, AIE_TEXT_PENDING (recovery/prompt/D4B-DEADLINE-WORDS-DRAFT.txt, 14 Oct). Replaced byte for byte by the AIE's texts before merge.",
+ "field_description": "When the goal’s deadline is a calendar point rather than a number of months (for example the end of that quarter, by Q3, by March), copy the words that state that deadline VERBATIM from goal.source_quote, for example \"by the end of that quarter\". null when the deadline is a number of months, when the goal has no stated deadline, or when the words are a launch reference, runway, learning or measurement window rather than the goal’s deadline. These words are only used to ask the user which date is meant; they do not set a deadline.",
+ "quote_clause": " Your brief says: \"<quote>\""
+}

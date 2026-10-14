@@ -3,9 +3,9 @@
  * NOT A MONTH COUNT. T5-integrated (staging 14b1e544) D4, both runs: "…by the end of that quarter" was drafted as
  * horizon_months 3 and basis.period_months 3, a count that needs today's date and a fiscal calendar to be true.
  *
- * ⛔ SHIPS ONLY WITH HIRING's calendar-point admission pair: `horizon-attestation.ts` CALENDAR_POINT misses "that quarter",
- * so on this brief a null horizon would leave no deadline question at all (attestHorizon returns `absent`, probe at
- * 14b1e544). The combined candidate adds the row that the brief's words are asked.
+ * ⛔ SHIPS ONLY WITH ITS CONSUMER (DL 14 Oct, moved from HIRING): the text alone loses the deadline (null also means "no
+ * deadline", and `attestHorizon`'s CALENDAR_POINT misses "that quarter"). `calendar-deadline-claim.test.ts` asks the
+ * drafter's claimed point, checked inside the goal's verified statement, in this same PR.
  *
  * The text is bound by identity (`tests/fixtures/calendar-deadline-text/calendar-deadline-text.json`); the corpus is
  * T5-integrated D4 r2's registered brief and recorded drafter answer (`_source`), through the real `buildModelFromBrief`.
