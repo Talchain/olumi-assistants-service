@@ -137,7 +137,7 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(sent[0] ?? '').toContain(STATED_FIGURE);
   });
 
-  it('AI-written Explain with a ranking sentence: the gate still drops it (authority), and no host closing is appended', async () => {
+  it('AI-written Explain with a ranking sentence: the gate still drops it (authority) and says why it cut it', async () => {
     // The served Run named its leader; here the comparison is withheld (the separation could not be established).
     state = { ...READ.analysis_state, leader_claim: { permitted: false, separation: 'not_separated', withheld_reason: 'separation_unavailable' } };
     const run = await runPress();
@@ -154,7 +154,8 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(explain._diagnostic_trace.reply_author).toBe('ai');
     expect(explain.assistant_text).toContain('The analysis ran.');
     expect(explain.assistant_text).not.toContain(RANKING);
-    expect(explain.assistant_text).not.toMatch(NO_LEADER_CLOSING);
+    // The gate appends its reason only when it cut a sentence: the reply accounts for the cut (CI on #3001: 9 protected rows).
+    expect(explain.assistant_text).toMatch(NO_LEADER_CLOSING);
     expect(sent[0] ?? '').toContain('goal_chance_range_display');
     // Tool-less Explain: the next-step rule, never the tool-use rule.
     expect(sent[0] ?? '').toContain(Q4);

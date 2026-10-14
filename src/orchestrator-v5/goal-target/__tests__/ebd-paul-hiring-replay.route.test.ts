@@ -346,12 +346,11 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     // turn (readiness, the coach) is said at most once in each reply; the deadline ask IS said, once, on the build turn.
     const asks = [...new Set([ask1, ask2, ...seen.flatMap(b => readinessAsks(b.analysis_ready))])];
     for (const [k, body] of seen.entries()) for (const ask of asks) expect(timesSaid(body, ask), `turn ${k + 1}: ${ask}`).toBeLessThanOrEqual(1);
-    // ⭐ BYPASS1 (DL, 14 Oct): this reply is the AI's own, so the host no longer adds the deadline question to it. The AI holds
-    // that question, by its exact words, as the ONE next step of the model it just built, never a "today's level" of the share,
-    // and the Q4 rule tells it to end on that step. Was: the host appended it (said once).
+    expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(1);
+    // ⭐ BYPASS1 (DL, 14 Oct): the reply is the AI's own; the first analysis's server sentence still carries the question, and
+    // the AI holds it, by its exact words, as the ONE next step of the model it just built (never a "today's level").
     expect(t1._diagnostic_trace.reply_author).toBe('ai');
     expect(builtNextStep).toEqual({ kind: 'missing_input', ask: ask1 });
-    expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(0);
 
     // ── Run (the Run click). ⭐ DL (b1): PLoT answers with the REAL ENGINE's response to this exact request (`runOn`). The
     // engine gives no `probability_of_goal` at threshold 1; each chance is the goal's own constraint (`auto_goal_threshold`,

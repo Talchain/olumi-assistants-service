@@ -110,6 +110,8 @@ describe('joint: the same reason the withheld line says types the step', () => {
     olumi_base: 'missing_input', precision_missing: 'run_again', not_returned: 'run_again',
     // No typed cause: an input might or might not unlock it, so no step is invented (PL 6135017311).
     figure_not_preserved: null, condition_not_named: null, no_option: null,
+    // #2992: a condition withheld or unscored has its own note saying why; the joint types no step of its own.
+    condition_unscored: null, condition_withheld: null,
   };
   it.each(Object.entries(kinds))('%s → %s', (reason, kind) => {
     const blocker = jointBlockerOf(2, reason as JointWithholdReason, ['Churn'], [conversion]);
