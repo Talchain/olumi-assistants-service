@@ -22,6 +22,8 @@ export interface TurnReadCache {
   around<T>(fn: () => Promise<T>): Promise<T>;
   /** Starts the turn's first graph read now; the first reader of the same epoch joins it (see the implementation). */
   prefetch(): void;
+  /** The prefetched read, only when it started before anything was dispatched or written: the model as the turn found it. */
+  turnStartRead(): Promise<Read | undefined>;
 }
 
 type Read = Awaited<ReturnType<InternalDispatch>>;
@@ -47,6 +49,8 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string, re
   let kept: { read: Read; epoch: number } | undefined;
   /** The read `prefetch` started and has not finished yet, with the epoch it started in. */
   let inflight: { promise: Promise<Read>; epoch: number } | undefined;
+  /** The prefetch, kept whatever later reads do: started at epoch 0, it is the model before this turn changed anything. */
+  let turnStart: Promise<Read> | undefined;
 
   const around = async <T>(fn: () => Promise<T>): Promise<T> => {
     try {
@@ -90,6 +94,7 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string, re
     if (kept !== undefined || inflight !== undefined) return;
     const startedAt = epoch;
     const promise = withAnalysisReadDeadline(() => inner(graphReadPath, {}));
+    if (startedAt === 0) turnStart = promise;
     const entry = { promise, epoch: startedAt };
     inflight = entry;
     promise.then(
@@ -102,5 +107,10 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string, re
     });
   };
 
-  return { dispatch, around, prefetch };
+  const turnStartRead = async (): Promise<Read | undefined> => {
+    const read = await turnStart?.catch(() => undefined);
+    return read?.status === 200 ? copy(read) : undefined;
+  };
+
+  return { dispatch, around, prefetch, turnStartRead };
 }

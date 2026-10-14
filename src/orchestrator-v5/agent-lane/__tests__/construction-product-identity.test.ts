@@ -382,8 +382,14 @@ describe('rule 4: a declaration that does not hold structurally is rejected and 
     expect(r?.reason).toContain('"Pro revenue" is not in the model');
   });
 
-  it('RED: the strict schema admits only a product, and requires the key', () => {
-    const wrongOp = { ...pricing([{ ...PRO_MRR_IDENTITY, operation: 'sum' }]) };
+  it('RED: the strict schema admits product, sum and accumulation, and requires the key', () => {
+    expect(buildCandidateSchema()).toMatchObject({ properties: { identities: { items: {
+      properties: { operation: { enum: ['product', 'sum', 'accumulation'] } },
+    } } } });
+    for (const operation of ['product', 'sum', 'accumulation']) {
+      expect(strict(pricing([{ ...PRO_MRR_IDENTITY, operation }])), operation).toBe(true);
+    }
+    const wrongOp = { ...pricing([{ ...PRO_MRR_IDENTITY, operation: 'unknown' }]) };
     expect(strict(wrongOp)).toBe(false);
     const { identities: _dropped, ...withoutKey } = pricing([]);
     expect(strict(withoutKey), 'strict output must say "none" rather than omit the key').toBe(false);

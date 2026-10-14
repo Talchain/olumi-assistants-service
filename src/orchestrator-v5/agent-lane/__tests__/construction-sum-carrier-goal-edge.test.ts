@@ -88,11 +88,15 @@ describe('R3-2 — the served C shape: the lever-only tally that feeds the goal'
     const { graph } = await build(G.brief, candidate(G));
     expect(sumsOf(graph.nodes)).toEqual([G_SUM]);
   });
-  it('the persisted contract: an Olumi sum survives GraphV3; a STATED sum (never minted) is malformed and dropped', () => {
+  // L2 (DL brief 12 Oct): construction now carries a sum the brief DEFINES as the user's (`checkDeclaredSums`), so a stated
+  // sum of two or more parts is a valid carrier. The malformed shapes are still dropped.
+  it('the persisted contract: an Olumi sum and (L2) a stated declared sum survive GraphV3; malformed sums are dropped', () => {
     const parse = (ni: unknown) => (GraphV3.parse({ nodes: [{ id: TALLY, kind: 'outcome', label: 'T', nonlinear_identity: ni }], edges: [] }) as unknown as Graph).nodes[0]!.nonlinear_identity;
     expect(parse({ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: false })).toEqual({ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: false });
-    expect(parse({ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: true })).toBeUndefined();
+    expect(parse({ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: true })).toEqual({ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: true });
     expect(parse({ operation: 'sum', factor_ids: ['a'], stated_in_brief: false })).toBeUndefined();
+    expect(parse({ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: 'yes' })).toBeUndefined();
+    expect(parse({ operation: 'sum', factor_ids: ['a', 'b'] })).toBeUndefined();
   });
   it('⭐ said ONCE, as Olumi\'s reading, where the user always sees it (open_questions), and typed', async () => {
     const { out } = await build(G.brief, candidate(G));

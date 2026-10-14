@@ -329,7 +329,7 @@ describe('(a) the checked declaration is carried on the product node, from regis
   });
 
   it('a malformed carrier is dropped and the stored graph still parses (never a new refusal)', () => {
-    for (const bad of [{ operation: 'sum', factor_ids: ['a', 'b'], stated_in_brief: true }, { operation: 'product', factor_ids: ['a'], stated_in_brief: true },
+    for (const bad of [{ operation: 'unknown', factor_ids: ['a', 'b'], stated_in_brief: true }, { operation: 'product', factor_ids: ['a'], stated_in_brief: true },
       { operation: 'product', factor_ids: ['a', 'b'] }, 'product', null]) {
       const parsed = GraphV3.safeParse({ nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR', nonlinear_identity: bad }], edges: [] });
       expect(parsed.success, JSON.stringify(bad)).toBe(true);

@@ -95,6 +95,8 @@ describe('K3 at the route — a typed "yes" applies the change, runs nothing, an
       .toEqual([
         expect.objectContaining({ name: 'authorise_change', mutated: true }),
         expect.objectContaining({ name: 'run_analysis', refusal: 'run_not_requested' }),
+        // The route's automatic Run, recorded as this turn's Run (C.md): the one that ran.
+        expect.objectContaining({ name: 'run_analysis', ok: true, mutated: false }),
       ]);
     expect((t2.json() as { suggested_actions: Chip[] }).suggested_actions.filter((c) => c.action_type === 'run_analysis'), 'it ran: no Run chip')
       .toEqual([]);

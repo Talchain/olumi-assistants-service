@@ -183,6 +183,7 @@ import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, breakEvenLine, goalNotCheckedLine, thresholdReasonLine, THRESHOLD_REST_STANDS, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { carriedEffectsTiming } from '../orchestrator-v5/goal-target/carried-effects-timing.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
@@ -4148,9 +4149,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const analysedThisTurn = runPress || result.tool_results.some((r) => r?.ran === true)
       || result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')
       || firstAnalysis?.outcome.ran === true || firstAnalysis?.outcome.reason === 'already_ran_for_construction';
-    if (committedChange && !analysedThisTurn && admitsRunOffer((await readBackState(readingDispatch, scenarioId)).analysisReady)) {
-      autoRun = await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.', effects_timing: null },
+    const savedRead = committedChange && !analysedThisTurn ? await readBackState(readingDispatch, scenarioId) : undefined;
+    if (savedRead !== undefined && admitsRunOffer(savedRead.analysisReady)) {
+      // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
+      const turnStart = (await readCache.turnStartRead())?.json as { graph?: unknown; analysis_result?: unknown } | undefined;
+      const effectsTiming = carriedEffectsTiming(turnStart === undefined ? undefined
+        : { graph: turnStart.graph, analysisResult: turnStart.analysis_result }, savedRead.graph);
+      autoRun = await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.', effects_timing: effectsTiming },
         { afterCommittedChange: true });
+      // ⭐ THE AUTOMATIC RUN IS THIS TURN'S RUN (principle review C.md, after #3038): recorded as the Agent's own Run is, so
+      // every reader of "this turn ran an analysis" (the chance lines, what it rests on, break-even, the bound card, the
+      // Run's outcome chips) reads it. A Run that did not complete is not recorded: its own sentence below says so, and the Run chip stays.
+      if (autoRun.ran === true) {
+        result = { ...result, tool_calls: [...result.tool_calls, { name: 'run_analysis', ok: autoRun.ok === true, mutated: false }],
+          tool_results: [...result.tool_results, autoRun] };
+      }
     }
     const runPressFailed = runPress && runPressResult?.refusal === 'run_failed';
     // Preserve the existing typed engine refusal/failure on a Run press, even if the model invents another cause.
@@ -5954,6 +5967,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * nothing left out; absent = not recorded.
        */
       ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
+      /**
+       * ⭐ IDENTITY-EXACT (DGAI #2774): the identities this Run's engine evaluated, the final read's
+       * `analysis_identity_evaluated_node_ids` (same fact, same gates as `analysis_result`), as a SIDECAR root key (the
+       * `option_participation` pattern). A Run press reaches the UI on this turn, so an evaluated identity's operand links
+       * read "Exact: …" at once, not only after a reload. `[]` = recorded, none evaluated; absent = not attested.
+       */
+      ...(identityEvaluated !== undefined ? { identity_evaluated_node_ids: [...identityEvaluated] } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
