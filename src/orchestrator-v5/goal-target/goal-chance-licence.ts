@@ -38,6 +38,7 @@ import {
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { midSentence } from '../agent-lane/guidance/render.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -609,7 +610,7 @@ export function goalChanceLicenceOf(
   // ⭐ AIE #94 6160376175 (hiring row 3): on the bound percent CHANGE from today (a change quantity this Run scored as the paired
   // change from today), a shortfall is a share of today's level of the goal ("21% of today’s productivity"): never percentage
   // points, never a share of the target. Any other "%" change says no shortfall (it would be ambiguous); other units keep their own.
-  const percentChange = changeFrame !== undefined && target.unit.trim() === '%';
+  const percentChange = changeFrame !== undefined && classifyUnitScaleClass(target.unit) === 'percent';
   const goalWords = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label)
     ? midSentence(goal.label.trim()) : undefined;
   const ofToday = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today' && goalWords !== undefined
