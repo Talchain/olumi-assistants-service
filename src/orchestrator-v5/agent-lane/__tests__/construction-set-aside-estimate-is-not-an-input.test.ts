@@ -122,14 +122,29 @@ describe("Olumi's £75,000 per conversation, which no edge carries, reaches the 
     expect(said[0]).toMatch(/^Olumi's guess, set aside: NOT in the model: /);
   });
 
-  it('RED: asked ONCE, in words that never place it in the model; the drafter\'s "provisional estimate of £75,000" question is not shown', async () => {
+  // ⛔ #3012 round 1 (DL ruling 14 Oct 02:0xZ): with no verified concerns the drafter's question is KEPT, never removed by its
+  // figure. Removal needs `unknown_concerns` binding it to the set-aside link alone; the contract's own question stays first.
+  const CONTRACT_Q = /^Olumi's starting guess is that .*75,?000.*, but the model doesn't hold it yet\. How much does "Qualified investor conversations" change "securing funding"\?$/;
+
+  it('the contract asks it in words that never place it in the model; with no verified concerns the drafter\'s own question is kept', async () => {
     const { out } = await build(funding(OLUMIS_75K));
+    const qs = strings(out.open_questions);
+    expect(qs.filter((q) => CONTRACT_Q.test(q)), JSON.stringify(qs)).toHaveLength(1);
+    expect(qs).toContain(DRAFTER_75K);
+    expect(qs).toContain(DRAFTER_RUNWAY);                             // CONTROL: an unrelated drafter question stays
+  });
+
+  it('RED: bound by `unknown_concerns` to the set-aside link alone, the drafter\'s "provisional estimate of £75,000" question is not shown beside it', async () => {
+    const { out } = await build({ ...funding(OLUMIS_75K), unknown_concerns: [
+      { unknown: DRAFTER_75K, concerns: ['Qualified investor conversations → securing funding'] },
+      { unknown: DRAFTER_RUNWAY, concerns: [] },
+    ] });
     const qs = strings(out.open_questions);
     const quoting = qs.filter((q) => /75,?000/.test(q));
     expect(quoting, JSON.stringify(qs)).toHaveLength(1);
-    expect(quoting[0]).toMatch(/^Olumi's starting guess is that .*75,?000.*, but the model doesn't hold it yet\. How much does "Qualified investor conversations" change "securing funding"\?$/);
+    expect(quoting[0]).toMatch(CONTRACT_Q);
     expect(qs).not.toContain(DRAFTER_75K);
-    expect(qs).toContain(DRAFTER_RUNWAY);                             // CONTROL: an unrelated drafter question stays
+    expect(qs).toContain(DRAFTER_RUNWAY);
   });
 
   it('RED (AIQ #2383): £75,000 tagged explicit but written nowhere in the brief is Olumi\'s guess, set aside exactly as one', async () => {
