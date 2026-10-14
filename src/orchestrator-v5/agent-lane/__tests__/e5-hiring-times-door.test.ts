@@ -116,6 +116,11 @@ describe('Paul\'s hiring-time sentence → ONE card → his starts in the model'
     const r = await dispatchTool('propose_hiring_times', JSON.stringify(PAULS_ARGS), ctx(PAUL) as never, w.caps) as Rec;
     const done = await press(w, r.proposal_id);
     expect(done).toMatchObject({ ok: true, applied: true, mutated: true, receipts: [{ version: 2, version_id: 'v-e5' }] });
+    // Reply-face P1: `follow_up` is what the user reads, so it holds the user's sentence only. The direction for the Agent is
+    // `note`, and the committed change's automatic Run is never asked for (the served legacy press showed such text verbatim).
+    expect(done.follow_up).toBe("These hiring assumptions are saved, with your inputs and Olumi's estimates distinguished.");
+    expect(String(done.follow_up)).not.toMatch(/\b(?:Run the analysis|do not state|speak only)\b/i);
+    expect(done.note).toBe('The analysis runs on the saved model; speak only to its result, and state no chance before it returns.');
     expect(w.registers).toHaveLength(1);
     expect(w.registers[0]).toMatchObject({ expected_graph_hash: expect.any(String), expected_graph_identity_hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     const after = w.graph();
