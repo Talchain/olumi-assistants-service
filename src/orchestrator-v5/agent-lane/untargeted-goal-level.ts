@@ -6,9 +6,15 @@
  * A goal holds today's level only against its target's scale (the target's cap): with no target there is no scale, so
  * admission writes no level (`admit-model.ts`, the untargeted branch), and the user's figure vanished without a word. It is
  * still never written here as a model figure: a level with no scale would need renormalising, by a guess, once a target
- * arrives. Instead the drop is a ledger entry that keeps what the user said (value, unit, their sentence) and asks ONE
- * question quoting them, through the channel construction already asks from (`.magnitude_question`, routed to
+ * arrives. Instead the drop is a ledger entry that keeps what the user said (value, unit, their sentence) and says ONE
+ * fact quoting them, through the channel construction already asks from (`.magnitude_question`, routed to
  * `open_questions` by `build-model.ts`). Nothing is discarded; no cap or threshold is invented.
+ *
+ * ⭐ THE HOST CARRIES ONLY THE FACT (AIE packet 6807d4e3 `C_caller_scope.host_fact`, 14 Oct): "Your brief says “<complete
+ * retained sentence>”. This draft does not yet hold that current level as a model input." No numeric target is required
+ * and the purpose is not re-asked: the one useful reasoning activity is the AI's, from the current blocker and retained
+ * purpose through the existing `next_step_blocker` / Q4 contract. With no retained sentence, the figure is said, never a
+ * quote invented for it.
  *
  * Only a level the brief WRITES as today's level of this goal is the user's (`goalLevelStated`, the same attestation a
  * change goal's base uses, whose own span gives the sentence); a drafter's own figure is not, and its drop owes no question.
@@ -41,6 +47,6 @@ export function untargetedGoalLevelAsk(
   const said = quote !== null ? `says “${quote}”` : `puts it at ${sayFigureWithoutRounding(level, unit ?? '')} today`;
   return {
     value: level, unit, quote,
-    question: `Your brief ${said}, but with no target the model holds no level for ‘${metric}’. What level would count as success, and by when?`,
+    question: `Your brief ${said}. This draft does not yet hold that current level as a model input.`,
   };
 }
