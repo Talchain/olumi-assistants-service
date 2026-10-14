@@ -907,7 +907,7 @@ describe('T4e K1: cold read never licenses an unknown sampled root as zero', () 
       const { assessCanonicalAnalysisReadiness } = await import('../../../../orchestrator/tools/analysis-ready-helper.js');
       expect(assessCanonicalAnalysisReadiness(JSON.parse(bytes)).blockingIssues.map(i => i.message)).toEqual([kind === 'risk'
         // AIE packet 6e52e896 `event_risk.readiness_copy`: a risk root on the event path is asked its occurrence within the goal's period.
-        ? 'How likely is ‘Delivery disruption’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.'
+        ? 'Is ‘Delivery disruption’ already true now? If so, say so. If not: How likely is ‘Delivery disruption’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.'
         : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
     }
   });
