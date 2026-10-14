@@ -75,6 +75,7 @@ import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
 import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import type { ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
+import type { ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -3054,6 +3055,8 @@ export async function dispatchOptionLevelsBatch(
     readonly goalHorizon?: ApprovedGoalHorizon;
     /** ⭐ G: the user's answer to the goal's open question (`goal-reading-write.ts`): ONE commit, alone. */
     readonly goalReading?: ApprovedGoalReading;
+    /** ⭐ Olumi's occurrence range for a risk root (`risk-occurrence.ts`): ONE commit, alone. */
+    readonly riskOccurrence?: ApprovedRiskOccurrence;
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
@@ -3071,6 +3074,7 @@ export async function dispatchOptionLevelsBatch(
   const linkStrengths = batch.linkStrengths ?? [];
   const eventKind = batch.goalSteady !== undefined ? 'goal_steady_edit' : batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
     : batch.goalReading !== undefined ? 'goal_reading_edit'
+    : batch.riskOccurrence !== undefined ? 'risk_occurrence_edit'
     : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
@@ -3131,7 +3135,7 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.riskOccurrence === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: batch.canvasEdit === true, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
@@ -3147,6 +3151,7 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
       ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}),
       ...(batch.goalReading !== undefined ? { goalReading: batch.goalReading } : {}),
+      ...(batch.riskOccurrence !== undefined ? { riskOccurrence: batch.riskOccurrence } : {}),
       ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
       ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
@@ -3481,6 +3486,8 @@ export type CommitOptionLevelsInput = {
   readonly deadline_card?: { readonly expected_goal: unknown; readonly own_write_landed: boolean };
   /** ⭐ G: ONE approved answer to the goal's open question — `expected_basis` is the stored reading the card showed. Alone. */
   readonly goal_reading?: ApprovedGoalReading;
+  /** ⭐ ONE approved card of Olumi's occurrence range for a risk root — `expected_node` is the node the card showed. Alone. */
+  readonly risk_occurrence?: ApprovedRiskOccurrence;
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
@@ -3550,6 +3557,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
       ...(input.goal_reading !== undefined ? { goal_reading: input.goal_reading } : {}),
+      ...(input.risk_occurrence !== undefined ? { risk_occurrence: (({ own_write_landed: _own, ...card }) => card)(input.risk_occurrence) } : {}),
       ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
@@ -3589,6 +3597,10 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.goal_reading !== undefined ? { goalReading: { goal_id: input.goal_reading.goal_id, expected_basis: input.goal_reading.expected_basis,
       ...(input.goal_reading.answer_words !== undefined ? { answer_words: input.goal_reading.answer_words } : {}),
       ...(input.goal_reading.expected_goal !== undefined ? { expected_goal: input.goal_reading.expected_goal } : {}) } } : {}),
+    ...(input.risk_occurrence !== undefined ? { riskOccurrence: { risk_id: input.risk_occurrence.risk_id,
+      event_risk: input.risk_occurrence.event_risk, expected_node: input.risk_occurrence.expected_node,
+      goal_id: input.risk_occurrence.goal_id, expected_goal: input.risk_occurrence.expected_goal,
+      own_write_landed: input.risk_occurrence.own_write_landed === true } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,

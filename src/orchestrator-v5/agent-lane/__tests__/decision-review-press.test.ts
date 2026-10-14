@@ -139,7 +139,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
 
   it('CONTROL (F1): two named roots keep their labels', () => {
     expect(treatedAsZeroReplyLine(withRoots({}, true), COMPARATIVE)).toBe(
-      'How likely or how large is "Demand shortfall" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review. How likely or how large is "Supply delay" today? The numerical analysis is withheld until this risk has a supported value. You can also ask Olumi to propose a labelled starting assumption for review.');
+      'How likely or how large is "Demand shortfall" today? The numerical analysis is withheld until this risk has a supported value. How likely or how large is "Supply delay" today? The numerical analysis is withheld until this risk has a supported value.');
   });
 
   it('RED (Codex r2 P2): a goal-figure reason the editors would rewrite says the withhold in the reader\'s own opening', () => {

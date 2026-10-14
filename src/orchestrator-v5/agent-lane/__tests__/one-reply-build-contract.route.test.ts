@@ -427,7 +427,8 @@ describe('ONE reply contract through the build route', () => {
     expect(body._answer_shape).toBeDefined();
     const shown = face(body._answer_shape!);
     expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual(['Not shown yet; why is under More detail']);
-    expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
+    // AIE packet 6e52e896 `event_risk.readiness_copy`: the risk root's event path asks its occurrence within the goal's period.
+    expect(shown).toContain('How likely is ‘Price-rise cancellation risk’ to happen at least once within 12 months?');
     expect(shown).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     // Q-c (DL 87114): one horizon-limit statement per surface.
