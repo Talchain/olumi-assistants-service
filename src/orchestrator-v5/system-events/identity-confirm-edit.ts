@@ -182,15 +182,16 @@ function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: rea
  * subscribers at month 12’ = today's subscribers + new each month − churn, over 12 months"), in the order the sum-goal branch
  * asks them, or `null`. A net-zero rate the model added itself is not asked (`goalStockAccumulationOf`'s rule).
  */
-function horizonAccumulationInputsOf(graph: Rec & { nodes: unknown[] }, part: Rec): string[] | null {
+function horizonAccumulationInputsOf(graph: Rec, part: Rec): string[] | null {
+  const nodes: unknown[] = Array.isArray(graph.nodes) ? graph.nodes : [];
   const acc = isRec(part.nonlinear_identity) ? part.nonlinear_identity : undefined;
   const ids = acc?.operation === 'accumulation' && Array.isArray(acc.factor_ids) && acc.factor_ids.length === 3
     && acc.factor_ids.every((x) => typeof x === 'string') ? acc.factor_ids as string[] : undefined;
-  const goals = graph.nodes.filter((n): n is Rec => isRec(n) && n.kind === 'goal');
+  const goals = nodes.filter((n): n is Rec => isRec(n) && n.kind === 'goal');
   const months = goals.length === 1 && typeof goals[0]!.id === 'string' ? readGoalRecord(graph, goals[0]!.id)?.horizon?.months : undefined;
   if (ids === undefined || months === undefined || acc?.horizon_months !== months) return null;
   const [stockId, rateId, inflowId] = ids as [string, string, string];
-  const rate = graph.nodes.find((n): n is Rec => isRec(n) && n.id === rateId);
+  const rate = nodes.find((n): n is Rec => isRec(n) && n.id === rateId);
   const zero = isRec(rate?.observed_state) ? rate.observed_state : undefined;
   const netZero = rateId === `${String(part.id)}_net_zero_rate` && zero?.raw_value === 0 && zero.value === 0;
   return [stockId, inflowId, ...(netZero ? [] : [rateId])];
