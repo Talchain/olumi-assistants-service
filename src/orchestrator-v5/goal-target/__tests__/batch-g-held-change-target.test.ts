@@ -53,7 +53,8 @@ const NOTE = 'Nothing has changed yet. This card proposes confirming the saved t
   + 'authorise_change only when the user’s bound approval for this shown card permits this proposal_id. It confirms the reading only; it does not change '
   + 'the underlying claim’s authorship or give permission to Run.';
 const BUTTON = { label: 'Yes, read it that way', message: 'Yes, read my target that way.' };
-const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”.`;
+/** The AIE's receipt; its closing full stop is not doubled after the answer's own "." (the card's rule). */
+const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”`;
 /** At least 10 %: the reconstructed second turn-14 call, as the hook passes it (`TARGET_OPERATOR[type]`, value, unit). */
 const AT_LEAST_10 = { operator: '>=', value: 10, unit: '%' };
 const goalOf = (body: Rec): Rec => (body.graph.nodes as Rec[]).find((n) => n.id === GOAL)!;

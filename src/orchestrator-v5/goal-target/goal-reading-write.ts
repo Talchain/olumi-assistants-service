@@ -105,8 +105,10 @@ const ANSWER_QUOTE_MAX = 300;
 export function goalReadingRecordedWords(reading: string, answer: string | undefined): string {
   const words = answer?.trim() ?? '';
   const base = GOAL_READING_CONFIRMED_TEMPLATE.replace('{reading}', () => reading);
-  return words !== '' && words.length <= ANSWER_QUOTE_MAX && !/[\r\n]/.test(words)
-    ? `${base} ${GOAL_READING_ANSWER_TEMPLATE.replace('{answer}', () => words)}` : base;
+  if (words === '' || words.length > ANSWER_QUOTE_MAX || /[\r\n]/.test(words)) return base;
+  // The template's closing full stop is not doubled after an answer that already ends a sentence ("…points.”", the card's rule).
+  const said = GOAL_READING_ANSWER_TEMPLATE.replace('{answer}', () => words);
+  return `${base} ${/[.?!]$/.test(words) ? said.slice(0, -1) : said}`;
 }
 
 export function applyGoalReadingEdit(persistedGraph: unknown, approved: ApprovedGoalReading): GoalReadingEditResult {

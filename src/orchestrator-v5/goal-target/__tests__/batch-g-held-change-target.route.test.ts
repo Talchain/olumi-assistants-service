@@ -39,7 +39,8 @@ const QUESTION = 'Does “increase productivity by at least 10%” mean 10% rela
 const READING = '‘productivity’ up at least 10% from today at three months, measured against today\'s development productivity'
   + '; also required, not part of this target: maintaining code quality; launch readiness';
 const CARD = `Confirm this reading of your target: ${READING}. Question being answered: ${QUESTION}`;
-const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”.`;
+/** The AIE's receipt; its closing full stop is not doubled after the answer's own "." (the card's rule). */
+const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded answer was: “${CLARIFIED}”`;
 const ROUTE_MS = 60_000;
 const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === 'productivity')!;
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
