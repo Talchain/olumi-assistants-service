@@ -1,0 +1,310 @@
+{
+ "_source": {
+  "draft": "olumi-work/recovery/s3/T6-prompt/raw/B/D4-reduce-cycle-time-r2-call1.json (provider output, gpt-5.6-terra, CEE a770ce49 + AIE manifest b34d6ebb), output_text parsed verbatim",
+  "brief": "olumi-work/recovery/s3/T6-prompt/payloads/B/D4-reduce-cycle-time-r2-call1.json .input, verbatim",
+  "aie_operations": "AIE-F-PROMPT-REQUEST-OVERRIDES-20261012.json (sha256 b34d6ebbc86616496bf16724099659c53de07e384181610cfcdde25227ab1c28) .operations, verbatim"
+ },
+ "brief": "Our current median delivery cycle is 8 weeks. Without a change, we expect it to reach 10 weeks next quarter. We want to reduce it by at least 15% relative to today's 8-week level by the end of that quarter. We are considering test automation or a release coordinator. Automation may initially slow delivery; the coordinator could help but hiring time is uncertain. We must not worsen the current defect rate. Help us understand the causal trade-offs.",
+ "draft": {
+  "goal": {
+   "kind": null,
+   "deliverable": null,
+   "metric": "median delivery cycle",
+   "operator": "<=",
+   "target_stated": true,
+   "value": -15,
+   "unit": "weeks",
+   "horizon_months": 3,
+   "provenance": "explicit",
+   "frame": "change_rel",
+   "baseline_known": true,
+   "baseline_value": 8,
+   "baseline_provenance": "explicit",
+   "scope": null,
+   "quantity_frame": "level",
+   "basis": {
+    "reference": "today",
+    "denominator": "today's 8-week median delivery cycle",
+    "period_months": 3,
+    "period_kind": "at_end",
+    "effect_unit": "weeks at the end of next quarter",
+    "effects_at_period_end": false,
+    "also_required": [
+     "must not worsen the current defect rate"
+    ],
+    "open_question": null
+   }
+  },
+  "constraints": [
+   {
+    "metric": "Defect rate",
+    "operator": "<=",
+    "value": 0,
+    "unit": "%",
+    "provenance": "inferred",
+    "frame": "change_abs",
+    "role": "limit"
+   }
+  ],
+  "options": [
+   {
+    "label": "Carry on as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   },
+   {
+    "label": "Test automation",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Test automation coverage",
+      "value": 25,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Release coordinator",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Release coordinator capacity",
+      "value": 1,
+      "value_kind": "absolute",
+      "unit": "FTE",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Phased automation",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Test automation coverage",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Test automation coverage",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Release coordinator capacity",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "FTE",
+    "provenance": "ai_proposed",
+    "plausible_max": 10
+   },
+   {
+    "label": "Defect rate",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": 5,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "No-change cycle increase by next quarter",
+    "role": "external",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 0,
+    "unit": "weeks",
+    "provenance": "inferred",
+    "plausible_max": 20
+   }
+  ],
+  "risks": [
+   {
+    "label": "Automation implementation disruption",
+    "provenance": "explicit",
+    "unit": null,
+    "plausible_max": null
+   },
+   {
+    "label": "Coordinator hiring delay",
+    "provenance": "explicit",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [],
+  "links": [
+   {
+    "from": "Test automation coverage",
+    "to": "median delivery cycle",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -0.4,
+    "effect_per_source_change": 10,
+    "effect_provenance": "ai_proposed",
+    "definitional": null,
+    "basis": "More automated regression checking is estimated to remove 0.4 weeks of cycle time per additional 10 percentage points of coverage by quarter end."
+   },
+   {
+    "from": "Test automation coverage",
+    "to": "Defect rate",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -0.5,
+    "effect_per_source_change": 10,
+    "effect_provenance": "ai_proposed",
+    "definitional": null,
+    "basis": "Automated repeatable testing is estimated to prevent 0.5 percentage points of defects per additional 10 percentage points of coverage."
+   },
+   {
+    "from": "Test automation coverage",
+    "to": "Automation implementation disruption",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Automation implementation disruption",
+    "to": "median delivery cycle",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Release coordinator capacity",
+    "to": "median delivery cycle",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": null,
+    "basis": "A full-time coordinator is provisionally estimated to remove one week of scheduling and release hand-off delay by quarter end."
+   },
+   {
+    "from": "Release coordinator capacity",
+    "to": "Defect rate",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -0.5,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": null,
+    "basis": "Dedicated release readiness coordination is estimated to reduce escaped defects by 0.5 percentage points."
+   },
+   {
+    "from": "Release coordinator capacity",
+    "to": "Coordinator hiring delay",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Coordinator hiring delay",
+    "to": "median delivery cycle",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null
+   },
+   {
+    "from": "Defect rate",
+    "to": "median delivery cycle",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 0.2,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": null,
+    "basis": "Each additional percentage point of defects is provisionally estimated to add 0.2 weeks of rework and verification time."
+   },
+   {
+    "from": "No-change cycle increase by next quarter",
+    "to": "median delivery cycle",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 2,
+    "effect_per_source_change": 2,
+    "effect_provenance": "inferred",
+    "definitional": null,
+    "basis": "Derived from the stated no-change forecast: the cycle rises from 8 weeks today to 10 weeks next quarter, or 2 additional weeks."
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "Forecast source retained: \"Without a change, we expect it to reach 10 weeks next quarter.\" This is modelled as a shared external increase of 2 weeks from today's 8-week level by the end of next quarter.",
+   "The exact calendar end date of \"next quarter\" is needed to confirm the three-month planning horizon.",
+   "What is the current defect rate, and how is it measured? The provisional 5% baseline is an Olumi modelling assumption, not a reported measurement.",
+   "How much automation coverage is feasible by the end of next quarter, and how much delivery capacity will its initial implementation consume?",
+   "How long would recruiting, notice, onboarding, and ramp-up take for the release coordinator? The coordinator benefit is currently a provisional quarter-end estimate.",
+   "The link sizes are provisional modelling assumptions; they should be replaced with your delivery, defect, and hiring evidence before relying on a calculation."
+  ],
+  "decision_question": "Help us understand the causal trade-offs."
+ },
+ "aie_operations": [
+  {
+   "kind": "replace_exact",
+   "location": "actual provider body.instructions",
+   "old": "Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.",
+   "replacement": "Set decision_question to the brief's governing question or statement of intent, copied VERBATIM as one span of 8–240 characters, including a statement such as 'We need to decide whether ...'. Preserve its compound purposes and conditions. Use null only when no such span exists. Never reword it or turn exploration into a decision."
+  },
+  {
+   "kind": "replace_exact",
+   "location": "actual provider body.text.format.schema.properties.decision_question.description where retained by strict schema",
+   "old": "The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none.",
+   "replacement": "The brief's own governing question or statement of intent, copied VERBATIM as one span of 8–240 characters. Include statements such as 'We need to decide whether ...'. Keep every purpose and condition within that span. Use null only when the brief contains no such span. Do not reword it or turn exploration into a decision."
+  },
+  {
+   "kind": "insert_after_exact",
+   "location": "actual provider body.instructions",
+   "anchor": "Preserve exact user facts, numbers, constraint semantics and time horizon.",
+   "insertion": " NO-CHANGE FORECAST. When the brief gives both a current level and a forecast without an intervention at a later horizon, preserve both with their distinct references and the forecast's exact wording and qualifiers. Represent the forecast once as a shared external drift by that horizon, in the goal's own units, using the existing factor and definitional-link shape. Derive the drift as forecast minus current level and identify it as derived from the stated forecast, never as a newly stated measurement. For 8 weeks today and a forecast of 10 weeks next quarter, retain 8 weeks as today's level and a forecast of 2 additional weeks by that horizon. That forecast affects carrying on and the alternatives unless an alternative changes its cause. Do not replace today's level or the target with the forecast, set the forecast drift to zero, count it twice, or retain it only as a question. Keep the original forecast sentence and its source alongside the derived change in the available evidence and question carriers."
+  }
+ ]
+}
