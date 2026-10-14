@@ -34,7 +34,8 @@ describe('the served D2 r1 retry, through the real build path', () => {
   it('reproduces the served totals, and now gives the drafter its own links budget: 30 − 18 = 12 for its 14', async () => {
     expect(FX.draft_call1.links, 'the first draft drew 14 links itself').toHaveLength(14);
     const { sent } = await construct([FX.draft_call1, FX.draft_call2]);
-    expect(sent, 'one first pass and one retry').toHaveLength(2);
+    // The served retry is still over, so the second bounded retry follows (DL ruling 14 Oct).
+    expect(sent, 'the first pass and two size retries').toHaveLength(3);
     const retry = sent[1]!.instructions as string;
     // The served state, byte for byte: the same draft yields the same totals the provider was sent.
     expect(retry).toContain(FX.served_retry_totals);

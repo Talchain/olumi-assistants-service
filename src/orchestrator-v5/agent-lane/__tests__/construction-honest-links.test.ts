@@ -275,7 +275,8 @@ describe('⛔ the kept option -> factor edge carries the user’s authorship of 
     const s = sequence(first, retry);
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
-    expect(s.calls).toHaveLength(2);
+    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    expect(s.calls).toHaveLength(3);
     expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(false);
     expect(out.refusal).toBe('model_too_large');
     expect(dp.registered()).toBe(0);

@@ -349,16 +349,17 @@ describe('⭐ a served draft keeps the drafter’s raw answer — one record, it
     expect(appended.filter((a) => JSON.stringify(a).includes(JSON.stringify(served).slice(1, -1))), 'no session append carries the raw text').toEqual([]);
   });
 
-  it('RED: a draft with a construction RETRY still writes ONE record, its two calls in order, each byte-identical to what was served', async () => {
+  it('RED: a draft with construction RETRIES still writes ONE record, its calls in order, each byte-identical to what was served', async () => {
     constructionText = () => `${JSON.stringify(oversized(), null, 2)}\n`;
     const body = await firstBrief();
     expect(body._agent.tool_calls, 'control: refused after the retry').toMatchObject([{ name: 'build_model_from_brief', ok: false, refusal: 'model_too_large' }]);
-    expect(constructionSent, 'control: first + one retry').toHaveLength(2);
+    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    expect(constructionSent, 'control: first + two size retries').toHaveLength(3);
     const recs = rawRows();
     expect(recs).toHaveLength(1);
     expect(recs[0]!.outcome).toBe('refused');
     expect(recs[0]!.refusal).toBe('model_too_large');
-    expect(recs[0]!.calls.map((c) => c.role)).toEqual(['first', 'retry']);
+    expect(recs[0]!.calls.map((c) => c.role)).toEqual(['first', 'retry', 'retry']);
     recs[0]!.calls.forEach((c, i) => {
       expect(c.raw_text === constructionServed[i], `call ${i} byte-identical`).toBe(true);
       expect(c.prompt_sha256, `call ${i} prompt`).toBe(sha(String(constructionSent[i]!.instructions)));

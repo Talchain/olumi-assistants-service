@@ -86,7 +86,8 @@ describe('⛔ a retry is adopted only if every user-stated identity survives', (
     const s = structuredSequence(first, retry);
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
-    expect(s.calls).toHaveLength(2);
+    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    expect(s.calls).toHaveLength(3);
     expect(out.ok).toBe(false);
     expect(out.refusal).toBe('model_too_large');
     expect(registered(dp.paths)).toBe(0);
@@ -140,7 +141,8 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     const s = structuredSequence(first, retry);
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
-    expect(s.calls).toHaveLength(2);
+    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    expect(s.calls).toHaveLength(3);
     expect(out.ok).toBe(false);
     expect(out.refusal).toBe('model_too_large');
     expect(registered(dp.paths)).toBe(0);
@@ -229,7 +231,8 @@ describe('⛔ the cap never overrides the user’s material plus its required sc
     const s = structuredSequence(c, c);
     const dp = dispatcher();
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
-    expect(s.calls, 'the oversized model is retried, not exempted').toHaveLength(2);
+    // DL ruling 14 Oct (T5 D2 r1): a model still over the limit after the first retry gets ONE more, never a third.
+    expect(s.calls, 'the oversized model is retried, not exempted').toHaveLength(3);
     expect(out.ok).toBe(false);
     expect(out.refusal).toBe('model_too_large');
   });
