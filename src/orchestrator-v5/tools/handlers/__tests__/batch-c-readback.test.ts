@@ -894,7 +894,8 @@ describe('T4e K1: cold read never licenses an unknown sampled root as zero', () 
   it.each(['risk', 'outcome'])('a stored %s root withholds with the named next step', async (kind) => {
     const graph = JSON.parse(store(marketing())) as Rec;
     const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
-    graph.nodes.push({ id: 'unknown_root', kind, label: 'Delivery disruption' });
+    // The user's own risk still withholds and asks first; a DRAFTED one is left out instead (DL 19:26Z, the next row).
+    graph.nodes.push({ id: 'unknown_root', kind, label: 'Delivery disruption', ...(kind === 'risk' ? { provenance: 'user_set' } : {}) });
     graph.edges.push({ from: 'unknown_root', to: goal.id, strength: { mean: -0.4, std: 0.1 },
       exists_probability: 1, effect_direction: 'negative' });
     const bytes = JSON.stringify(graph);
@@ -910,5 +911,17 @@ describe('T4e K1: cold read never licenses an unknown sampled root as zero', () 
         ? 'Is ‘Delivery disruption’ already true now? If so, say so. If not: How likely is ‘Delivery disruption’ to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.'
         : 'What is "Delivery disruption" today, before any option changes it? Without a current level the analysis would treat it as zero.']);
     }
+  });
+  it('DL 19:26Z: a stored DRAFTED risk root with no figure is left out of the request (with its link), never sent as zero', async () => {
+    const graph = JSON.parse(store(marketing())) as Rec;
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    graph.nodes.push({ id: 'unknown_root', kind: 'risk', label: 'Delivery disruption' });
+    graph.edges.push({ from: 'unknown_root', to: goal.id, strength: { mean: -0.4, std: 0.1 },
+      exists_probability: 1, effect_direction: 'negative' });
+    const { payload } = await runFromStore(JSON.stringify(graph));
+    const sent = payload.graph as Rec;
+    expect((sent.nodes as Rec[]).map((n) => n.id)).not.toContain('unknown_root');
+    expect((sent.edges as Rec[]).filter((e) => e.from === 'unknown_root' || e.to === 'unknown_root')).toEqual([]);
+    expect((sent.nodes as Rec[]).map((n) => n.id)).toContain(goal.id);
   });
 });

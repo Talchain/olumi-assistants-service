@@ -27,6 +27,7 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 import { goalReadingProjectionOf } from '../goal-target/goal-reading-write.js';
 import { EventRiskV1, type EventRiskV1T } from '../../schemas/event-risk.js';
 import { userStatementOf, type UserStatement } from './user-statements.js';
+import { limitNodeIds } from '../../graph/retained-limit.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -93,6 +94,89 @@ export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
   const block = EventRiskV1.safeParse(node.event_risk);
   return !(block.success && block.data.occurrence.basis === 'olumi' && !riskOccurrenceIsCurrent(node, graph));
 }
+
+/**
+ * ⭐ ONE RULE FOR AN UNSIZED RISK, IN EVERY JOURNEY (DL 19:26Z 14 Oct; T1H's hiring r3, served CEE 9c3b5808: the drafted
+ * ‘Code quality degradation’ held the whole Run on MISSING_FACTOR_LEVEL, with no window for any card to size it; capacity's
+ * added risk is already left out and said once, #3084). A risk nobody has sized is LEFT OUT of the Run's calculation: never
+ * sampled at zero, and never given an invented occurrence to open the Run (PL 18:41Z). The host says so once, with its labelled
+ * next step (`decision-input-ask.ts`). In the set: a RISK with a unique id that
+ *  · nobody has sized: readiness's level rule finds no level and it carries no occurrence block at all (a stale one of Olumi's
+ *    is offered again, as before);
+ *  · the user did not put there themselves (`provenance: 'user_set'`): a risk the user added still asks for its figure first;
+ *  · is undecided (`analysis_participation` absent: an adopted risk asks; a `retained_excluded` one is already out);
+ *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it (option, decision and limit links are not
+ *    causes: PLoT strips them; a node the user kept out is not sent), and a directed path to a goal;
+ *  · is not something the Run needs: no option sets it and no limit names it (those keep asking, as before).
+ * Pure; read on the model as saved, by readiness, the Run's and what-if's compute projection, and the host's line.
+ */
+export function unsizedRiskIds(graph: unknown): ReadonlySet<string> {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return new Set();
+  const nodes = graph.nodes.filter(isRec);
+  const counts = new Map<unknown, number>();
+  for (const n of nodes) counts.set(n.id, (counts.get(n.id) ?? 0) + 1);
+  const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
+  // Judged on the graph the Run SENDS (T4i): a node the user kept out (`retained_excluded`) and its links are not sent.
+  const keptOut = new Set(nodes.filter((n) => n.analysis_participation === 'retained_excluded').map((n) => n.id));
+  const causal = (id: unknown): boolean => kindOf.has(id) && !keptOut.has(id) && !['option', 'decision', 'constraint'].includes(String(kindOf.get(id)));
+  const edges = graph.edges.filter(isRec).filter((e) => e.edge_type !== 'bidirected' && causal(e.from) && causal(e.to));
+  const needed = new Set<unknown>([
+    ...nodes.filter((n) => n.kind === 'option').flatMap((n) => [n.interventions, isRec(n.data) ? n.data.interventions : undefined]
+      .flatMap((i) => (isRec(i) ? Object.keys(i) : []))),
+    ...limitNodeIds(graph),
+  ]);
+  const reachesGoal = (from: unknown): boolean => {
+    const seen = new Set<unknown>([from]);
+    for (const stack = [from]; stack.length > 0;) {
+      const at = stack.pop();
+      for (const e of edges) {
+        if (e.from !== at || seen.has(e.to)) continue;
+        if (kindOf.get(e.to) === 'goal') return true;
+        seen.add(e.to);
+        stack.push(e.to);
+      }
+    }
+    return false;
+  };
+  return new Set(nodes.filter((n) => n.kind === 'risk' && typeof n.id === 'string' && counts.get(n.id) === 1
+    && n.provenance !== 'user_set' && n.analysis_participation === undefined
+    && (n.event_risk === undefined || n.event_risk === null) && !riskHoldsALevel(n, graph)
+    && !needed.has(n.id) && !edges.some((e) => e.to === n.id) && reachesGoal(n.id)).map((n) => n.id as string));
+}
+
+/**
+ * The compute-only copy the Run and the what-if send: every {@link unsizedRiskIds} node, and every link touching it, left out
+ * (PLoT refuses a dangling link end). Identity is read on the model as saved; this copy is never persisted.
+ */
+export function withoutUnsizedRisks<T>(graph: T, identityGraph: unknown = graph): T {
+  const leftOut = unsizedRiskIds(identityGraph);
+  if (leftOut.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  const touches = (e: unknown): boolean => isRec(e) && (leftOut.has(e.from as string) || leftOut.has(e.to as string));
+  return { ...graph, nodes: graph.nodes.filter((n) => !(isRec(n) && leftOut.has(n.id as string))),
+    ...(Array.isArray(graph.edges) ? { edges: graph.edges.filter((e) => !touches(e)) } : {}) } as T;
+}
+
+/**
+ * The host's ONE line for an unsized risk (said once, on the build turn and every Run: `decision-input-ask.ts`): what the
+ * result assumes about it (that it doesn't happen), and the labelled step that sizes it. The step is offered only where the occurrence card can exist (one
+ * current goal period, `riskOccurrenceSubject`: PL 05:53Z); otherwise the line promises nothing.
+ */
+export function unsizedRiskLine(graph: unknown, riskId: string, besideChance: boolean): string | null {
+  const node = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === riskId) : undefined;
+  const label = typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : null;
+  if (label === null || /[\r\n]/.test(label)) return null;
+  const subject = riskOccurrenceSubject(graph, riskId);
+  // DL (AIE asked, #94): leaving the risk out is a labelled CONDITIONAL, so the line says what the result assumes.
+  const leftOut = `${besideChance ? 'These chances assume' : 'This analysis assumes'} ‘${label}’ doesn’t happen; it has no figure yet.`;
+  return subject.kind !== 'eligible' ? leftOut
+    : `${leftOut} To include it, say whether it’s already true now, or how likely it is to happen at least once within `
+      + `${windowWords(subject.window_months)}; or ask Olumi to suggest a starting estimate for you to review.`;
+}
+
+/** The label-free form, where a label would not reach the user whole (the review's editors): the count, never a guess. */
+export const unsizedRisksUnnamedLine = (count: number): string => (count === 1
+  ? 'This analysis assumes one risk on your goal’s path doesn’t happen; it has no figure yet.'
+  : `This analysis assumes ${count} risks on your goal’s path don’t happen; they have no figures yet.`);
 
 /**
  * ⭐ AN OCCURRENCE IS A LEVEL ONLY OVER THE GOAL'S CURRENT WINDOW (Codex r2 on #3013: a write landed, the goal's period then

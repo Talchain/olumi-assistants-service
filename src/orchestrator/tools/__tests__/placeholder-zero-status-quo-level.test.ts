@@ -17,6 +17,7 @@
  * (`served.isl_goal_ancestor_data_gap`), never a list typed here. Binary shape
  * alone does not establish a current state (AIE T4 R5, 13 October 2026).
  */
+import { unsizedRiskIds } from '../../../orchestrator-v5/agent-lane/risk-occurrence.js';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -299,7 +300,9 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       const EXCLUDED = 'fac_new_pro_customer_price';
       const ORPHANED = 'risk_competitive_price_or_ai_feature_response';
       expect(levelIssueFactorIds(fx.graph), 'precondition: before exclusion the risk had a cause').not.toContain(ORPHANED);
+      // The orphaned risk is the user's own here (`user_set`): theirs is asked. A DRAFTED one is left out (the next row).
       const graph = excluding(fx.graph, [EXCLUDED]);
+      (graph.nodes as Array<Record<string, unknown>>).find((n) => n.id === ORPHANED)!.provenance = 'user_set';
       const guard = sent(graph);
       expect(guard.excludedNodeIds).toEqual([EXCLUDED]);
       const onSent = levelIssueFactorIds(guard.graph);
@@ -307,6 +310,21 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       expect(onSent).not.toContain(EXCLUDED);
       expect(levelIssueFactorIds(graph)).toEqual(onSent);
       expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+
+    it('A (DL 19:26Z): the same orphaned risk as DRAFTED, unsized, is left out, on the stored graph and the sent graph alike', () => {
+      const fx = load('journey-a-run2-final-214311Z');
+      const EXCLUDED = 'fac_new_pro_customer_price';
+      const ORPHANED = 'risk_competitive_price_or_ai_feature_response';
+      const graph = excluding(fx.graph, [EXCLUDED]);
+      const guard = sent(graph);
+      expect(unsizedRiskIds(graph).has(ORPHANED)).toBe(true);
+      expect(unsizedRiskIds(guard.graph).has(ORPHANED)).toBe(true);
+      const onSent = levelIssueFactorIds(guard.graph);
+      expect(onSent).not.toContain(ORPHANED);
+      expect(levelIssueFactorIds(graph)).toEqual(onSent);
+      // Before the exclusion it had a cause, so it was never in the set.
+      expect(unsizedRiskIds(fx.graph).has(ORPHANED)).toBe(false);
     });
 
     it('a lever target excluded too: the Run refuses rather than withhold anything, so readiness withholds nothing either', () => {
@@ -330,7 +348,8 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
         { id: 'c', kind: 'option', label: 'Olumi suggestion', proposed_by: 'olumi', interventions: { x: { value: 0.7, source: 'cee_inference' } } },
         { id: 'f', kind: 'factor', label: 'Staff', category: 'controllable', observed_state: { value: 0.5, source: 'user_override' } },
         { id: 'x', kind: 'factor', label: 'Excluded cause', category: 'controllable', observed_state: { value: 0.3, source: 'user_override' }, analysis_participation: 'retained_excluded' },
-        { id: 'r', kind: 'risk', label: 'Orphaned risk' },
+        // The user's own risk (`user_set`), so it is asked; a DRAFTED unsized risk is left out instead (DL 19:26Z 14 Oct).
+        { id: 'r', kind: 'risk', label: 'Orphaned risk', provenance: 'user_set' },
       ], edges: [e('d', 'a'), e('d', 'b'), e('d', 'c'), e('a', 'f'), e('b', 'f'), e('c', 'x'), e('f', 'g'), e('x', 'r'), e('r', 'g')] };
       expect(levelIssueFactorIds(graph)).toEqual(['r']);
       expect(resolveRunAdmission(graph).willProceed).toBe(false);

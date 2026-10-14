@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { resolveRunAdmission } from '../analysis-ready-core.js';
 import { assessRouteAdmission } from '../../../../cee/graph-readiness/canonical-readiness.js';
 import { readinessViewOf, stillNeededLine } from '../../../agent-lane/readiness-view.js';
+import { unsizedRiskIds } from '../../../agent-lane/risk-occurrence.js';
 import {
   assessCanonicalAnalysisReadiness,
   buildCanonicalAnalysisReadyFromGraph,
 } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 
 /** T4e AMEND / AIE 6144041136: every relevant unknown sampled root withholds
- * numerical analysis; an optional prior must use the existing proposal path. */
+ * numerical analysis; an optional prior must use the existing proposal path.
+ * ⭐ DL 19:26Z 14 Oct (`unsizedRiskIds`): a DRAFTED unsized risk is left out of the Run instead, said once by the host; a
+ * risk the user added (`user_set`) still withholds and asks. The replica's risk root is the user's unless a row says drafted. */
 
 type Rec = Record<string, unknown>;
 const TECH = 'hire_lead';
@@ -58,10 +61,10 @@ function replica(developersToday = 6, baseline = true) {
   return { nodes, edges, options, goal_node_id: 'goal' };
 }
 
-function withRoot(kind: string, valued = false, reaches = true) {
+function withRoot(kind: string, valued = false, reaches = true, drafted = false) {
   const g = replica(4);
   g.nodes.push({ id: 'root_gap', kind, label: kind === 'risk' ? 'Lack of AI experience' : 'Current delivery capacity',
-    category: 'observable', ...(valued ? { observed_state: { value: 0.35, source: 'brief_extraction' } } : {}),
+    category: 'observable', ...(kind === 'risk' && !drafted ? { provenance: 'user_set' } : {}), ...(valued ? { observed_state: { value: 0.35, source: 'brief_extraction' } } : {}),
   });
   if (reaches) g.edges.push(edge('root_gap', 'goal', kind === 'risk'));
   return g;
@@ -84,6 +87,18 @@ describe('every sampled unvalued root kind on the goal path has a typed gap', ()
     expect(assessRouteAdmission(g).may_run).toBe(false);
     expect(unvaluedRoots(g)).toEqual([]);
     expect(stillNeededLine(readinessViewOf(g))).toBeNull();
+  });
+
+  it('R1 (DL 19:26Z): the same risk DRAFTED, unsized, is left out: no gap and no ask; the option levels still withhold', () => {
+    const g = withRoot('risk', false, true, true);
+    expect(rootIssues(g)).toEqual([]);
+    expect(unsizedRiskIds(g)).toEqual(new Set(['root_gap']));
+    expect(buildCanonicalAnalysisReadyFromGraph(g)?.blockers?.map(b =>
+      typeof b === 'object' && b !== null && 'message' in b ? b.message : undefined)).toEqual([
+      'Factor "Tech leads" is currently 1 people. What should option "Carry On as Now" set it to?',
+      'Factor "Developers" is currently 4 people. What should option "Carry On as Now" set it to?',
+    ]);
+    expect(unvaluedRoots(g)).toEqual([]);
   });
 
   it('R1-contrast: the same risk with a finite level has no gap and runs', () => {
@@ -137,7 +152,7 @@ const RISK_IDS = ['risk:ai_experience', 'risk:hiring_mismatch'] as const;
 const RISK_LABELS = ['Lack of AI experience', 'Hiring mismatch'] as const;
 
 /** Paul's fresh hiring shape: both levers valued; the risks have no figure. */
-function freshHiringDraft(withRisks = true, valuedRisks = false) {
+function freshHiringDraft(withRisks = true, valuedRisks = false, own = false) {
   const options = [
     option(BASE, 'Carry On', {}, true),
     option(DEVS, 'Hire Two Developers', { developer_headcount: { value: 6 / 30, source: 'brief_extraction' } }),
@@ -151,7 +166,7 @@ function freshHiringDraft(withRisks = true, valuedRisks = false) {
     { id: 'tech_lead_headcount', kind: 'factor', label: 'Tech leads', category: 'controllable',
       observed_state: { value: 1 / 10, raw_value: 1, unit: 'people', source: 'brief_extraction' } },
     ...options,
-    ...(withRisks ? RISK_IDS.map((id, i) => ({ id, kind: 'risk', label: RISK_LABELS[i],
+    ...(withRisks ? RISK_IDS.map((id, i) => ({ id, kind: 'risk', label: RISK_LABELS[i], ...(own ? { provenance: 'user_set' } : {}),
       ...(valuedRisks ? { observed_state: { value: 0.35, source: 'brief_extraction' } } : {}),
     })) : []),
   ];
@@ -166,8 +181,8 @@ function freshHiringDraft(withRisks = true, valuedRisks = false) {
 }
 
 describe('T4e K1: non-factor roots withhold and offer a next step', () => {
-  it('U1: the fresh a994-shaped hiring draft withholds both risk roots by id', () => {
-    const g = freshHiringDraft();
+  it('U1: the fresh a994-shaped hiring draft withholds both risk roots by id, when they are the user\'s own', () => {
+    const g = freshHiringDraft(true, false, true);
     const assessment = assessCanonicalAnalysisReadiness(g);
     const ready = buildCanonicalAnalysisReadyFromGraph(g)!;
     expect(ready.may_run).toBe(false);
@@ -184,6 +199,22 @@ describe('T4e K1: non-factor roots withhold and offer a next step', () => {
     expect(assessment.repairProposal?.unresolved_inputs.map(i => i.factor_id)).toEqual(['developer_headcount', 'tech_lead_headcount', ...RISK_IDS]);
     expect(assessment.repairProposal?.issue_ids).toEqual(assessment.issues.map(i => i.issue_id));
     expect(stillNeededLine(readinessViewOf(g))).toBeNull();
+  });
+
+  it('U1 (DL 19:26Z): DRAFTED, as a994 drafts them, both risk roots are left out by id; only the offered option levels remain', () => {
+    const g = freshHiringDraft();
+    const assessment = assessCanonicalAnalysisReadiness(g);
+    const ready = buildCanonicalAnalysisReadyFromGraph(g)!;
+    expect(unsizedRiskIds(g)).toEqual(new Set(RISK_IDS));
+    // Only the offered option levels remain, so the Run may proceed: no risk holds it any more.
+    expect(ready.may_run).toBe(true);
+    expect(resolveRunAdmission(g).willProceed).toBe(true);
+    expect(ready.status).toBe('needs_user_input');
+    expect(ready.unvalued_roots).toBeUndefined();
+    expect(assessment.blockingIssues.map(i => [i.code, i.factor_id])).toEqual([
+      ['MISSING_OPTION_VALUE', 'developer_headcount'], ['MISSING_OPTION_VALUE', 'tech_lead_headcount'],
+    ]);
+    expect(assessment.repairProposal?.unresolved_inputs.map(i => i.factor_id)).toEqual(['developer_headcount', 'tech_lead_headcount']);
   });
 
   it('U2: giving both risks a likelihood removes the notices and the ask', () => {
@@ -225,7 +256,7 @@ describe('T4e K1: non-factor roots withhold and offer a next step', () => {
   });
 
   it('U5: no zero treatment or automatic prior is manufactured for unknown risks', () => {
-    const g = freshHiringDraft(); const before = structuredClone(g);
+    const g = freshHiringDraft(true, false, true); const before = structuredClone(g);
     const view = readinessViewOf(g);
     expect(view.may_run).toBe(false);
     expect(view.treated_as_zero).toBeUndefined();
@@ -235,11 +266,18 @@ describe('T4e K1: non-factor roots withhold and offer a next step', () => {
       ...RISK_LABELS.map(label =>
       `How likely or how large is "${label}" today? Olumi can’t run the numbers until this risk has a figure.`)]);
     expect(g).toEqual(before);
+    // Drafted (DL 19:26Z): still no zero, no prior and no write; they are left out, never asked.
+    const drafted = freshHiringDraft(); const draftedBefore = structuredClone(drafted);
+    expect(readinessViewOf(drafted).treated_as_zero).toBeUndefined();
+    expect(assessCanonicalAnalysisReadiness(drafted).blockingIssues.map(i => i.message)).toEqual([
+      'Factor "Developers" is currently 4 people. What should option "Carry On" set it to?',
+      'Factor "Tech leads" is currently 1 people. What should option "Carry On" set it to?']);
+    expect(drafted).toEqual(draftedBefore);
   });
 
   it('risk gaps join the repair proposal without losing existing factor gaps', () => {
     for (const count of [0, 1, 2]) {
-      const g = freshHiringDraft();
+      const g = freshHiringDraft(true, false, true);
       for (let k = 1; k <= count; k++) {
         g.nodes.push({ id: `factor_gap_${k}`, kind: 'factor', label: `Capacity ${k}`, category: 'observable' });
         g.edges.push(edge(`factor_gap_${k}`, 'goal'));

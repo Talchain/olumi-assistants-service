@@ -68,6 +68,7 @@ export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-ho
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
+import { withoutUnsizedRisks } from '../../agent-lane/risk-occurrence.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -868,7 +869,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // can apply it to that option alone. Identity + zero incidence + no named limit is the SAME readiness predicate.
     // PLoT cannot return a driver, sensitivity or worth-checking row for a risk it never receives. Project BEFORE the
     // remaining compute readers; the snapshot and persisted graph (including the stamp) are untouched.
-    let graphForAnalysis = withoutPreconditionRisks(participation.graph, snapshot.graph);
+    // An unsized drafted risk is left out the same way, and said once by the host (`unsizedRiskIds`, readiness's own rule).
+    let graphForAnalysis = withoutUnsizedRisks(withoutPreconditionRisks(participation.graph, snapshot.graph), snapshot.graph);
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately

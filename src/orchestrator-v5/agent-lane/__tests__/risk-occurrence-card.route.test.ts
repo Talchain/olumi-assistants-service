@@ -29,6 +29,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { unsizedRiskIds, unsizedRiskLine } from '../risk-occurrence.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
@@ -61,6 +62,8 @@ const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal'
 /** The served read with a saved 3-month window, 14 October 2026 to 14 January 2027 (Codex r1's shape). */
 const DATED = (() => { const b = structuredClone(SERVED) as Rec; Object.assign(goalOf(b.graph), { goal_horizon: { deadline: '2027-01-14' },
   goal_horizon_reference_date: '2026-10-14', goal_horizon_months: 3, goal_horizon_stated_months: 3 }); return b; })();
+/** The same model with the risk as the user's own (`user_set`): theirs still asks first (DL 19:26Z 14 Oct). */
+const own = (g: Rec): Rec => { const c = structuredClone(g); (c.nodes as Rec[]).find((n) => n.id === RISK)!.provenance = 'user_set'; return c; };
 const levelAsks = (g: Rec): Rec[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[]).filter((i) => i.code === 'MISSING_FACTOR_LEVEL');
 
 /** The served read in a stateful store: the read route, the level door's append (graph, facts) and its read-back. */
@@ -155,11 +158,16 @@ const offerCard = async (turn: Awaited<ReturnType<typeof route>>) => {
 };
 
 describe('Hiring path (a): Olumi’s starting assumption for the risk root, through the real route', () => {
-  it('precondition (served graph): the risk root has no level and no cause; readiness withholds the whole Run and asks the event question (AIE)', () => {
+  it('precondition (served graph): the risk root has no level and no cause; drafted, it is left out and its line offers this card (DL 19:26Z)', () => {
     expect(riskOf(SERVED.graph)).toEqual({ id: RISK, ref: 'R1', kind: 'risk', label: LABEL, provenance: 'ai_inferred' });
     expect((SERVED.graph.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
-    expect(buildCanonicalAnalysisReadyFromGraph(SERVED.graph)).toMatchObject({ may_run: false });
-    expect(levelAsks(SERVED.graph).map((i) => [i.factor_id, i.message])).toEqual([[RISK, ASK]]);
+    expect(unsizedRiskIds(SERVED.graph)).toEqual(new Set([RISK]));
+    expect(levelAsks(SERVED.graph)).toEqual([]);
+    expect(unsizedRiskLine(SERVED.graph, RISK, false)).toBe(`This analysis assumes ‘${LABEL}’ doesn’t happen; it has no figure yet. To include it, say whether `
+      + 'it’s already true now, or how likely it is to happen at least once within 3 months; or ask Olumi to suggest a starting estimate for you to review.');
+    // The user's own risk: readiness withholds the whole Run and asks the event question (AIE), as before.
+    expect(buildCanonicalAnalysisReadyFromGraph(own(SERVED.graph))).toMatchObject({ may_run: false });
+    expect(levelAsks(own(SERVED.graph)).map((i) => [i.factor_id, i.message])).toEqual([[RISK, ASK]]);
   });
 
   it('GREEN: propose → ONE card → the press → saved as Olumi’s → the Run is admitted → a cold reopen keeps it', async () => {
@@ -219,7 +227,7 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((typed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'))
       .toEqual([expect.objectContaining({ ok: false, mutated: false })]);
     expect(w.graph()).toEqual(SERVED.graph);
-    expect(levelAsks(w.graph()).map((i) => i.factor_id)).toEqual([RISK]);
+    expect(unsizedRiskIds(w.graph()).has(RISK)).toBe(true);
   }, ROUTE_MS);
 
   it('CONTRAST: a declined card writes nothing', async () => {
@@ -354,16 +362,18 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_assumptions')).toMatchObject({ ok: false });
     expect((offer.suggested_actions ?? []).filter((c: Rec) => String(c.id).startsWith('agent-approve'))).toEqual([]);
     expect(w.graph()).toEqual(unperiod.graph);
-    expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
+    // Drafted, its line promises nothing; the user's own risk keeps the ask that never promises a card.
+    expect(unsizedRiskLine(w.graph(), RISK, false)).toBe(`This analysis assumes ‘${LABEL}’ doesn’t happen; it has no figure yet.`);
+    expect(levelAsks(own(w.graph())).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
       'How likely or how large is "Code quality deterioration" today? Olumi can’t run the numbers until this risk has a figure.']);
   }, ROUTE_MS);
 
   it('PL 05:53Z: adoption alone never licenses the Run — another unresolved root still withholds it after the press', async () => {
-    // A second risk root with no level, acting on the goal as the first does.
+    // A second risk root with no level, acting on the goal as the first does: the USER's own, so it still asks (DL 19:26Z).
     const twoRoots = { ...structuredClone(SERVED), scenario_id: randomUUID() } as Rec;
-    (twoRoots.graph.nodes as Rec[]).push({ id: 'key_developer_leaves', kind: 'risk', label: 'Key developer leaves', provenance: 'ai_inferred' });
+    (twoRoots.graph.nodes as Rec[]).push({ id: 'key_developer_leaves', kind: 'risk', label: 'Key developer leaves', provenance: 'user_set' });
     (twoRoots.graph.edges as Rec[]).push({ ...structuredClone((twoRoots.graph.edges as Rec[]).find((e) => e.from === RISK)!), from: 'key_developer_leaves' });
-    expect(levelAsks(twoRoots.graph).map((i) => i.factor_id).sort()).toEqual(['code_quality_deterioration', 'key_developer_leaves']);
+    expect(levelAsks(twoRoots.graph).map((i) => i.factor_id)).toEqual(['key_developer_leaves']);
     const w = world(twoRoots);
     const turn = await route(w);
     const { offer, chip } = await offerCard(turn);

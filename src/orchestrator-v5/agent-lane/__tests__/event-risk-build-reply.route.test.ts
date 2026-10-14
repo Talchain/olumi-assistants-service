@@ -152,6 +152,9 @@ describe('event-risk disclosure through the served build reply', () => {
   });
   it('ER-2-control: no likelihood keeps the current reply and shape byte-identical', async () => {
     const body = await turn(PREFIX + 'Our key developer might leave in the next 6 months.');
+    // DL 19:26Z 14 Oct (snapshot AMENDED, +1 line −1 ask +1 ask): the drafted risk with no figure is left out and said once, as
+    // what the analysis assumes; its ask is gone; and ‘Delivery outcome’, whose only cause it was, is now a root of the graph
+    // the Run sends, so readiness asks its level (T4i's existing rule). Nothing else in the reply moved.
     expect({ text: body.assistant_text, shape: body._answer_shape }).toMatchSnapshot();
     // BYPASS1: the AI wrote this reply and holds the D1 objective ask as its typed next step, so the host adds it 0 times.
     const objectiveAsk = 'I used "Delivery" as a provisional objective. What should this model help you explore?';

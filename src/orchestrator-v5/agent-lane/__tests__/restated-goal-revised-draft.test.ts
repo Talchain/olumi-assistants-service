@@ -348,23 +348,26 @@ async function expectStoredRunAndReopen(s: ReturnType<typeof server>, rows: Rec[
 }
 
 describe('MA2 original 13:18Z evidence, kept separate from the scripted revised-draft continuation', () => {
-  it('the captured saved old model: its Run on a placeholder zero is withheld (T4); with that risk stated, both exact unscored-limit reasons persist, and no absent AND target is invented', async () => {
-    // AMENDED (T4, 14 Oct; was: the captured model ran through Run). That Run itself rested on a placeholder zero: the
-    // capture's own recorded engine warning names `campaign_execution_risk` (a drafter-added risk with no level, no prior,
-    // reaching the goal through `campaign_readiness`) as defaulted to 0.0. T4 withholds such a Run and asks: unknown is
-    // never zero. Only that root is named.
+  it('the captured saved old model: its drafted unsized risk is left out, never sampled at zero; with or without it, both exact unscored-limit reasons persist, and no absent AND target is invented', async () => {
+    // AMENDED twice. T4 (14 Oct; was: the captured model ran through Run): that Run rested on a placeholder zero, as the
+    // capture's own recorded engine warning shows for `campaign_execution_risk` (a drafter-added risk with no level, no prior,
+    // reaching the goal through `campaign_readiness`), so T4 withheld it. DL 19:26Z 14 Oct (one rule for an unsized risk):
+    // the drafted risk is now LEFT OUT of the request (never sent at zero) and said once, so the captured model runs again.
     const recorded = JSON.stringify(CAPTURE_1318.enrichment);
     expect(recorded).toContain("root ancestor(s) 'campaign_execution_risk' carry no observed value or ParameterUncertainty and defaulted to 0.0");
-    const refused = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318).then(() => null, (e: unknown) => e as Rec);
-    expect((refused?.verdict?.issues as Rec[] | undefined)?.filter((i) => i.code === 'MISSING_FACTOR_LEVEL').map((i) => i.factor_id))
-      .toEqual(['campaign_execution_risk']);
-    // MA2's own protections, unchanged, on the same capture once that risk states a level (T4's valued shape).
+    const unsized = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318);
+    expect(((unsized.payload.graph as Rec).nodes as Rec[]).map((n) => n.id)).not.toContain('campaign_execution_risk');
+    expect(((unsized.payload.graph as Rec).edges as Rec[]).filter((e) => e.from === 'campaign_execution_risk' || e.to === 'campaign_execution_risk')).toEqual([]);
+    // MA2's own protections, unchanged, on that Run and on the same capture once the risk states a level (T4's valued shape).
     const stated = { ...CAPTURE_1318.graph, nodes: (CAPTURE_1318.graph.nodes as Rec[]).map((n) => n.id === 'campaign_execution_risk'
       ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n) };
-    const { payload, outcome } = await runFromStore(JSON.stringify(stated), true, CAPTURE_1318);
-    expect(payload.goal_constraints).toEqual(CAPTURE_1318.graph.goal_constraints);
-    expect(outcome.handler_facts[0].result.constraint_verdict.per_limit).toEqual(CAPTURE_1318.limit_verdicts.per_limit);
-    expect(goalChanceLicenceForAgent(outcome.handler_facts[0].result)).toBeUndefined();
+    const valued = await runFromStore(JSON.stringify(stated), true, CAPTURE_1318);
+    expect(((valued.payload.graph as Rec).nodes as Rec[]).map((n) => n.id)).toContain('campaign_execution_risk');
+    for (const { payload, outcome } of [unsized, valued]) {
+      expect(payload.goal_constraints).toEqual(CAPTURE_1318.graph.goal_constraints);
+      expect(outcome.handler_facts[0].result.constraint_verdict.per_limit).toEqual(CAPTURE_1318.limit_verdicts.per_limit);
+      expect(goalChanceLicenceForAgent(outcome.handler_facts[0].result)).toBeUndefined();
+    }
     expect(CAPTURE_1318.graph.nodes.filter((n: Rec) => n.kind === 'goal').map((n: Rec) => n.label)).toEqual(['Product feature launch']);
     expect(CAPTURE_1318.graph.goal_constraints.filter((c: Rec) => c.role === 'goal_target')).toEqual([]);
   });

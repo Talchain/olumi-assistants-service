@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { unsizedRiskIds } from '../risk-occurrence.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { AnalysisNotReadyError, resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { assessCanonicalAnalysisReadiness, blockerIssue } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -275,14 +276,25 @@ describe('T4 real first-Run caller and kept K1 negatives', () => {
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect((await firstRun(graph)).called).toBe(0);
   });
-  it('K1: an unknown risk withholds the numerical Run and offers its next step', async () => {
+  it('K1: an unknown risk the user added withholds the numerical Run and offers its next step', async () => {
     const graph = readyGraph(); const root = graph.nodes.find((n: Rec) => n.id === 'u');
     root.kind = 'risk'; root.category = 'observable'; delete root.observed_state;
+    // The user's own risk still asks first; a DRAFTED one is left out instead (DL 19:26Z 14 Oct, the next row).
+    root.provenance = 'user_set';
     storedGraph = graph; await construct(); expect(runs).toBe(0);
     expect(assessCanonicalAnalysisReadiness(graph).analysisReady?.unvalued_roots).toBeUndefined();
     expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map(i => i.message)).toEqual(['How likely or how large is "Demand" today? Olumi can’t run the numbers until this risk has a figure.']);
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect((await firstRun(graph)).called).toBe(0);
+  });
+  it('K1 (DL 19:26Z): an unknown DRAFTED risk is left out, never computed as zero; the first Run proceeds without it', async () => {
+    const graph = readyGraph(); const root = graph.nodes.find((n: Rec) => n.id === 'u');
+    root.kind = 'risk'; root.category = 'observable'; delete root.observed_state;
+    expect(unsizedRiskIds(graph)).toEqual(new Set(['u']));
+    expect(assessCanonicalAnalysisReadiness(graph).analysisReady?.unvalued_roots).toBeUndefined();
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.filter(i => i.factor_id === 'u')).toEqual([]);
+    expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    expect((await firstRun(graph)).called).toBe(1);
   });
   it('R6: 24 nodes runs; the same-sized malformed cycle still blocks', async () => {
     const graph = readyGraph(false);
