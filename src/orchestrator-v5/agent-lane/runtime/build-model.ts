@@ -39,7 +39,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { verifiedFactorLevel, verifiedOptionSetting, withGoalLevelFromVerifiedQuote } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -1746,7 +1746,9 @@ export async function buildModelFromBrief(
   // Keep the existing repair route available to an ordinary draft before deciding that a failed event
   // admission must refuse. These intermediate graphs are never registered without the final structural gate.
   const eventFallbackRefusals = new WeakMap<AdmittedModel, string>();
-  const admitForBuild = (model: CandidateModel, levelCandidate = model): AdmittedModel => {
+  const admitForBuild = (drafted: CandidateModel, levelCandidate = drafted): AdmittedModel => {
+    // The goal's current level the drafter left null, from a factor's verified quote; unknown otherwise.
+    const model = withGoalLevelFromVerifiedQuote(drafted, brief);
     const args = [model, {}, brief, goalLevelTheUserWrote(levelCandidate, brief), writtenAgain,
       (c: CandidateModel) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] as const;
     const result = admitCandidateModel(...args, construction);

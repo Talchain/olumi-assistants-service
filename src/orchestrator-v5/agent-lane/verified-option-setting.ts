@@ -705,6 +705,32 @@ export function verifiedGoalLevel(model: CandidateModel, brief: string | undefin
   }
 }
 
+/**
+ * ⭐ THE GOAL'S CURRENT LEVEL FROM A VERIFIED QUOTE (DL 14 Oct, capacity on 732ebe50: "Chance not shown yet: Weekly support
+ * capacity's current level is missing", where 9e72fd2a showed 36 %). The same brief drafted twice left the goal's level 80
+ * once and null once (drafter variance; persisted raws 70c179df / 825be021). Where the drafter leaves it null, the level is
+ * the ONE figure a factor's `baseline_evidence.quote` verifies at (`verifiedFactorLevel`) in the goal's own typed unit, and
+ * it is taken only when `verifiedGoalLevel` holds on it: a direct sentence of the brief names the goal and writes that
+ * figure ("Total weekly support capacity is defined as the existing 80 tickets per week …"). Otherwise the level stays
+ * unknown: never an Olumi estimate, never the drafter's word. A level the drafter gave keeps its own path.
+ */
+export function withGoalLevelFromVerifiedQuote(model: CandidateModel, brief: string | undefined): CandidateModel {
+  try {
+    const goal = model.goal;
+    if (goal.baseline_value !== null && goal.baseline_value !== undefined) return model;
+    const unit = readUnitParts(goal.unit);
+    if (unit === null) return model;
+    const levels = new Set(model.factors.filter(f => typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value)
+      && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit) && verifiedFactorLevel(model, f, brief))
+      .map(f => f.baseline_value as number));
+    if (levels.size !== 1) return model;
+    const filled: CandidateModel = { ...model, goal: { ...goal, baseline_known: true, baseline_value: [...levels][0]!, baseline_provenance: 'explicit' } };
+    return verifiedGoalLevel(filled, brief) ? filled : model;
+  } catch {
+    return model;
+  }
+}
+
 /** Replace only an unquoted Olumi estimate with a conflicting value authenticated by the existing factor verifier. */
 export function verifiedFactorLevelValue(model: CandidateModel, factor: Factor, brief: string | undefined): Factor | null {
   // A claimed human receipt that fails verification must remain unverified. Do not rewrite its
