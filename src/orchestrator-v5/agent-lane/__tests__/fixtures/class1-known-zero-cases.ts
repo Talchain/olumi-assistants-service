@@ -121,7 +121,8 @@ export const class1Rows: { name: string; check: () => void | Promise<void> }[] =
   { name: 'CONTROL absolute launch at £49 on unknown baseline is still demoted', check: () => {
     const { c, option, factor, original } = control({ baseline_known: false, unit: 'GBP/month' }, { value_kind: 'absolute', value: 49, unit: 'GBP/month' });
     const p = prepareProvisionalCandidate(c);
-    assert.deepEqual(level(p.candidate, option, factor), { ...original, provenance: 'ai_proposed' });
+    // Still demoted off the user's path, and now UNKNOWN, never Olumi's (capacity row 7, #3030): the drafter called it the user's.
+    assert.deepEqual(level(p.candidate, option, factor), { ...original, provenance: 'ai_proposed', user_material_unverified: true });
     assert.deepEqual(p.provenance_demoted, [{ option, factor, value: 49 }]);
   } },
   { name: 'CONTROL absolute £49 on known baseline stays explicit without computed marker', check: () => {
