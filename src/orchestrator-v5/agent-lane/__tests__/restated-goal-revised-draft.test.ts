@@ -605,6 +605,58 @@ describe('later human work is kept: carried by identity, read as context, named 
       + 'Tell the user plainly which of their changes a revised draft would lose.');
   });
 
+  it('Q3, a level: the user\'s setting for an option is carried onto the same option and factor of the revision, re-keyed', async () => {
+    const g = structuredClone(FX.graph);
+    const option = (g.nodes as Rec[]).find((n) => n.id === 'hire_marketing_manager')!;
+    const cell = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_specified' };
+    option.interventions = { ...option.interventions, advertising_spend: cell };
+    const sameOption = (): Rec => { const c = candidate(); c.options[0].label = 'Hire marketing manager'; return c; };
+    const { caps, proposals } = laneWith(server({ graph: g }), { draft: sameOption });
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    const c = candidateOf(proposals, r);
+    const factor = (c.nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
+    expect(((c.nodes as Rec[]).find((n) => n.label === 'Hire marketing manager')!.interventions as Rec)[factor.id]).toEqual(cell);
+    expect(cardOf(proposals, r)).toContain('Kept as you set them: your level for \u2018Hire marketing manager\u2019 on \u2018Advertising spend\u2019. ');
+  });
+
+  it('Q3, a link: the user\'s reviewed link is carried between the same two parts of the revision, with its review', async () => {
+    const g = structuredClone(FX.graph);
+    const edge = (g.edges as Rec[]).find((e) => e.from === 'advertising_spend' && e.to === 'annual_marketing_spend')!;
+    edge.provenance = { ...edge.provenance, reviewed_by_user: { intent: 'confirm' } };
+    const { caps, proposals } = laneWith(server({ graph: g }));
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    const c = candidateOf(proposals, r);
+    const id = (label: string): string => (c.nodes as Rec[]).find((n) => n.label === label)!.id as string;
+    const carried = (c.edges as Rec[]).filter((e) => e.from === id('Advertising spend') && e.to === id('Annual marketing spend'));
+    expect(carried).toHaveLength(1);
+    expect(carried[0]!.provenance).toEqual(edge.provenance);
+  });
+
+  it('Q3, a limit: the user\'s own limit row replaces the revision\'s row with the same terms, so it stays the user\'s', async () => {
+    const g = structuredClone(FX.graph);
+    const row = (g.goal_constraints as Rec[]).find((c) => c.node_id === 'founder_marketing_time')!;
+    row.provenance = 'user';
+    const { caps, proposals } = laneWith(server({ graph: g }));
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    const c = candidateOf(proposals, r);
+    const founder = (c.nodes as Rec[]).find((n) => n.label === 'Founder marketing time')!;
+    const rows = (c.goal_constraints as Rec[]).filter((x) => x.node_id === founder.id && x.operator === '<=' && x.value === 25);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.provenance).toBe('user');
+  });
+
+  it('a part the user added that the revision lacks: not offered, naming it', async () => {
+    const g = structuredClone(FX.graph);
+    Object.assign((g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!, { provenance: 'user_specified' });
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Marketing experience\u2019, which you added']);
+    const r = await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(String(r.detail)).toContain('does not hold \u2018Marketing experience\u2019, which you added, so nothing was offered');
+  });
+
   it('G2 (adopted): a saved edit since the draft no longer refuses; the card names what the revision adds and omits against the current saved model', async () => {
     const { caps, proposals, inputs } = laneWith(server({ ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'd920b614-9d04-413f-a047-dab6bcf807ac'] } }));
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
