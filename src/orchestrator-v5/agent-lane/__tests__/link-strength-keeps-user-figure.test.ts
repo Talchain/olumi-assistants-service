@@ -175,5 +175,7 @@ describe('⭐ F1: propose_link_strengths leaves the user’s figure out and says
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, left_out_user_figures: [refusal('slight')] }));
     expect(puts).toHaveLength(1);
     expect(puts[0]!.operations.map((o) => (o as unknown as { path: string }).path)).toEqual(['feature_development_spend::pro_plan_feature_value']);
+    // ⭐ #3002 (DL; buddy review): the HOST names the held link on the card itself, by the model's labels.
+    expect(puts[0]!.public_label).toContain('Not included, because it holds the user\u2019s own figure (nothing changes for it): "Cost overrun risk" \u2192 "MRR"');
   });
 });

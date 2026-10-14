@@ -141,8 +141,13 @@ describe('⛔ R3-9 × R12: a link set leaves out the links a declared identity d
     const left = p.left_out_definitional as string[];
     expect(left).toHaveLength(2);
     for (const s of left) expect(s).toContain('Pro MRR');
-    expect(String(p.public_label)).not.toContain('"Pro plan price" → "Pro MRR"');
+    // ⛔ EXPECTATION CHANGED (#3002, DL: the card names every omitted link; old: the link is absent from the whole card → new: it
+    // is never OFFERED, and the host names it as not included, by its labels, on the card and in the receipt).
+    const [offered, ...omitted] = String(p.public_label).split('. Not included, because ');
+    expect(offered).not.toContain('"Pro plan price" → "Pro MRR"');
+    expect(omitted).toEqual(['a calculation the model declares defines them (nothing changes for them): "Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR"']);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(String(out.follow_up)).toContain('Not included, because a calculation the model declares defines them (nothing changes for them): "Pro plan price" → "Pro MRR"; "Pro paying subscribers" → "Pro MRR".');
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(doorCalls()).toBe(1);
     expect(rows.size, 'ONE commit').toBe(1);

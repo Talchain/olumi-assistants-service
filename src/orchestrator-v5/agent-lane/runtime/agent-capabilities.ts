@@ -2200,17 +2200,19 @@ function mixedLinkSetHeading(strengths: number, unsizedChanges: number, reviews:
 /** D1 (AIE AMEND, 12 Oct), verbatim: the pending offer's words for Olumi's first estimate of a link nobody had sized. */
 export const D1_PENDING_FIRST_ESTIMATE = 'an estimate from Olumi that has not yet been applied';
 /**
- * #3002 (DL split, Codex CHECK-3002-783a55b8 item 3): the HOST names, on the card itself, each link left out because the
- * source of its band is not verified, by the model's own labels for its ids, so the user never relies on the Agent saying
- * it. AIE_TEXT_PENDING (the AIE writes the exact words).
+ * ⭐ #3002 (DL; Codex CHECK-3002-783a55b8 item 3 and its buddy review): the HOST names, on the card itself, EVERY link the set
+ * leaves out and why, by the model's own labels for its ids, so the user never relies on the Agent saying it. The receipt
+ * repeats these sentences from the stored card after approval. AIE_TEXT_PENDING (the AIE writes the exact words).
  */
-/** The words every left-out sentence on a link-set card starts with; the receipt repeats those sentences after approval. */
 const LEFT_OUT_CARD_LEAD = 'Not included, because ';
-export const leftOutUnknownOriginCard = (pairs: readonly string[]): string => pairs.length === 0 ? ''
-  : `. ${LEFT_OUT_CARD_LEAD}the source of ${pairs.length === 1 ? 'its band' : 'their bands'} is not verified (nothing changes for ${pairs.length === 1 ? 'it' : 'them'}): ${pairs.join('; ')}`;
-/** #3002: the same, for each link whose band the Agent declared a third party's, with the source it cites. AIE_TEXT_PENDING. */
-export const leftOutThirdPartyCard = (pairs: readonly string[]): string => pairs.length === 0 ? ''
-  : `. ${LEFT_OUT_CARD_LEAD}${pairs.length === 1 ? 'its band is' : 'their bands are'} someone else\u2019s, not the user\u2019s or Olumi\u2019s (nothing changes for ${pairs.length === 1 ? 'it' : 'them'}): ${pairs.join('; ')}`;
+const LEFT_OUT_REASON = {
+  unknown_origin: (one: boolean) => `the source of ${one ? 'its band' : 'their bands'} is not verified`,
+  third_party: (one: boolean) => `${one ? 'its band is' : 'their bands are'} someone else\u2019s, not the user\u2019s or Olumi\u2019s`,
+  definitional: (one: boolean) => `a calculation the model declares defines ${one ? 'it' : 'them'}`,
+  user_figure: (one: boolean) => `${one ? 'it holds' : 'they hold'} the user\u2019s own figure`,
+} as const;
+export const leftOutCard = (reason: keyof typeof LEFT_OUT_REASON, pairs: readonly string[]): string => pairs.length === 0 ? ''
+  : `. ${LEFT_OUT_CARD_LEAD}${LEFT_OUT_REASON[reason](pairs.length === 1)} (nothing changes for ${pairs.length === 1 ? 'it' : 'them'}): ${pairs.join('; ')}`;
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -4926,6 +4928,9 @@ export function createAgentCapabilities(
       const thirdParty: string[] = [];
       // ⭐ F1: links left out because they hold the user's own figure, each in the refusal's own words.
       const heldFigures: string[] = [];
+      /** The same links as `definitional` and `heldFigures`, by the model's labels, for the card's own naming (#3002). */
+      const definitionalPairs: string[] = [];
+      const heldFigurePairs: string[] = [];
       const seen = new Set<string>();
       for (const l of asked) {
         const name = `"${String(l?.from_label ?? '')}" \u2192 "${String(l?.to_label ?? '')}"`;
@@ -4968,6 +4973,7 @@ export function createAgentCapabilities(
         const definition = definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null);
         if (definition !== null) {
           definitional.push(definitionalLinkRefusalText(g.raw, definition));
+          definitionalPairs.push(`"${from.label}" \u2192 "${to.label}"`);
           continue;
         }
         const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
@@ -5008,6 +5014,7 @@ export function createAgentCapabilities(
         const heldFigure = currentBand === band ? null : userFigureHeld(edge);
         if (heldFigure !== null) {
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
+          heldFigurePairs.push(pair);
           continue;
         }
         // The selection binds exactly ONE directed link only when nothing else is selected. The model's `user_stated` is not
@@ -5158,7 +5165,8 @@ export function createAgentCapabilities(
             // write says it (the approval's words are the narrator's own).
             : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x) === 'Olumi\u2019s first estimate for a link nobody had sized'
               ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; ')
-          + leftOutUnknownOriginCard(unknownOrigin) + leftOutThirdPartyCard(thirdParty),
+          + leftOutCard('unknown_origin', unknownOrigin) + leftOutCard('third_party', thirdParty)
+          + leftOutCard('definitional', definitionalPairs) + leftOutCard('user_figure', heldFigurePairs),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
