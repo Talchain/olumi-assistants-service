@@ -382,8 +382,6 @@ export function teamTimeConfirmationCardParts(a: ApprovedTeamTime, deliverable: 
  * S2: the card for a time read from the user's statements. Each statement's own line is quoted; Olumi's reading of it (its
  * form and qualifier) is said once, as theirs to adopt. Nothing Olumi did not read from their words is added.
  */
-const heldBoundWords = (b: { readonly end: 'lower' | 'upper'; readonly months: number }): string =>
-  `your ${b.end === 'lower' ? 'lower' : 'upper'} end of ${b.months} months`;
 /** Olumi's reading of each kept statement, AIE #94 6174707160's words: "no sooner than 7 months", "8 months as a likely upper end, …". */
 function keptReading(s: UserStatement): string | null {
   const q = s.qualifier;
