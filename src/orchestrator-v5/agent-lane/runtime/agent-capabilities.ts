@@ -293,7 +293,7 @@ import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysi
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
-import { goalTargetBasisOf } from '../../goal-target/goal-target-basis.js';
+import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -5930,6 +5930,21 @@ export function createAgentCapabilities(
       const datedNow = named !== null && weekdayDatedIn(typed) === named;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // ⭐ SCIENCE (AIE MA3; marketing e2e 0dac5dcc turn 04, "6 months to launch … that's when the 3-month sales cycle starts"):
+      // a goal measured over the window from launch is judged over that window, so the launch date OPENS it. It is never the
+      // goal's deadline (a wrong horizon), and it is not a new deliverable to redraft around (`revised_draft_has_no_target`).
+      // The model has no carrier for a launch date yet (`goal_target_basis` is strict on the shared DB: reader-first, with
+      // the window forecasts), so nothing is prepared and the AI says so plainly.
+      const launchGoals = g.nodes.filter((n) => n.kind === 'goal');
+      const launch = launchGoals.length === 1 ? launchWindowOf(launchGoals[0]) : undefined;
+      if (launch !== undefined) {
+        const label = String(launchGoals[0]!.label ?? 'the goal');
+        return { ok: false, mutated: false, refusal: 'launch_opens_window',
+          detail: `‘${label}’ is measured ${periodWords(launch)}, so the launch date the user gave (“${words}”) is when that window `
+            + 'starts, not the goal\'s deadline. Olumi cannot hold a launch date in the model yet, so nothing was prepared. Tell the user '
+            + `plainly, in one sentence: their targets stay measured ${periodWords(launch)}, and their launch timing is noted in this `
+            + 'conversation but does not change the calculation yet. Do not ask them to restate the date, and do not offer a deadline card.' };
+      }
       const heldHumanWords = proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id).some(held => {
         const proposal = proposals.get(held.proposal_id);
         return proposal?.provenance.authored_by === 'user_stated' && proposal.operations.some(op =>
@@ -10989,6 +11004,10 @@ export function createAgentCapabilities(
       try {
         const g = await readGraph(ctx.scenario_id);
         if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
+        // AIE MA3: a goal measured over the window from launch has no deadline of its own; a launch date opens that window
+        // (`proposeGoalDeadline`'s `launch_opens_window`), so no card ever places one as the goal's deadline.
+        const goalsHeld = g.nodes.filter((n) => n.kind === 'goal');
+        if (goalsHeld.length === 1 && launchWindowOf(goalsHeld[0]) !== undefined) return undefined;
         // The turn that built the draft already offered a deadline card (a committed set_goal_deadline proposal), or its offers are unknown.
         if (await buildTurnAlreadyOfferedDeadline(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
         const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
