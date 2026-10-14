@@ -10718,8 +10718,9 @@ export function createAgentCapabilities(
       };
     },
 
-    async runAnalysis(ctx, args): Promise<ToolResult> {
-      if (approvalAppliedThisRequest) {
+    async runAnalysis(ctx, args, opts): Promise<ToolResult> {
+      // The Agent never runs an analysis as part of an approval; the route's automatic Run after a committed change does.
+      if (approvalAppliedThisRequest && opts?.afterCommittedChange !== true) {
         return {
           ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
           detail:
