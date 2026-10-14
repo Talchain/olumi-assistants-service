@@ -25,6 +25,22 @@ const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
   deliver: 'deliver', delivering: 'deliver', delivered: 'deliver', delivers: 'deliver',
   finish: 'finish', finishing: 'finish', finished: 'finish', finishes: 'finish',
 };
+/**
+ * ⛔ AN UNATTESTED EVENT IS NEVER SAVED AS THE GOAL (DL ruling 14 Oct, amended per PL #94 05:36Z; served hiring on 34a5cdf6,
+ * raw 9d75b605: "We have an urgent launch date in the next three months." drafted as the event-by-date goal "Urgent launch"
+ * while the brief's governing sentence asks to "increase productivity by at least 10%"). The drafter's event goal the brief
+ * reader does not attest, with the brief's own words kept for the redraft and the clarification: the event's quote and the
+ * governing sentence, each only when it is verbatim in the brief (else null, never paraphrased). Null when the draft's goal
+ * is not an event, or construction prompted the event (`event_by_date_prompted`), or the brief attests it.
+ */
+export interface UnattestedEventGoal { readonly event: string; readonly words: string | null; readonly governing: string | null }
+export function unattestedEventGoal(candidate: CandidateModel, brief: string, prompted: boolean): UnattestedEventGoal | null {
+  const goal = candidate.goal;
+  if (prompted || goal.kind !== 'event_by_date' || briefAttestsEventByDate(brief, goal)) return null;
+  const verbatim = (text: unknown): string | null => (typeof text === 'string' && text.trim() !== '' && brief.includes(text.trim()) ? text.trim() : null);
+  return { event: goal.metric, words: verbatim((goal as { source_quote?: unknown }).source_quote), governing: verbatim(candidate.decision_question) };
+}
+
 /** The candidate's quantity decides the class; numbers elsewhere in the brief do not. */
 export function isQuantityGoalCandidate(goal: CandidateModel['goal']): boolean {
   return goal.value !== null || readCurrencyUnitWithQualifiers(currencyWordsAsCodes(goal.unit)).kind === 'currency';

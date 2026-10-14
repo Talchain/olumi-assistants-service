@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -56,6 +56,7 @@ import {
   assessConstructionSize,
   retryInstruction,
   keepsEveryUserStatedIdentity,
+  keepsEveryUserStatedIdentityWhenGoalRechosen,
   nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
@@ -677,6 +678,34 @@ export function keepsEveryGoalCondition(first: CandidateModel['goal'], retry: Ca
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
+/** A redraft that re-chooses the goal may add conditions, never lose one the first goal held (by identity, as above). */
+function keepsTheFirstGoalConditions(first: CandidateModel['goal'], retry: CandidateModel['goal']): boolean {
+  const conditions = (g: CandidateModel['goal']): string[] => {
+    const also = g?.basis?.also_required;
+    return Array.isArray(also) ? also.filter((x): x is string => typeof x === 'string').map(canonicalLabel) : [];
+  };
+  const kept = conditions(retry);
+  return conditions(first).every((c) => kept.includes(c));
+}
+
+/**
+ * The construction retry's issue for an unattested event goal (`unattestedEventGoal`): the reason, with the brief's own words.
+ * The drafter re-chooses the goal from the brief; the event stays as its deadline or condition. (Drafter text: AIE pending.)
+ */
+function unattestedEventIssue(u: UnattestedEventGoal): string {
+  return `The goal "${u.event}" is an event the brief does not state as its goal${u.words !== null ? ` (the brief says: "${u.words}")` : ''}.`
+    + (u.governing !== null ? ` The brief's governing statement is: "${u.governing}".` : '')
+    + ' Choose the goal the brief itself states, with its own quantity, unit, comparator, reference and period; keep the event as its'
+    + ' deadline or condition, and keep every other stated target, limit and condition.';
+}
+
+/** When the one redraft still holds an unattested event as the goal: nothing is saved, and the AI asks the user which goal. */
+function unattestedEventClarification(u: UnattestedEventGoal): string {
+  return `The draft took "${u.event}" as the goal, but the brief does not state it as the goal${u.words !== null ? ` ("${u.words}")` : ''}.`
+    + (u.governing !== null ? ` Its governing statement is: "${u.governing}".` : '')
+    + ' Nothing was saved. Ask the user which result the model should measure success by, then draft it again with that goal.';
+}
+
 export function retrySchemaPinningGoal(
   goal: CandidateModel['goal'],
   /**
@@ -685,6 +714,8 @@ export function retrySchemaPinningGoal(
    * before the key) pins to "no question" (null).
    */
   decisionQuestion?: string | null,
+  /** False only for the redraft of an unattested event goal (`unattestedEventIssue`): the goal is re-chosen, the question stays pinned. */
+  pinGoal = true,
 ): Record<string, unknown> {
   const schema = buildCandidateSchema();
   const properties = schema['properties'] as Record<string, Record<string, unknown>>;
@@ -692,7 +723,7 @@ export function retrySchemaPinningGoal(
     ? { type: 'string', enum: [decisionQuestion] }
     : { type: 'null' };
   const goalSchema = properties['goal'];
-  if (goalSchema === undefined) return schema;
+  if (goalSchema === undefined || !pinGoal) return schema;
   goalSchema['properties'] = {
     // Recovery Batch C (AIE request check, 12 Oct): an EVENT goal's kind and deliverable are part of the goal, so a pinned
     // retry keeps them (else the retry could not say "event_by_date" and the event reading was lost); a quantity goal pins
@@ -1800,6 +1831,8 @@ export async function buildModelFromBrief(
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
   const firstCandidate = candidate;
+  // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
+  const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
@@ -1897,7 +1930,8 @@ export async function buildModelFromBrief(
   // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue),
+    ...(unattested !== null ? [unattestedEventIssue(unattested)] : [])];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1957,14 +1991,19 @@ export async function buildModelFromBrief(
       // not merely of the refusal path.
       // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
       // fact and relationship the user stated must still be there by name.
-      const keepsUserMaterial = keepsEveryUserStatedIdentity(first.size, retrySize);
+      // A redraft that re-chose an unattested event goal keeps the user's material with the goal node exempt and the user's
+      // target kept as its goal (`keepsEveryUserStatedIdentityWhenGoalRechosen`); every other retry exactly as before.
+      const keepsUserMaterial = unattested === null ? keepsEveryUserStatedIdentity(first.size, retrySize)
+        : keepsEveryUserStatedIdentityWhenGoalRechosen(first.size, retrySize, retryCandidate.goal);
       // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
       const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(first.preparation, retryPreparation, retryRaw, retryAdmitted);
       if (!(
         (needsSizeRetry ? retrySize.nodes <= first.size.nodes && retrySize.edges <= first.size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
         keepsUserMaterial && keepsEveryUserNumber(firstCandidate, first.candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
         // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
-        keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal) &&
+        // A redraft of an unattested event goal re-chooses the goal: adopted only when it is no longer one, losing no condition.
+        (unattested === null ? keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal)
+          : keepsTheFirstGoalConditions(first.candidate.goal, retryCandidate.goal) && unattestedEventGoal(retryCandidate, brief, false) === null) &&
         // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
         // gap — but it must never cover LESS, and when coverage is the only reason
         // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
@@ -1975,7 +2014,7 @@ export async function buildModelFromBrief(
           || (retryOpen < gapCount(first.preparation) && keepsEveryRegisteredOption)
           // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
           || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(first.admitted).size && keepsEveryRegisteredOption)
-          || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          || (chainsAsked.length > 0 && keepsEveryRegisteredOption) || unattested !== null) &&
         // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
         (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(first.admitted))) &&
         // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
@@ -2043,7 +2082,9 @@ export async function buildModelFromBrief(
             : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
           max_output_tokens: budget.max_output_tokens,
           reasoning_effort: budget.reasoning_effort,
-          schema: strictForTheDrafter(retrySchemaPinningGoal(first.candidate.goal, first.candidate.decision_question), { providerBoundary: false }),
+          // The redraft of an unattested event goal re-chooses the goal (unpinned); a second size retry keeps the goal it chose.
+          schema: strictForTheDrafter(unattested === null ? retrySchemaPinningGoal(first.candidate.goal, first.candidate.decision_question)
+            : retrySchemaPinningGoal(previous.goal, first.candidate.decision_question, attempt === 2), { providerBoundary: false }),
         });
         const adopted = retry.text.length > 0 ? judgeRetry(retry.text) : null;
         if (adopted !== null) {
@@ -2084,6 +2125,12 @@ export async function buildModelFromBrief(
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
   // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
   const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
+
+  // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
+  // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
+  if (unattested !== null && unattestedEventGoal(candidate, brief, false) !== null) {
+    return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested) };
+  }
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {
