@@ -67,6 +67,7 @@ import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
+import { untargetedGoalLevelAsk } from './untargeted-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
 import { admitGoalTargetBasis, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis } from '../goal-target/goal-target-basis.js';
 import {
@@ -3721,6 +3722,13 @@ function admitOnce(
         const raw = model.goal.value;
         const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
         if (!stated) {
+          // GEN #3: the user's stated level holds no figure without a target's scale, and is ASKED, never dropped silently.
+          const unscaled = untargetedGoalLevelAsk(model.goal, goalLevelStated, brief);
+          if (unscaled !== null) {
+            loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].observed_state.magnitude_question`,
+              before: { value: unscaled.value, unit: unscaled.unit, quote: unscaled.quote }, after: null, reason: unscaled.question,
+              severity: 'warn' } as RepairEntry);
+          }
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
