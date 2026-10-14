@@ -6,14 +6,18 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { unresolvedEventOptionIds, withEventShareDate, withRatioCarrierSizes } from '../../goal-target/event-by-date-model.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { CAPACITY_RATIO_COMPARISON_WITHHELD, withoutCapacityRatioComparison, withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
-import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
+import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
 import { normalChance } from '../../goal-target/event-by-date-share.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
+import { normaliseAbsenceOnly, projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { GOAL_FIGURES_SHARE_APPROXIMATION } from '../../../orchestrator/context/option-result-source.js';
 
@@ -183,5 +187,92 @@ describe('L2: an event option with no Olumi pace acts through the brief\'s own c
     const g = await construct(d);
     expect(node(g, LEGACY_SWITCH)).toBeUndefined();
     expect(unresolvedEventOptionIds(g)).toEqual([LEGACY]);
+  });
+});
+
+describe('PL 6135017311 item 3: a live compiler — r follows the SAVED figures on every committed revision', () => {
+  const LEGACY_FIX = 'event_context_6', FEATURE = 'event_context_7', DEVS = 'event_context_8';
+  const commit = (g: Rec): Rec => projectGraphForPersistence(g) as Rec;
+  const extra = (g: Rec): Rec => node(g, LEGACY_SWITCH).observed_state.extra_share_by_date;
+
+  it('PRECONDITION: r is compiled by id from the saved capacity factors (kept out of the computed graph) and the option\'s 15% held on its carrier', async () => {
+    const g = await saved();
+    for (const id of [LEGACY_FIX, FEATURE, DEVS]) expect(node(g, id).analysis_participation, id).toBe('retained_excluded');
+    // No lever on a kept-out factor (the participation guard would refuse the Run); the setting rides on the carrier.
+    expect(node(g, LEGACY).interventions[LEGACY_FIX]).toBeUndefined();
+    expect(extra(g).ratio_source).toEqual({ factor_ids: [DEVS, FEATURE], set_ids: [LEGACY_FIX], settings: { [LEGACY_FIX]: 15 },
+      derived: { [FEATURE]: { source_id: LEGACY_FIX, total: 100 } } });
+    expect(extra(g).capacity_ratio).toBeCloseTo(85 / 75, 12);
+    // A committed revision is a fixed point (stored bases stay editable).
+    expect(commit(g)).toEqual(normaliseAbsenceOnly(g));
+    expect(commit(commit(g))).toEqual(commit(g));
+  });
+
+  it('⭐ RED→GREEN: an edit to the 25% re-derives feature time (two-way split) and recompiles r and the link size', async () => {
+    const g = await saved();
+    const before = structuredClone(g.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength);
+    Object.assign(node(g, LEGACY_FIX).observed_state, { raw_value: 20, value: 0.2 });
+    const after = commit(g);
+    expect(extra(after).capacity_ratio).toBeCloseTo(85 / 80, 12); // feature time 80% today → 85% with the option
+    expect(extra(after).ratio_basis.factors[1]).toMatchObject({ label: 'Time on feature work', today: 80, withOption: 85 });
+    expect(after.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength.mean).toBeLessThan(before.mean);
+    expect(shareOptionEstimateWords(after, LEGACY)).toContain('‘Time on feature work’ at 80% of development time today');
+  });
+
+  it('⭐ the option\'s setting (15% → 10%) recompiles r; an edit to the 6 developers is read live and cancels in this option\'s ratio', async () => {
+    const g = await saved();
+    extra(g).ratio_source.settings[LEGACY_FIX] = 10;
+    expect(extra(commit(g)).capacity_ratio).toBeCloseTo(90 / 75, 12);
+    expect(extra(commit(g)).ratio_basis.settings[0]).toMatchObject({ label: 'Time on legacy fixes', value: 10 });
+    const h = await saved();
+    Object.assign(node(h, DEVS).observed_state, { raw_value: 7, value: 7 / 30 });
+    expect(extra(commit(h)).ratio_basis.factors[0]).toMatchObject({ label: 'Mid-weight developers', today: 7, withOption: 7 });
+    expect(extra(commit(h)).capacity_ratio).toBeCloseTo(85 / 75, 12);
+  });
+
+  it('⛔ CONTRAST (fail closed): a setting that slows the team, or an unreadable figure, shows no chance, each with its reason', async () => {
+    const g = await saved(5, 7);
+    extra(g).ratio_source.settings[LEGACY_FIX] = 30;
+    const slower = commit(g);
+    expect(extra(slower).capacity_ratio).toBeCloseTo(70 / 75, 12);
+    expect(sharePartsForOption(slower, LEGACY)).toBeNull();
+    expect(shareChanceInputFailure(slower, LEGACY)).toBe("Not shown. With the model's current figures this option lowers the team's "
+      + "capacity (to 93% of today), and this deadline forecast doesn't yet model an option that slows the team down.");
+    const h = await saved(5, 7);
+    delete node(h, LEGACY_FIX).observed_state.raw_value;
+    const unreadable = commit(h);
+    expect(extra(unreadable).ratio_source_unreadable).toBe(true);
+    expect(shareChanceInputFailure(unreadable, LEGACY)).toBe("Not shown. This option's effect is worked out from the model's capacity "
+      + 'figures, and one of them is missing or unreadable now.');
+  });
+
+  it('⭐ DL: the exact node and edge set the Run sends to PLoT for Paul\'s graph (the capacity factors stay out; only the compiled carrier is sent)', async () => {
+    const g = await saved(5, 7);
+    const store = { readMostRecentPendingActions: async () => [], loadGraph: async () => structuredClone(g),
+      loadGraphAndBriefText: async () => ({ graph: structuredClone(g), briefText: null }) };
+    const snapshot = await loadScenarioSnapshotForRunAnalysis('c1494f4d-13f9-4216-ac62-35871c7ff207', 'req-l5', store as never);
+    const golden = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as Rec;
+    golden.results = [CARRY_ON, LEGACY, 'event_option_3'].map((id) => ({ ...golden.results[0], option_id: id, probability_of_goal: 0.4 }));
+    const run = vi.fn(async (_body: unknown) => structuredClone(golden));
+    const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn(async () => ({})) } as never,
+      scenarioReader: vi.fn(async () => snapshot) });
+    await handler({
+      context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [],
+        session_id: 'c1494f4d-13f9-4216-ac62-35871c7ff207', request_id: 'req-l5', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 },
+        prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+      payload: makeMessagePayload({ scenario_id: 'c1494f4d-13f9-4216-ac62-35871c7ff207', message: 'Run the analysis.', turn_class: 'decide', stage: 'analyse' }),
+      requestId: 'req-l5', signal: new AbortController().signal, orientationText: '',
+    } as never);
+    expect(run).toHaveBeenCalledOnce();
+    const sent = (run.mock.calls[0]![0] as Rec).graph as Rec;
+    expect(sent.nodes.map((n: Rec) => n.id).sort()).toEqual(['event_capacity_2', 'event_capacity_3', 'event_decision', 'event_goal',
+      'event_option_1', 'event_option_2', 'event_option_3', 'event_team']);
+    expect(sent.edges.map((e: Rec) => `${e.from}->${e.to}`).sort()).toEqual(['event_capacity_2->event_goal', 'event_capacity_3->event_goal',
+      'event_decision->event_option_1', 'event_decision->event_option_2', 'event_decision->event_option_3',
+      'event_option_1->event_capacity_2', 'event_option_1->event_capacity_3', 'event_option_2->event_capacity_2',
+      'event_option_2->event_capacity_3', 'event_option_3->event_capacity_2', 'event_option_3->event_capacity_3', 'event_team->event_goal']);
+    // The legacy switch's link carries the size compiled from the saved figures (the persisted graph's own).
+    expect(sent.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength.mean)
+      .toBeCloseTo(g.edges.find((e: Rec) => e.from === LEGACY_SWITCH).strength.mean, 12);
   });
 });
