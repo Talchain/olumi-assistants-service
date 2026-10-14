@@ -68,7 +68,7 @@ function runAsTheHandlerDoes(o: { graph?: Rec; brief?: string | null; sentRun?: 
   const brief = 'brief' in o ? o.brief : FX.brief;
   const effects_timing = 'effects_timing' in o ? o.effects_timing : 'not_stated';
   const withheld = withholdForPeriodEndEffects(served, graph, GOAL, { sentRun, brief, effects_timing });
-  const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, sentRun),
+  const envelope = withGoalChanceLicence(withheld, graph, GOAL, earned, sentGoalThresholdOf(withheld, sentRun.graph, GOAL, earned, { sentRun, brief, effects_timing }),
     graph, { storedConstraints: graph.goal_constraints, sentConstraints: graph.goal_constraints, sentRun, brief, effects_timing });
   return { envelope, view: { type: 'analysis_result', enrichment: envelope } };
 }
