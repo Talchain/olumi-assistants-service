@@ -35,7 +35,9 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     model: 'gpt-5.6-terra',
     role: 'widening',
     max_output_tokens: 2600,
-    reasoning_effort: 'high',
+    // ⭐ SPEED (DL 14 Oct, undeployed/EFFORT-REPLAY.md): high → low. Replayed on the served widening bodies: quality equal
+    // (11 vs 12 new relevant risks, 13 vs 12 kept), median 16.9 → 9.4 s, and no more 20 s cap timeouts.
+    reasoning_effort: 'low',
     evidence:
       'Banked manifest terra_widener measured out 2495 against max 2600 (96%). Re-measured 22 Sep ' +
       'at a 6000 ceiling: out 2409 incl. 475 reasoning. So 2600 fits, but the margin is ~100-200 ' +

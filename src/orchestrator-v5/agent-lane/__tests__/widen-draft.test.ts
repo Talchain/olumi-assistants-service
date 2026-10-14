@@ -861,6 +861,8 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(requests.find(isOptions)!.instructions).toBe(`${PREAMBLE}\n${OPTIONS_PREAMBLE}\n${(optionsTurn as Rec).directive}`);
     expect(createHash('sha256').update(readFileSync(new URL('../method-turn/widen-turn.ts', import.meta.url))).digest('hex')).toBe(WIDEN_TURN_SHA256);
     for (const req of requests) { expect(req.schema.type).toBe('object'); expect(req.max_output_tokens).toBeLessThanOrEqual(3000); }
+    // SPEED (DL 14 Oct, EFFORT-REPLAY.md): both widening passes are SENT at low effort.
+    for (const req of requests) expect(req.reasoning_effort).toBe('low');
   });
 
   it('aw-option-lever-classification: only a goal-path factor moved by no other option is a new lever', async () => {
