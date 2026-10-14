@@ -115,9 +115,10 @@ const inputsOf = (c: Case): GuidanceSignalInputs => ({
 });
 
 /** The contract's own members of a goal-path entry: `value_hash` is checked on its own below. */
+// `value_hash` and `has_range` are CEE's own fields (the cases predate them): each is checked by identity below instead.
 const withoutHashes = (k: string, v: unknown): unknown =>
   (k === 'model.goal_path_links' || k === 'model.goal_path_factors') && Array.isArray(v)
-    ? v.map(({ value_hash: _h, ...rest }: { value_hash?: string }) => rest) : v;
+    ? v.map(({ value_hash: _h, has_range: _r, ...rest }: { value_hash?: string; has_range?: boolean }) => rest) : v;
 
 describe('guidance signals from served captures (RC derivation check)', () => {
   it('the corpus is the contract\'s: 9 served cases, each capture byte-identical to the one the case names', () => {
@@ -139,6 +140,12 @@ describe('guidance signals from served captures (RC derivation check)', () => {
       const entries = [...(got['model.goal_path_links'] as { value_hash: string }[]), ...(got['model.goal_path_factors'] as { value_hash: string }[])];
       expect(entries.length).toBeGreaterThan(0);
       for (const e of entries) expect(e.value_hash).toMatch(HEX12);
+      // RC-OUTSIDE-VIEW's signal, bound to THIS factor's stored value in the capture: a range present, or none.
+      const nodes = (c.body.draft_graph as { nodes: { id: string; observed_state?: { range?: unknown } | null }[] }).nodes;
+      for (const f of got['model.goal_path_factors'] as { factor_id: string; has_range: unknown }[]) {
+        const range = nodes.find((n) => n.id === f.factor_id)?.observed_state?.range;
+        expect(f.has_range, f.factor_id).toBe(range !== undefined && range !== null);
+      }
     });
   }
 

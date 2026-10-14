@@ -43,7 +43,9 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     // Batch R: staging's bytes plus only the E6 cooldown_default line (E6 on B-on-C pinned aafa47a1's different base).
     // Batch R round 2 (independent check P1): the line no longer claims a shown item quiets its whole item row.
     // Batch B (merge of staging after R, 12 Oct): R's bytes (354e8e0a) plus ONLY SYS2 G1's W4/W6 why_now corrections (dfc52dc8).
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('d97b918fda14a15b534ff545a6e9ca892ea1be01e5c7beb567d6011e71b8a58a');
+    // RC-OUTSIDE-VIEW (DL 14 Oct, old #1711 rebuilt): ONE appended row (P5, typed `has_range`, no keyword trigger), the slot_1
+    // and tie_break lists naming it, and the outside_view catalogue / DSK-TR-002 entries saying it is built. No case changes.
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('54bed6181acce51492eab8d0d74d46fb03a4b6bfe5bd0abfbd8e1d26d65ec0fb');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));

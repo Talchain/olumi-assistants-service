@@ -14,7 +14,7 @@ export const POLICY = {
     "explain_this_result": "A continuation of the Run, not a coaching intervention. It never counts against the budget below.",
     "suppression": "If open.decision_point is true, offer NO coaching row and no RC-COACH-EDITS pill. The decision comes first.",
     "budget": {
-      "slot_1": "The single highest-priority eligible row among RC-WIDEN, RC-WHAT-CHANGES, RC-STRENGTHEN-ITEM, RC-PREMORTEM.",
+      "slot_1": "The single highest-priority eligible row among RC-WIDEN, RC-WHAT-CHANGES, RC-STRENGTHEN-ITEM, RC-PREMORTEM, RC-OUTSIDE-VIEW.",
       "slot_2": "RC-COACH-EDITS, only when eligible. It is user-initiated, so it may sit beside slot 1.",
       "max_chips": 2
     },
@@ -27,7 +27,7 @@ export const POLICY = {
     ],
     "tie_break": [
       "Same priority and the SAME item (e.g. RC-WHAT-CHANGES and RC-STRENGTHEN-ITEM both name factor X): offer RC-WHAT-CHANGES only. Reasoning framing wins over the model action.",
-      "Otherwise by row order: RC-WIDEN, RC-WHAT-CHANGES, RC-STRENGTHEN-ITEM, RC-PREMORTEM."
+      "Otherwise by row order: RC-WIDEN, RC-WHAT-CHANGES, RC-STRENGTHEN-ITEM, RC-PREMORTEM, RC-OUTSIDE-VIEW."
     ],
     "method_turn_rule": "On a 'method' turn, offer no other method. Offer only that method's own follow-up actions.",
     "cooldown_default": "A row (or item) with guidance status offered, pressed, dismissed or completed is not offered while its current state_key_hash equals the recorded one: a row is said once per state (E6, DL 12 Oct, Paul's test). user.explicit_request bypasses this.",
@@ -668,6 +668,89 @@ export const POLICY = {
         "A-COACH-EDITS-SAME-SET-HIDDEN",
         "A-REQUEST1-NO-COACHING"
       ]
+    },
+    {
+      "policy_id": "RC-OUTSIDE-VIEW",
+      "name": "Outside view",
+      "action_type": "reasoning_method",
+      "trigger_predicate": {
+        "all": [
+          "turn.request in [narration, turn]",
+          "model.goal_present",
+          "a factor F in model.goal_path_factors with F.value_authorship == yours AND F.has_range == false"
+        ]
+      },
+      "required_typed_signals": [
+        "model.goal_present",
+        "model.goal_path_factors",
+        "open.decision_point",
+        "turn.request"
+      ],
+      "forbidden_without": [
+        "a named goal-path factor whose value is the user's single figure with no range"
+      ],
+      "silent_when": [
+        "open.decision_point",
+        "turn.request == run_result",
+        "no goal-path factor holds the user's single figure without a range (DSK-TR-002: never a keyword scan of chat)",
+        "the factor carries a range, or its value is Olumi's or of unknown origin, or has_range is not recorded",
+        "guidance[RC-OUTSIDE-VIEW] offered, pressed, dismissed or completed with an unchanged state_key"
+      ],
+      "priority": "P5",
+      "reasoning_question": "In similar past cases you know of, what did {item_label} turn out to be, and how much did it vary?",
+      "short_copy": "Compare {item_label} with similar cases.",
+      "why_now": "{item_label} is a single figure you gave, with no range around it.",
+      "primary_action": {
+        "label": "Compare with similar cases",
+        "action_kind": "discuss",
+        "intent": "outside_view",
+        "behaviour": "Olumi asks which past cases are most like this one and what the figure turned out to be in them. It never invents figures from past cases or presents one as a fact. The user's figure stays as given; a range the user then states goes on a change card for approval."
+      },
+      "secondary_actions": [
+        {
+          "label": "Not now",
+          "action_kind": "dismiss"
+        }
+      ],
+      "progressive_detail": "Why: one line from science_basis.",
+      "state_key": {
+        "fields": [
+          "factor_id",
+          "value_hash"
+        ],
+        "shape": "{factor_id, value_hash}",
+        "note": "A new figure for the factor (value_hash moves) may bring it back; a range ends it."
+      },
+      "cooldown_rule": "Default cooldown.",
+      "reentry_rule": "Returns only when the factor's stored value changes (value_hash), or another factor qualifies.",
+      "completion_rule": "Completed when the factor gains a range, or the method turn answers.",
+      "truth_dependencies": [
+        "observedValueAuthorship (F1)",
+        "observed_state.range (StoredInterventionRange)",
+        "goal path (assembleGuidanceSignals)"
+      ],
+      "human_control_rule": "Never sets a value or a range itself. Any range goes through a change card the user applies.",
+      "never_say": [
+        "reference class",
+        "a figure from past cases Olumi did not get from the user",
+        "a percentage chance attached to the factor"
+      ],
+      "horizon_rule": null,
+      "science_basis": {
+        "summary": "A single figure judged from the inside tends to be over-optimistic; comparing it with how similar past cases actually turned out tends to correct that.",
+        "refs": [
+          "Kahneman & Tversky (1979) Intuitive prediction: biases and corrective procedures",
+          "Lovallo & Kahneman (2003) Delusions of success, HBR",
+          "Flyvbjerg (2006) From Nobel Prize to project management: getting risks right"
+        ],
+        "dsk": [
+          "DSK-P-002 (Outside view): the method",
+          "DSK-TR-002 (re-grounded; see dsk_trigger_map): a typed signal, never a keyword scan of chat"
+        ]
+      },
+      "replaces": [],
+      "signal_status": "available",
+      "acceptance_example_ids": []
     }
   ],
   "copy_rules": {
