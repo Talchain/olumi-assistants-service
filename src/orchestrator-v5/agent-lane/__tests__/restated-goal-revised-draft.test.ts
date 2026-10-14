@@ -23,7 +23,8 @@ import { retainedLimitOnlyNodeIds, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../.
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
-import { constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, REVISED_DRAFT_MORE_LINKS, type CallStructuredModel } from '../runtime/build-model.js';
+import { revisedDraftBrief } from '../runtime/draft-replacement.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -1182,4 +1183,65 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     expect({ operation_id: v.operation_id, candidate: v.candidate }).toEqual({ operation_id: fixture.operation_id, candidate: fixture.candidate });
   });
 
+});
+
+/**
+ * ⭐ L20 SERVED 14 Oct (5e3d631e, scenario d7efe636): the revised draft for Paul's two goals came to 35 links (16 nodes, 4 of
+ * them Olumi's), the size retry fitted but demoted "25% of my time" and "over 15%" to Olumi's estimates, so it was rejected and
+ * the goals were never saved ("revised_draft_not_prepared", 125 s). The drafter's two answers are the served ones, verbatim
+ * (`tests/fixtures/marketing-l20-revised-draft/served-015fbf08.json`, md5 per call checked against the row).
+ */
+describe('a revised draft over the link limit only is admitted as drafted (L20 served)', () => {
+  const SERVED = JSON.parse(readFileSync('tests/fixtures/marketing-l20-revised-draft/served-015fbf08.json', 'utf8')) as { first_pass: string; size_retry: string };
+  /** The served drafter: its first pass, then (if asked) its size retry, each verbatim. */
+  const servedLane = (s: ReturnType<typeof server>, first = SERVED.first_pass) => {
+    const answers = [first, SERVED.size_retry];
+    let drafted = 0;
+    const call = (async () => { const text = answers[drafted] ?? ''; drafted += 1; return { text }; }) as unknown as CallStructuredModel;
+    const caps = createAgentCapabilities(s.dispatch, new ProposalStore(), call, 'full', undefined, {
+      readCommittedTurnLedger: s.readCommittedTurnLedger, readStatedObjections: async () => [] });
+    return { caps, drafts: () => drafted };
+  };
+
+  it('RED: the served first pass is offered as drafted (no retry), says why it is larger once, and both goals are saved on approval', async () => {
+    const s = server();
+    const { caps, drafts } = servedLane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer.ok, JSON.stringify(offer)).toBe(true);
+    expect(drafts(), 'one drafter call: the retry that lost the user\'s figures is not asked').toBe(1);
+    expect(String(offer.public_label).split(REVISED_DRAFT_MORE_LINKS), 'said once').toHaveLength(2);
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: true, mutated: true, applied: true });
+    const rows = (s.graph().goal_constraints ?? []) as Rec[];
+    const goal = (s.graph().nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.label).toBe('New customers in the first 3 months');
+    // Both of L20's figures land as written (comparator, figure, unit), never as Olumi's estimates.
+    expect(rows.find((r) => r.role === 'goal_target' && r.value === 15)).toMatchObject({ unit: '%', operator_as_stated: '>' });
+    expect(rows.find((r) => r.role === 'goal_target' && r.value === 20)).toMatchObject({ node_id: goal.id });
+  });
+
+  it('CONTRAST: a FIRST model over the link limit takes today\'s path: the size retry is asked, and the served pair is refused', async () => {
+    let n = 0;
+    const answers = [SERVED.first_pass, SERVED.size_retry];
+    const input = revisedDraftBrief(FX.brief_text, L20);
+    const out = await buildModelFromBrief(SID, input, (async () => ({ status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } })) as never,
+      (async () => { const text = answers[n] ?? ''; n += 1; return { text, status: 'completed' }; }) as never) as Rec;
+    expect(n).toBe(2);
+    expect(out).toMatchObject({ ok: false, refusal: 'model_too_large', nodes: 16, edges: 35 });
+  });
+
+  it('CONTRAST: a revised draft over the NODE limit is still refused', async () => {
+    const over = JSON.parse(SERVED.first_pass) as Rec;
+    // Three more of Olumi's own factors, each wired toward the goal: 19 nodes, over the 18-node limit.
+    for (const label of ['Launch timing fit', 'Channel mix breadth', 'Message clarity']) {
+      over.factors.push({ ...over.factors.find((f: Rec) => f.provenance === 'ai_proposed'), label });
+      over.links.push({ ...over.links[0], from: label, to: 'Conversion rate' });
+    }
+    const s = server();
+    const { caps } = servedLane(s, JSON.stringify(over));
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer).toMatchObject({ ok: false, refusal: 'revised_draft_not_prepared' });
+    expect(s.commits).toHaveLength(0);
+  });
 });
