@@ -10,7 +10,7 @@ import { cappedTeamShareMean, teamShareMoments } from './event-by-date-share.js'
 import { displayedPctAt } from './goal-chance-driver.js';
 import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { confirmationQuoteLine, confirmedSelection, verbatimSourceLine, type QuoteConfirmation } from '../agent-lane/quote-confirmation.js';
-import { combineStatementEnds, statementReadingWords, verifyStatements, type StatementForm, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
+import { combineStatementEnds, statementReadingWords, userStatementOf, verifyStatements, type StatementForm, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, any>;
@@ -230,7 +230,8 @@ export type TeamTimeFromStatements =
 /** The statements a held bound was recorded from (`teamObservedState`), so a later answer combines with them unrepeated. */
 export function heldTeamTimeStatements(graph: unknown): readonly UserStatement[] {
   const held = eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time;
-  return held?.held_bound !== undefined && Array.isArray(held.statements) ? held.statements as UserStatement[] : [];
+  return held?.held_bound !== undefined && Array.isArray(held.statements)
+    ? (held.statements as unknown[]).map(userStatementOf).filter((x): x is UserStatement => x !== undefined) : [];
 }
 export function teamTimeFromStatements(texts: StatementTexts, raw: unknown, held: readonly UserStatement[] = []): TeamTimeFromStatements {
   const v = verifyStatements(raw, texts, { subject: { quantity: 'months_to_finish' }, unit: 'months', forms: TEAM_TIME_FORMS,

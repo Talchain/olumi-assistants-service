@@ -26,7 +26,7 @@ import { goalTargetBasisOf } from '../goal-target/goal-target-basis.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
 import { goalReadingProjectionOf } from '../goal-target/goal-reading-write.js';
 import { EventRiskV1, type EventRiskV1T } from '../../schemas/event-risk.js';
-import type { UserStatement } from './user-statements.js';
+import { userStatementOf, type UserStatement } from './user-statements.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -264,7 +264,7 @@ export function approvedRiskOccurrenceOf(op: { readonly path: string; readonly v
   const v = (isRec(op.value) ? op.value : {}) as Rec;
   if (!isRec(v.event_risk) || !isRec(v.expected_node) || typeof v.goal_id !== 'string' || !isRec(v.expected_goal)) return undefined;
   return { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node, goal_id: v.goal_id, expected_goal: v.expected_goal,
-    ...(isRec(v.holds_now) ? { holds_now: v.holds_now as unknown as UserStatement } : {}) };
+    ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}) };
 }
 
 /**
