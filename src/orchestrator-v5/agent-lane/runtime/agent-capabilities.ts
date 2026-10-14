@@ -6292,9 +6292,11 @@ export function createAgentCapabilities(
         ? args.reference_date.trim() : undefined;
       if (placed.ok !== true || setAside === undefined || reference === undefined || setAside === reference) return placed;
       return { ...placed, reference_used: reference, reference_set_aside: setAside,
-        note: `${String(placed.note ?? '')} The reference_date you passed (${setAside}) was not used: Olumi counts this deadline from the `
-          + `scenario's recorded reference date, ${sayDate(reference)}, which the card shows. That is deliberate, not an inconsistency: `
-          + 'show the card as it is and do not withdraw it for that reason.' };
+        // AIE #94 6178720067 item 2, exact text: the dates from the returned tuple; a genuine conflict still takes the existing path.
+        note: `${String(placed.note ?? '')} The reference_date you passed (${setAside}) was not used. This proposal uses ${sayDate(reference)}, `
+          + 'shown on the card. Explain the returned card using that reference; this difference alone is not a reason to withdraw it. '
+          + 'If the returned deadline or reference conflicts with the user\u2019s actual applicable words or the current supported date/source, '
+          + 'surface that specific conflict and use the existing clarification or correction path.' };
     },
 
     /**
