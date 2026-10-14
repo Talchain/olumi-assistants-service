@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting, briefWritesGoalFigure } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -2971,28 +2971,22 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
  * Anything else is unchanged: a zero part adds nothing to the user's figures, and any non-zero estimate keeps it Olumi's.
  */
 export function goalLevelOfStatedSum(model: CandidateModel, brief: string | undefined): CandidateModel {
-  return goalLevelIsEstimated(model.goal) && usersSumFixesGoalLevel(model, brief)
-    ? { ...model, goal: { ...model.goal, baseline_provenance: 'explicit' } } : model;
-}
-
-/** Whether the user's own sum fixes the goal's level today, whatever provenance the drafter typed (`goalLevelOfStatedSum`). */
-export function usersSumFixesGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
   const goal = model.goal;
   const level = goal.baseline_value;
-  if (goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return false;
+  if (!goalLevelIsEstimated(goal) || goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return model;
   const sums = (model.identities ?? []).filter((d) => d?.operation === 'sum' && d.outcome === goal.metric);
   const quote = sums.length === 1 ? sums[0]!.evidence?.quote : undefined;
-  if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return false;
+  if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return model;
   const unitOf = (u: unknown): string => String(u ?? '').trim().toLowerCase();
   const matches = sums[0]!.factors.map((label) => model.factors.filter((f) => f.label === label));
-  if (matches.length < 2 || matches.some((m) => m.length !== 1)) return false;
+  if (matches.length < 2 || matches.some((m) => m.length !== 1)) return model;
   const parts = matches.map((m) => m[0]!);
   if (parts.some((f) => unitOf(f.unit) !== unitOf(goal.unit) || f.baseline_known !== true
-    || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))) return false;
+    || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))) return model;
   const stated = parts.filter((f) => f.baseline_value !== 0);
-  if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return false;
+  if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return model;
   const total = parts.reduce((sum, f) => sum + (f.baseline_value as number), 0);
-  return Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level));
+  return Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)) ? { ...model, goal: { ...goal, baseline_provenance: 'explicit' } } : model;
 }
 
 /**
@@ -3990,16 +3984,6 @@ function admitOnce(
         // `baseline_known` to its provenance, so a level the model marks known but
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
         const estimated = goalLevelIsEstimated(model.goal);
-        /**
-         * ⛔ THE DRAFTER'S `explicit` IS ITS WORD, NOT THE BRIEF'S (DL 13:49Z 14 Oct; found by #3053's mutant 3: a typed 90 the
-         * brief never writes was stored as the user's level). The level path now reads the same authority as the change and
-         * ceiling paths (`goalLevelTheUserWrote`, injected as `goalLevelStated`: the brief writes this figure about THIS goal),
-         * the brief writes the figure as a fact, and not only as another quantity's (`briefWritesGoalFigure`), or the user's own sum fixing it (`usersSumFixesGoalLevel`, capacity). Otherwise the level
-         * is unknown: withheld and asked, never Olumi's guess presented as theirs. Fix forward (#3056 CI): a name-bound reader
-         * here withheld "MRR is £16,000 today" and "from about 1,400 today", levels the brief plainly writes.
-         */
-        const notInBrief = !estimated && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && baselineRaw !== 0
-          && !goalLevelStated(baselineRaw, model.goal.unit) && !briefWritesGoalFigure(model, brief) && !usersSumFixesGoalLevel(model, brief);
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
@@ -4023,13 +4007,7 @@ function admitOnce(
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
             targetUnit: model.goal.unit,
           });
-          if (verdict.admitted && notInBrief) {
-            // Every rule above admitted it, but the brief never writes it: unknown, and asked (the refusals above keep their words).
-            withheld(
-              `The current level of "${model.goal.metric}" (${baselineRaw}) is not a figure your brief states for it, so no chance ` +
-              `of reaching ${raw} is shown. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
-            );
-          } else if (verdict.admitted) {
+          if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
             observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, verifiedGoalLevel(model, brief));
           } else {

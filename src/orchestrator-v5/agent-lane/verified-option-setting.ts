@@ -705,54 +705,13 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
  * Anything else stays exactly as written before. The typed-unit equality is defence in depth: V2's neighbour rule
  * already withholds a factor whose figure the goal's sentence writes as another quantity.
  */
-/**
- * ⭐ THE BRIEF WRITES THE GOAL'S DRAFTED LEVEL AS A FACT, AND NOT ONLY FOR ANOTHER QUANTITY (fix forward of #3056, 14 Oct).
- * Some direct sentence of the brief writes the level's magnitude in a role that is not an aim, a condition or the past
- * (`occurrenceRoleOf`), and that sentence does not name another quantity of the model (a word of its label the goal's label
- * lacks) without naming the goal. Admission's level path reads it, so a level the brief never writes, or writes only as
- * another quantity's ("Our existing team resolves 80 tickets per week" for the total), is asked for, never admitted as the
- * user's (DL 13:49Z). It needs no name for the goal: "MRR is about £16,000 today" names "Monthly recurring revenue" in words
- * no shared name reader binds (`mrr` reads as a period adverb), and a bare count ("from about 1,400 today") carries no unit.
- */
-export function briefWritesGoalFigure(model: CandidateModel, brief: string | undefined): boolean {
-  try {
-    const value = model.goal.baseline_value;
-    if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return false;
-    const own = words(model.goal.metric).filter(w => !grammar(w));
-    const others = [...(model.factors ?? []), ...(model.outcomes ?? []), ...(model.risks ?? [])]
-      .map(q => q.label).filter((l): l is string => typeof l === 'string' && l !== model.goal.metric);
-    const theirs = others.flatMap(l => words(l)).filter(w => !grammar(w) && !own.some(g => sameName(g, w)));
-    const names = (text: string, set: readonly string[]): boolean => words(text).some(w => set.some(n => sameName(n, w)));
-    return assertions(brief).some(a => directContext(brief, a) && (names(a.text, own) || !names(a.text, theirs))
-      && findLinkEffectAmounts(a.text).some(amount => amount.magnitude === Math.abs(value)
-        && !['aim', 'conditional', 'past'].includes(occurrenceRoleOf(a.text, amount.index) ?? '')));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The ORIGIN half of `verifiedGoalLevel`, alone: a direct sentence of the brief names the goal and writes its drafted level in the
- * goal's typed frame, not as an aim or bound (`sentencesWritingFigure`). Admission's level path reads it so a level the brief never
- * writes is not taken for the user's (DL 13:49Z 14 Oct); the ROLE half stays `verifiedGoalLevel`'s (`extractionType`).
- */
-export function briefWritesGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
-  try {
-    const goal = model.goal; const value = goal.baseline_value;
-    if (typeof value !== 'number' || !Number.isFinite(value) || readUnitParts(goal.unit) === null) return false;
-    return sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length > 0;
-  } catch {
-    return false;
-  }
-}
-
 export function verifiedGoalLevel(model: CandidateModel, brief: string | undefined): boolean {
   try {
     const goal = model.goal; const value = goal.baseline_value;
     if (typeof value !== 'number' || !Number.isFinite(value)) return false;
     const unit = readUnitParts(goal.unit);
     if (unit === null) return false;
-    if (!briefWritesGoalLevel(model, brief)) return false;
+    if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
     return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
       && verifiedFactorLevel(model, f, brief));
   } catch {
