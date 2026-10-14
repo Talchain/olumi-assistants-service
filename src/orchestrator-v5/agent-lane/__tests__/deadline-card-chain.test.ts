@@ -620,9 +620,10 @@ describe('RULING A: the route card trusts the attested words; retired negatives 
       'We want to increase survey responses from 200 to 500, over the next ten months.',
     ].map((brief) => [`shared label word (R7 buddy r2 P2): ${brief}`, brief] as const),
   ];
-  it.each(RETIRED)('%s', async (_name, brief, sentence = brief) => {
+  it.each(RETIRED.map(([name, brief, sentence]) => ({ name, brief, sentence: sentence ?? brief })))('$name', async ({ brief, sentence }) => {
     const w = world({ graph: d2.graph, brief }), before = w.read();
-    const offer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), storedBrief: brief, start: { rowId: w.rows[0]!.id, rows: w.rows } });
+    // The capability reads the stored brief itself (route-only authorship: no argument selects the source).
+    const offer = await w.caps.deadlineCardFromDraft(w.ctx('Run'), { ...issueInput(), start: { rowId: w.rows[0]!.id, rows: w.rows } });
     expect(offer?.words).toBe('ten months');
     const out = await offer!.issue(w.ctx('Run'), { deadline_words: 'ten months', rationale: '' }) as Rec;
     expect(out).toMatchObject({ ok: true, mutated: false });
