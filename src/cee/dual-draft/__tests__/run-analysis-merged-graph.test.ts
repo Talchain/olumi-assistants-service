@@ -174,14 +174,26 @@ describe('Phase 4 — merged graph through the real run_analysis handler', () =>
     expect(handlerOutcome.handler_facts).toHaveLength(1);
     expect(handlerOutcome.assistant_text.length).toBeGreaterThan(0);
 
-    // 6. The payload PLoT received contains the MERGED graph verbatim —
-    // including the M2-added risk node and causal link.
+    // 6. The payload PLoT received is the MERGED graph. ⭐ One rule for an unsized risk (`unsizedRiskIds`, DL 14 Oct): the
+    // M2-added risk is in the saved model, but no one has sized it, so the Run leaves it and its link out (never sampled at
+    // zero) and the host says so once.
     expect(run).toHaveBeenCalledOnce();
     const payloadGraph = (plotPayload as { graph: GraphV3T }).graph;
-    expect(payloadGraph.nodes.some((n) => n.id === 'risk_regulatory')).toBe(true);
-    expect(payloadGraph.edges.some((e) => e.from === 'risk_regulatory' && e.to === 'fac_price')).toBe(true);
+    expect(merged.nodes.some((n) => n.id === 'risk_regulatory')).toBe(true);
+    expect(payloadGraph.nodes.some((n) => n.id === 'risk_regulatory')).toBe(false);
+    expect(payloadGraph.edges.some((e) => e.from === 'risk_regulatory' || e.to === 'risk_regulatory')).toBe(false);
     // Deferred option is NOT in the analysed graph (D1 limitation, explicit).
     expect(payloadGraph.nodes.some((n) => n.id === 'opt_partner')).toBe(false);
+
+    // 7. Sized, the M2-added risk node and its causal link reach PLoT verbatim.
+    const sized = structuredClone(merged);
+    Object.assign(sized.nodes.find((n) => n.id === 'risk_regulatory')!, { observed_state: { value: 0.3 } });
+    Object.assign(snapshot, { graph: sized, rawPersistedGraph: sized });
+    await handler(makeInvocation());
+    expect(run).toHaveBeenCalledTimes(2);
+    const sizedGraph = (plotPayload as { graph: GraphV3T }).graph;
+    expect(sizedGraph.nodes.some((n) => n.id === 'risk_regulatory')).toBe(true);
+    expect(sizedGraph.edges.some((e) => e.from === 'risk_regulatory' && e.to === 'fac_price')).toBe(true);
   });
 
   it('baseline sanity: the unmerged M1 graph succeeds through the same harness (merge does not regress the baseline)', async () => {

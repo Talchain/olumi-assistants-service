@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardHolds, riskOccurrenceGoalSubject, riskOccurrencePostimageIsScoped,
-  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, unsizedRiskIds, unsizedRiskLine, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { heldCardStillApplies, heldCardSubjectMoved } from '../proposal-object/still-applies.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
@@ -239,16 +239,23 @@ describe('risk-occurrence: Olumi’s range for an unvalued risk root', () => {
   it('AIE readiness copy: the eligible event path asks the occurrence within the window; an ineligible risk keeps its question, never promising a card', () => {
     const ask = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
       .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message);
-    expect(ask(G)).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers '
+    // The copy is asked of a risk the user put there themselves (`unsizedRiskIds`: theirs still asks first).
+    const own = (g: Rec): Rec => { const c = structuredClone(g); riskOf(c).provenance = 'user_set'; return c; };
+    expect(ask(own(G))).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers '
       + 'until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
     // PL 05:53Z: where no card can exist (no single saved goal period), the ask never offers one.
     const honest = ['How likely or how large is "Code quality deterioration" today? Olumi can’t run the numbers until this '
       + 'risk has a figure.'];
     const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
-    expect(ask(conflict)).toEqual(honest);
+    expect(ask(own(conflict))).toEqual(honest);
     const noPeriod = structuredClone(G); delete goalOf(noPeriod).goal_target_basis;
     expect(riskOccurrenceSubject(noPeriod, RISK)).toEqual({ kind: 'ineligible', reason: 'no_window' });
-    expect(ask(noPeriod)).toEqual(honest);
+    expect(ask(own(noPeriod))).toEqual(honest);
+    // ⭐ The drafted risk (DL 19:26Z): never asked, left out, and its host line offers the same step only where the card can exist.
+    for (const g of [G, conflict, noPeriod]) expect(ask(g)).toEqual([]);
+    expect(unsizedRiskLine(G, RISK, false)).toBe('‘Code quality deterioration’ has no figure yet, so this analysis leaves it out. To include it, say whether it’s '
+      + 'already true now, or how likely it is to happen at least once within 3 months; or ask Olumi to suggest a starting estimate for you to review.');
+    for (const g of [conflict, noPeriod]) expect(unsizedRiskLine(g, RISK, false)).toBe('‘Code quality deterioration’ has no figure yet, so this analysis leaves it out.');
   });
 });
 
@@ -282,9 +289,9 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
 
   it('RED→GREEN: their words → ONE card quoting them → the press → the risk holds now as THEIRS (occurrence 1, basis user); its gap closes', async () => {
     const w = world();
-    // Before: readiness offers the held-state reading first, then the AIE occurrence ask.
-    expect(asks(w.graph())).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ '
-      + 'to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
+    // Before: the drafted, unsized risk is left out of the Run (DL 19:26Z), never asked; its host line offers this step.
+    expect(asks(w.graph())).toEqual([]);
+    expect(unsizedRiskIds(w.graph()).has(RISK)).toBe(true);
     const card = await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
     expect(card).toMatchObject({ ok: true, risk_holds_now: { risk: 'Code quality deterioration', quote: SAID, within_months: 3 } });
     expect(card.public_label).toBe(`From your message: ‘${SAID}’ Do you want to record that ‘Code quality deterioration’ is already true now? `
@@ -299,6 +306,8 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
       + 'How strongly it affects the model is still Olumi’s placeholder on its link.' });
     expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
     expect(asks(w.graph())).toEqual([]);
+    // After: theirs, so it is in the Run.
+    expect(unsizedRiskIds(w.graph()).has(RISK)).toBe(false);
     expect(w.commits()).toBe(1);
   });
   it('never on unverified, partial or other words; a risk that cannot hold it says why; the writer refuses a holds-now block without its statement', async () => {
