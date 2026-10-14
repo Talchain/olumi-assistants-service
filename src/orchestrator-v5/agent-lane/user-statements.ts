@@ -12,8 +12,9 @@
 import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 
-export type StatementForm = 'point' | 'range' | 'lower_bound' | 'upper_bound' | 'holds_now';
-export const STATEMENT_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now'];
+/** `describes`: qualitative words about the quantity ("I'm not that experienced with marketing"), with no figure of the user's. */
+export type StatementForm = 'point' | 'range' | 'lower_bound' | 'upper_bound' | 'holds_now' | 'describes';
+export const STATEMENT_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now', 'describes'];
 
 /** What a quantity a statement is about: set by the tool that verifies it, never by the Agent's words. */
 export interface StatementSubject {
@@ -121,7 +122,8 @@ export function verifyStatements(raw: unknown, texts: StatementTexts, rules: Sta
       ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
       ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
       ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
-    if (form === 'holds_now') { out.push(base); continue; }
+    // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
+    if (form === 'holds_now' || form === 'describes') { out.push(base); continue; }
     const stated = rules.figuresIn(quote);
     if (form === 'range') {
       const low = figure(given?.low), high = figure(given?.high);
@@ -160,7 +162,7 @@ export type CombinedEnds =
 
 /** The ends the statements give, hard apart from qualified. A negated statement ("not 7 months") gives no end. */
 export function combineStatementEnds(statements: readonly UserStatement[]): CombinedEnds {
-  const used = statements.filter((s) => s.negated !== true && s.form !== 'holds_now');
+  const used = statements.filter((s) => s.negated !== true && s.form !== 'holds_now' && s.form !== 'describes');
   const isLow = (s: UserStatement): boolean => (s.form === 'lower_bound' || s.form === 'range') && s.low !== undefined;
   const isHigh = (s: UserStatement): boolean => (s.form === 'upper_bound' || s.form === 'range') && s.high !== undefined;
   const hard = (s: UserStatement): boolean => s.qualifier === undefined;
@@ -221,5 +223,5 @@ export function statementReadingWords(s: UserStatement, unit: string): string {
   if (s.form === 'upper_bound') return `a ${q}upper end of ${s.high} ${unit}`;
   if (s.form === 'range') return `a ${q}range of ${s.low}–${s.high} ${unit}`;
   if (s.form === 'point') return `${q}${s.low} ${unit}`;
-  return 'a condition that holds now';
+  return s.form === 'describes' ? 'your description' : 'a condition that holds now';
 }
