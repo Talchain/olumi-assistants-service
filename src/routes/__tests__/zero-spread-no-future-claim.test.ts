@@ -19,8 +19,8 @@ type Rec = Record<string, any>;
 const READ = (JSON.parse(readFileSync('tests/fixtures/zero-spread/served-capacity-post3010-read01-20261014.json', 'utf8')) as Rec).body as Rec;
 const KEEP = 'keep_current_staffing';
 const SERVED_LINE = 'Falls short of 100 tickets per week if today’s figures hold.';
-const LINE = 'Chance not shown: this option’s simulated results barely vary in this model, because the figures it rests on are fixed, or nearly, '
-  + 'so a chance would only read as certain or impossible. Worth checking: which of those figures you are unsure of; giving them a range can let the Run show a chance.';
+const LINE = 'Chance not shown: this result reports a very narrow central range or a very small spread. '
+  + 'That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option.';
 const licenceRecord = (result: Rec): Rec => (result.enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_CHANCE_LICENSED)!;
 const cells = (result: Rec) => projectCanonicalAnalysisCells(result as never, READ.graph, READ.analysis_goal_certainty);
 const FUTURE = /falls short|meets\b|if today.s (figures|rates) hold/i;

@@ -45,8 +45,8 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
   // ⛔ Capacity post3010 row 3 (PL #94 6135017311, 05:25Z): the PLAIN variant's "Meets / Falls short of … if today’s figures hold"
   // said a future event and is retired for the line its predicate proves; side kept as data. The carrier's rates line and §(o′) stay.
   it('the face line: §(o′) with no carrier and a horizon; the carrier’s rates line; the plain variant says only what is proven', () => {
-    const LINE = 'Chance not shown: this option’s simulated results barely vary in this model, because the figures it rests on are fixed, or nearly, '
-      + 'so a chance would only read as certain or impossible. Worth checking: which of those figures you are unsure of; giving them a range can let the Run show a chance.';
+    const LINE = 'Chance not shown: this result reports a very narrow central range or a very small spread. '
+      + 'That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option.';
     const short = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 0, 0, 18500) : r));
     const acc = structuredClone(graph);
     acc.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').nonlinear_identity = { operation: 'accumulation',
