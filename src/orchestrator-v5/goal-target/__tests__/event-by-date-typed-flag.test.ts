@@ -260,13 +260,21 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
   // ⭐ DL (14 Oct, Paul's legacy brief): a draft TYPED event_by_date with a STATED deadline keeps its forecast whatever the
   // options; an option with no usable mechanism (none, invalid or a zero pace) stays unresolved, never acting as 0. The rows
   // above (no deadline recorded) keep their refusals; a missing deliverable or no real option still refuses with one.
-  const dated = (c: CandidateModel): CandidateModel => ({ ...c, goal: { ...c.goal, deadline_words: 'ship the new platform by Q3' } as CandidateModel['goal'] });
+  // DL ruling C (14 Oct): "whatever options" only where the draft states the team's capacity from the brief.
+  const STAFFED_BRIEF = `${BRIEF} We have eight platform engineers.`;
+  const teamFactor = (over: Partial<CandidateModel['factors'][number]> = {}): CandidateModel['factors'][number] => ({
+    label: 'Platform engineers', role: 'controllable', baseline_known: true, baseline_value: 8, unit: 'engineers',
+    provenance: 'explicit', plausible_max: 30, baseline_evidence: { quote: 'We have eight platform engineers.' }, ...over,
+  } as CandidateModel['factors'][number]);
+  const dated = (c: CandidateModel, team: CandidateModel['factors'][number] | null = teamFactor()): CandidateModel => ({ ...c,
+    goal: { ...c.goal, deadline_words: 'ship the new platform by Q3' } as CandidateModel['goal'],
+    factors: team ? [...c.factors, team] : c.factors });
   it.each([
     ['no added_capacity', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => ({ ...o, added_capacity: null })) })],
     ['invalid added_capacity', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => o.is_status_quo ? o : { ...o, added_capacity: { monthly_share_pct: 10, lead_months_low: 5, lead_months_high: 3 } }) })],
     ['zero capacity change', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => o.is_status_quo ? o : { ...o, added_capacity: { monthly_share_pct: 0, lead_months_low: 2, lead_months_high: 4 } }) })],
   ] as const)('deadline stated, %s: the forecast is admitted and every such option is unresolved (never acting as 0)', (_name, change) => {
-    const admitted = flagged(dated(change(b3())));
+    const admitted = flagged(dated(change(b3())), STAFFED_BRIEF);
     expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
     expect(admitted.nodes.some(n => n.id === 'event_team')).toBe(true);
     const graph = { nodes: admitted.nodes, edges: admitted.edges };
@@ -281,8 +289,27 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     ['no deliverable', 'it needs the deliverable the date is for', (c: CandidateModel): CandidateModel => ({ ...c, goal: { ...c.goal, deliverable: null } })],
     ['no option but carrying on', "the options don't change the team's capacity", (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.filter(o => o.is_status_quo) })],
   ] as const)('deadline stated, %s: still the existing refusal', (_name, piece, change) => {
-    const admitted = flagged(dated(change(b3())));
+    const admitted = flagged(dated(change(b3())), STAFFED_BRIEF);
     expect(admitted.withheld).toContainEqual(expect.objectContaining({ reason: 'event_goal_unadmitted', detail: refusal(piece) }));
+  });
+  // Ruling C's contrasts: the same dated draft with no option pace. No capacity basis from the brief → the ordinary model
+  // (T5 D2's marketing launch: an Olumi-proposed time factor is not a basis); a chain identity is one.
+  const noPace = (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => ({ ...o, added_capacity: null })) });
+  it.each([
+    ['no team or time factor at all', null],
+    ['an Olumi-proposed time share (no brief quote)', teamFactor({ label: 'Working time on the platform', unit: '%', baseline_value: 0, provenance: 'ai_proposed', baseline_evidence: null })],
+    ['a stated figure that is not team size or time (a budget)', teamFactor({ label: 'Annual budget', unit: 'GBP/year', baseline_value: 400000, baseline_evidence: { quote: 'keeping annual salary spend under £400k' } })],
+  ] as const)('deadline stated, no option pace, %s: no capacity basis → the existing refusal (the ordinary model)', (_name, team) => {
+    const admitted = flagged(dated(noPace(b3()), team), STAFFED_BRIEF);
+    expect(admitted.withheld).toContainEqual(expect.objectContaining({ reason: 'event_goal_unadmitted', detail: refusal('it needs how much capacity each option adds') }));
+  });
+  it('deadline stated, no option pace, a chain identity (capacity = people × time share): admitted, options unresolved', () => {
+    const c = dated(noPace(b3()), null);
+    const identities: CandidateModel['identities'] = [{ outcome: 'Platform capacity', operation: 'product',
+      factors: ['Senior engineers hired', 'Junior engineers hired'], provenance: 'inferred' }];
+    const admitted = flagged({ ...c, identities }, STAFFED_BRIEF);
+    expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
+    expect(unresolvedEventOptionIds({ nodes: admitted.nodes, edges: admitted.edges })).toEqual(['event_option_2', 'event_option_3']);
   });
 
   it('an event-slice draft whose event admission fails keeps its reachable ordinary model and logs the missing piece', () => {
