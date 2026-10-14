@@ -3524,6 +3524,8 @@ export function createAgentCapabilities(
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy> }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
+  /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
+  const withdrawnProposals = new Set<string>();
 
   /**
    * Prepare the revised draft with C's own construction from the stored brief and THIS turn's typed goal
@@ -3621,9 +3623,24 @@ export function createAgentCapabilities(
         words: `\u2018${target.measures}\u2019 ${TARGET_COMPARATOR_WORDS[target.comparator] ?? target.comparator} ${targetFigure(target.value, target.unit)}`,
         onCanvas: resolveNamed(g, target.measures, () => true).kind !== 'none' }]) };
     }
-    // Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is not this target.
-    const holds = draft.held.some((t) => t.quantity === canonicalLabel(target.measures) && t.value === target.value
-      && t.comparator === target.comparator && unitsConflict(target.unit, t.unit) === null);
+    // ⛔ A WITHDRAWN CARD IS NOT OFFERED AGAIN (served marketing turn 02 on 00a51f7d): the turn's one draft is reused, so a
+    // target call after `withdraw_proposal` returned the withdrawn id as offered, and the reply described a card the user
+    // never saw. Its id is consumed for this turn (`proposalsAwaitingApproval`), so the call says so instead. Only a recorded
+    // withdrawal refuses: a card merely gone from the store (evicted) is this turn's own preparation and is offered again.
+    if (withdrawnProposals.has(draft.proposal.proposal_id)) {
+      return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'This revised-draft card was withdrawn earlier this turn, so it is not offered and nothing has changed. Never say a card is shown.' };
+    }
+    if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
+    /**
+     * Bound to the quantity the call names (AIE 0452 AMEND 2): the same figure on another quantity is never "held". Held only
+     * by the exact label. A card target that carries this figure, comparator and unit under another label is UNKNOWN, never
+     * "not in the draft" (served marketing turn 02 on 00a51f7d: "new customers" read NOT on ‘New customers in first 3 months’,
+     * so the AI withdrew the card and nothing reached Paul). NOT held only when no card target carries the figure at all.
+     */
+    const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
+      && unitsConflict(target.unit, t.unit) === null);
+    const holds: boolean | 'unknown' = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)) ? true
+      : sameFigure.length > 0 ? 'unknown' : false;
     return {
       ok: true, mutated: false,
       proposal_id: draft.proposal.proposal_id,
@@ -3633,7 +3650,9 @@ export function createAgentCapabilities(
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
         + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
-        + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
+        + (holds === true ? '' : holds === 'unknown'
+          ? ` Whether this target (${targetFigure(target.value, target.unit)}) is the card\u2019s own could not be checked against the user\u2019s words: ask the user to check the targets on the card, and never say it is in the revised draft or that it is not.`
+          : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
   };
 
@@ -6708,6 +6727,7 @@ export function createAgentCapabilities(
         const p = proposals.get(id);
         if (p === undefined || p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return notFound;
         proposals.discard(id);
+        withdrawnProposals.add(id);
       }
       return {
         ok: true, mutated: false, proposal_id: id, withdrawn: true,
