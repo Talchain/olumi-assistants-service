@@ -1,0 +1,279 @@
+{
+ "_source": {
+  "brief": "Supabase scenarios.brief_text, scenario c1494f4d-13f9-4216-ac62-35871c7ff207 (Paul, 14 Oct 2026), sha256 009aa27bc2b7d044c92cbafe310a998c7a175dca98c8c9bf24a6e597895d8d73",
+  "draft": "Supabase cee_drafter_raw_responses id 4ed360a9-8aa3-4d48-b332-53ee6efa58e6, calls[0].raw_text (md5 1641e8dc07ab2005579af7ec8f4866bb, 7465 bytes), cee_build 1d932db68525acf7d84710e17a40cf73ca4a9985, created 2026-10-14T16:18:16Z; parsed, unedited"
+ },
+ "brief": "We have an urgent launch date in the next six months, but our development team is spending, on average, 25% of their time on fixing legacy code. We need to find a way to reduce the amount of time spent on these bug fixes and suboptimal functionality, or increase our development velocity, as at the moment we are looking like we're going to miss our next feature launch deadline by at least a month and possibly two. We currently have six mid-weight developers.",
+ "draft": {
+  "goal": {
+   "kind": "event_by_date",
+   "deliverable": "next feature launch",
+   "metric": "Next feature launch deadline",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "%",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "explicit",
+   "scope": null,
+   "quantity_frame": "level",
+   "basis": null,
+   "source_quote": "We have an urgent launch date in the next six months, but our development team is spending, on average, 25% of their time on fixing legacy code. We need to find a way to reduce the amount of time spent on these bug fixes and suboptimal functionality, or increase our development velocity, as at the moment we are looking like we're going to miss our next feature launch deadline by at least a month and possibly two.",
+   "deadline_words": "We have an urgent launch date in the next six months, but our development team is spending, on average, 25% of their time on fixing legacy code."
+  },
+  "constraints": [],
+  "options": [
+   {
+    "label": "Carry on as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   },
+   {
+    "label": "Legacy-code reduction",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Time on legacy fixes",
+      "value": 15,
+      "value_kind": "absolute",
+      "unit": "% of development time",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Add two developers",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Mid-weight developers",
+      "value": 8,
+      "value_kind": "absolute",
+      "unit": "developers",
+      "provenance": "ai_proposed",
+      "stated_evidence": null
+     }
+    ],
+    "added_capacity": {
+     "monthly_share_pct": 8,
+     "lead_months_low": 2,
+     "lead_months_high": 4
+    },
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Time on legacy fixes",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": {
+     "quote": "We have an urgent launch date in the next six months, but our development team is spending, on average, 25% of their time on fixing legacy code."
+    },
+    "baseline_value": 25,
+    "unit": "% of development time",
+    "provenance": "explicit",
+    "plausible_max": 100
+   },
+   {
+    "label": "Time on feature work",
+    "role": "observable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 75,
+    "unit": "% of development time",
+    "provenance": "inferred",
+    "plausible_max": 100
+   },
+   {
+    "label": "Mid-weight developers",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_evidence": {
+     "quote": "We currently have six mid-weight developers."
+    },
+    "baseline_value": 6,
+    "unit": "developers",
+    "provenance": "explicit",
+    "plausible_max": 30
+   },
+   {
+    "label": "Feature development capacity",
+    "role": "observable",
+    "baseline_known": true,
+    "baseline_evidence": null,
+    "baseline_value": 4.5,
+    "unit": "developer-equivalents",
+    "provenance": "inferred",
+    "plausible_max": 30
+   },
+   {
+    "label": "Forecast launch delay",
+    "role": "external",
+    "baseline_known": false,
+    "baseline_evidence": null,
+    "baseline_value": null,
+    "unit": "months",
+    "provenance": "inferred",
+    "plausible_max": 12
+   }
+  ],
+  "risks": [
+   {
+    "label": "Missing feature launch deadline",
+    "provenance": "explicit",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [],
+  "links": [
+   {
+    "from": "Time on legacy fixes",
+    "to": "Time on feature work",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": -1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred",
+    "definitional": null,
+    "basis": "With a fixed allocation of development time, more legacy-fix time leaves less time for feature work.",
+    "source_quote": null
+   },
+   {
+    "from": "Time on feature work",
+    "to": "Feature development capacity",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Mid-weight developers",
+    "to": "Feature development capacity",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Feature development capacity",
+    "to": "Missing feature launch deadline",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Missing feature launch deadline",
+    "to": "Next feature launch deadline",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Feature development capacity",
+    "to": "Next feature launch deadline",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Forecast launch delay",
+    "to": "Next feature launch deadline",
+    "direction": "negative",
+    "provenance": "explicit",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": "We need to find a way to reduce the amount of time spent on these bug fixes and suboptimal functionality, or increase our development velocity, as at the moment we are looking like we're going to miss our next feature launch deadline by at least a month and possibly two."
+   }
+  ],
+  "identities": [
+   {
+    "outcome": "Feature development capacity",
+    "operation": "product",
+    "factors": [
+     "Mid-weight developers",
+     "Time on feature work"
+    ],
+    "provenance": "inferred",
+    "reading": null,
+    "evidence": null
+   }
+  ],
+  "unknowns": [
+   "The forecast says the launch could be missed by at least one month and possibly two. What delivery date is currently forecast, and what is the exact launch deadline?",
+   "Olumi's proposed legacy-code reduction option assumes that reducing time on legacy fixes from 25% to 15% is feasible; what level of legacy-fix time is realistic without increasing customer or operational risk?",
+   "Olumi's proposed hiring option assumes two additional mid-weight developers, contributing roughly 8% of the launch deliverable per month after a 2–4 month lead time. What hiring, notice, onboarding and ramp-up timing is realistic?",
+   "Which legacy-code work is essential defect remediation versus suboptimal functionality that can be deferred, redesigned or retired?"
+  ],
+  "decision_question": "We need to find a way to reduce the amount of time spent on these bug fixes and suboptimal functionality, or increase our development velocity",
+  "unknown_concerns": [
+   {
+    "unknown": "The forecast says the launch could be missed by at least one month and possibly two. What delivery date is currently forecast, and what is the exact launch deadline?",
+    "concerns": [
+     "Forecast launch delay",
+     "Forecast launch delay → Next feature launch deadline"
+    ]
+   },
+   {
+    "unknown": "Olumi's proposed legacy-code reduction option assumes that reducing time on legacy fixes from 25% to 15% is feasible; what level of legacy-fix time is realistic without increasing customer or operational risk?",
+    "concerns": [
+     "Time on legacy fixes",
+     "Time on legacy fixes → Time on feature work"
+    ]
+   },
+   {
+    "unknown": "Olumi's proposed hiring option assumes two additional mid-weight developers, contributing roughly 8% of the launch deliverable per month after a 2–4 month lead time. What hiring, notice, onboarding and ramp-up timing is realistic?",
+    "concerns": [
+     "Mid-weight developers",
+     "Mid-weight developers → Feature development capacity"
+    ]
+   },
+   {
+    "unknown": "Which legacy-code work is essential defect remediation versus suboptimal functionality that can be deferred, redesigned or retired?",
+    "concerns": [
+     "Time on legacy fixes",
+     "Time on legacy fixes → Time on feature work"
+    ]
+   }
+  ]
+ }
+}
