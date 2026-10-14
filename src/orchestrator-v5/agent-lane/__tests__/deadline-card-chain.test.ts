@@ -81,10 +81,12 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
 }
 const apps: FastifyInstance[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+/** What this harness's AI answers on a turn that calls no tool. */
+const AGENT_ANSWER = 'The model is available to review.';
 async function route(w: ReturnType<typeof world>) {
   vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}')))
-    ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The model is available to review.' }] }] }), { status: 200 })));
+    ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: AGENT_ANSWER }] }] }), { status: 200 })));
   const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
   const app = Fastify({ logger: false }); apps.push(app);
   app.post('/assist/v1/scenarios/:id/graph', async () => w.graphWire());
@@ -129,7 +131,8 @@ describe('deterministic deadline card on the first Agent turn', () => {
   });
   it('R1 Run-chip offers exactly one bound card using draft R; no graph change', async () => {
     const w = world(), before = w.read(), turn = await route(w), body = await turn(), { call, yes } = card(body);
-    expect(body.assistant_text).toBe(yes.detail); expect(w.read()).toEqual(before);
+    // AMENDED (hiring post3007 turn 02, DL 14 Oct; was `toBe(yes.detail)`): the card's question follows the AI's answer, never replaces it.
+    expect(body.assistant_text).toBe(`${AGENT_ANSWER}\n\n${yes.detail}`); expect(w.read()).toEqual(before);
     const carrier = (w.rows[0] as Rec).pending_actions.find((p: Rec) => p.chip_id === yes.id);
     expect(carrier.action.inline_patch.agent_proposal).toMatchObject({ proposal_id: call.proposal_id,
       operations: [{ op: 'set_goal_deadline', path: goal(before).id, value: { deadline: '2027-08-10', words: 'ten months', reference: R, expected_deadline: null, stated_months: 10 } }] });
@@ -444,7 +447,8 @@ describe('R6 the draft was built inside an Agent turn', () => {
   it('the first turn after the build turn offers exactly one bound card; the turn after that never repeats it', async () => {
     const w = world(), before = w.read(); w.rows.unshift(buildAnswer(w));
     const turn = await route(w), first = await turn(), { call, yes } = card(first);
-    expect(first.assistant_text).toBe(yes.detail); expect(w.read()).toEqual(before);
+    // AMENDED (hiring post3007 turn 02, DL 14 Oct; was `toBe(yes.detail)`): the card's question follows the AI's answer.
+    expect(first.assistant_text).toBe(`${AGENT_ANSWER}\n\n${yes.detail}`); expect(w.read()).toEqual(before);
     expect(call.proposal_id).toEqual(expect.any(String));
     const second = await turn({ agent_session_id: first._agent.session_id });
     expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
@@ -656,5 +660,36 @@ describe('RULING A: the route card trusts the attested words; retired negatives 
     // Yes saves the date the card showed.
     await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: body._agent.session_id });
     expect(goal(w.read()).goal_horizon).toMatchObject({ deadline: '2027-01-14' });
+  });
+
+  it('SERVED hiring-post3007 turn 02: the card rides ALONGSIDE the AI\'s answer to the user\'s own question, never instead of it', async () => {
+    // Served (CEE 35a66525, `live/runs/2026-10-14T031016Z-hiring-post3007/hiring/turns/02.json`): Paul typed the message below on
+    // the first turn after the draft. The AI answered (one conversation call, 17.6 s), but the reply was ONLY the card. Turn 03's
+    // AI then said its deadline question "failed to answer your UI question".
+    const asked = 'Why can I barely see any of the connections between the factors, risks and outcome? Is this a UI or a data issue?';
+    // Author-written stand-in for the AI's answer (the served one was replaced, so never captured): the claim is structural.
+    const answer = 'It is mostly a data issue: most links between the factors and the outcome are still unsized, so they draw faintly.';
+    const w = world(hiring as { graph: Rec; brief: string }); w.reference('2026-10-14T03:10:16Z', '2026-10-14T03:10:16Z');
+    const before = w.read(), turn = await route(w);
+    const inputs: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      inputs.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: answer }] }] }), { status: 200 });
+    }));
+    const body = await turn({ message: asked, source: 'composer', chip: undefined });
+    const calls = body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
+    expect(calls, JSON.stringify(body._agent.tool_calls)).toHaveLength(1);
+    const yes = body.suggested_actions.find((c: Rec) => c.id === approvalChipIdFor(calls[0].proposal_id));
+    const CARD = 'Is your deadline 14 January 2027 (3 months from 14 October 2026)? Your words: “three months” in “We have an urgent launch date '
+      + 'in the next three months”. Olumi’s interpretation; check the date and reference before approving.';
+    expect(yes).toMatchObject({ label: 'Yes', detail: CARD });
+    // Served: `assistant_text` was CARD alone. Now the AI's answer, then the card's question.
+    expect(body.assistant_text).toBe(`${answer}\n\n${CARD}`);
+    expect(w.read(), 'offered, not saved').toEqual(before);
+    // The next turn's AI reads both in its history: its answer was given, and the card was asked.
+    await turn({ message: 'Thanks. What should I look at first?', source: 'composer', chip: undefined, agent_session_id: body._agent.session_id });
+    const next = inputs.at(-1)!;
+    expect(next).toContain(answer);
+    expect(next).toContain('Is your deadline 14 January 2027');
   });
 });
