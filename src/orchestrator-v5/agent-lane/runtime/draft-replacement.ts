@@ -28,6 +28,7 @@ import { constructionOperationId } from './build-model.js';
 import { edgeReviewedByUser, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 import { provenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { resolveMagnitudeFrame } from '../../../cee/magnitude/link-effect.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
@@ -70,8 +71,7 @@ export interface HumanItem {
     | { readonly kind: 'value'; readonly node: Rec }
     | { readonly kind: 'level'; readonly option: Rec; readonly factor: Rec | undefined; readonly factor_id: string; readonly cell: unknown }
     | { readonly kind: 'link'; readonly edge: Rec; readonly from: Rec | undefined; readonly to: Rec | undefined }
-    | { readonly kind: 'node'; readonly node: Rec }
-    | { readonly kind: 'limit'; readonly row: Rec; readonly node: Rec | undefined };
+    | { readonly kind: 'node'; readonly node: Rec };
 }
 
 /**
@@ -136,37 +136,61 @@ export function humanItemsAfterTheDraft(raw: unknown): HumanItem[] {
     if (c.provenance !== 'user') continue;
     const words = `your limit or target on ${named(byId.get(String(c.node_id)), 'the model')}`;
     // A row on the goal, or the goal's target row, is a target for the goal: kept refusing, as a goal target is.
-    if (c.role === 'goal_target' || goalIds.has(String(c.node_id))) found.push({ words, origin: 'human' });
-    else found.push({ words, origin: 'human', carry: { kind: 'limit', row: c, node: byId.get(String(c.node_id)) } });
+    // Not carried: a stored graph cannot hold a user limit row (`GraphV3`), so one found here refuses, as before.
+    found.push({ words, origin: 'human' });
   }
   return found;
 }
 
 /**
- * ⭐ WHAT THE USER SET IN THE SAVED MODEL IS CARRIED, BY IDENTITY, WITH ITS OWN STAMP (current-model caller, PL #94 07:32Z
- * Q3: "human-stamped items carry by identity from the saved authority, with full meaning. Missing or incompatible → no
- * offer"). The revised draft is the drafter's; construction's admission attests the user only from the brief, so a user
- * edit the drafter reproduced from the context would come back under the wrong author. Each carried item is the saved one,
- * verbatim, moved onto the candidate's node of the same kind and label (the lane's canonical label):
- *   · a value: the factor's whole `observed_state` (figure, unit, cap, source, review);
- *   · a level: the option's whole cell on that factor, re-keyed to the candidate's factor;
- *   · a link: the saved edge, its ends re-keyed (replacing the candidate's own edge between the same two nodes);
- *   · a node the user added: the candidate must hold it;
- *   · a limit: the saved row on the candidate's node of that quantity (replacing a candidate row with the same terms).
- * A node an item needs that the candidate does not hold, or a value whose unit the candidate's node declares differently,
- * is MISSING: the caller offers nothing and names it. Nothing else in the candidate is changed.
+ * ⭐ WHAT THE USER SET IN THE SAVED MODEL IS CARRIED, BY IDENTITY, WITH ITS OWN STAMP AND ITS OWN MEANING (current-model
+ * caller, PL #94 07:32Z Q3: "human-stamped items carry by identity from the saved authority, with full meaning. Missing or
+ * incompatible → no offer"). Construction attests the user only from the brief, so a user edit the drafter reproduced from
+ * the context would come back under the wrong author. Each item moves onto the revision's part of the same kind and label
+ * (the lane's canonical label), and its MEANING is kept, never its encoded bytes.
+ *
+ * ⛔ A STORED FIGURE IS ENCODED ON ITS NODE'S RANGE (buddy FAIL on #3032: a level of £40,000 stored as 0.2 of a £200,000 range
+ * read back as £20,000 on the revision's £100,000 range; a reviewed 1:1 link went to the engine as £2 per £1). So:
+ *   · a value or an option's level is re-encoded from its NATURAL figure on the revision's range (`levelFrameOf`, the
+ *     writer's own rule), and kept only when the revision's range reads it back as that same figure (the level writer's and
+ *     the link sizer's ranges agree; a range-less revision keeps only a range-less figure);
+ *   · a link is carried only when both its ends keep the same magnitude range (`resolveMagnitudeFrame`), so its strength
+ *     means the same natural size; a link cannot be re-sized here, so a moved range refuses;
+ *   · a node the user added must be in the revision, and carries the user's own stamp onto it.
+ * A user limit row is not carried: the stored graph cannot hold one (`GraphV3` limits are explicit / inferred / proxy), so
+ * G1's limit item refuses, as before. MISSING (the part is absent) or INCOMPATIBLE (a unit or range that cannot hold the
+ * same meaning) → the caller offers nothing and names the item. Nothing else in the candidate is changed.
  */
-export function carryHumanItems(candidate: unknown, items: readonly HumanItem[]): { replacement: Rec; carried: string[]; missing: string[] } {
+export function carryHumanItems(candidate: unknown, items: readonly HumanItem[],
+  levelFrameOf: (node: Rec | undefined) => number | null): { replacement: Rec; carried: string[]; missing: string[] } {
   const replacement = structuredClone(rec(candidate) ?? {}) as Rec;
   const nodes = recs(replacement.nodes);
   const edges = recs(replacement.edges);
-  const rows = recs(replacement.goal_constraints);
   const identity = (n: Rec | undefined): string | null => (n === undefined || typeof n.label !== 'string' || n.label.trim() === ''
     ? null : `${String(n.kind ?? '')}:${canonicalLabel(n.label)}`);
   const sameNode = (saved: Rec | undefined): Rec | undefined => {
     const key = identity(saved);
     return key === null ? undefined : nodes.find((n) => identity(n) === key);
   };
+  const osOf = (n: Rec | undefined): Rec | undefined => rec(n?.observed_state) ?? rec(rec(n?.data)?.observed_state);
+  const magnitudeFrame = (n: Rec | undefined): number | undefined =>
+    (n === undefined ? undefined : resolveMagnitudeFrame({ ...(n as object), label: String(n.label ?? ''), option_levels: [] } as never));
+  const close = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  /** The revision node's ONE range, or null when it has none; undefined when the writer's and the sizer's ranges disagree. */
+  const rangeOf = (n: Rec): number | null | undefined => {
+    const level = levelFrameOf(n);
+    const sized = magnitudeFrame(n);
+    return level !== null && sized !== undefined && !close(level, sized) ? undefined : level;
+  };
+  /** A natural figure on the revision's range: its encoded value, or undefined when that range cannot hold it as the same figure. */
+  const encodeOn = (natural: number, n: Rec, savedRange: number | null): number | undefined => {
+    const range = rangeOf(n);
+    if (range === undefined) return undefined;
+    if (range === null) return savedRange === null ? natural : undefined;
+    const value = natural / range;
+    return Number.isFinite(value) && close(value * range, natural) ? value : undefined;
+  };
+  const sameUnit = (a: unknown, b: unknown): boolean => typeof a !== 'string' || typeof b !== 'string' || a.trim() === b.trim();
   const carried: string[] = [];
   const missing: string[] = [];
   for (const item of items) {
@@ -174,39 +198,53 @@ export function carryHumanItems(candidate: unknown, items: readonly HumanItem[])
     if (item.origin !== 'human' || c === undefined) continue;
     if (c.kind === 'value') {
       const target = sameNode(c.node);
-      const saved = rec(c.node.observed_state) ?? rec(rec(c.node.data)?.observed_state);
-      const declared = rec(target?.observed_state)?.unit;
-      if (target === undefined || saved === undefined
-        || (typeof declared === 'string' && typeof saved.unit === 'string' && declared.trim() !== saved.unit.trim())) { missing.push(item.words); continue; }
-      target.observed_state = structuredClone(saved);
+      const saved = osOf(c.node);
+      const savedRange = levelFrameOf(c.node);
+      const natural = saved === undefined ? undefined : typeof saved.raw_value === 'number' ? saved.raw_value
+        : typeof saved.value === 'number' ? (savedRange === null ? saved.value : saved.value * savedRange) : undefined;
+      const own = osOf(target);
+      const value = target === undefined || natural === undefined || !sameUnit(own?.unit, saved?.unit) ? undefined : encodeOn(natural, target, savedRange);
+      if (target === undefined || saved === undefined || natural === undefined || value === undefined) { missing.push(item.words); continue; }
+      // The user's figure and stamp; the revision's own range fields (its cap and declared scale), so it reads back as theirs.
+      const { cap: _savedCap, declared_scale: _savedScale, ...theirs } = saved;
+      target.observed_state = { ...theirs, value, raw_value: natural, ...(typeof saved.baseline === 'number' ? { baseline: value } : {}),
+        ...(own?.cap !== undefined ? { cap: own.cap } : {}), ...(own?.declared_scale !== undefined ? { declared_scale: own.declared_scale } : {}) };
     } else if (c.kind === 'level') {
       const option = sameNode(c.option);
       const factor = sameNode(c.factor);
-      if (option === undefined || factor === undefined || typeof factor.id !== 'string') { missing.push(item.words); continue; }
-      option.interventions = { ...(rec(option.interventions) ?? {}), [factor.id]: structuredClone(c.cell) };
+      const cell = rec(c.cell);
+      const savedRange = levelFrameOf(c.factor);
+      const natural = cell === undefined ? undefined : typeof cell.raw_value === 'number' ? cell.raw_value
+        : typeof cell.value === 'number' ? (savedRange === null ? cell.value : cell.value * savedRange) : undefined;
+      const value = factor === undefined || natural === undefined || !sameUnit(cell?.unit, osOf(factor)?.unit) ? undefined : encodeOn(natural, factor, savedRange);
+      if (option === undefined || factor === undefined || typeof factor.id !== 'string' || cell === undefined || value === undefined) { missing.push(item.words); continue; }
+      const match = rec(cell.target_match);
+      option.interventions = { ...(rec(option.interventions) ?? {}), [factor.id]: { ...structuredClone(cell), value,
+        ...(typeof cell.raw_value === 'number' ? { raw_value: natural } : {}), ...(match !== undefined ? { target_match: { ...match, node_id: factor.id } } : {}) } };
     } else if (c.kind === 'link') {
       const from = sameNode(c.from);
       const to = sameNode(c.to);
-      if (from === undefined || to === undefined) { missing.push(item.words); continue; }
+      const kept = (saved: Rec | undefined, next: Rec | undefined): boolean => {
+        const a = magnitudeFrame(saved);
+        const b = magnitudeFrame(next);
+        return a !== undefined && b !== undefined && close(a, b);
+      };
+      if (from === undefined || to === undefined || !kept(c.from, from) || !kept(c.to, to)) { missing.push(item.words); continue; }
       const edge = { ...structuredClone(c.edge), from: from.id, to: to.id };
       const at = edges.findIndex((e) => e.from === from.id && e.to === to.id);
       if (at >= 0) edges[at] = { ...edge, ...(typeof edges[at]!.id === 'string' ? { id: edges[at]!.id } : {}) };
       else edges.push(edge);
     } else if (c.kind === 'node') {
-      if (sameNode(c.node) === undefined) { missing.push(item.words); continue; }
+      const target = sameNode(c.node);
+      if (target === undefined) { missing.push(item.words); continue; }
+      target.provenance = c.node.provenance;
     } else {
-      const node = sameNode(c.node);
-      if (node === undefined || typeof node.id !== 'string') { missing.push(item.words); continue; }
-      const row = { ...structuredClone(c.row), node_id: node.id };
-      // The same row by its full identity: quantity (node), comparator, figure, unit and frame — never an equal figure alone.
-      const at = rows.findIndex((r) => r.node_id === node.id && String(r.operator_as_stated ?? r.operator) === String(c.row.operator_as_stated ?? c.row.operator)
-        && r.value === c.row.value && unitOf(r) === unitOf(c.row) && (r.value_frame ?? 'level') === (c.row.value_frame ?? 'level'));
-      if (at >= 0) rows[at] = row;
-      else if (!rows.some((r) => r.constraint_id === c.row.constraint_id && r.node_id === node.id)) rows.push(row);
+      missing.push(item.words);
+      continue;
     }
     carried.push(item.words);
   }
-  return { replacement: { ...replacement, nodes, edges, goal_constraints: rows }, carried, missing };
+  return { replacement: { ...replacement, nodes, edges }, carried, missing };
 }
 
 /** G2. The committed writes other than the construction's own registration (`build-model.ts`'s create-only register). */

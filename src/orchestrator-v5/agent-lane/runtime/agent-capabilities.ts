@@ -3605,7 +3605,7 @@ export function createAgentCapabilities(
     }
     Object.assign(candidate, limits.replacement);
     // What the user set is carried by identity, with its own stamp; a node it needs that the revision lacks → nothing offered.
-    const kept = carryHumanItems(candidate, gate.items);
+    const kept = carryHumanItems(candidate, gate.items, (n) => levelFrameOf(n as never));
     if (kept.missing.length > 0) {
       return notOffered('revised_draft_not_prepared', `The revised draft does not hold ${kept.missing.join('; ')}, so nothing was offered and the model is unchanged. `
         + 'Tell the user plainly which of their changes a revised draft would lose.');

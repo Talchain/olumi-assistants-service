@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAgentCapabilities, draftGateDetail, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilities, draftGateDetail, levelFrameOf, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
 import { isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -581,19 +581,26 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(inputs).toHaveLength(1);
     expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
     const carried = (candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
-    expect(carried.observed_state).toEqual(f.observed_state);
+    expect(carried.observed_state).toMatchObject({ source: 'user_assumption', reviewed_by_user: { intent: 'confirm' }, raw_value: 0, value: 0 });
     expect(cardOf(proposals, r)).toContain('Kept as you set them: your review of the value for \u2018Advertising spend\u2019. ');
   });
 
-  it('⭐ Q3: the user\'s own figure is carried back over the drafter\'s, with its stamp (a drafter never re-authors it)', async () => {
+  /** The meaning of a figure on its node: its encoded value times the node's range (the writer's rule), as every reader takes it. */
+  const naturalOn = (node: Rec, value: number): number => value * (levelFrameOf(node as never) ?? 1);
+
+  it('⭐ Q3: the user\'s own figure is carried back over the drafter\'s, with its stamp, AS THE SAME FIGURE on the revision\'s range', async () => {
     const g = structuredClone(FX.graph);
     const f = (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!;
-    f.observed_state = { unit: 'GBP/year', value: 0.4, raw_value: 40000, cap: 100000, source: 'user_specified', extractionType: 'explicit' };
+    // The shape a real user edit stores (`identity-confirm-edit.ts`): £40,000 encoded on the saved node's £200,000 range.
+    expect(f.scale_frame).toBe(200000);
+    f.observed_state = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' };
     const { caps, proposals } = laneWith(server({ graph: g }));
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     const node = (candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
-    expect(node.observed_state).toEqual(f.observed_state);
+    expect(levelFrameOf(node as never), 'PRECONDITION: the revision measures it on another range').not.toBe(200000);
+    expect(node.observed_state).toMatchObject({ unit: 'GBP/year', raw_value: 40000, source: 'user_override' });
+    expect(naturalOn(node, node.observed_state.value as number)).toBeCloseTo(40000, 6);
     expect(cardOf(proposals, r)).toContain('Kept as you set them: your figure for \u2018Advertising spend\u2019. ');
   });
 
@@ -613,7 +620,7 @@ describe('later human work is kept: carried by identity, read as context, named 
   it('Q3, a level: the user\'s setting for an option is carried onto the same option and factor of the revision, re-keyed', async () => {
     const g = structuredClone(FX.graph);
     const option = (g.nodes as Rec[]).find((n) => n.id === 'hire_marketing_manager')!;
-    const cell = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_specified' };
+    const cell = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_specified' }; // £40,000 on the saved £200,000 range
     option.interventions = { ...option.interventions, advertising_spend: cell };
     const sameOption = (): Rec => { const c = candidate(); c.options[0].label = 'Hire marketing manager'; return c; };
     const { caps, proposals } = laneWith(server({ graph: g }), { draft: sameOption });
@@ -621,15 +628,50 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     const c = candidateOf(proposals, r);
     const factor = (c.nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
-    expect(((c.nodes as Rec[]).find((n) => n.label === 'Hire marketing manager')!.interventions as Rec)[factor.id]).toEqual(cell);
+    const carriedCell = ((c.nodes as Rec[]).find((n) => n.label === 'Hire marketing manager')!.interventions as Rec)[factor.id] as Rec;
+    expect(carriedCell).toMatchObject({ unit: 'GBP/year', raw_value: 40000, source: 'user_specified' });
+    // The Agent's level projection (`projectOptionLevels`: value × `levelFrameOf`) reads the user's £40,000, never £20,000.
+    expect(naturalOn(factor, carriedCell.value as number)).toBeCloseTo(40000, 6);
     expect(cardOf(proposals, r)).toContain('Kept as you set them: your level for \u2018Hire marketing manager\u2019 on \u2018Advertising spend\u2019. ');
   });
 
-  it('Q3, a link: the user\'s reviewed link is carried between the same two parts of the revision, with its review', async () => {
+  it('⭐ FULL PATH: the carried figure is the user\'s £40,000 after approval, in the stored graph, and in what the Run sends', async () => {
+    const g = structuredClone(FX.graph);
+    (g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!.observed_state = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' };
+    const s = server({ graph: g });
+    const { caps } = laneWith(s);
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(r.proposal_id)), { proposal_id: r.proposal_id } as never);
+    expect(applied, JSON.stringify(applied).slice(0, 600)).toMatchObject({ ok: true, applied: true });
+    const stored = (s.graph().nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
+    expect(stored.observed_state).toMatchObject({ raw_value: 40000, source: 'user_override' });
+    expect(naturalOn(stored, stored.observed_state.value as number)).toBeCloseTo(40000, 6);
+    const { payload } = await runFromStore(s.bytes(), true);
+    // What the engine receives: the factor's encoded value on the range it is sent with reads back as the user's £40,000.
+    const sent = ((payload.graph as Rec).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!;
+    expect(sent.observed_state).toMatchObject({ raw_value: 40000, source: 'user_override' });
+    expect(naturalOn(sent, sent.observed_state.value as number)).toBeCloseTo(40000, 6);
+  });
+
+  it('Q3, a link whose end the revision measures on another range is REFUSED, naming it (its strength would mean another size)', async () => {
     const g = structuredClone(FX.graph);
     const edge = (g.edges as Rec[]).find((e) => e.from === 'advertising_spend' && e.to === 'annual_marketing_spend')!;
     edge.provenance = { ...edge.provenance, reviewed_by_user: { intent: 'confirm' } };
-    const { caps, proposals } = laneWith(server({ graph: g }));
+    const r = await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(String(r.detail)).toContain('does not hold your review of the link \u2018Advertising spend\u2019 \u2192 \u2018Annual marketing spend\u2019');
+  });
+
+  it('Q3, a link: on the same ranges, the user\'s reviewed link is carried between the same two parts, with its review', async () => {
+    const g = structuredClone(FX.graph);
+    const edge = (g.edges as Rec[]).find((e) => e.from === 'advertising_spend' && e.to === 'annual_marketing_spend')!;
+    edge.provenance = { ...edge.provenance, reviewed_by_user: { intent: 'confirm' } };
+    const sameRanges = (): Rec => { const c = candidate();
+      for (const f of c.factors as Rec[]) if (f.label === 'Advertising spend' || f.label === 'Annual marketing spend') f.plausible_max = 200000;
+      return c; };
+    const { caps, proposals } = laneWith(server({ graph: g }), { draft: sameRanges });
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     const c = candidateOf(proposals, r);
@@ -637,39 +679,22 @@ describe('later human work is kept: carried by identity, read as context, named 
     const carried = (c.edges as Rec[]).filter((e) => e.from === id('Advertising spend') && e.to === id('Annual marketing spend'));
     expect(carried).toHaveLength(1);
     expect(carried[0]!.provenance).toEqual(edge.provenance);
+    expect(carried[0]!.strength).toEqual(edge.strength);
   });
 
-  it('Q3, a limit: the user\'s own limit row replaces the revision\'s row with the same terms, so it stays the user\'s', async () => {
+  it('a part the user added that the revision holds keeps the user\'s stamp on it (never the revision\'s own)', async () => {
     const g = structuredClone(FX.graph);
-    const row = (g.goal_constraints as Rec[]).find((c) => c.node_id === 'founder_marketing_time')!;
-    row.provenance = 'user';
+    Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { provenance: 'user_set' });
+    expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Advertising spend\u2019, which you added']);
     const { caps, proposals } = laneWith(server({ graph: g }));
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const c = candidateOf(proposals, r);
-    const founder = (c.nodes as Rec[]).find((n) => n.label === 'Founder marketing time')!;
-    const rows = (c.goal_constraints as Rec[]).filter((x) => x.node_id === founder.id && x.operator === '<=' && x.value === 25);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.provenance).toBe('user');
-  });
-
-  it('ADVERSARIAL (equal figure, other identity): a user row with the same figure in another unit replaces nothing; it is added beside the revision\'s', async () => {
-    const g = structuredClone(FX.graph);
-    const row = (g.goal_constraints as Rec[]).find((c) => c.node_id === 'founder_marketing_time')!;
-    Object.assign(row, { provenance: 'user', unit: 'hours/week', constraint_id: 'agent-lane:founder_marketing_time:<=:hours' });
-    delete row.provenance_unit_relabelled;
-    const { caps, proposals } = laneWith(server({ graph: g }));
-    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
-    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    const c = candidateOf(proposals, r);
-    const founder = (c.nodes as Rec[]).find((n) => n.label === 'Founder marketing time')!;
-    const rows = (c.goal_constraints as Rec[]).filter((x) => x.node_id === founder.id && x.value === 25);
-    expect(rows.map((x) => [x.unit, x.provenance]).sort()).toEqual([['%', 'explicit'], ['hours/week', 'user']]);
+    expect((candidateOf(proposals, r).nodes as Rec[]).find((n) => n.label === 'Advertising spend')!.provenance).toBe('user_set');
   });
 
   it('a part the user added that the revision lacks: not offered, naming it', async () => {
     const g = structuredClone(FX.graph);
-    Object.assign((g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!, { provenance: 'user_specified' });
+    Object.assign((g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!, { provenance: 'user_set' });
     expect(humanMaterialAfterTheDraft(g)).toEqual(['\u2018Marketing experience\u2019, which you added']);
     const r = await laneWith(server({ graph: g })).caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
