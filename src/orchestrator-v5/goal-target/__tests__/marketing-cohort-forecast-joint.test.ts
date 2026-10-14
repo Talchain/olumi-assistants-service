@@ -83,7 +83,8 @@ describe('marketing: the chance of meeting both targets, from each option’s sa
     expect(notes.filter((n) => n.startsWith('‘Annual marketing spend’ is at most'))).toHaveLength(1);
     const law = notes.find((n) => n.startsWith('These chances rest on a forecast, not on the model’s links'))!;
     expect(law).toContain('‘Hire marketing manager’ reaches 500 people over the first three months after launch with a ‘Conversion rate’ of 12–18%');
-    expect(law).toContain('read as the likely range (the middle half)');
+    expect(law).toContain('the one you said the conversion is as likely to fall inside as outside (the middle half)');
+    expect(law).not.toContain('read as');
     expect(law).toContain('the number of people reached is held fixed, so its own uncertainty isn’t included');
     expect(law).toContain('‘New customers in first 3 months’ counts the people who convert among those same people, as you said');
     // The model's reasons for the targets describe the links, not this figure: never said beside it.
