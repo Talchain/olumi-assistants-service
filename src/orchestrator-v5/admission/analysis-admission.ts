@@ -1336,13 +1336,30 @@ export function analysisAdmissionFrom(
   // ── missing_important_inputs ───────────────────────────────────────────────
   if (missing.length > 0) {
     const demanded = missing.filter((m) => m.obligation !== 'offered').length;
+    // C1 (Paul's funding test, 14 Oct; r1 Codex): say what is required, never "nothing is required of you" over an open gap.
+    // · What the Run LEAVES OUT is its plan's own list (a held status quo is waived AND compared, never "left out"); including
+    //   such an option needs the user's values.
+    // · An offered gap that is NOT waived is still open: Olumi has not filled it.
+    // "Nothing is required of you" is said only when every gap was filled for the Run (waived, its option compared as held).
+    const excluded = new Set(admission.plan.excluded_option_ids);
+    const leftOut = [...new Set(missing.filter((m) => typeof m.option_id === 'string' && excluded.has(m.option_id))
+      .map((m) => m.option_label ?? m.option_id))].filter((label): label is string => typeof label === 'string' && label !== '');
+    const open = missing.filter((m) => m.obligation === 'offered' && !m.waived_by_exclusion).length;
+    const named = leftOut.map((label) => `‘${label}’`);
+    const leftOutWords = named.length === 0 ? undefined
+      : `${named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`} `
+        + `${named.length === 1 ? 'is left out until you set what it changes' : 'are left out until you set what they change'}.`;
+    const openWords = open === 0 ? undefined
+      : `${open === 1 ? 'One input is' : `${open} inputs are`} still open: give your value, or ask Olumi to estimate it.`;
+    const required = [leftOutWords, openWords].filter((w): w is string => w !== undefined).join(' ');
     reasons.push({
       field: 'missing_important_inputs',
       code: 'MODEL_HAS_BLOCKERS',
       message:
         demanded > 0
           ? `${demanded === 1 ? 'One input is' : `${demanded} inputs are`} still needed from you.`
-          : 'Olumi filled in the gaps here itself; you can review them, and nothing is required of you.',
+          : required !== '' ? required
+            : 'Olumi filled in the gaps here itself; you can review them, and nothing is required of you.',
     });
   }
 
