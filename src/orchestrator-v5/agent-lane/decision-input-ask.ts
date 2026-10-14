@@ -160,6 +160,19 @@ const withinMonths = (goal: Rec): string => {
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
 function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[]): string[] {
+  return leftOutRiskLines(graph, goalLabel, cells).map((l) => l.line);
+}
+
+/**
+ * The left-out risks whose OWN line already says the option's chance leaves them out ("…, and that option's chance doesn't
+ * include it yet."): the relies-on line beside a shown chance. Any generic sentence about the same omission repeats it
+ * (capacity e2e 57687e86 turn 01, judge row 4). Same predicates as the lines themselves, so the two cannot disagree.
+ */
+export function risksSaidLeftOutOfTheChance(graph: unknown, cells: readonly OptionChanceCell[]): ReadonlySet<string> {
+  return new Set(leftOutRiskLines(graph, '', cells).filter((l) => l.chanceOmission).map((l) => l.riskId));
+}
+
+function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[]): { riskId: string; line: string; chanceOmission: boolean }[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const allEdges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -178,7 +191,10 @@ function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionC
       // relies_on). Never read one shape blind: the served B1 draft 500'd on exactly that (27dfd9e5, 8 Oct).
       const optionId = recordOf(r.relies_on)?.option_id ?? recordOf(recordOf(r.draft_widening)?.hits)?.id;
       const option = nodes.find((n) => n.id === optionId && n.kind === 'option');
-      if (option !== undefined) return reliesOnRiskLine(labelOf(r), labelOf(option), chanceShownFor(cells, option.id as string));
+      if (option !== undefined) {
+        const besideChance = chanceShownFor(cells, option.id as string);
+        return { riskId: r.id as string, line: reliesOnRiskLine(labelOf(r), labelOf(option), besideChance), chanceOmission: besideChance };
+      }
     }
     // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
     // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
@@ -190,7 +206,8 @@ function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionC
     const named = nodes.filter((n) => n.kind !== 'risk' && upstream.has(n.id as string)).map((n) => `"${labelOf(n)}"`);
     const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
     const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
-    return `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`;
+    return { riskId: r.id as string, line: `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`,
+      chanceOmission: false };
   });
 }
 

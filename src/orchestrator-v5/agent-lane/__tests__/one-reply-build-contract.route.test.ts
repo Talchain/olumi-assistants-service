@@ -328,28 +328,28 @@ describe('ONE reply contract through the build route', () => {
     await expectStoredAndReplayed(zeroBody, lastBuildPayload);
   });
 
-  it('r13 automatic first Run: typed retained risks supply the note and marker on the build turn, with identical replay', async () => {
+  it('r13 automatic first Run: each retained risk\'s own line says the chance leaves it out, so no generic note or marker repeats it (capacity e2e 57687e86 row 4); identical replay', async () => {
     useNumericChanceRead();
     buildWidened = { options: 0, risks: 3 };
     const risks = withOlumiAddedRisks();
     const body = await buildTurn();
     const input = lastComposeInput as ReplyComposeInput;
     expect(input.chanceCells?.some(cell => cell.kind === 'figure' || cell.kind === 'range'), 'the build includes its first analysis').toBe(true);
-    expect(input.widenedRiskNote).toBe(widenedRiskNote(buildWidened));
-    expect(input.widenedRiskMarker).toBe(widenedRiskMarker(risks));
-    expect(input.obligations).toContainEqual(expect.objectContaining({ role: 'caveat', text: widenedRiskMarker(risks) }));
+    const option = ((risks[0]!.draft_widening as Rec).hits as Rec).label;
+    // The omission is said once, by the lines that name each risk; the generic note and its marker are not owed.
+    for (const risk of risks) expect(body.assistant_text).toContain(`‘${risk.label}’: ‘${option}’ relies on this not happening.`);
+    expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(1);
+    expect(input.widenedRiskNote).toBeUndefined();
+    expect(input.widenedRiskMarker).toBeUndefined();
+    expect(input.obligations).not.toContainEqual(expect.objectContaining({ role: 'caveat', text: widenedRiskMarker(risks) }));
+    expect(body.assistant_text).not.toContain(widenedRiskNote(buildWidened)!);
+    expect(body.assistant_text).not.toContain(widenedRiskMarker(risks)!);
     expect(body._answer_shape, body.assistant_text).toBeDefined();
-    const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
     expect(body._answer_shape!.bullets[0], 'the build receipt still follows its headline').toBe(widenedLine(buildWidened));
-    const markerIndex = units.indexOf(widenedRiskMarker(risks)!);
-    expect(markerIndex, 'the automatic first Run displays the typed risk marker').toBeGreaterThan(0);
-    expect(units.slice(0, markerIndex).some(unit => /\d+%/.test(unit)), 'the marker stays beside this first analysis chance').toBe(true);
-    expect(count(face(body._answer_shape!), widenedRiskMarker(risks)!)).toBe(1);
-    expect(count(body._answer_shape!.detail, widenedRiskNote(buildWidened)!)).toBe(1);
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
-  it('r13 Run: retained typed Olumi risks keep the marker beside the numeric chance and the note once; replay identical', async () => {
+  it('r13 Run: each retained risk\'s own line says the chance leaves it out, once; no generic note or marker repeats it (capacity e2e 57687e86 row 4); replay identical', async () => {
     useNumericChanceRead();
     const risks = withOlumiAddedRisks();
     saved = structuredClone(currentRead.graph);
@@ -361,27 +361,19 @@ describe('ONE reply contract through the build route', () => {
     const input = lastComposeInput as ReplyComposeInput;
     const note = widenedRiskNote({ options: 0, risks: risks.length })!;
     const marker = widenedRiskMarker(risks)!;
-    process.stdout.write(`FU1_SHOWN_RUN ${JSON.stringify({ text: body.assistant_text, shape: body._answer_shape,
-      chanceCells: input.chanceCells, widenedRiskNote: input.widenedRiskNote, widenedRiskMarker: input.widenedRiskMarker })}\n`);
     expect(input.faceContract).toBe('run');
     expect(input.widenedLine, 'persisted risks owe disclosure, not a fresh draft receipt').toBeUndefined();
-    expect(input.widenedRiskNote).toBe(note);
-    expect(input.widenedRiskMarker).toBe(marker);
     expect(input.chanceCells?.some(cell => cell.kind === 'figure' || cell.kind === 'range')).toBe(true);
-    expect(body._answer_shape, body.assistant_text).toBeDefined();
-    const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
-    const markerIndex = units.indexOf(marker);
-    expect(markerIndex, 'marker stays on the face').toBeGreaterThan(0);
-    expect(units.slice(0, markerIndex).some(unit => /\d+%/.test(unit)), 'marker follows the numeric chance').toBe(true);
-    expect(count(face(body._answer_shape!), marker)).toBe(1);
-    expect(face(body._answer_shape!)).not.toContain(note);
-    expect(count(body._answer_shape!.detail, note)).toBe(1);
-    expect(count(body.assistant_text, note)).toBe(1);
     const riskOption = ((risks[0]!.draft_widening as Rec).hits as Rec).id;
     expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'figure', option_id: riskOption }));
-    // The interpreted loop uses the existing sentence dedupe: retain every named risk and state the shared exclusion once.
+    // Every named risk is retained and the shared exclusion is said once, by those lines (the existing sentence dedupe).
     for (const risk of risks) expect(body.assistant_text).toContain(`‘${risk.label}’: ‘Raise prices 10%’ relies on this not happening.`);
     expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(1);
+    // ⭐ RED before the fix: the generic note and its face marker said the same omission twice more.
+    expect(input.widenedRiskNote).toBeUndefined();
+    expect(input.widenedRiskMarker).toBeUndefined();
+    expect(count(body.assistant_text, note)).toBe(0);
+    expect(count(body.assistant_text, marker)).toBe(0);
     await expectStoredAndReplayed(body, payload);
   });
 
