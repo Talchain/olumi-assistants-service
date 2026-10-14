@@ -96,6 +96,8 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
       // + F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority, written only by construction / the adoption
       // door / the option-status writer — an AI add carrying it would forge the adoption inference.
       'analysis_participation',
+      // + Science PR-4 (14 Oct, AIE same-cohort law): an option's cohort forecast, written only by its one writer.
+      'cohort_forecast',
       'defaulted',
       'exists_defaulted',
       'extractiontype',
@@ -146,7 +148,8 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
     // 27 CEE-owned smuggle names include the three new S4 pipeline-owned fields and three horizon-basis stamps; add five J2 names and event_risk.
     // Batch C: ruling 4 — +1 smuggle name (`goal_target_basis`), so 34 in all; the six non-smuggle names are unchanged.
-    expect(all.length).toBe(34);
+    // Science PR-4 — +1 smuggle name (`cohort_forecast`), so 35 in all; the six non-smuggle names are unchanged.
+    expect(all.length).toBe(35);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',
