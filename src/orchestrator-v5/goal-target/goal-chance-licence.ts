@@ -1022,11 +1022,19 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     ...statusQuo, ...moved, targets: block };
 }
 
-/** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
+/**
+ * One Run-input candidate must agree with every licensed option; ambiguity records nothing.
+ * ⛔ Hiring row 3 (14 Oct): the licence it agrees with is the one the Run states, read with the Run's own inputs. A change goal
+ * whose effects are not stated at the period end is licensed only on its conditional reading (`periodEndConditionalOf`: the
+ * brief and Olumi's timing reading). With `sentRun` alone that licence was null, so no threshold was recorded and the shortfall
+ * line (`shortfallNotesOf`) was never said for hiring.
+ */
 export function sentGoalThresholdOf(
-  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean, sentRun?: SentRunInputs,
+  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
 ): SentGoalThreshold | undefined {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, sentRun === undefined ? {} : { sentRun });
+  const sentRun = inputs.sentRun;
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, inputs);
   if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
