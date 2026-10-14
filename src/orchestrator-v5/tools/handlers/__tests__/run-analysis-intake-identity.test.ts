@@ -79,8 +79,10 @@ describe('run_analysis handler — source-bound intake identity', () => {
     return { outcome, result: fact.result, plotClient };
   }
 
-  it('withholds and discloses unverified identity on the actual handler egress', async () => {
-    const { outcome, result } = await run({ nodes: boundNodes.map(({ source_quote: _quote, ...node }) => node) });
+  // #3055 (DL 14 Oct 13:59Z): with NO option-words record anywhere (the served lane never writes one) identity does not
+  // withhold; that row is `run-analysis-intake-no-record.test.ts`. A record that binds only SOME options still withholds.
+  it('withholds and discloses unverified identity on the actual handler egress (a record binds one option, not the other)', async () => {
+    const { outcome, result } = await run({ nodes: [boundNodes[0]!, (({ source_quote: _quote, ...node }) => node)(boundNodes[1]!)] });
     expect(result.constraint_verdict?.may_name_leading_option).toBe(false);
     expect(outcome.assistant_text).toContain('does not establish which options correspond');
     expect(outcome.assistant_text).not.toMatch(/candidate is missing|not in the model|Add it/);
@@ -113,7 +115,8 @@ describe('run_analysis handler — source-bound intake identity', () => {
     expect(outcome.assistant_text).toContain('Customer churn');
     expect(outcome.assistant_text).toContain('could not be checked');
     expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
-    if (!bound) expect(outcome.assistant_text).toContain('does not establish which options correspond');
+    // No option-words record: no identity disclosure (#3055); the unevaluated churn limit alone withholds the leader.
+    if (!bound) expect(outcome.assistant_text).not.toContain('does not establish which options correspond');
   });
 
   it.each([
