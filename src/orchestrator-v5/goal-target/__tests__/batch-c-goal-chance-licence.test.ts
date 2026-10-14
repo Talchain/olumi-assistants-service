@@ -18,15 +18,17 @@ import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysi
 import { withholdOptionLimitScores } from '../../../orchestrator/context/constraint-feasibility.js';
 
 /**
- * AMENDED (AIE #94 6160089127; were "Doing nothing: no change to ‘<goal>’ in this model, by assumption."): the status-quo row's
+ * AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): the status-quo row's
  * two exact lines. Hiring's ‘Productivity’ is a CHANGE goal: the generic line. ‘Development capacity’ is a LEVEL goal holding
  * today's 75% and a target of at least 85% in one unit: the LEVEL line, naming both as recorded values (never "meets").
  */
-const SQ_GENERIC_PRODUCTIVITY = 'Carrying on as now: this Run uses ‘Productivity’ as its unchanged reference, by assumption. Its own '
-  + 'chance of meeting the recorded target is not shown. You can review what could make ‘Productivity’ change if you carried on as now.';
-const SQ_LEVEL_CAPACITY = 'Carrying on as now: this Run uses ‘Development capacity’ as its unchanged reference. The model\'s held '
-  + 'reference value is 75%; the target for this Run is at least 85%. This option\'s own chance of meeting that target is not shown. '
-  + 'You can review what could make ‘Development capacity’ change if you carried on as now.';
+const SQ_GENERIC_PRODUCTIVITY = 'This Run cannot give a chance for carrying on as now: it uses ‘Productivity’ as its unchanged '
+  + 'reference, by assumption. Review the evidence for how ‘Productivity’ could change over this Run’s goal '
+  + 'period without an intervention, including any forecast or uncertainty already retained in the model.';
+const SQ_LEVEL_CAPACITY = 'This Run cannot give a chance for carrying on as now: it uses ‘Development capacity’ as its unchanged '
+  + 'reference, by assumption. The model’s held reference value is 75%; the target for this Run is at least '
+  + '85%. Review the evidence for how ‘Development capacity’ could change over this Run’s goal period '
+  + 'without an intervention, including any forecast or uncertainty already retained in the model.';
 type Rec = Record<string, unknown>;
 
 // ── Hiring: productivity, % change from today; +10 by month three ─────────────────────────────────────────────────────
