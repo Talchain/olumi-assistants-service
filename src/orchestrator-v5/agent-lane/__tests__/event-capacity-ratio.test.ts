@@ -297,3 +297,42 @@ describe('Paul\'s legacy brief on the served drafter (capture e635a126, 14 Oct):
     expect(unresolvedEventOptionIds(g)).toEqual([]);
   });
 });
+
+describe('DL (14 Oct): a stated deadline keeps its forecast whatever options the AI drafts — six real drafts of Paul\'s brief', () => {
+  const PROBE = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-probe-drafts-20261014.json', import.meta.url), 'utf8')) as {
+    drafts: { id: string; raw_text: string; raw_sha256: string }[] };
+  it('PRECONDITION: six byte-pinned drafts, each typed event_by_date with the brief\'s deadline words; five have no option with a pace', () => {
+    expect(PROBE.drafts).toHaveLength(6);
+    for (const d of PROBE.drafts) expect(createHash('sha256').update(d.raw_text, 'utf8').digest('hex'), d.id).toBe(d.raw_sha256);
+    const parsed = PROBE.drafts.map((d) => JSON.parse(d.raw_text) as Rec);
+    for (const c of parsed) expect(c.goal.kind).toBe('event_by_date');
+    expect(parsed.filter((c) => c.options.some((o: Rec) => o.added_capacity != null)).length).toBe(1);
+  });
+
+  it('⭐ RED→GREEN: every draft builds the deadline forecast; an option with no mechanism is unresolved with its coaching reason, never a clone of carrying on', async () => {
+    for (const d of PROBE.drafts) {
+      const g = await construct(JSON.parse(d.raw_text) as Rec);
+      expect(node(g, 'event_team'), d.id).toBeDefined();
+      const options = g.nodes.filter((n: Rec) => n.kind === 'option');
+      for (const o of options.filter((x: Rec) => x.is_baseline !== true)) {
+        const acts = Object.entries(o.interventions ?? {}).some(([, v]) => (v as Rec)?.value === 1);
+        expect(acts || unresolvedEventOptionIds(g).includes(o.id), `${d.id} ${o.label}`).toBe(true);
+      }
+    }
+    // The first #3112 draft: its options set nothing, so each is withheld with the coaching step once the team's time is held.
+    const first = PROBE.drafts.find((d) => d.id === 'p3112fix-1')!;
+    const dated = withEventShareDate(await construct(JSON.parse(first.raw_text) as Rec), '2027-04-14', '2026-10-14') as Rec;
+    const saved1 = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team', low_months: 7, high_months: 8,
+      deadline: '2027-04-14', reference_date: '2026-10-14' } as never, computeAnalysisAffectingGraphHash(dated as never)!);
+    if (saved1.kind !== 'mutated') throw new Error(JSON.stringify(saved1));
+    const ids = saved1.mutatedGraph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id as string);
+    const gated = withShareByDateChanceGate({ option_comparison: ids.map((id: string) => ({ option_id: id, probability_of_goal: 0.2 })),
+      inference_warnings: [] as Rec[] }, saved1.mutatedGraph, 'event_goal') as Rec;
+    const why = (id: string) => (gated.inference_warnings as Rec[]).find((w) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION
+      && Array.isArray(w.option_ids) && w.option_ids.includes(id))?.message;
+    expect(why('event_option_1')).toBeUndefined(); // carrying on as now keeps its chance
+    // #3092's reason names the kept-out part the option changes, then the coaching step.
+    expect(why('event_option_2')).toBe('No chance is shown for this option yet: it changes ‘Legacy-code fix time share’, which this deadline '
+      + "forecast doesn't use yet. Worth discussing: how much it would speed up the work, and from when.");
+  });
+});

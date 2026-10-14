@@ -373,6 +373,13 @@ export function refusedEventByDate(detail: typeof EVENT_BY_DATE_REFUSALS[number]
     withheld: [{ from: 'event_decision', to: 'event_goal', reason: 'event_goal_unadmitted', detail }] };
 }
 
+/** The drafter recorded a stated deadline: a horizon in months, or the brief's own deadline words. */
+function eventDeadlineStated(goal: CandidateModel['goal'] | undefined): boolean {
+  const g = goal as (CandidateModel['goal'] & { deadline_words?: unknown }) | undefined;
+  return (typeof g?.horizon_months === 'number' && Number.isFinite(g.horizon_months) && g.horizon_months > 0)
+    || (typeof g?.deadline_words === 'string' && g.deadline_words.trim() !== '');
+}
+
 function validEventCapacity(capacity: CandidateModel['options'][number]['added_capacity']): boolean {
   return !!capacity && [capacity.monthly_share_pct, capacity.lead_months_low, capacity.lead_months_high].every(Number.isFinite)
     && capacity.monthly_share_pct >= 0 && capacity.monthly_share_pct <= 100
@@ -477,6 +484,12 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   const ratios = eventCapacityRatios(candidate);
   const raisesCapacity = candidate.options.some((o, i) => o.is_status_quo !== true && (ratios.get(i)?.ratio ?? 0) > 1);
   if (raisesCapacity) return null;
+  // ⭐ DL (14 Oct, Paul's legacy brief: the options vary run to run, the deadline does not): a STATED deadline keeps its
+  // forecast whatever options the AI drafts. An option with no mechanism stays unresolved with its reason and a coaching step
+  // (`unsupportedEventOptionWhy`); carrying on as now still gets its chance once the team's time is held.
+  // Only for a draft the drafter TYPED as an event-by-date goal: a flagged draft answered as another kind of goal (a price
+  // rise "with the next release") keeps its ordinary model when nothing in it changes the team's capacity.
+  if (candidate.goal?.kind === 'event_by_date' && eventDeadlineStated(candidate.goal)) return null;
   if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
   return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }
@@ -543,6 +556,13 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
         ? `Olumi's added-capacity pace for "${o.label}" is not used. Enter a pace between 0% and 100% of ${deliverable} a month.`
         : `Olumi's lead time for "${o.label}" is not used. Enter the soonest and latest start times in months, with the soonest first.`;
       loss.push({ field_path: `nodes[${id}].added_capacity`, before: capacity, after: null, reason, severity: 'warn' });
+      return;
+    }
+    // DL (14 Oct): a zero pace is no mechanism; the option stays unresolved, never acting as 0 (a clone of carrying on).
+    if (monthly_share_pct === 0) {
+      unresolved.push(id);
+      loss.push({ field_path: `nodes[${id}].added_capacity`, before: capacity, after: null, severity: 'warn',
+        reason: `Olumi's added-capacity pace for "${o.label}" is 0%, so this forecast doesn't count it as speeding up the work.` });
       return;
     }
     const sw = `event_capacity_${i + 1}`;
