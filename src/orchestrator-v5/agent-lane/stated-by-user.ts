@@ -1698,8 +1698,9 @@ export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): St
  * clause is coordinated (", and" / ", but" / "while" / "whereas"), so "Each extra conversation, which costs £20, brings
  * £1,000" stays one clause.
  */
+export const COORDINATE_CUT = /,\s*(?:and|but)\s|\s(?:while|whereas)\s/giu;
 function sameCoordinateClause(q: string, a: number, b: number): boolean {
-  const cuts = [...q.matchAll(/,\s*(?:and|but)\s|\s(?:while|whereas)\s/giu)].map((m) => m.index ?? 0);
+  const cuts = [...q.matchAll(COORDINATE_CUT)].map((m) => m.index ?? 0);
   const clauseOf = (at: number): number => cuts.filter((c) => c < at).length;
   return clauseOf(a) === clauseOf(b);
 }

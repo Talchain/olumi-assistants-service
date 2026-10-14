@@ -1,4 +1,4 @@
-import { bandTheUserWrote, clausesOf, factorTheUserNamed, linkEffectQuoteContextMiss, quoteSpansIn, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { bandTheUserWrote, clausesOf, factorTheUserNamed, figuresWrittenIn, linkEffectQuoteContextMiss, quoteSpansIn, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 
 type Entity = { readonly id: string; readonly label: string };
@@ -183,6 +183,50 @@ export function latestLinkBands(
     }
   }
   return latest;
+}
+
+/**
+ * ⛔ T2A3's reading for a FIGURE the Agent quotes from the user's message (link effects; served hiring 14 Oct: "Olumi
+ * suggested that hiring a Tech lead would raise productivity by about 8%" was recorded as the user's figure). True when the
+ * quote is not the user's own claim: the message disowns its estimates; the quote sits inside a report of Olumi's claim
+ * (`OLUMI_SAID`, its own clause, unless the user contrasts their own claim after it) or under a frame that names Olumi's
+ * claim ("You suggested:"), until a clause opens with the user's own claim; or it is disputed ("I disagree that …", or a
+ * next clause "Is that right?" / "I disagree"). The same rules `latestLinkBands` applies to a band.
+ */
+export function quoteIsNotTheUsersClaim(message: string, quote: string): boolean {
+  const text = plainQuote(message), said = plainQuote(quote);
+  const at = said === '' ? -1 : text.indexOf(said);
+  if (at < 0) return false;
+  const clauses = clausesOf(text);
+  if (clauses.some(disowns)) return true;
+  let from = 0, framed = false;
+  for (const [i, clause] of clauses.entries()) {
+    const start = text.indexOf(clause, from); from = start + clause.length;
+    const whole = clause.trim(), offset = start + clause.indexOf(whole);
+    if (OWN_AT_START.test(whole)) framed = false;
+    const covers = offset < at + said.length && at < offset + whole.length;
+    const report = OLUMI_SAID.exec(whole);
+    if (covers) {
+      if (framed) return true;
+      const inClause = Math.max(0, at - offset);
+      // "I disagree that …": a clause that opens with the user's dispute disputes what it holds.
+      if (DISPUTES_WHAT_CAME_BEFORE.test(whole)) return true;
+      if (report !== null) {
+        const after = whole.slice(report.index + report[0].length);
+        const own = CONTRAST_THEN_OWN.exec(after);
+        const ownFrom = own === null ? Infinity : report.index + report[0].length + own.index;
+        const before = whole.slice(0, report.index);
+        const userBefore = /\b(?:while|whereas|but|although|though|however)\s*$/i.test(before) && inClause + said.length <= report.index;
+        if (!userBefore && inClause < ownFrom) return true;
+      }
+      const next = clauses[i + 1];
+      if (next !== undefined && at + said.length <= offset + whole.length && DISPUTES_WHAT_CAME_BEFORE.test(next.trim())) return true;
+    } else if (report !== null && CONTRAST_THEN_OWN.exec(whole.slice(report.index + report[0].length)) === null
+      && figuresWrittenIn(whole.slice(report.index + report[0].length)) === 0) {
+      framed = true;
+    }
+  }
+  return false;
 }
 
 /** Verified conversation evidence for this directed pair, never a band found elsewhere in history. */
