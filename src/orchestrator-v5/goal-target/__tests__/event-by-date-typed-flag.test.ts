@@ -130,6 +130,22 @@ const AI_LEVELS_BY_CASE: Record<string, readonly string[]> = {
   'sealedR-d3': ['starter_subscribers'], // sealed(): known 0 subscribers, inferred, cap 5000.
   'B3-d2': ['senior_engineers_hired', 'junior_engineers_hired'], // Recorded: known 0 engineers, inferred, caps 20/30.
 };
+/**
+ * The introduction stamp (DL 14 Oct, `recovery/prompt/INTRODUCTION-STAMP-DRAFT.txt`): a risk or factor the drafter claimed
+ * `ai_proposed`, that the brief does not name and no option the user stated acts on, now carries `proposed_by: 'olumi'`. The
+ * digests below pin what base registered before the stamp: exactly these nodes carry it, by id, and it is set aside before
+ * hashing, so every other byte stays pinned. (An option's mark predates the stamp and stays in the digest.)
+ */
+function stampSetAside(g: Rec, ids: readonly string[]): Rec {
+  expect((g.nodes as Rec[]).filter((n) => n.kind !== 'option' && n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]))
+    .toEqual(ids.map((id) => [id, 'olumi']));
+  return { ...g, nodes: (g.nodes as Rec[]).map((n) => {
+    if (n.kind === 'option') return n;
+    const { proposed_by: _stamp, ...rest } = n;
+    return rest;
+  }) };
+}
+
 function beforeAiLevelTypes(g: Rec, candidate: CandidateModel, key: string): Rec {
   const ids = AI_LEVELS_BY_CASE[key];
   expect(ids, key).toBeDefined();
@@ -210,7 +226,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       expect(registrations).toHaveLength(1);
       // Verified against a replay without the Olumi fit: only this edge changes. Frames and all other bytes stay pinned.
       const fittedIds = [{ from: 'starter_subscribers', to: 'monthly_recurring_revenue' }];
-      const registrationBase = structuredClone(registrations[0]);
+      const registrationBase = stampSetAside(structuredClone(registrations[0]), ['price_increase_churn', 'starter_support_strain']);
       for (const id of fittedIds) {
         const index = registrationBase.edges.findIndex((e: Rec) => e.from === id.from && e.to === id.to);
         expect(registrationBase.edges.filter((e: Rec) => e.from === id.from && e.to === id.to)).toHaveLength(1);
@@ -257,7 +273,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(result).toMatchObject({ ok: true, mutated: true });
     expect(registrations).toHaveLength(1);
     // Base staging 94b2554d registered this exact graph (census r3, graph_sha prefix).
-    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
+    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(stampSetAside(registrations[0], ['recruitment_and_onboarding_delay']), JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
     expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
   });
 

@@ -1,6 +1,6 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "6a1fdbe9-bee4-423b-8f01-4e483070afcd",
+ "operation_id": "f8cee774-f1c4-41c6-b9e4-5e1234836549",
  "candidate": {
   "nodes": [
    {
@@ -167,7 +167,8 @@
      "source": "cee_inference",
      "extractionType": "inferred"
     },
-    "scale_frame": 100
+    "scale_frame": 100,
+    "proposed_by": "olumi"
    },
    {
     "id": "conversion_rate",

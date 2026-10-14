@@ -80,11 +80,22 @@ const withVerifiedType = (n: Node, key: string): Node => {
   if (typed.extractionType === undefined) typed.extractionType = 'explicit';
   return { ...n, observed_state: typed } as Node;
 };
+/**
+ * The introduction stamp (DL 14 Oct, `recovery/prompt/INTRODUCTION-STAMP-DRAFT.txt`): a factor or risk the drafter claimed
+ * `ai_proposed`, that the brief does not name and no option the user stated acts on, now carries `proposed_by: 'olumi'`.
+ * Exactly these served nodes, by id; every other byte is unchanged ("AI feature value" in the factor-kind draft is a lever
+ * of the user's own "Raise Pro to £59", so it stays bare).
+ */
+const STAMPED_BY_CASE: Record<string, readonly string[]> = {
+  'served-paul-churn-outcome-20260926T032916Z': ['pro_plan_subscribers', 'ai_feature_value'],
+  'served-paul-churn-factor-20260926T032913Z': ['new_pro_conversion_rate', 'active_pro_subscribers'],
+};
 const asServedNow = (n: Node | undefined): Node | undefined => {
   if (n === undefined) return n;
   const key = SERVED_FACTOR.nodes.includes(n) ? 'served-paul-churn-factor-20260926T032913Z'
     : 'served-paul-churn-outcome-20260926T032916Z';
-  return withVerifiedType(withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n), key);
+  const now = withVerifiedType(withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n), key);
+  return STAMPED_BY_CASE[key]!.includes(n.id) ? { ...now, proposed_by: 'olumi' } : now;
 };
 const typedIds = (g: { nodes: Node[] }): string[] => g.nodes
   .filter((n) => (n as Node & { observed_state?: { extractionType?: unknown } }).observed_state?.extractionType === 'explicit')

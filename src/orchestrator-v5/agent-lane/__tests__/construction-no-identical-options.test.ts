@@ -255,6 +255,29 @@ const exactlyTheVerifiedCase = (g: SGraph, key: string): void => {
     }
   }
 };
+/**
+ * The introduction stamp (DL 14 Oct, `recovery/prompt/INTRODUCTION-STAMP-DRAFT.txt`): a factor or risk the drafter claimed
+ * `ai_proposed`, that the brief does not name and no option the user stated acts on, now carries `proposed_by: 'olumi'`.
+ * `candidateFromServed` claims every served non-brief node `ai_proposed`, so exactly these carry it, by id, in graph order.
+ * The served graphs and base's registration predate the stamp: after this exact check it is set aside, and everything else
+ * is compared byte for byte, as before.
+ */
+const STAMPED_BY_CASE: Record<string, readonly string[]> = {
+  'f-20260926T001627Z': ['price_sensitivity', 'pro_subscribers', 'price_driven_churn_risk'],
+  'f-20260926T020217Z': ['pro_plan_subscribers', 'new_pro_plan_conversion', 'price_driven_churn', 'ai_value_mismatch'],
+  'f-20260926T022404Z': ['upgrade_conversion', 'pro_plan_subscribers', 'price_resistance'],
+  'f-20260926T022612Z': ['monthly_new_pro_subscribers', 'pro_subscriber_base', 'price_resistance'],
+};
+const stampSetAside = (g: SGraph, key: string): SGraph => {
+  const markOf = (n: SNode) => (n as SNode & { proposed_by?: unknown }).proposed_by;
+  expect(g.nodes.filter((n) => n.kind !== 'option' && markOf(n) !== undefined).map((n) => [n.id, markOf(n)]))
+    .toEqual(STAMPED_BY_CASE[key]!.map((id) => [id, 'olumi']));
+  return { ...g, nodes: g.nodes.map((n) => {
+    if (n.kind === 'option') return n;
+    const { proposed_by: _stamp, ...rest } = n as SNode & { proposed_by?: unknown };
+    return rest;
+  }) };
+};
 const withCreditedType = (n: SNode, key: string): SNode => {
   const os = n.observed_state;
   const type = VERIFIED_BY_CASE[key]!.includes(n.id) ? 'explicit'
@@ -373,7 +396,7 @@ describe.each([
   });
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
-    const { graph: sizedGraph } = await build(draft());
+    const sizedGraph = stampSetAside((await build(draft())).graph, key);
     exactlyTheVerifiedCase(sizedGraph, key);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph, run.brief.draft_graph), G1_WITH_HORIZON));
@@ -384,7 +407,7 @@ describe.each([
   });
 
   it('RED: everything else is byte-identical to what base registers — only the test option and its edges are gone', async () => {
-    const { graph } = await build(draft());
+    const graph = stampSetAside((await build(draft())).graph, key);
     exactlyTheVerifiedCase(graph, key);
     const base = after2355(baseGraph(key), key, graph);
     expect(optionIds(base)).toContain(TEST_ID);
@@ -465,8 +488,9 @@ describe('controls — what the rule must never touch', () => {
     // The construction mark (`olumi-option-marker.ts`, DL #72 5887534233): the Olumi-added £54 option, and only it, carries
     // `proposed_by: 'olumi'`. "£49 with AI release" sets the user's own £49, so it stays unmarked (the level backstop).
     // The served graph and base's registration predate the mark; everything else is compared byte for byte, as before.
+    // The introduction stamp marks the drafter's own factors and risks the same way (`STAMPED_BY_CASE`).
     const marked = (registered.nodes as { id: string; proposed_by?: unknown }[]).filter((n) => n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]);
-    expect(marked).toEqual(key === 'f-20260926T001627Z' ? [[olumiId, 'olumi']] : []);
+    expect(marked).toEqual([...(key === 'f-20260926T001627Z' ? [[olumiId, 'olumi']] : []), ...STAMPED_BY_CASE[key]!.map((id) => [id, 'olumi'])]);
     const graph = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).

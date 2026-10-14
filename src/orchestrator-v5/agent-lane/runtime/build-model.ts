@@ -46,7 +46,7 @@ import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 import { identityCanCarryExactLinks } from '../../admission/identity-evaluations.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
-import { markOlumiOptions } from '../olumi-option-marker.js';
+import { markOlumiAdditions } from '../olumi-option-marker.js';
 import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
@@ -158,6 +158,14 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
 
 export function buildCandidateSchema(): Record<string, unknown> {
   const provenance = { type: 'string', enum: ['explicit', 'inferred', 'ai_proposed'] };
+  // ⭐ THE INTRODUCTION CLAIM (the introduction stamp, DL 14 Oct): who introduced an option, factor, risk or outcome, never who
+  // supplied a value (`baseline_provenance`, `effect_provenance` keep the bare enum). Admission carries "ai_proposed" to
+  // `proposed_by: 'olumi'` (`markOlumiAdditions`). AIE_TEXT_PENDING (`recovery/prompt/INTRODUCTION-STAMP-DRAFT.txt`).
+  const introducedBy = { ...provenance, description: 'Who introduced this item. "explicit": the user states it in the brief. '
+    + '"inferred": the brief implies it without stating it. "ai_proposed": you are adding it yourself, beyond the brief: an '
+    + 'alternative, factor, risk or outcome the user did not raise. Use "ai_proposed" only for your own additions; if you are '
+    + 'unsure whether the brief implies an item, use "inferred". Your own additions are shown to the team as Olumi\u2019s '
+    + 'suggestions, never as theirs.' };
   const obj = (properties: Record<string, unknown>, required: string[]) => ({
     type: 'object', additionalProperties: false, properties, required,
   });
@@ -262,7 +270,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
      */
     options: { type: 'array', items: obj({
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
-      provenance,
+      provenance: introducedBy,
       changes: { type: 'array', description:
         'Factor labels this option acts on for which no defensible level exists \u2014 each one leaves the user a value question before anything can be calculated, so prefer a level in `interventions` (your ai_proposed estimate when the brief states none). Use the factor labels exactly. The option marked is_status_quo leaves this empty. An option (other than the one marked is_status_quo) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
@@ -297,7 +305,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or supported evidence. A provisional AI estimate keeps this false. EXCEPTION: for a factor explicitly defined as a CHANGE FROM TODAY, today\'s structural value is 0: baseline_known true, baseline_value 0. This is a definition, not a newly stated measurement, and does not state its value at a future horizon. For the existing NO-CHANGE FORECAST representation, derive the future change as the stated no-change forecast at its specified horizon minus the supported current level of the SAME quantity, with compatible units and reference. Preserve both sources, the horizon and conditions. Do not apply today\'s structural-zero exception to this future value: a valid derived change may be positive, negative or zero. Identify it as a derived conditional forecast, not a newly stated measurement or observed current level. Missing or incompatible operands remain unknown; never invent a value or probability law.' },
       baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
-      unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance,
+      unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance: introducedBy,
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
@@ -305,8 +313,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
     // out of an outcome or a risk can be read, so a goal they feed could never be sized in its own unit.
     // ⛔ OPTIONAL HERE, REQUIRED ONLY WHERE IT IS SENT (DL 5916270318, option D): a candidate recorded before the frames
     // existed still validates against this contract, and `strictForTheDrafter` requires both keys of the drafter itself.
-    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
-    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance: introducedBy, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance: introducedBy, ...QUANTITY_FRAME }, ['label', 'provenance']) },
     links: { type: 'array', description:
       'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.',
       items: obj({
@@ -2236,8 +2244,9 @@ export async function buildModelFromBrief(
     // level and spread with every link it touches, so the user's size fits and nothing moves in natural units.
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
-      // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-      nodes: markOlumiOptions(accumulated.nodes, candidate, brief),
+      // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief),
+      // and so does each risk and factor the drafter claims as its own (the introduction stamp: T4i P1 reads it).
+      nodes: markOlumiAdditions(accumulated.nodes, candidate, brief),
       edges: accumulated.edges,
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }

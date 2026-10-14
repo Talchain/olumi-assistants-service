@@ -76,3 +76,44 @@ export function markOlumiOptions<N extends { readonly kind?: unknown; readonly l
   if (!nodes.some(marks)) return nodes;
   return nodes.map((n) => (marks(n) ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }
+
+/**
+ * ⭐ THE DRAFTER'S OWN RISKS AND FACTORS CARRY THE SAME MARK (the introduction stamp, DL 14 Oct; T4i P1 reads it). Hiring
+ * post3007: the drafter added "Code quality deterioration" and claimed it (`provenance: "ai_proposed"`), but admission keeps
+ * that claim only in its ledger (`displayProvenanceFor` → `ai_inferred`), so the graph could not tell Olumi's risk from the
+ * user's and the Run waited on its level. The mark is the drafter's positive claim alone: `inferred` (or anything unclear)
+ * is never marked, so unknown stays unknown. The same backstops as an option: never a label the brief names, never a name
+ * two items or two nodes share; and never a factor with a known baseline, which only the user or evidence supplies. Nor a
+ * factor that an option the USER stated acts on (DL 14 Oct): served hiring claimed "Tech lead hires", the lever of the user's
+ * own "Hire Tech Lead", as its own; that is Olumi's name for the user's choice, not Olumi's addition.
+ */
+export function olumiAddedQuantityLabels(candidate: CandidateModel, brief: string): ReadonlySet<string> {
+  const briefKey = canonicalLabel(brief);
+  const usersLevers = new Set((candidate.options ?? []).filter((o) => o.provenance === 'explicit')
+    .flatMap((o) => [...(o.changes ?? []), ...(o.interventions ?? []).map((i) => i.factor_label)])
+    .map((l) => canonicalLabel(String(l))));
+  const items = [...(candidate.risks ?? []), ...(candidate.factors ?? [])];
+  const count = new Map<string, number>();
+  for (const q of items) count.set(canonicalLabel(q.label ?? ''), (count.get(canonicalLabel(q.label ?? '')) ?? 0) + 1);
+  return new Set(items
+    .filter((q) => typeof q.label === 'string' && canonicalLabel(q.label) !== '' && count.get(canonicalLabel(q.label)) === 1)
+    .filter((q) => q.provenance === 'ai_proposed' && (q as { baseline_known?: unknown }).baseline_known !== true)
+    .filter((q) => !briefKey.includes(canonicalLabel(q.label)) && !usersLevers.has(canonicalLabel(q.label)))
+    .map((q) => canonicalLabel(q.label)));
+}
+
+/** Construction's mark: options as `markOlumiOptions`, then each risk and factor node the drafter added (above). Pure. */
+export function markOlumiAdditions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly is_baseline?: unknown; readonly draft_widening?: unknown; readonly proposed_by?: unknown }>(
+  nodes: readonly N[], candidate: CandidateModel, brief: string,
+): readonly N[] {
+  const withOptions = markOlumiOptions(nodes, candidate, brief);
+  const olumi = olumiAddedQuantityLabels(candidate, brief);
+  if (olumi.size === 0) return withOptions;
+  const isQuantity = (n: N): boolean => (n.kind === 'risk' || n.kind === 'factor') && typeof n.label === 'string';
+  const named = new Map<string, number>();
+  for (const n of withOptions) if (isQuantity(n)) named.set(canonicalLabel(n.label as string), (named.get(canonicalLabel(n.label as string)) ?? 0) + 1);
+  const marks = (n: N): boolean => isQuantity(n) && n.proposed_by === undefined
+    && olumi.has(canonicalLabel(n.label as string)) && named.get(canonicalLabel(n.label as string)) === 1;
+  if (!withOptions.some(marks)) return withOptions;
+  return withOptions.map((n) => (marks(n) ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
+}
