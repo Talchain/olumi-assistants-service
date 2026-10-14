@@ -180,7 +180,7 @@ a3_nothing_else() {
   chk "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname IN ('append_construction_questions_event', '$D5NAME')")" 1 "exactly one D5 function (round-1 helper absent)"
 }
 a4_attributes() {
-  chk "$(q "SELECT format('secdef=%s vol=%s config=%s ret=%s nargs=%s acl=%s comment=%s', p.prosecdef, p.provolatile, array_to_string(p.proconfig, ';'), p.prorettype::regtype, p.pronargs, p.proacl::text, obj_description(p.oid, 'pg_proc') IS NOT NULL) FROM pg_proc p WHERE p.oid = to_regprocedure('$D5SIG')")" \
+  chk "$(q "SELECT format('secdef=%s vol=%s config=%s ret=%s nargs=%s acl=%s comment=%s', p.prosecdef::text, p.provolatile, array_to_string(p.proconfig, ';'), p.prorettype::regtype, p.pronargs, p.proacl::text, (obj_description(p.oid, 'pg_proc') IS NOT NULL)::text) FROM pg_proc p WHERE p.oid = to_regprocedure('$D5SIG')")" \
       "secdef=false vol=v config=search_path=pg_catalog, public ret=jsonb nargs=23 acl={postgres=X/postgres,service_role=X/postgres} comment=true" "attributes"
   chk "$(q "SELECT has_function_privilege('anon', '$D5SIG', 'EXECUTE')||'/'||has_function_privilege('authenticated', '$D5SIG', 'EXECUTE')||'/'||has_function_privilege('b0_nobody', '$D5SIG', 'EXECUTE')||'/'||has_function_privilege('service_role', '$D5SIG', 'EXECUTE')")" \
       "false/false/false/true" "EXECUTE anon/authenticated/PUBLIC-only/service_role"

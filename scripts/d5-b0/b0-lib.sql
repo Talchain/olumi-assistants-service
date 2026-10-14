@@ -176,7 +176,7 @@ BEGIN
   IF t.assistant_message IS DISTINCT FROM 'b0 assistant answer for ' || p_turn THEN RETURN 'assistant_message differs'; END IF;
   IF t.agent_guidance IS DISTINCT FROM p_guidance THEN RETURN 'agent_guidance differs: ' || coalesce(t.agent_guidance::text, 'NULL'); END IF;
   IF t.suggested_actions IS DISTINCT FROM p_offers THEN RETURN 'suggested_actions differs'; END IF;
-  IF t.suggested_actions_run_key IS DISTINCT FROM CASE WHEN p_offers IS NULL THEN NULL ELSE p_run_key END THEN RETURN 'offers run key differs'; END IF;
+  IF t.suggested_actions_run_key IS DISTINCT FROM (CASE WHEN p_offers IS NULL THEN NULL ELSE p_run_key END) THEN RETURN 'offers run key differs'; END IF;
   IF t.run_narration IS DISTINCT FROM p_narration THEN RETURN 'run_narration differs'; END IF;
   IF (SELECT count(*) FROM public.v5_handler_facts f WHERE f.v5_conversation_turn_id = t.id) <> 0 THEN RETURN 'handler facts were written'; END IF;
   IF p_receipt->>'id' IS DISTINCT FROM t.id::text THEN RETURN 'receipt id is not the answer row id'; END IF;
