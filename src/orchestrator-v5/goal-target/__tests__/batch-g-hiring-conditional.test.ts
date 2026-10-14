@@ -342,7 +342,7 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
 });
 
 /**
- * ⭐ DL ruling 14 Oct (option A; Paul: label, never withhold; coach, don't refuse). Served hiring with the deadline card pressed
+ * ⭐ DL ruling 14 Oct (option A; AIE #94 6171728409: a chance only where the model supports it, and its assumption said once). Served hiring with the deadline card pressed
  * (live/runs/2026-10-14T140600Z-hiring-e2e-8f52bfd5-5ebc9b0c, hiring/reads/09-19-after-reopen.json): the goal held the card's
  * month beside the basis' own three months, and every Run withheld "only today's numbers". A held month that IS the target's own
  * period, with no timing carrier, is the same static reading: the conditional chance with the AIE's note, or E's withhold.
@@ -372,6 +372,23 @@ describe('option A: the deadline card\'s held month equal to the target\'s own p
       expect(JSON.stringify(run.envelope).split(NOTE), timing).toHaveLength(2);
       expect(JSON.stringify(run.envelope), timing).not.toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
     }
+  });
+
+  it('AIE 6171728409 (2)+(4): with the card pressed, the chance is scoped to the target scored, the other conditions stay named, and the note is said once through the saved read, a reload and the Agent', () => {
+    const graph = pressed(FX.graph);
+    const run = runWithHorizonGate(graph, 'in_place_by_period');
+    expect(goalChanceLicenceForAgent(run.view)!.chance_words).toContain(OWN_TARGET.replace(/^chance of /, ''));
+    const reloaded = JSON.parse(JSON.stringify(graph)) as Rec;
+    const view = { type: 'analysis_result', enrichment: JSON.parse(JSON.stringify(run.envelope)) as Rec };
+    const notes = goalChanceNotesForAgent(view, reloaded, true);
+    expect(notes).toContain(CONDITIONS);
+    expect(notes.filter((n) => n === NOTE)).toHaveLength(1);
+    const owed = withScreenLinesOwed('Here is what this run shows for the two hiring options.', goalChanceScreenLinesForAgent(view, reloaded, true), notes).text;
+    expect(owed.split(NOTE)).toHaveLength(2);
+  });
+
+  it('AIE 6171728409 (3): the card never attests timing — a missing or invalid timing reading with the card pressed withholds with E\'s sentence', () => {
+    for (const timing of [null, 'soon'] as const) expectWithheld(runWithHorizonGate(pressed(FX.graph), timing), `timing ${String(timing)}`);
   });
 
   it('NEGATIVE (c) still holds with the card: a stated late/partial effect withholds with E\'s sentence', () => {
