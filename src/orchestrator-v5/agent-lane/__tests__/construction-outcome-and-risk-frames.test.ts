@@ -186,8 +186,10 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     expect(onFrames(contract.errors)).toEqual([]);
     const sent = new Ajv({ strict: false, allErrors: true }).compile(strictForTheDrafter(buildCandidateSchema()));
     expect(sent(recorded.candidate)).toBe(false);
+    // #3134 (S2 holds now from the brief): a risk's nullable `already_true_evidence` is required where SENT, like every key at
+    // the OpenAI boundary; the recorded candidate predates it, so its one risk misses it too.
     expect(onFrames(sent.errors).map((e) => (e as { params?: { missingProperty?: string } }).params?.missingProperty).sort())
-      .toEqual(['plausible_max', 'plausible_max', 'unit', 'unit']);
+      .toEqual(['already_true_evidence', 'plausible_max', 'plausible_max', 'unit', 'unit']);
   });
 
   it('what is SENT requires both keys on every outcome and risk; every other object is sent byte for byte as the contract', async () => {
