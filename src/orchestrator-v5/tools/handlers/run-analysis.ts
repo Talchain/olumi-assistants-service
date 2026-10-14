@@ -2924,7 +2924,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
     const sentRun = plotPayload;
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, sentRun),
+      // Hiring row 3 (14 Oct): read with the period-end withhold's own inputs, so a change goal's conditional licence holds here too.
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, periodEndInputs),
       snapshot.rawPersistedGraph ?? graphForAnalysis,
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.

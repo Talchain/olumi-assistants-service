@@ -37,6 +37,8 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { midSentence } from '../agent-lane/guidance/render.js';
+import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -90,6 +92,11 @@ export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of y
 const SPREAD_NOTE_RETIRED = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** The scale authority's exact percent spellings (`unit-scale-class.ts`), never its prefix fallback. */
+const PERCENT_TOKENS: readonly string[] = UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [];
+/** Two recorded phrases are the same words: case, spacing and apostrophe form aside. */
+const sameWords = (a: unknown, b: string): boolean => typeof a === 'string'
+  && a.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
 const SHORTFALL_TEMPLATE = 'In its worst 1 in 20 runs of this model, ‘<label>’ falls short of your target by <figure> or more.';
 const TYPICAL_SHORTFALL_TEMPLATE = 'In this model, ‘<label>’ falls short of your target in almost every run, typically by about <figure>.';
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -605,7 +612,19 @@ export function goalChanceLicenceOf(
     }
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
-  const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
+  // ⭐ AIE #94 6160376175 (hiring row 3): on the bound percent CHANGE from today (a change quantity this Run scored as the paired
+  // change from today), a shortfall is a share of today's level of the goal ("21% of today’s productivity"): never percentage
+  // points, never a share of the target. Codex #3008 r1: bound by the RECORD, never a text classifier. The target's unit is
+  // one of the scale authority's exact percent tokens (its prefix fallback admits "percentage points"), and the validated
+  // basis records its denominator as today's level of THIS goal and its effect unit as that unit of it, exactly. Any
+  // other percent-family change says no shortfall (it would be ambiguous); other units keep their own.
+  const percentChange = changeFrame !== undefined && classifyUnitScaleClass(target.unit) !== 'unknown';
+  const ofTodayBound = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today'
+    && goalLabel !== undefined && PERCENT_TOKENS.includes(target.unit.trim().toLowerCase())
+    && sameWords(basis.denominator, `today's ${goalLabel}`) && sameWords(basis.effect_unit, `${target.unit.trim()} of today's ${goalLabel}`);
+  const ofToday = ofTodayBound ? ` of today’s ${midSentence(goalLabel!)}` : undefined;
+  const shortfall = percentChange && ofToday === undefined ? {}
+    : shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope, ofToday ?? '');
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
   // ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): over everything upstream of EVERY node of the event this Run sent —
   // each target and each included limit (the joint rests on all of them), by any path — one census (`goalChanceEstimateCounts`).
@@ -1029,11 +1048,19 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     ...statusQuo, ...moved, targets: block };
 }
 
-/** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
+/**
+ * One Run-input candidate must agree with every licensed option; ambiguity records nothing.
+ * ⛔ Hiring row 3 (14 Oct): the licence it agrees with is the one the Run states, read with the Run's own inputs. A change goal
+ * whose effects are not stated at the period end is licensed only on its conditional reading (`periodEndConditionalOf`: the
+ * brief and Olumi's timing reading). With `sentRun` alone that licence was null, so no threshold was recorded and the shortfall
+ * line (`shortfallNotesOf`) was never said for hiring.
+ */
 export function sentGoalThresholdOf(
-  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean, sentRun?: SentRunInputs,
+  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
 ): SentGoalThreshold | undefined {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, sentRun === undefined ? {} : { sentRun });
+  const sentRun = inputs.sentRun;
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, inputs);
   if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
@@ -1115,7 +1142,7 @@ function spreadNotesOf(
 function shortfallNotesOf(
   sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
   pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
-  unit: string, graph: unknown, envelope: Rec,
+  unit: string, graph: unknown, envelope: Rec, reference = '',
 ): Record<string, string> {
   const notes: Record<string, string> = {};
   // goalChanceScreenLinesForAgent shows no per-option point under `similar` or a superlative.
@@ -1140,9 +1167,15 @@ function shortfallNotesOf(
     if (!finite(downside?.p05) || !finite(outcome?.p10)) continue;
     const q05 = downside.p05 * cap;
     if (!finite(q05) || q05 > outcome.p10 + 1e-6 * Math.abs(outcome.p10) || q05 >= raw) continue;
+    // ⛔ Hiring row 3 (14 Oct): the outcome percentiles are in the frame this Run RECORDED (`sent.field`): raw beside the raw
+    // threshold field, normalised beside the normalised one. The tail must also hold in that frame: a negative change in the
+    // normalised frame passed the line above by its sign alone. The typical figure is read in that frame too (below).
+    const toRaw = sent.field.endsWith('_raw') ? 1 : cap;
+    const p10Raw = outcome.p10 * toRaw;
+    if (!finite(p10Raw) || q05 > p10Raw + 1e-6 * Math.abs(p10Raw)) continue;
     const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
     if (typeof label !== 'string' || label.trim() === '' || /[\r\n]/.test(label)) continue;
-    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 : NaN) : q05);
+    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 * toRaw : NaN) : q05);
     if (!finite(difference) || difference <= 0) continue;
     const amount = pct[id] === 0 ? Number(difference.toPrecision(2)) : floorSig2(difference);
     if (!finite(amount) || amount <= 0) continue;
@@ -1152,8 +1185,10 @@ function shortfallNotesOf(
     const figure = sayFigureAsWritten(amount, unit);
     // A two-state unit may format a difference as "on"; a shortfall requires a numeric amount.
     if (!/\d/.test(figure)) continue;
+    // The caller's reference words follow the amount ("21% of today’s productivity"); empty for a level.
+    const said = `${figure}${reference}`;
     const template = pct[id] === 0 ? TYPICAL_SHORTFALL_TEMPLATE : SHORTFALL_TEMPLATE;
-    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : figure) });
+    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : said) });
   }
   return notes;
 }
