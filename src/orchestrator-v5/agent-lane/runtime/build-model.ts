@@ -432,7 +432,7 @@ export const AIE_APPROVED_DECLARED_SUM = {
 export const BUILD_INSTRUCTIONS = [
   // ⭐ OLUMI'S PURPOSE (Paul's principle; DL 14 Oct): the drafter is sent alone, so it carries the core lines itself.
   ...OLUMI_PURPOSE_CORE_LINES,
-  'The goal carries the user’s governing aim and its stated target. A date is not automatically the goal: preserve whether it is a deadline for achieving the aim, a launch or start reference, or a measurement or learning window. Use event_by_date only when delivering the stated event is itself an aim; do not replace a quantity goal with an unrelated event or move its governing target into constraints to do so. Further mandatory targets of the same purpose may stay as target constraints: preserve their AND meaning, common reference and window, and all limits and conditions. If the governing meaning is unclear, retain the original words and ask; do not invent a target or a launch-completion percentage. For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. STATED CAPACITY CHAIN. When the brief states what the team’s capacity for the deliverable is made of (such as how many people there are and what share of their time goes to this work rather than other work), declare that chain in identities: a product whose outcome is the team’s effective capacity (such as ‘Feature development capacity’ in developer-equivalents) and whose factors are the headcount and the share of time on the deliverable’s work, with the outcome’s baseline_value equal to its factors’ baseline_values multiplied (a share held in % counts as that many hundredths: 6 developers × 75% = 4.5 developer-equivalents). Where the brief splits that time into shares of one whole (time on feature work and time on legacy fixes), hold each share as its own factor in the same unit, and an option that moves one share also sets every share it frees or takes, so the shares still make up the whole. Put each option’s setting on the chain’s own factors (its headcount or its shares), so the option acts through the chain; a setting the brief does not give is your proposed setting, with provenance ai_proposed. An option that frees time from other work, rather than adding people, acts only through those shares: its added_capacity is null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. For an event-by-date model, the host supplies the deadline question; do not add that same question to unknowns. Ask only relevant remaining timing questions, such as how long the current team would take or when new capacity becomes effective, when those facts are genuinely missing. Never ask today’s level of the event goal.',
+  'The goal carries the user’s governing aim and its stated target. A date is not automatically the goal: preserve whether it is a deadline for achieving the aim, a launch or start reference, or a measurement or learning window. Use event_by_date only when delivering the stated event is itself an aim; do not replace a quantity goal with an unrelated event or move its governing target into constraints to do so. Further mandatory targets of the same purpose may stay as target constraints: preserve their AND meaning, common reference and window, and all limits and conditions. If the governing meaning is unclear, retain the original words and ask; do not invent a target or a launch-completion percentage. For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. CAPACITY CHAIN. When the brief supplies the parts of the team’s allocation to the same deliverable, retain their actual quantities, units, population, period, source and qualifications. Declare a product identity only where that arithmetic is valid: headcount multiplied by the share of time on this work gives allocated developer-equivalents, with a percentage converted to a fraction once. Keep the supplied inputs distinct from derived values and Olumi’s interpretation; do not present the identity or its effect on delivery speed as a human assertion unless it was supplied as such. A stated share on legacy fixes does not by itself establish that all remaining time is feature work. Derive complementary shares only for an explicitly complete, disjoint allocation of the same whole; otherwise any proposed allocation is labelled as Olumi’s assumption, with its basis and unresolved conditions. An option changing that allocation sets its affected parts consistently with the retained whole, without inventing other categories or changing stated bounds. A setting the brief does not give remains ai_proposed, with no fabricated stated evidence. A time-freeing option represented by this allocation chain has added_capacity null, so the same effect is not counted again as a separate pace contribution. Preserve the chain’s original factors and causal meaning; downstream computation must also apply each effect once. Arithmetic allocation is not evidence that delivery pace scales proportionally, that the change is immediately effective, or that skill, onboarding, transition costs and other risks are absent. Retain those separate causal, timing and uncertainty assumptions and all governing conditions as provisional reasoning for the existing analysis and proposal paths. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. For an event-by-date model, the host supplies the deadline question; do not add that same question to unknowns. Ask only relevant remaining timing questions, such as how long the current team would take or when new capacity becomes effective, when those facts are genuinely missing. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
   AIE_APPROVED_DECLARED_SUM.instruction,
@@ -1769,6 +1769,9 @@ export function goalPathsCarryTheUsersFigures(graph: { readonly nodes: readonly 
   }));
 }
 
+/** What a revised draft over the link limit says, once, in plain words (DL 14 Oct). */
+export const REVISED_DRAFT_MORE_LINKS = 'This model has more links than usual, because it tracks everything your goals depend on.';
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -1787,6 +1790,8 @@ export async function buildModelFromBrief(
    * user's message). Written verbatim in this brief text too, it attests the event-by-date reading in place of the verb list.
    */
   attestedDeliverable?: string,
+  /** A revised draft (`prepareRevisedDraft`): a prepare-only card the user accepts before anything changes. */
+  revisedDraft?: boolean,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = {
@@ -1976,7 +1981,17 @@ export async function buildModelFromBrief(
   let leftOut: { kind: string; label: string }[] = [];
   // An option the FIRST draft had withheld as indistinct, which an adopted retry then dropped: still said.
   let carriedWithheld: readonly WithheldOption[] = [];
-  const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
+  /**
+   * ⭐ A REVISED DRAFT OVER THE LINK LIMIT ONLY IS ADMITTED AS DRAFTED (DL 14 Oct, Paul's marketing L20: "conversion rate of over
+   * 15% and … 20 new customers"). Its two goals' chain came to 35 links (16 nodes; 4 of them Olumi's), the size retry
+   * fitted but demoted "25% of my time" and "over 15%" to Olumi's estimates, so it was rightly rejected and the user's goals
+   * were never saved (125 s). The link cap is a backstop for an over-widened FIRST model; a revised draft is a card the user
+   * accepts first. So no retry runs (it is that retry which loses the user's figures) and the draft is admitted, said once.
+   * The node limit still refuses, and a first model takes today's path.
+   */
+  const revisedDraftOverLinksOnly = revisedDraft === true && !size.within && !size.user_material_exceeds_limit
+    && size.nodes <= size.limits.maxNodes;
+  const needsSizeRetry = !size.within && !size.user_material_exceeds_limit && !revisedDraftOverLinksOnly;
   // A missing risk mechanism, and an option × factor (or acted-on baseline) with no
   // level (c22, `findCoverageGaps`), ask the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
@@ -2036,7 +2051,7 @@ export async function buildModelFromBrief(
   const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue),
     ...(unattested !== null ? [unattestedEventIssue(unattested, brief)] : [])];
   let trace: ConstructionTrace = { retried: false };
-  if (needsSizeRetry || asked.length > 0) {
+  if ((needsSizeRetry || asked.length > 0) && !revisedDraftOverLinksOnly) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
     const reasons = {
@@ -2254,7 +2269,7 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) };
   }
 
-  if (!size.within && !size.user_material_exceeds_limit) {
+  if (!size.within && !size.user_material_exceeds_limit && !revisedDraftOverLinksOnly) {
     return {
       ok: false,
       mutated: false,
@@ -2706,7 +2721,10 @@ export async function buildModelFromBrief(
   // ⭐ B RESTATED GOAL (`draft-replacement-context.ts`): a revised draft of an unreviewed scaffold is PREPARED, never
   // written here. The caller offers these exact bytes as one card and registers them on approval, with compare-and-set
   // on the base it read; so the empty-model guard and the create-only registration below are not this call's.
-  if (preparingDraftReplacementFor(scenarioId)) return { ok: true, mutated: false, prepared_graph: graph };
+  if (preparingDraftReplacementFor(scenarioId)) {
+    return { ok: true, mutated: false, prepared_graph: graph,
+      ...(revisedDraftOverLinksOnly && !size.within ? { admitted_over_limit_because: REVISED_DRAFT_MORE_LINKS } : {}) };
+  }
   // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   if (stillEmpty.status === 200) {
@@ -2803,7 +2821,7 @@ export async function buildModelFromBrief(
     construction_retried: constructionRetried,
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
-      : {}),
+      : revisedDraftOverLinksOnly && !size.within ? { admitted_over_limit_because: REVISED_DRAFT_MORE_LINKS } : {}),
     options: admitted.nodes.filter((n) => n.kind === 'option').length,
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),

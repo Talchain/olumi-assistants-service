@@ -9,7 +9,7 @@
  */
 import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../admission/target-testability.js';
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
-import { chanceGoalBlockerOf } from '../goal-target/event-by-date-model.js';
+import { chanceGoalBlockerOf, draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
 import { jointBlockerOf, olumiBaseTargetsOf } from '../goal-target/goal-targets-joint.js';
 import { goalTargetMissingBlockerOf, isChanceGoalModel } from './decision-input-ask.js';
 import { oneNextStep, type PressBlocker } from './press-next-step.js';
@@ -33,15 +33,21 @@ export interface NextStepRead {
  * other answer lets the Run start. Where Olumi's starting-assumption card can exist for it (#3013, `riskOccurrenceSubject`
  * eligible), the proposing tool is named, so one approval admits the Run.
  */
-function runWithheldBlockerOf(raw: unknown, analysisReady: unknown): PressBlocker | null {
+export function runWithheldBlockerOf(raw: unknown, analysisReady: unknown): PressBlocker | null {
   if (!isRec(analysisReady) || analysisReady.status !== 'needs_user_input' || !Array.isArray(analysisReady.blockers)) return null;
   const gap = analysisReady.blockers.filter(isRec).find((b) => b.blocker_type === 'missing_value'
     && typeof b.factor_id === 'string' && typeof b.message === 'string' && b.message.trim() !== '');
   if (gap === undefined) return null;
   const card = riskOccurrenceSubject(raw, gap.factor_id as string);
-  return { kind: 'missing_input', ask: gap.message as string, ...(card.kind === 'eligible'
-    ? { proposable_by: { tool: 'propose_assumptions', node_id: gap.factor_id as string, field: 'occurrence_range', window_months: card.window_months } }
-    : {}) };
+  if (card.kind === 'eligible') return { kind: 'missing_input', ask: gap.message as string,
+    proposable_by: { tool: 'propose_assumptions', node_id: gap.factor_id as string, field: 'occurrence_range', window_months: card.window_months } };
+  // ⭐ S2 (DL 14 Oct; SCIENCE's marketing capture; PL 18:41Z): a FACTOR with no level can take Olumi's own labelled starting
+  // estimate (press-only), with the user's words about it quoted on the card, so the step is that card, never the question
+  // again. The event model's team part is excluded: its level comes only from the team's time (`propose_team_time`).
+  const node = isRec(raw) && Array.isArray(raw.nodes) ? raw.nodes.filter(isRec).find((n) => n.id === gap.factor_id) : undefined;
+  const factorGap = node?.kind === 'factor' && draftedTeamPartOf(raw)?.team.id !== gap.factor_id;
+  return { kind: 'missing_input', ask: gap.message as string,
+    ...(factorGap ? { proposable_by: { tool: 'propose_assumptions', node_id: gap.factor_id as string, field: 'starting_value' } } : {}) };
 }
 
 export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null {

@@ -6,6 +6,7 @@ import { log } from '../../../utils/telemetry.js';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
 import { admitCandidateModel, slugId, type CandidateModel } from '../../agent-lane/admit-model.js';
+import { unresolvedEventOptionIds } from '../event-by-date-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import type { ToolResult } from '../../agent-lane/runtime/agent-tools.js';
 import { firstAnalysisSentence } from '../../agent-lane/first-analysis.js';
@@ -254,6 +255,34 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
     } finally { info.mockRestore(); eventAdmission.mockRestore(); }
+  });
+
+  // ⭐ DL (14 Oct, Paul's legacy brief): a draft TYPED event_by_date with a STATED deadline keeps its forecast whatever the
+  // options; an option with no usable mechanism (none, invalid or a zero pace) stays unresolved, never acting as 0. The rows
+  // above (no deadline recorded) keep their refusals; a missing deliverable or no real option still refuses with one.
+  const dated = (c: CandidateModel): CandidateModel => ({ ...c, goal: { ...c.goal, deadline_words: 'ship the new platform by Q3' } as CandidateModel['goal'] });
+  it.each([
+    ['no added_capacity', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => ({ ...o, added_capacity: null })) })],
+    ['invalid added_capacity', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => o.is_status_quo ? o : { ...o, added_capacity: { monthly_share_pct: 10, lead_months_low: 5, lead_months_high: 3 } }) })],
+    ['zero capacity change', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => o.is_status_quo ? o : { ...o, added_capacity: { monthly_share_pct: 0, lead_months_low: 2, lead_months_high: 4 } }) })],
+  ] as const)('deadline stated, %s: the forecast is admitted and every such option is unresolved (never acting as 0)', (_name, change) => {
+    const admitted = flagged(dated(change(b3())));
+    expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
+    expect(admitted.nodes.some(n => n.id === 'event_team')).toBe(true);
+    const graph = { nodes: admitted.nodes, edges: admitted.edges };
+    expect(unresolvedEventOptionIds(graph)).toEqual(['event_option_2', 'event_option_3']);
+    // No capacity switch is on for either option: neither is a clone of carrying on with a 0 part.
+    for (const id of ['event_option_2', 'event_option_3']) {
+      const o = admitted.nodes.find(n => n.id === id)!;
+      expect(Object.values(o.interventions ?? {}).some(v => (v as { value?: unknown }).value === 1), id).toBe(false);
+    }
+  });
+  it.each([
+    ['no deliverable', 'it needs the deliverable the date is for', (c: CandidateModel): CandidateModel => ({ ...c, goal: { ...c.goal, deliverable: null } })],
+    ['no option but carrying on', "the options don't change the team's capacity", (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.filter(o => o.is_status_quo) })],
+  ] as const)('deadline stated, %s: still the existing refusal', (_name, piece, change) => {
+    const admitted = flagged(dated(change(b3())));
+    expect(admitted.withheld).toContainEqual(expect.objectContaining({ reason: 'event_goal_unadmitted', detail: refusal(piece) }));
   });
 
   it('an event-slice draft whose event admission fails keeps its reachable ordinary model and logs the missing piece', () => {

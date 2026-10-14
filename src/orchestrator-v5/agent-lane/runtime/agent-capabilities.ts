@@ -14,13 +14,14 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, r
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { userStatementOf, verifyStatements, type UserStatement } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
-/** ⛔ Wrong author (served hiring 14 Oct): Olumi's claim, reported, framed, disputed or disowned, is never the user's figure. */
+import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
  * The binder's misses the option reading answers (served hiring negative r3): the clause split at a colon, an article that
  * counts the option's noun rather than the label's, a source change the clause counts as one. Every other miss (which link,
  * an unclear or level figure, a figure of another quantity) stands.
  */
 const OPTION_READS_PAST: ReadonlySet<string> = new Set(['not_one_statement', 'figure_counts_another_unit', 'figures_not_in_statement']);
+/** ⛔ Wrong author (served hiring 14 Oct): Olumi's claim, reported, framed, disputed or disowned, is never the user's figure. */
 const NOT_THE_USERS_CLAIM = 'Nothing was prepared: these words report, dispute or disown Olumi\u2019s estimate, so they are not the user\u2019s own figure. '
   + 'Ask the user for their own figure, in their words.';
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
@@ -305,8 +306,11 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
-import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
+import { applyCohortForecastEdit, approvedCohortForecastOf, COHORT_MIDDLE_HALF_QUESTION, cohortForecastCardWords, cohortForecastRecordedWords, percentRangesIn,
+  peopleFiguresIn, SET_COHORT_FORECAST_OP, storedTargetRowsOf, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
+import { cohortTargetsOf, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -3694,7 +3698,7 @@ export function createAgentCapabilities(
         ...(gate.messages.length > 0 ? { messages: gate.messages } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : undefined;
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
         // No widening for a revised draft (prepare-only card): it stays exactly as served before the arms were restored.
-        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context, deliverable)));
+        (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context, deliverable, true)));
     } catch {
       out = { ok: false, mutated: false };
     }
@@ -3776,6 +3780,8 @@ export function createAgentCapabilities(
       + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
         : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
       + againstCurrent
+      // Said once: a revised draft admitted over the link limit (build-model.ts `revisedDraftOverLinksOnly`).
+      + ((out as { admitted_over_limit_because?: unknown }).admitted_over_limit_because === REVISED_DRAFT_MORE_LINKS ? `${REVISED_DRAFT_MORE_LINKS} ` : '')
       + 'Check the targets, limits and options on this card before choosing.';
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
@@ -4150,6 +4156,50 @@ export function createAgentCapabilities(
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
       follow_up: approved.holds_now !== undefined ? riskHoldsNowRecordedWords(String(approved.expected_node.label))
         : riskOccurrenceRecordedWords(String(approved.expected_node.label), approved.event_risk) };
+  };
+
+  /**
+   * ⭐ SCIENCE PR-4b: the press on the user's cohort forecast card. ONE commit through the atomic level door's `cohort_forecast`
+   * member, alone, then a read-back holding exactly the card's option with its forecast and the two targets as the card read
+   * them. Receipt only on that; the figures stay the user's (`author: 'user'`), as their verified words state them.
+   */
+  const applyCohortForecast = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const pid = parent.proposal_id;
+    const card = approvedCohortForecastOf(op);
+    if (card === undefined || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
+    }
+    const ownCommitInLedger = async (): Promise<boolean> => opts.readCommittedTurnLedger !== undefined
+      && await opts.readCommittedTurnLedger(ctx.scenario_id).then((l) => l.write_turn_ids.includes(authorisationTurnId(pid)), () => false);
+    const approved: ApprovedCohortForecast = { ...card,
+      own_write_landed: proposals.partialProgressOf(pid) !== undefined || await ownCommitInLedger() };
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(pid), links: [], levels: [], cohort_forecast: approved });
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const written = applyCohortForecastEdit(before.raw, approved);
+      const postimage = written.kind === 'mutated' ? written.mutatedGraph : written.kind === 'unchanged' ? before.raw : undefined;
+      const landed = postimage !== undefined && (res.status === 'committed' || await ownCommitInLedger());
+      if (landed) proposals.markPartial(pid, { revision: computeAnalysisAffectingGraphHash(postimage as never)!,
+        landed: [op.path], receipts: [], expected_postimage: postimage });
+    }
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
+    }
+    const notConfirmed: ToolResult = { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
+      detail: RISK_OCCURRENCE_UNKNOWN_SAVE, readiness_after: readinessViewOf(undefined) };
+    if (res.status === 'unconfirmed') return notConfirmed;
+    const check = await readGraph(ctx.scenario_id);
+    const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
+    if (check === null || !isDeepStrictEqual(held, { ...approved.expected_node, cohort_forecast: approved.cohort_forecast })
+      || !isDeepStrictEqual(storedTargetRowsOf(check.raw), approved.expected_targets)) return notConfirmed;
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(pid, receipts);
+    const label = typeof approved.expected_node.label === 'string' ? approved.expected_node.label : op.path;
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
+      follow_up: cohortForecastRecordedWords(label, approved.cohort_forecast) };
   };
 
   /**
@@ -5974,6 +6024,85 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash, team_time: a };
     },
 
+    /**
+     * ⭐ AIE SAME-COHORT LAW (science PR-4b; `goal-target/cohort-forecast-write.ts`): ONE option's cohort forecast from the
+     * user's own words, three verified S2 statements: the people it reaches over the goal's window (a point), the range the
+     * conversion is as likely to fall inside as outside (ONLY as the answer to {@link COHORT_MIDDLE_HALF_QUESTION}; any other
+     * range is never read as a middle half, AIE #94 6174707160), and their answer that the count target counts converts among
+     * those same people. Prepares one card; only its press writes (card-only). Nothing is estimated here.
+     */
+    async proposeCohortForecast(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const nodes = ((g.raw as { nodes?: unknown }).nodes as unknown[] | undefined ?? []).filter(isPlainRecord);
+      const wanted = typeof args?.option_label === 'string' ? args.option_label.trim().toLowerCase() : '';
+      const named = nodes.filter((n) => n.kind === 'option' && typeof n.label === 'string' && n.label.trim().toLowerCase() === wanted);
+      if (wanted === '' || named.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'option_not_found',
+          detail: 'Name ONE option exactly as the model labels it. Nothing was prepared.' };
+      }
+      const option = named[0]!;
+      const optionId = String(option.id);
+      const targets = storedTargetRowsOf(g.raw);
+      const rate = targets.filter((t) => typeof t.unit === 'string' && t.unit.trim() === '%');
+      const count = targets.filter((t) => !rate.includes(t));
+      if (targets.length !== 2 || rate.length !== 1 || count.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'targets_not_cohort',
+          detail: 'This forecast is for a goal with exactly two targets: a percentage of the people reached and a count of them. Nothing was prepared.' };
+      }
+      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text };
+      const people = verifyStatements([{ ...(isPlainRecord(args?.people) ? args.people : {}), form: 'point' }], texts,
+        { subject: { quantity: 'people_reached', option_id: optionId }, unit: 'people', forms: ['point'], figuresIn: peopleFiguresIn });
+      const conversion = verifyStatements([{ ...(isPlainRecord(args?.conversion) ? args.conversion : {}), form: 'range' }], texts,
+        { subject: { quantity: 'conversion_middle_half', option_id: optionId }, unit: '%', forms: ['range'], figuresIn: percentRangesIn });
+      const same = verifyStatements([{ quote: isPlainRecord(args?.same_cohort) ? args.same_cohort.quote : undefined, form: 'holds_now' }], texts,
+        { subject: { quantity: 'same_cohort' }, unit: '', forms: ['holds_now'], figuresIn: () => [] });
+      for (const v of [people, conversion, same]) {
+        if (v.kind === 'refused') return { ok: false, mutated: false, refusal: v.refusal, detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+      }
+      const p = (people as Extract<typeof people, { kind: 'verified' }>).statements[0]!;
+      const c = (conversion as Extract<typeof conversion, { kind: 'verified' }>).statements[0]!;
+      const s = (same as Extract<typeof same, { kind: 'verified' }>).statements[0]!;
+      // ⛔ AIE #94 6174707160: a range is the user's middle half only as their answer to that one question, never by Olumi's reading.
+      if (c.answering !== COHORT_MIDDLE_HALF_QUESTION) {
+        return { ok: false, mutated: false, refusal: 'middle_half_not_asked',
+          detail: `A range is recorded as an even chance only when the user gives it in answer to: "${COHORT_MIDDLE_HALF_QUESTION}" `
+            + 'Ask that, and pass their answer with answering set to those exact words. Their range as they said it is kept, never re-read. Nothing was prepared.' };
+      }
+      const f: CohortForecast = { people_reached: p.low!, conversion_middle_half_pct: [c.low!, c.high!],
+        same_cohort: { rate_target_node_id: String(rate[0]!.node_id), count_target_node_id: String(count[0]!.node_id), stated_by: 'user' },
+        author: 'user' };
+      if (cohortTargetsOf(targets, f) === undefined) {
+        return { ok: false, mutated: false, refusal: 'targets_not_cohort',
+          detail: 'The two targets are not a percentage and a whole number of people over the same window. Nothing was prepared.' };
+      }
+      const approved: ApprovedCohortForecast = { option_id: optionId, cohort_forecast: f, expected_node: structuredClone(option),
+        expected_targets: structuredClone(targets), statements: { people: p, conversion: c, same_cohort: s } };
+      const dry = applyCohortForecastEdit(g.raw, approved);
+      if (dry.kind !== 'mutated') {
+        return { ok: false, mutated: false, refusal: dry.kind === 'unchanged' ? 'already_held' : `cohort_forecast_${dry.reason}`,
+          detail: dry.kind === 'unchanged' ? 'That forecast is already held for this option.' : 'This forecast cannot be recorded on the current model. Nothing was prepared.' };
+      }
+      const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id);
+      const goal = nodes.find((n) => n.kind === 'goal');
+      const basis = goal === undefined ? undefined : goalTargetBasisOf(goal);
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: SET_COHORT_FORECAST_OP, path: optionId, value: { cohort_forecast: f, expected_node: approved.expected_node,
+          expected_targets: approved.expected_targets, statements: approved.statements } }],
+        provenance: { authored_by: 'user_stated', basis: p.source },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: cohortForecastCardWords(String(option.label), f, approved.statements, labelOf(rate[0]!.node_id), labelOf(count[0]!.node_id),
+          basis === undefined ? '' : ` ${periodWords(basis)}`) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some((o) => o.op === SET_COHORT_FORECAST_OP && o.path === optionId)) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        cohort_forecast: { option: String(option.label), people_reached: f.people_reached, conversion_middle_half_percent: f.conversion_middle_half_pct },
+        note: 'Show the card as it is. Only the user’s press records it; then each option needs its own forecast before the chance of meeting both targets can be said.' };
+    },
+
     /** THE USER approves the interpreted deadline and its actual source.
      * A chance goal holds a date, never a target percentage; approval binds the date and recorded reference. */
     async proposeGoalDeadline(ctx, args): Promise<ToolResult> {
@@ -6339,7 +6468,8 @@ export function createAgentCapabilities(
       const scaleAmbiguous: { label: string; value: number; as_percent: number; as_share: number }[] = [];
       const directionConflict: { label: string }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true; kept?: true }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true; kept?: true;
+        confirmed?: { source: string; quote: string }; described?: { source: string; quote: string } }[] = [];
       const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'unverified_brief' | 'already_accepted' }[] = [];
       // ⭐ Hiring path (a): an unvalued risk ROOT takes Olumi's occurrence range on its own card (`risk-occurrence.ts`).
       const riskRanges: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string;
@@ -6417,6 +6547,35 @@ export function createAgentCapabilities(
          * adoption marker the writer already stamps (`user_assumption` + `reviewed_by_user`). Only Olumi's OWN figure may
          * pass (`heldFigureOwner`): the user's, the brief's, or one already accepted is not Olumi's to accept.
          */
+        /**
+         * ⭐ S2 — CONFIRM, NEVER RE-ASK (DL 14 Oct; pricing r2 judge finding 5): a figure the user WROTE that the model holds with
+         * its role unverified (`unverified_brief`: Paul's "increase the Pro plan price from £49 to £59 per month") is confirmed
+         * from their own complete statement through the one shared contract (`verifyStatements`), and recorded as theirs only
+         * by the press. The figure is the one STORED, never the Agent's; any other figure is not this act.
+         */
+        if (a?.user_stated === true && Array.isArray(a?.statements) && heldFigureOwner(node) === 'unverified_brief') {
+          const os = (node.observed_state ?? undefined) as Record<string, unknown> | undefined;
+          const heldUnit = typeof os?.unit === 'string' ? os.unit : String(factorUnitOf(g.raw, node) ?? '');
+          const held = keptFigureFor(node as never, heldUnit);
+          const v = verifyStatements(a.statements, { now: ctx.user_turn_text, conversation: ctx.user_text,
+            unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
+          { subject: { quantity: 'level_today', node_id: node.id }, unit: heldUnit, forms: ['point'],
+            figuresIn: (q) => findLinkEffectAmounts(q).map((n) => ({ low: n.magnitude, high: n.magnitude })) });
+          if (v.kind === 'refused') {
+            return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'level_not_stated',
+              detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+          }
+          if (typeof held !== 'number' || v.statements.length !== 1 || v.statements[0]!.low !== held) {
+            return { ok: false, mutated: false, refusal: 'not_the_held_figure',
+              detail: `‘${node.label}’ holds ${typeof held === 'number' ? sayFigureRead(held, heldUnit) : 'no figure'}; this confirms only that figure, from the `
+                + 'user\'s own statement of it. Nothing was prepared. To change the figure, propose the new one they gave.' };
+          }
+          if (seen.has(node.id)) continue;
+          seen.add(node.id);
+          adopted.push({ id: node.id, label: node.label, value: held, unit: heldUnit, basis: '', userWrote: true,
+            confirmed: { source: v.statements[0]!.source, quote: v.statements[0]!.quote } });
+          continue;
+        }
         if (a?.keep === true) {
           const os = (node.observed_state ?? undefined) as Record<string, unknown> | undefined;
           const keptUnit = typeof os?.unit === 'string' ? os.unit : String(factorUnitOf(g.raw, node) ?? '');
@@ -6535,8 +6694,25 @@ export function createAgentCapabilities(
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
+        /**
+         * ⭐ S2 (DL 14 Oct, SCIENCE's marketing capture; PL 18:41Z): words the user said ABOUT this factor ("I'm not that
+         * experienced with marketing") are kept, quoted, as theirs. They are never turned into a number of theirs: the figure
+         * is Olumi's own estimate from them, labelled and press-only, verified by the one shared contract.
+         */
+        let described: { source: string; quote: string } | undefined;
+        if (a?.user_stated === false && Array.isArray(a?.statements)) {
+          const v = verifyStatements(a.statements, { now: ctx.user_turn_text, conversation: ctx.user_text,
+            unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
+          { subject: { quantity: 'level_today', node_id: node.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
+          if (v.kind === 'refused') {
+            return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'description_not_stated',
+              detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+          }
+          described = { source: v.statements[0]!.source, quote: v.statements[0]!.quote };
+        }
         adopted.push({
           id: node.id, label: node.label,
+          ...(described !== undefined ? { described } : {}),
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
           userWrote: writtenAbout || quote !== null,
@@ -6588,6 +6764,10 @@ export function createAgentCapabilities(
         op: 'set_factor_value',
         path: a.id,
         value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed',
+          // S2: the user's own statement this figure is confirmed from (the card quotes it; the press makes it theirs), or the
+          // words Olumi's estimate is read from (quoted; the figure stays Olumi's).
+          ...(a.confirmed !== undefined ? { confirmed_from: a.confirmed } : {}),
+          ...(a.described !== undefined ? { described_by: a.described } : {}),
           ...storedFactorDomain(g.nodes.find(n => n.id === a.id)?.observed_state) },
       }));
       /**
@@ -6604,8 +6784,10 @@ export function createAgentCapabilities(
       const said = (value: number, unit: string) => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ' ' + unit : ''}`;
       const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
       const pct = (v: number): string => `${Number((v * 100).toPrecision(6))}%`;
-      const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string; asPercent?: true; kept?: true }) =>
-        a.kept ? `${a.label} = ${sayFigureRead(a.value, a.unit)}`
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string; asPercent?: true; kept?: true;
+        confirmed?: { source: string; quote: string } }) =>
+        a.confirmed !== undefined ? `${a.label} = ${sayFigureRead(a.value, a.unit)} today, as you wrote it: “${a.confirmed.source}”`
+        : a.kept ? `${a.label} = ${sayFigureRead(a.value, a.unit)}`
         : typeof a.replaces === 'number'
           // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A). A pairing the
           // approval confirms is shown with the user's own sentence (above), in the units they wrote.
@@ -6657,7 +6839,8 @@ export function createAgentCapabilities(
           // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
           // Keeping a canonical estimate is retention, not a newly authored estimate.
           return usersOwn(a) || a.kept ? figure
-            : `${figure}\nWhy Olumi suggests this (not checked against a source unless one is shown): “${a.basis}”`;
+            : `${figure}${a.described !== undefined ? `\nFrom your words: “${a.described.source}” Olumi’s figure from them is its own estimate, not yours.` : ''}`
+              + `\nWhy Olumi suggests this (not checked against a source unless one is shown): “${a.basis}”`;
         }).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -6670,6 +6853,7 @@ export function createAgentCapabilities(
           factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
           ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
           ...(usersOwn(a) ? { your_figure: true } : {}),
+          ...(a.confirmed !== undefined ? { confirms_your_figure: true, from_your_words: a.confirmed.source } : {}),
           ...(a.kept ? { keeps_olumis_estimate: true } : {}),
         })),
         ...(notKeepable.length > 0 ? { not_keepable: notKeepable, not_keepable_note: NOT_KEEPABLE_NOTE } : {}),
@@ -7880,6 +8064,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === CONFIRM_GOAL_READING_OP) return applyGoalReading(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_COHORT_FORECAST_OP) return applyCohortForecast(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
@@ -8494,6 +8679,10 @@ export function createAgentCapabilities(
                 ? { value: approvedValue / (capOf(o.path) as number), raw_value: approvedValue }
                 : { value: approvedValue }),
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
+              // S2: a figure the user wrote, confirmed from their statement, is their authorship even though it is unchanged
+              // (schemas 0.62.0 `intent: 'set'`); without it the writer reads an unchanged value as a review.
+              ...((v as { confirmed_from?: unknown }).confirmed_from !== undefined && valueOpAuthor(o, decision.proposal) === 'user_stated'
+                ? { intent: 'set' as const } : {}),
             },
           });
           // ⭐ OLUMI'S FIGURE, ADOPTED, IS STORED AS AN ASSUMPTION (review of #1851, B2; RC #63

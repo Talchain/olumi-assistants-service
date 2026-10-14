@@ -4,9 +4,10 @@
  * product, but its "Legacy-code reduction" option set only the legacy share (25 → 15), never the feature-time share in the product, so the option never
  * touched the chain and the forecast showed it identical to carrying on as now.
  *
- * The drafter text now asks for the chain as an identity, for every share an option frees or takes, and for the option's
- * setting on the chain's own factors. A time-freeing option has ONE mechanism, the chain (HIRING's identity ratio; DL 17:5xZ):
- * it gets no Olumi pace (`added_capacity`), so the forecast never counts it twice. The text is bound by identity (`tests/fixtures/drafter-capacity-chain/chain.json`). The corpus is
+ * The drafter text (the AIE's CAPACITY CHAIN paragraph, #94 6175255841) asks for the allocation as a product identity in
+ * consistent units, a complementary share only for an explicitly complete allocation (else labelled as Olumi's assumption),
+ * and the option's setting on the chain's own parts. A time-freeing option has ONE mechanism, the chain (DL 17:5xZ): it gets no
+ * Olumi pace (`added_capacity`), so the forecast never counts it twice; the identity is never evidence of proportional pace. The text is bound by identity (`tests/fixtures/drafter-capacity-chain/chain.json`). The corpus is
  * not the author's: Paul's served brief and the drafter's recorded answer to it (`served-c1494f4d.json`, `_source`), through
  * the real `buildModelFromBrief`. Whether the drafter now behaves so is AI behaviour, measured on the served build.
  */

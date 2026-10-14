@@ -46,6 +46,14 @@ function capacityInputFailure(extra: Rec): string | null {
     if (extra.lead_low !== extra.lead_high) {
       return "Not shown. This option's start is given as a range, and this forecast can't yet work out a capacity change with an uncertain start. Say when it would take full effect.";
     }
+    // PL 6135017311 item 3: the ratio is compiled from the saved figures; an unreadable one, or one that slows the team, fails closed.
+    if (extra.ratio_source_unreadable === true) {
+      return "Not shown. This option's effect is worked out from the model's capacity figures, and one of them is missing or unreadable now.";
+    }
+    if (Number.isFinite(extra.capacity_ratio) && extra.capacity_ratio < 1) {
+      return `Not shown. With the model's current figures this option lowers the team's capacity (to ${Math.round(extra.capacity_ratio * 100)}% of today), `
+        + "and this deadline forecast doesn't yet model an option that slows the team down.";
+    }
     // A capacity-ratio carrier (L3): sized only from today's team time; until then, no chance rests on it.
     return Number.isFinite(extra.capacity_ratio) && extra.capacity_ratio >= 1 && extra.ratio_sizing?.rule === 'marginal_normal' ? null
       : "Not shown yet. This option's effect is worked out from today's team time to finish, which the model doesn't hold yet.";

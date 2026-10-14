@@ -867,6 +867,10 @@ export function createSetFactorValueHandler(): HandlerFn {
       // `delete`, for the reason given for `elicited_from` above. The NODE-LEVEL
       // spelling is withdrawn below, beside `provenance`.
       delete (merged as { extractionType?: unknown }).extractionType;
+      // ⭐ S2 (DL 14 Oct; pricing r2 judge finding 5): `user_material_unverified` says a human-written figure's ROLE was never
+      // verified (Paul's brief "from £49 to £59 per month", held as today's price). The user's OWN authoring write settles
+      // exactly that, so it is cleared by the same rule; an adoption of Olumi's figure (`adoptedSource`) is not that act.
+      if (adoptedSource === undefined) delete (merged as { user_material_unverified?: unknown }).user_material_unverified;
       // #2848: `frame_source: 'olumi_convention'` says OLUMI chose this cap. A write that changes the cap makes it
       // someone else's, so the marker (and the factor-detail disclosure it drives) goes with the old cap.
       if (after.cap !== undefined && after.cap !== priorObserved.cap) {

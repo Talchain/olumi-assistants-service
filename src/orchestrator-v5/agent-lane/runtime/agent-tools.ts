@@ -307,6 +307,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'records that the user accepted it. Never on the user\u2019s own figure or one from their brief, never with a ' +
               'different number, and never in the same call as other values. Omit it in every other case.',
           },
+          // S2 (DL 14 Oct, pricing r2): a figure the user already wrote, confirmed from their own statement, never asked again.
+          statements: { type: 'array', minItems: 1, maxItems: 1, description: 'The user\u2019s complete statement about this factor, copied exactly from their brief or a message. (a) A figure they already WROTE that the model holds as unverified (for example "from £49 to £59 per month" for today\u2019s price): form "point" with that figure as value, user_stated true and the same figure as value; approval records it as theirs and never changes it. (b) Words that DESCRIBE the factor without a figure (for example "I\u2019m not that experienced with marketing"): form "describes", with user_stated false, your own estimate as value and your reading as basis; the card quotes their words and the figure stays your estimate. Omit it otherwise.',
+            items: obj({ quote: { type: 'string' }, form: { type: 'string', enum: ['point', 'describes'] }, value: { type: 'number' } }, ['quote', 'form']) },
           // S2 (SCIENCE 16:49Z; AIE #94 6173489813): a risk the user says is already true now.
           holds_now: { ...obj({ quote: { type: 'string' } }, ['quote']), description: 'For an existing RISK the user says is ALREADY TRUE NOW (for example "I\u2019m not that experienced with marketing" for \u2018Limited marketing experience\u2019): their complete statement, copied exactly from one of their messages. Give it with user_stated true, alone in the call; value and unit are not used. Olumi records that the risk holds now, never a chance of it happening; how strongly it acts stays on its link. Omit it otherwise.' },
           // AIE packet 6e52e896 `event_risk.occurrence_range_description`, byte for byte (hiring path (a)).
@@ -540,6 +543,36 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           answering: { type: 'string', description: 'Only when the statement answers a question you asked: what that question was about, in your words (for example "the likely upper end"). It is shown as context on the card, never as the user\u2019s words.' },
         }, ['quote', 'form']) },
     }, []),
+  },
+  {
+    // ⭐ AIE same-cohort law (science PR-4b, `goal-target/cohort-forecast-write.ts`): ONE option's cohort forecast, the user's words only.
+    type: 'function', name: 'propose_cohort_forecast',
+    description: 'Record ONE option\u2019s forecast of the people it reaches, so the chance of meeting a goal\u2019s two targets together '
+      + '(a percentage of the people reached AND a count of them over the same window, for example conversion above 15% and 20 new '
+      + 'customers within three months of launch) can be calculated on the same people. Use only the user\u2019s own words, from any '
+      + 'of their messages, each their complete statement copied exactly. people: how many people this option reaches over the '
+      + 'goal\u2019s window, with value. conversion: the range they gave in answer to exactly "Which range is the conversion as likely '
+      + 'to fall inside as outside (an even chance)?", with low and high in percent and answering set to those exact words. A range '
+      + 'they gave any other way is kept as they said it and is never read as an even chance: ask that question first. same_cohort: '
+      + 'their statement that the customers come from the same people the conversion is measured on. Never estimate or fill in any '
+      + 'of these yourself. Call once per option: every option, carrying on as now included, needs its own. This prepares a card; '
+      + 'only the user\u2019s press on it records the forecast.',
+    parameters: obj({
+      option_label: { type: 'string', description: 'The option exactly as the model labels it.' },
+      people: obj({
+        quote: { type: 'string', description: 'The user\u2019s complete statement of how many people this option reaches, copied exactly.' },
+        value: { type: 'number', exclusiveMinimum: 0, description: 'That number of people, as the quote states it.' },
+      }, ['quote', 'value']),
+      conversion: obj({
+        quote: { type: 'string', description: 'The user\u2019s complete answer to the even-chance question, copied exactly.' },
+        low: { type: 'number', exclusiveMinimum: 0, description: 'Its lower end, in percent.' },
+        high: { type: 'number', exclusiveMinimum: 0, description: 'Its upper end, in percent.' },
+        answering: { type: 'string', description: 'Exactly: Which range is the conversion as likely to fall inside as outside (an even chance)?' },
+      }, ['quote', 'low', 'high', 'answering']),
+      same_cohort: obj({
+        quote: { type: 'string', description: 'The user\u2019s complete statement that the customers come from the same people the conversion is measured on.' },
+      }, ['quote']),
+    }, ['option_label', 'people', 'conversion', 'same_cohort']),
   },
   {
     // ⭐ E5 (Paul's manual test, 12 Oct): the start of each person an option adds, quoted; Olumi reads the months (`hiring-times.ts`).
@@ -882,7 +915,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -966,6 +999,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months?: number; high_months?: number; statements?: readonly StatementArgs[] }): Promise<ToolResult>;
+  proposeCohortForecast?(ctx: AgentToolContext, args: { option_label?: unknown; people?: unknown; conversion?: unknown; same_cohort?: unknown }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
   proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
   /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
@@ -1140,6 +1174,8 @@ async function dispatchToolUnbounded(
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
     case 'propose_team_time':
       return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
+    case 'propose_cohort_forecast':
+      return caps.proposeCohortForecast !== undefined ? caps.proposeCohortForecast(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_hiring_times':
       return caps.proposeHiringTimes !== undefined ? caps.proposeHiringTimes(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_goal_deadline':

@@ -373,6 +373,13 @@ export function refusedEventByDate(detail: typeof EVENT_BY_DATE_REFUSALS[number]
     withheld: [{ from: 'event_decision', to: 'event_goal', reason: 'event_goal_unadmitted', detail }] };
 }
 
+/** The drafter recorded a stated deadline: a horizon in months, or the brief's own deadline words. */
+function eventDeadlineStated(goal: CandidateModel['goal'] | undefined): boolean {
+  const g = goal as (CandidateModel['goal'] & { deadline_words?: unknown }) | undefined;
+  return (typeof g?.horizon_months === 'number' && Number.isFinite(g.horizon_months) && g.horizon_months > 0)
+    || (typeof g?.deadline_words === 'string' && g.deadline_words.trim() !== '');
+}
+
 function validEventCapacity(capacity: CandidateModel['options'][number]['added_capacity']): boolean {
   return !!capacity && [capacity.monthly_share_pct, capacity.lead_months_low, capacity.lead_months_high].every(Number.isFinite)
     && capacity.monthly_share_pct >= 0 && capacity.monthly_share_pct <= 100
@@ -388,7 +395,7 @@ export interface EventCapacityRatio {
   readonly factors: readonly { readonly label: string; readonly today: number; readonly withOption: number; readonly unit?: string;
     /** AIE 6174736249: a factor the brief did not state, worked out by Olumi through a drafted link from a set factor. A
      * −1-per-1 link in the same unit is Olumi's two-way split assumption (`split_with`, e.g. feature time = 100% − legacy). */
-    readonly derived?: { readonly from: string; readonly split_with?: string } }[];
+    readonly derived?: { readonly from: string; readonly split_with?: string; readonly split_total?: number } }[];
   /** True only when the drafter typed the identity as stated in the brief; otherwise it is Olumi's reading. */
   readonly identity_stated: boolean;
   /** The option's own settings the ratio rests on, each with whether it is Olumi's proposal. */
@@ -426,7 +433,7 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
     if (o.is_status_quo === true) return;
     const settings: Rec[] = Array.isArray(o.interventions) ? o.interventions : [];
     if (settings.some(iv => iv.value_kind !== 'absolute' || typeof iv.value !== 'number' || !Number.isFinite(iv.value))) return;
-    const derived = new Map<number, { from: string; split_with?: string }>();
+    const derived = new Map<number, { from: string; split_with?: string; split_total?: number }>();
     const unitOf = (label: string): string | undefined => {
       const u = factors.find(x => sameLabel(x.label, label))?.unit; return typeof u === 'string' && u.trim() !== '' ? u : undefined;
     };
@@ -443,7 +450,9 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
           value += (link.effect_amount / link.effect_per_source_change) * ((iv.value as number) - from);
           const stated = factors.find(x => sameLabel(x.label, label))?.provenance === 'explicit';
           const split = link.effect_amount / link.effect_per_source_change === -1 && unitOf(label) !== undefined && unitOf(label) === unitOf(String(iv.factor_label));
-          if (!stated) derived.set(k, split ? { from: String(iv.factor_label), split_with: String(iv.factor_label) } : { from: String(iv.factor_label) });
+          // A two-way split keeps its total (75% + 25% = 100%), so the live compiler re-derives this factor when the source is edited.
+          if (!stated) derived.set(k, split ? { from: String(iv.factor_label), split_with: String(iv.factor_label), split_total: today[k]! + from }
+            : { from: String(iv.factor_label) });
         }
       }
       return value;
@@ -469,6 +478,18 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   if (!Array.isArray(candidate.options)) return EVENT_BY_DATE_REFUSALS[1];
   const options = candidate.options.filter(o => o.is_status_quo !== true);
   if (options.length === 0) return EVENT_BY_DATE_REFUSALS[2];
+  // Paul's legacy brief on the served drafter (capture e635a126, 14 Oct): the options set the brief's own capacity chain
+  // (time on legacy fixes / feature work) with no pace. Such an option changes the team's capacity through that chain
+  // (`eventCapacityRatios`, r > 1), so the stated deadline still gets its forecast instead of the ordinary model.
+  const ratios = eventCapacityRatios(candidate);
+  const raisesCapacity = candidate.options.some((o, i) => o.is_status_quo !== true && (ratios.get(i)?.ratio ?? 0) > 1);
+  if (raisesCapacity) return null;
+  // ⭐ DL (14 Oct, Paul's legacy brief: the options vary run to run, the deadline does not): a STATED deadline keeps its
+  // forecast whatever options the AI drafts. An option with no mechanism stays unresolved with its reason and a coaching step
+  // (`unsupportedEventOptionWhy`); carrying on as now still gets its chance once the team's time is held.
+  // Only for a draft the drafter TYPED as an event-by-date goal: a flagged draft answered as another kind of goal (a price
+  // rise "with the next release") keeps its ordinary model when nothing in it changes the team's capacity.
+  if (candidate.goal?.kind === 'event_by_date' && eventDeadlineStated(candidate.goal)) return null;
   if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
   return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }
@@ -537,6 +558,13 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
       loss.push({ field_path: `nodes[${id}].added_capacity`, before: capacity, after: null, reason, severity: 'warn' });
       return;
     }
+    // DL (14 Oct): a zero pace is no mechanism; the option stays unresolved, never acting as 0 (a clone of carrying on).
+    if (monthly_share_pct === 0) {
+      unresolved.push(id);
+      loss.push({ field_path: `nodes[${id}].added_capacity`, before: capacity, after: null, severity: 'warn',
+        reason: `Olumi's added-capacity pace for "${o.label}" is 0%, so this forecast doesn't count it as speeding up the work.` });
+      return;
+    }
     const sw = `event_capacity_${i + 1}`;
     switches.push(sw);
     nodes.push({ id: sw, kind: 'factor', category: 'controllable', label: `${o.label} adds capacity`, provenance: 'ai_inferred',
@@ -560,6 +588,88 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
 }
 
 /**
+ * PL 6135017311 item 3 (a live compiler): each capacity-ratio carrier's r is recomputed from the SAVED source factors
+ * (`ratio_source`, by node id) and its option's SAVED settings on every committed revision (`projectGraphForPersistence`),
+ * so an edit to the 25% or to the 6 developers changes it. Then it is sized (`withRatioCarrierSizes`). A graph with no
+ * compiled carrier is returned as is (the same object); otherwise a clone. Idempotent. An unreadable source fails closed.
+ */
+export function withCompiledCapacityRatios<T>(graph: T): T {
+  if (!rec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return graph;
+  if (!graph.nodes.some((n: Rec) => rec(n?.observed_state?.extra_share_by_date?.ratio_source))) return graph;
+  const out = structuredClone(graph) as Rec;
+  compileCapacityRatios(out);
+  withRatioCarrierSizes(out);
+  return out as T;
+}
+
+function compileCapacityRatios(graph: Rec): void {
+  const byId = new Map<string, Rec>(graph.nodes.filter(rec).map((n: Rec) => [n.id as string, n]));
+  const num = (v: unknown): number | undefined => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  const on = (v: unknown): number | undefined => typeof v === 'number' ? v : rec(v) ? num(v.value) : undefined;
+  for (const carrier of graph.nodes.filter(rec)) {
+    const c = carrier.observed_state?.extra_share_by_date, src = c?.ratio_source;
+    if (!rec(src) || !Array.isArray(src.factor_ids) || !Array.isArray(src.set_ids)) continue;
+    delete c.ratio_source_unreadable;
+    const options = graph.nodes.filter((n: Rec) => rec(n) && n.kind === 'option' && on(n.interventions?.[carrier.id]) === 1);
+    // Each factor's figure today and the option's setting on it, in the user's units (raw), never a scaled value.
+    const today = (id: string): number | undefined => num(byId.get(id)?.observed_state?.raw_value);
+    // The option's setting on a source factor: its own lever if it has one, else the setting held on the carrier.
+    const setting = (option: Rec, id: string): number | undefined => {
+      const v = option.interventions?.[id];
+      return rec(v) && num(v.raw_value) !== undefined ? num(v.raw_value) : rec(src.settings) ? num(src.settings[id]) : undefined;
+    };
+    const compiled = options.length !== 1 ? null : (() => {
+      const option = options[0]!;
+      // A factor Olumi derived by a two-way split follows its source: today = total − source today; with the option = total − setting.
+      const split = (f: string): { readonly source: string; readonly total: number } | undefined => {
+        const d = rec(src.derived) ? src.derived[f] : undefined;
+        return rec(d) && typeof d.source_id === 'string' && num(d.total) !== undefined ? { source: d.source_id, total: d.total as number } : undefined;
+      };
+      const todayOf = (f: string): number | undefined => {
+        const d = split(f); if (d === undefined) return today(f);
+        const s = today(d.source); return s === undefined ? undefined : d.total - s;
+      };
+      const withOption = (src.factor_ids as string[]).map((f) => {
+        const direct = setting(option, f);
+        if (direct !== undefined) return direct;
+        const d = split(f);
+        if (d !== undefined) { const s = setting(option, d.source) ?? today(d.source); return s === undefined ? undefined : d.total - s; }
+        let value = today(f);
+        for (const s of src.set_ids as string[]) {
+          const to = setting(option, s), from = today(s);
+          const link = graph.edges.find((e: Rec) => e.from === s && e.to === f);
+          const ne = link?.provenance?.natural_effect;
+          if (to === undefined || from === undefined || value === undefined || !rec(ne)) continue;
+          const per = num(ne.per_source_change), amount = num(ne.amount);
+          if (per === undefined || per === 0 || amount === undefined) return undefined;
+          value += (amount / per) * (to - from);
+        }
+        return value;
+      });
+      const base = (src.factor_ids as string[]).map(todayOf);
+      if ([...withOption, ...base].some((v) => v === undefined || !(v > 0))) return null;
+      const product = (vs: readonly (number | undefined)[]): number => vs.reduce<number>((a, b) => a * b!, 1);
+      const r = product(withOption) / product(base);
+      if (!Number.isFinite(r) || r <= 0) return null;
+      return { r, base: base as number[], withOption: withOption as number[], option };
+    })();
+    if (compiled === null) { c.ratio_source_unreadable = true; continue; }
+    c.capacity_ratio = compiled.r;
+    const basis = rec(c.ratio_basis) ? c.ratio_basis : (c.ratio_basis = {});
+    if (Array.isArray(basis.factors)) {
+      basis.factors = (src.factor_ids as string[]).map((id, i) => ({ ...(basis.factors[i] ?? {}),
+        label: byId.get(id)?.label ?? basis.factors[i]?.label, today: compiled.base[i], withOption: compiled.withOption[i] }));
+    }
+    if (Array.isArray(basis.settings)) {
+      basis.settings = basis.settings.map((x: Rec, i: number) => {
+        const id = (src.set_ids as string[])[i], v = id === undefined ? undefined : setting(compiled.option, id);
+        return id === undefined || v === undefined ? x : { ...x, label: byId.get(id)?.label ?? x.label, value: v };
+      });
+    }
+  }
+}
+
+/**
  * L3 (DL ruling (A); AIE 6175233964 amendment, 14 Oct): each capacity-ratio carrier is sized from the team's BASELINE
  * CONTRIBUTION B = C·T (the team part's moments with the team link's held coefficient), for the window's fixed scale
  * k = 1 + (r−1)·max(0, H−L)/H: link mean (k−1)·μB, sd √(k²−1)·σB (`ratioLinkMoments`). Under the model's Normal
@@ -580,7 +690,7 @@ export function withRatioCarrierSizes(graph: Rec): Rec {
     if (!c || typeof c.capacity_ratio !== 'number') continue;
     const r = c.capacity_ratio;
     const H = isShareCalendarDate(c.reference_date) && isShareCalendarDate(c.deadline) ? timeBetween(c.reference_date, c.deadline, 'months') : NaN;
-    const k = capacityRatioScale(r, H, c.lead_low, c.lead_high);
+    const k = c.ratio_source_unreadable === true ? null : capacityRatioScale(r, H, c.lead_low, c.lead_high);
     if (!held || k === null) {
       edge.strength = { mean: 0.5, std: 0.125 }; edge.defaulted = true; delete c.ratio_sizing;
       if (edge.provenance) delete edge.provenance.natural_effect;

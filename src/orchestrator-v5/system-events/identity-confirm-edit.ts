@@ -38,6 +38,8 @@ import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js'
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
+import { sayFigureRead } from '../agent-lane/say-figure.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { identityConflictsWithScope } from '../agent-lane/goal-scope.js';
 import type { GoalScope } from '../../schemas/goal-scope.js';
@@ -184,14 +186,24 @@ function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: rea
  * write). ONE predicate for the writer and every door that offers the card, so the card is never offered where its Yes
  * would be refused. By label, in factor order. Pure.
  */
-export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): { readonly id: string; readonly label: string; readonly kind: string }[] {
+export interface IdentityPartWithoutLevel {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: string;
+  /**
+   * S2 (DL 14 Oct; pricing r2 judge finding 5): the user's OWN figure the part already holds with its role unverified ("from
+   * £49 to £59 per month"). It is asked to be confirmed, never asked for again.
+   */
+  readonly held?: { readonly owner: 'yours_unverified'; readonly said: string };
+}
+export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): IdentityPartWithoutLevel[] {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes)) return [];
   const stock = goalStockAccumulationOf(persistedGraph);
   if (stock !== null && factorIds.length === 1 && factorIds[0] === stock.carrier.id) {
     return identityPartsWithoutLevel(persistedGraph, [String(stock.stock.id), String(stock.inflow.id),
       ...(stock.netZero === null ? [String(stock.rate.id)] : [])]);
   }
-  const out: { id: string; label: string; kind: string }[] = [];
+  const out: IdentityPartWithoutLevel[] = [];
   for (const id of new Set(factorIds)) {
     const part = persistedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
     if (part === undefined) continue;
@@ -208,7 +220,11 @@ export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: re
     const ownValue = typeof os?.value === 'number' && Number.isFinite(os.value);
     const today = todaysLevelFor(persistedGraph, id);
     if (usersLevel || (today !== null && (!ownValue || os?.raw_value === today.raw))) continue;
-    out.push({ id, label: typeof part.label === 'string' && part.label.trim() !== '' ? part.label.trim() : id, kind: String(part.kind) });
+    const figure = typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : ownValue && typeof os?.cap !== 'number' ? os?.value : undefined;
+    // Only the user's OWN figure is confirmed here; Olumi's basis-less estimate stays asked blank (DL 8 Oct, Paul 2 Oct §9).
+    const held = typeof figure === 'number' && heldFigureOwnerOf(os) === 'unverified_brief'
+      ? { owner: 'yours_unverified' as const, said: sayFigureRead(figure, typeof os?.unit === 'string' ? os.unit : '') } : undefined;
+    out.push({ id, label: typeof part.label === 'string' && part.label.trim() !== '' ? part.label.trim() : id, kind: String(part.kind), ...(held !== undefined ? { held } : {}) });
   }
   return out;
 }
@@ -218,11 +234,17 @@ export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: re
  * `composeIdentityNotEvaluatedAsk`'s `identity_operand_missing`). A part no control can record a level on
  * (`IDENTITY_PART_LEVEL_KINDS`) is never asked for, since an answer could not be saved: the limit is said instead.
  */
-export function identityPartLevelAsk(goalLabel: string, formula: readonly string[], missing: readonly { readonly label: string; readonly kind: string }[]): string {
+export function identityPartLevelAsk(goalLabel: string, formula: readonly string[],
+  missing: readonly { readonly label: string; readonly kind: string; readonly held?: IdentityPartWithoutLevel['held'] }[]): string {
   const q = (l: string): string => `‘${l}’`;
   const and = (xs: readonly string[]): string => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
   const as = `${q(goalLabel)} as ${formula.map(q).join(' × ')}`;
   const askable = missing.filter((m) => IDENTITY_PART_LEVEL_KINDS.some(kind => kind === m.kind));
+  // ⭐ S2: a figure already held is CONFIRMED, never asked for again: the user's own (role unverified), or Olumi's estimate.
+  if (askable.length === missing.length && missing.some((m) => m.held !== undefined)) {
+    const asks = missing.map((m) => m.held !== undefined ? `is your ${m.held.said} today's ${q(m.label)}?` : `what is ${q(m.label)} today?`);
+    return `To work out ${as}: ${asks.map((a) => `${a.charAt(0).toUpperCase()}${a.slice(1)}`).join(' ')}`;
+  }
   if (askable.length === missing.length) {
     const one = missing.length === 1;
     return `To work out ${as}, I need ${and(missing.map((m) => q(m.label)))}: what ${one ? 'is it' : 'are they'} today?`;
