@@ -650,6 +650,20 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(rows[0]!.provenance).toBe('user');
   });
 
+  it('ADVERSARIAL (equal figure, other identity): a user row with the same figure in another unit replaces nothing; it is added beside the revision\'s', async () => {
+    const g = structuredClone(FX.graph);
+    const row = (g.goal_constraints as Rec[]).find((c) => c.node_id === 'founder_marketing_time')!;
+    Object.assign(row, { provenance: 'user', unit: 'hours/week', constraint_id: 'agent-lane:founder_marketing_time:<=:hours' });
+    delete row.provenance_unit_relabelled;
+    const { caps, proposals } = laneWith(server({ graph: g }));
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    const c = candidateOf(proposals, r);
+    const founder = (c.nodes as Rec[]).find((n) => n.label === 'Founder marketing time')!;
+    const rows = (c.goal_constraints as Rec[]).filter((x) => x.node_id === founder.id && x.value === 25);
+    expect(rows.map((x) => [x.unit, x.provenance]).sort()).toEqual([['%', 'explicit'], ['hours/week', 'user']]);
+  });
+
   it('a part the user added that the revision lacks: not offered, naming it', async () => {
     const g = structuredClone(FX.graph);
     Object.assign((g.nodes as Rec[]).find((n) => n.label === 'Marketing experience')!, { provenance: 'user_specified' });

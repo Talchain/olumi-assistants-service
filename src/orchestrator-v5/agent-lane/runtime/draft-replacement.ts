@@ -198,7 +198,9 @@ export function carryHumanItems(candidate: unknown, items: readonly HumanItem[])
       const node = sameNode(c.node);
       if (node === undefined || typeof node.id !== 'string') { missing.push(item.words); continue; }
       const row = { ...structuredClone(c.row), node_id: node.id };
-      const at = rows.findIndex((r) => r.node_id === node.id && String(r.operator) === String(c.row.operator) && r.value === c.row.value);
+      // The same row by its full identity: quantity (node), comparator, figure, unit and frame — never an equal figure alone.
+      const at = rows.findIndex((r) => r.node_id === node.id && String(r.operator_as_stated ?? r.operator) === String(c.row.operator_as_stated ?? c.row.operator)
+        && r.value === c.row.value && unitOf(r) === unitOf(c.row) && (r.value_frame ?? 'level') === (c.row.value_frame ?? 'level'));
       if (at >= 0) rows[at] = row;
       else if (!rows.some((r) => r.constraint_id === c.row.constraint_id && r.node_id === node.id)) rows.push(row);
     }
