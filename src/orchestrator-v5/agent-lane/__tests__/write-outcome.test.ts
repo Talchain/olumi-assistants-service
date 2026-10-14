@@ -266,8 +266,11 @@ describe('P50: the save indicator owns "saved"', () => {
   it('pending figures say exactly what approval changes', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_assumptions' }],
       [build, { ok: true, mutated: false, proposal_id: 'prop_p50' }]);
-    expect(n.status).toBe('Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.');
+    expect(n.status).toBe('Figures you did not give me are Olumi\u2019s estimates; when you approve one, it stays marked as Olumi\u2019s estimate, approved by you.');
     expect(n.status).not.toMatch(/\bsaved\b/i);
+    // ⛔ Adoption is not authorship (DL 23:08Z): approving never makes Olumi's estimate the user's own figure.
+    expect(n.status).not.toMatch(/become[s]? (yours|your own)/i);
+    expect(n.status).toContain('stays marked as Olumi\u2019s estimate, approved by you');
   });
 
   it('a replayed build keeps its exact explanation', () => {
