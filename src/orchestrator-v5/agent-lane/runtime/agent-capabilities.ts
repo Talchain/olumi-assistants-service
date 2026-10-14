@@ -1,4 +1,5 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
+import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
@@ -1163,6 +1164,42 @@ interface GraphRead {
 
 // An edited graph can still carry an earlier Run. Its old result must not be
 // given a display name derived from the new intervention level.
+/**
+ * ⭐ THE COMPARISON WITH THE PRECEDING RUN, for the model (Paul #94 6166259456; DL 14 Oct). ONE reader for both the state
+ * read (`get_canonical_state`) and a Run's own output: the delta the model may be shown (`selectedRunDeltaForModel`) and,
+ * where none is licensed or its C1 was checked down, Olumi's own leader-free record of what changed (`rerunRecordForModel`).
+ * Both undefined for a first Run.
+ */
+async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel> }> {
+  const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
+  const delta = await selectedRunDeltaForModel(scenarioId, g, g.run_delta);
+  const optionNames = optionNameAliasesForCurrentRun(g);
+  // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
+  // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
+  // model delta (context byte-unchanged) and for a first Run.
+  // SD-1 (rehearsal12): a licensed delta whose C1 the projection checked down (several changes, or partial coverage)
+  // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
+  const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
+    && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
+  // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
+  // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
+  // This fallback shares the selected-delta budget; incomplete coverage must not start a second deadline.
+  const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
+    : await rerunPairReadForRunDelta(scenarioId, requestId, g.run_delta, Math.max(0, evidenceDeadlineAt - Date.now()));
+  const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
+    [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
+    pairRead?.frameRefitLinks);
+  return { delta, rerunRecord };
+}
+
+/** What a Run's output tells the model to do with its comparison facts (Paul #94 6166259456). */
+export const RUN_COMPARISON_NOTE = 'This Run has a preceding Run of this model. In your reply, coach on this Run\u2019s new result: what it '
+  + 'means for the user\u2019s goal and decision, grounded in the model\u2019s own reasoning and the science behind the analysis. Then '
+  + 'compare it with the preceding Run: what changed in the model between the two Runs (from rerun_record or run_delta) and how each '
+  + 'option\u2019s result moved, using only the figures given here. Where these facts cannot support a quantity (a figure withheld, a '
+  + 'change not recorded, or a movement no change is shown to cause), say so plainly instead of estimating. Never present the '
+  + 'preceding Run\u2019s result as the current one.';
+
 function optionNameAliasesForCurrentRun(g: Omit<GraphRead, 'run_delta'>): ReturnType<typeof optionNameAliases> {
   const kind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   // The graph read has already checked the Run against the canonical analysis
@@ -4535,8 +4572,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
-      const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
+      const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
       // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
       // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
       let statedObjectionsUnreadable = false;
@@ -4550,22 +4586,6 @@ export function createAgentCapabilities(
       const scopeIssues = g.goal_scope_reconciliation ?? [];
       const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
-      // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
-      // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
-      // model delta (context byte-unchanged) and for a first Run.
-      // SD-1 (rehearsal12): a licensed delta whose C1 the projection checked down (several changes, or partial coverage)
-      // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
-      const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
-        && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
-      // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
-      // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
-      // This fallback shares the selected-delta budget; incomplete coverage must not start a second deadline.
-      const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
-        : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta,
-          Math.max(0, evidenceDeadlineAt - Date.now()));
-      const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
-        [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
-        pairRead?.frameRefitLinks);
       // Opt-in interpreter section. The default state remains the ordinary Agent's assembly.
       let explanationSection: Record<string, unknown> | undefined;
       if (options?.section === 'run_explanation') {
@@ -10823,6 +10843,30 @@ export function createAgentCapabilities(
       // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
       const identityAskSay = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw, postRunRead.brief_text) : null;
       const identityCard = result !== undefined ? identityCardFor(ctx, postRunRead) : undefined;
+      // ⭐ COACH ON THE NEW RESULT, AGAINST THE PRECEDING RUN (Paul #94 6166259456; DL 14 Oct). When the post-run read selected
+      // THIS Run (its run-fact identity: scenario, graph hash, computed_at) and holds a preceding Run's delta, the model gets the
+      // SAME comparison facts the state read gives (`runComparisonFacts`) with this Run's output, and is told to coach and
+      // compare (`RUN_COMPARISON_NOTE`). The model writes it; no host prose. A first Run, or a read of another Run, adds nothing.
+      let runComparison: Record<string, unknown> | undefined;
+      // Only a Run whose own response carries a run-over-run delta has a preceding Run, so no other Run spends a read on it.
+      if (result !== undefined && runIdentity !== undefined && r.json.run_delta !== undefined) {
+        if (postRunRead === undefined) {
+          try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
+        }
+        const readRun = postRunRead === null || postRunRead === undefined ? undefined : {
+          scenario_id: ctx.scenario_id,
+          graph_hash_at_run: (postRunRead.analysis_result as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
+          computed_at: (postRunRead.analysis_state as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at,
+        };
+        if (postRunRead && postRunRead.run_delta !== undefined
+          && compareAnalysisRunFactIdentity(runIdentity, readRun).status === 'match') {
+          const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
+          if (delta !== undefined || rerunRecord !== undefined) {
+            runComparison = { ...(delta !== undefined ? { run_delta: delta } : {}), ...(rerunRecord !== undefined ? { rerun_record: rerunRecord } : {}),
+              note: RUN_COMPARISON_NOTE };
+          }
+        }
+      }
       return {
         ok: r.status === 200,
         mutated: false,
@@ -10856,6 +10900,7 @@ export function createAgentCapabilities(
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
         // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
         ...withIdentityCard(identityCard),
+        ...(runComparison !== undefined ? { run_comparison: runComparison } : {}),
       };
     },
   };
