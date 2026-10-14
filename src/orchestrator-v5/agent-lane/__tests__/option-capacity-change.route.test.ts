@@ -22,6 +22,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { approvalChipsFor } from '../approval-chips.js';
+import { withoutAgentDirections } from '../write-outcome.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
@@ -96,6 +97,12 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
 
     const done = await press(w, r.proposal_id);
     expect(done, JSON.stringify(done)).toMatchObject({ ok: true, applied: true, mutated: true });
+    // ⛔ What the USER reads (served 7f5659fd: the Agent's direction was shown verbatim, the user's sentence dropped): the
+    // fast path shows `follow_up` through `withoutAgentDirections`; the direction for the Agent rides in `note` only.
+    expect(withoutAgentDirections(String(done.follow_up)).text).toBe('‘Reduce legacy-fix time’ is saved: it now acts in the deadline '
+      + 'forecast through the time it frees, with your figure and Olumi’s assumptions kept distinct.');
+    expect(String(done.follow_up)).not.toMatch(/speak only|state no chance|the user/i);
+    expect(done.note).toBe('The analysis runs on the saved model; speak only to its result, and state no chance before it returns.');
     expect(w.registers).toHaveLength(1); // ONE compare-and-set registration
     const g = w.graph();
     // The canvas reads this graph: the new part and its links are there.
@@ -118,6 +125,11 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     // On his own 7–8 months the user's bound decides (PL 6135017311 item 1): out of reach, with the arithmetic, never a tail figure.
     expect(shareChanceInputFailure(g, LEGACY)).toBeNull();
     expect(capacityRatioOutOfReach(g, LEGACY)).toMatch(/^No chance is shown for this option: on your own soonest estimate it can’t reach 100% of next feature launch by 14 April 2027\. Even at 7 months, it gets about 97% done by then/);
+    // ⛔ Served 7f5659fd (22:50Z, wrong author): carrying on as now said "rests on figures Olumi can’t yet confirm" and offered
+    // a speed-up step, over HIS 7–8 months. Today's team (no part on, k = 1) gets the same bound reason, with its arithmetic.
+    expect(capacityRatioOutOfReach(g, 'event_option_1')).toBe('No chance is shown for this option: on your own soonest estimate it can’t '
+      + 'reach 100% of next feature launch by 14 April 2027. Even at 7 months, it gets about 85% done by then (7 months of work, past the '
+      + '6 months to the deadline).');
   });
 
   it('⛔ authorship: the carrier and the r reading are Olumi\'s (adopted by the press); "25% → 15%" is kept as HIS statement', async () => {

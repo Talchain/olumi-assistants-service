@@ -303,12 +303,17 @@ export const CAPACITY_RATIO_ASSUMPTION_NOTE = 'For an option worked out from the
  */
 export function capacityRatioOutOfReach(graph: unknown, optionId: string): string | null {
   const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
-  if (share === null || parts === null || parts.ratio === undefined || parts.team.quantity !== 'months_to_finish') return null;
+  if (share === null || parts === null || parts.team.quantity !== 'months_to_finish') return null;
+  // ⛔ Served 7f5659fd (legacy capture 22:50Z, wrong author): carrying on as now (no part switched on: today's team, k = 1)
+  // fell to the unearned line, "rests on figures Olumi can’t yet confirm", over the user's OWN 7–8 months. The user's bound
+  // beats the tail for it exactly as for a ratio option. An option with a hiring part keeps its own rules.
+  const k = parts.ratio ?? (parts.extra === undefined ? 1 : undefined);
+  if (k === undefined) return null;
   const threshold = share.threshold_raw / 100;
   let exact: number;
   try { exact = exactChance(parts, threshold); } catch { return null; }
   if (exact > 0) return null;
-  const { D, low } = parts.team, k = parts.ratio;
+  const { D, low } = parts.team;
   // ⛔ PL (14 Oct, wrong-author class): "your own soonest estimate" only for the user's OWN verified hard lower bound.
   // An Olumi endpoint (an assumed range, a lone-point convention) is never their minimum: no out-of-reach claim, and the
   // engine's approximate result stands with its own label.
@@ -318,9 +323,11 @@ export function capacityRatioOutOfReach(graph: unknown, optionId: string): strin
   const deliverable = deliverableOf(share);
   const best = Math.floor(Math.min(1, (k * D) / low) * 100);
   const oneDp = (n: number): string => n.toLocaleString('en-GB', { maximumFractionDigits: 1 });
-  const arithmetic = lead === 0
-    ? ` (${months(low)} months of work at ${Math.round(k * 100)}% of today’s capacity is still about ${oneDp(low / k)} months, past the ${oneDp(D)} months to the deadline)`
-    : '';
+  const arithmetic = parts.ratio === undefined
+    ? ` (${months(low)} months of work, past the ${oneDp(D)} months to the deadline)`
+    : lead === 0
+      ? ` (${months(low)} months of work at ${Math.round(k * 100)}% of today’s capacity is still about ${oneDp(low / k)} months, past the ${oneDp(D)} months to the deadline)`
+      : '';
   return `No chance is shown for this option: on your own soonest estimate it can’t reach ${months(share.threshold_raw)}% of ${deliverable} `
     + `by ${sayDate(share.deadline)}. Even at ${months(low)} months, it gets about ${best}% done by then${arithmetic}.`;
 }
