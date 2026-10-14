@@ -3771,6 +3771,18 @@ export function createAgentCapabilities(
       operation_id: v.operation_id,
     });
     /**
+     * ⛔ A DEFINITE REFUSAL WROTE NOTHING (DL 14 Oct, Codex 3023 r2: a 409 with zero writes was receipted `mutated:true`). Every
+     * 409 the register route returns is refused before any write (`assist.v1.scenario-graph-register.ts`: GRAPH_STALE,
+     * OPERATION_ID_REUSED, SHARE_BY_DATE_SERVER_OWNED …, each "nothing written"), so it is said as not replaced, exactly as
+     * the hiring-times apply above says its STALE. Only an AMBIGUOUS failure reads the model back (AIE 6122431786 §4).
+     */
+    if (reg.status === 409) {
+      const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+      return /STALE/.test(code)
+        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
+        : notApplied('not_applied', 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
+    }
+    /**
      * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
      * registration acknowledged for the bytes it stored from this exact candidate (`graph_identity_hash`, "the server has the
      * graph, and this token names it"). Any other postimage (another writer's change to a link, a value, an option) is

@@ -97,7 +97,9 @@ const candidate = (): Rec => ({
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
 function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void;
   /** A route that stores something other than the approved candidate, and acknowledges what it stored (AIE B34). */
-  beforeAck?: (stored: Rec) => void } = {}) {
+  beforeAck?: (stored: Rec) => void;
+  /** The register route refuses with this 409 code, writing nothing (as every 409 of `assist.v1.scenario-graph-register.ts` does). */
+  refuse?: string } = {}) {
   let graph: Rec = structuredClone(opts.graph ?? FX.graph);
   const commits: { turn_id: string; bytes: string }[] = [];
   const ledger = {
@@ -112,6 +114,7 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
     }
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
       const b = body as { graph: Rec; expected_graph_hash?: unknown; expected_graph_identity_hash?: unknown; operation_id?: string };
+      if (opts.refuse !== undefined) return { status: 409, json: { details: { code: opts.refuse } } };
       const stored = GraphV3.parse(b.graph) as Rec;
       opts.beforeAck?.(stored);
       const bytes = JSON.stringify(stored);
@@ -862,6 +865,20 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
     expect(s.commits).toHaveLength(0);
+  });
+
+  it.each([
+    ['GRAPH_STALE', 'superseded'], ['OPERATION_ID_REUSED', 'not_applied'], ['SHARE_BY_DATE_SERVER_OWNED', 'not_applied'],
+  ])('a definite 409 from the register (%s) wrote nothing: the press says not replaced (%s), never "changed"', async (code, refusal) => {
+    const s = server({ refuse: code });
+    const { caps } = lane(s);
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    s.said(FX.l20.turn_id);
+    const before = s.bytes();
+    const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, applied: false, refusal });
+    expect(s.commits).toHaveLength(0);
+    expect(s.bytes()).toBe(before);
   });
 
   it('G3 at the press: a message after L20 and before the press refuses the replacement', async () => {
