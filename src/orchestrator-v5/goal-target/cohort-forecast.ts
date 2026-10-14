@@ -3,7 +3,7 @@
  *
  * "Conversion over 15% and 20 new customers within the first three months after launch". When the user says the new customers
  * come from the same people the conversion rate is measured on, both targets count ONE cohort: an option reaches E people over
- * the window, each converts with the cohort's propensity p ~ Beta (from the conversion's likely range, read as the middle half),
+ * the window, each converts with the cohort's propensity p ~ Beta (fitted to the user's own quartiles of it, AIE 6176433015),
  * N ~ Binomial(E, p) people convert, and the realised rate is N / E on the SAME draw. ISL scores each target and their joint on
  * those draws (`options[].target_forecast` → `option_comparison[].target_forecast`); nothing is multiplied and no independence
  * is assumed. This file reads the option's stored forecast and builds that wire block; `goal-targets-joint.ts` licenses the
@@ -69,7 +69,7 @@ export interface TargetForecastWire {
   readonly conditions: readonly { readonly constraint_id: string; readonly quantity: CohortQuantity; readonly threshold: number }[];
 }
 
-/** The quartiles ISL fits the propensity to: the middle half, as fractions. One conversion, used by the wire and the licence. */
+/** The quartiles ISL fits the propensity to (the user's one-in-four-each-side estimates), as fractions. One conversion, wire and licence. */
 export function rateQuartilesOf(f: CohortForecast): readonly [number, number] {
   return [f.conversion_middle_half_pct[0] / 100, f.conversion_middle_half_pct[1] / 100];
 }

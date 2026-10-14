@@ -5,10 +5,12 @@
  * scored together only on ONE cohort: how many people an option reaches over the window, and how likely they are to convert.
  * This is the one writer of an option's `cohort_forecast`, from the user's own words only:
  *  · the people reached, ONE figure the user stated for that option (S2 statement, form `point`);
- *  · the conversion as the RANGE the user gave in answer to Olumi's ONE explicit question, which range it is as likely to fall
- *    inside as outside (S2 statement, form `range`, `answering` that question). That is the user's own middle half. A range
- *    given any other way is never read as one: no automatic percentile, min–max or 90% interval (AIE #94 6174707160; SCIENCE
- *    → AIE 6176146776, option A). The card quotes the words and the question, and only the press records them;
+ *  · the UNDERLYING conversion rate (the chance that one person in that cohort converts, never the realised fraction) as the
+ *    two estimates the user gave in answer to Olumi's ONE explicit question for THIS option, cohort and window: about one
+ *    chance in four below the lower and one in four above the upper, i.e. their own quartiles (S2 statement, form `range`,
+ *    `answering` exactly {@link cohortQuartileQuestion}, typed in the very turn that answers it). A range given any other way,
+ *    or an answer to an earlier even-chance question, is never read as quartiles: no automatic percentile, min–max, 90%
+ *    interval or tail split (AIE #94 6174707160; AIE 6176433015 amending SCIENCE's option A). Only the press records them;
  *  · the user's own answer that the count target counts converts among those same people (S2, verified quote). Without it the
  *    targets' dependence is unknown and nothing is written (no independence is assumed).
  * Reached ONLY through the atomic level door's `cohort_forecast` member, alone in its commit, after the user pressed the card
@@ -22,6 +24,7 @@ import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
+import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
 type Rec = Record<string, unknown>;
@@ -64,25 +67,54 @@ export function percentRangesIn(quote: string): { low: number; high: number }[] 
   return [...quote.matchAll(re)].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
 }
 
-/** Olumi's ONE question whose answer is the user's own middle half of the conversion (the reading's only door). */
-export const COHORT_MIDDLE_HALF_QUESTION = 'Which range is the conversion as likely to fall inside as outside (an even chance)?';
+/** The goal's window as the forecast is read over it ("the first three months after launch"), or `undefined` without one goal. */
+export function cohortWindowOf(graph: unknown): string | undefined {
+  const goals = (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : []).filter((n): n is Rec => isRec(n) && n.kind === 'goal');
+  const basis = goals.length === 1 ? goalTargetBasisOf(goals[0]) : undefined;
+  return basis?.period_kind === 'over_period' ? periodWords(basis).replace(/^over /, '') : undefined;
+}
+
+/**
+ * Olumi's ONE question whose answer is the user's own quartiles of the underlying conversion rate, AIE 6176433015's exact
+ * words with THIS option, cohort and window filled in (the reading's only door). It is never asked for another quantity.
+ */
+export const cohortQuartileQuestion = (optionLabel: string, window: string): string =>
+  `For ‘${optionLabel.trim()}’, among the people it reaches during ${window}, what lower and upper estimates of the underlying `
+  + 'conversion rate would leave, in your judgement, about a one-in-four chance that the rate is below the lower estimate and a '
+  + 'one-in-four chance that it is above the upper estimate?';
+
+/** The meaning the question rests on, said beside it (AIE 6176433015): the chance per person, not the fraction that results. */
+export const UNDERLYING_RATE_MEANING = 'Here the underlying conversion rate is the chance that any one of those people converts.';
+
+/** The same question, whatever quote marks, spacing or case it was passed back in. */
+export const sameQuestion = (a: string | undefined, b: string): boolean => {
+  const norm = (t: string): string => t.replace(/[\u2018\u2019\u201C\u201D'"]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return a !== undefined && norm(a) === norm(b);
+};
 
 const sayPeople = (n: number): string => `${n.toLocaleString('en-GB')} ${n === 1 ? 'person' : 'people'}`;
 
-/** The card: the user's words, Olumi's reading of them, and what pressing records. */
+/**
+ * The card: the user's answer recorded as their estimates in AIE 6176433015's exact words, their other two statements, and
+ * Olumi's own modelling approximation, said as Olumi's and kept apart from theirs.
+ */
 export function cohortForecastCardWords(optionLabel: string, f: CohortForecast, s: ApprovedCohortForecast['statements'],
-  rateLabel: string, countLabel: string, period: string): string {
+  rateLabel: string, countLabel: string, window: string): string {
+  const [lo, hi] = f.conversion_middle_half_pct;
   return [
-    `From your messages: ‘${s.people.source}’ · ‘${s.conversion.source}’ · ‘${s.same_cohort.source}’`,
-    `Record for ‘${optionLabel.trim()}’: it reaches ${sayPeople(f.people_reached)}${period}, and its ‘${rateLabel}’ is as likely `
-      + `to fall inside ${f.conversion_middle_half_pct[0]}–${f.conversion_middle_half_pct[1]}% as outside it (your answer to which range is an even chance).`,
-    `‘${countLabel}’ counts the people who convert among those same people, as you said. The number reached is held fixed.`,
+    `From your answer to the question about one chance in four below and one chance in four above: “${s.conversion.source}”. `
+      + `Record your estimates as about one chance in four below ${lo}% and one chance in four above ${hi}% for ‘${optionLabel.trim()}’, `
+      + `among the people it reaches, during ${window}? These are your estimates, not a minimum and maximum.`,
+    `From your messages: ‘${s.people.source}’ · ‘${s.same_cohort.source}’. It reaches ${sayPeople(f.people_reached)} during ${window}, `
+      + `and ‘${countLabel}’ counts the people who convert among those same people, as you said. The number reached is held fixed.`,
+    `Olumi’s approximation, not yours: the underlying ‘${rateLabel}’ is treated as a smooth curve (a Beta distribution) through your `
+      + 'two estimates, and each person converts or not at that same chance. If no such curve fits them, no chance is given for this option.',
   ].join('\n');
 }
 
 export const cohortForecastRecordedWords = (optionLabel: string, f: CohortForecast): string =>
-  `Recorded from your words: ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, and its conversion is as likely to fall `
-  + `inside ${f.conversion_middle_half_pct[0]}–${f.conversion_middle_half_pct[1]}% as outside it.`;
+  `Recorded from your words: ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, with about one chance in four that its `
+  + `underlying conversion rate is below ${f.conversion_middle_half_pct[0]}% and one in four that it is above ${f.conversion_middle_half_pct[1]}%.`;
 
 export type CohortForecastRefusal = 'invalid_graph' | 'invalid_forecast' | 'option_not_found' | 'option_changed' | 'targets_changed';
 
@@ -95,13 +127,17 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) {
     return { kind: 'refused', reason: 'invalid_graph' };
   }
-  // Only a well-formed forecast whose figures are exactly the user's verified statements, by the user, is ever written here.
+  // Only a well-formed forecast whose figures are exactly the user's verified statements, by the user, is ever written here,
+  // and the conversion's two figures only as their answer to the quartile question for THIS option and the goal's window.
   const f = readCohortForecast({ kind: 'option', cohort_forecast: approved.cohort_forecast });
   const s = approved.statements;
+  const named = persistedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.option_id && n.kind === 'option');
+  const window = cohortWindowOf(persistedGraph);
   if (f === undefined || !isDeepStrictEqual(f, approved.cohort_forecast) || f.author !== 'user'
     || s.people.form !== 'point' || s.people.low !== f.people_reached || s.people.high !== f.people_reached
     || s.conversion.form !== 'range' || s.conversion.low !== f.conversion_middle_half_pct[0] || s.conversion.high !== f.conversion_middle_half_pct[1]
-    || s.conversion.answering !== COHORT_MIDDLE_HALF_QUESTION
+    || named === undefined || window === undefined
+    || !sameQuestion(s.conversion.answering, cohortQuartileQuestion(String(named.label ?? ''), window))
     || s.same_cohort.form !== 'holds_now') {
     return { kind: 'refused', reason: 'invalid_forecast' };
   }
@@ -132,7 +168,7 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
       affected_entities: [{ kind: 'option', label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: 'Recorded from your words an option’s people reached and conversion range',
+      safe_summary: 'Recorded from your words an option’s people reached and conversion estimates',
       impact: 'low',
       rerun_recommended: true,
     },

@@ -551,9 +551,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + '(a percentage of the people reached AND a count of them over the same window, for example conversion above 15% and 20 new '
       + 'customers within three months of launch) can be calculated on the same people. Use only the user\u2019s own words, from any '
       + 'of their messages, each their complete statement copied exactly. people: how many people this option reaches over the '
-      + 'goal\u2019s window, with value. conversion: the range they gave in answer to exactly "Which range is the conversion as likely '
-      + 'to fall inside as outside (an even chance)?", with low and high in percent and answering set to those exact words. A range '
-      + 'they gave any other way is kept as they said it and is never read as an even chance: ask that question first. same_cohort: '
+      + 'goal\u2019s window, with value. conversion: their two estimates, given in this message as the answer to Olumi\u2019s question '
+      + '"For \u2018<option>\u2019, among the people it reaches during <window>, what lower and upper estimates of the underlying '
+      + 'conversion rate would leave, in your judgement, about a one-in-four chance that the rate is below the lower estimate and a '
+      + 'one-in-four chance that it is above the upper estimate?", with low and high in percent and answering set to that question as '
+      + 'asked. A range they gave any other way is kept as they said it and is never read as these estimates. If they cannot judge '
+      + 'those chances, keep their range and offer to look at a comparable past campaign instead. same_cohort: '
       + 'their statement that the customers come from the same people the conversion is measured on. Never estimate or fill in any '
       + 'of these yourself. Call once per option: every option, carrying on as now included, needs its own. This prepares a card; '
       + 'only the user\u2019s press on it records the forecast.',
@@ -564,10 +567,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         value: { type: 'number', exclusiveMinimum: 0, description: 'That number of people, as the quote states it.' },
       }, ['quote', 'value']),
       conversion: obj({
-        quote: { type: 'string', description: 'The user\u2019s complete answer to the even-chance question, copied exactly.' },
+        quote: { type: 'string', description: 'The user\u2019s complete answer to the one-in-four question, copied exactly from this message.' },
         low: { type: 'number', exclusiveMinimum: 0, description: 'Its lower end, in percent.' },
         high: { type: 'number', exclusiveMinimum: 0, description: 'Its upper end, in percent.' },
-        answering: { type: 'string', description: 'Exactly: Which range is the conversion as likely to fall inside as outside (an even chance)?' },
+        answering: { type: 'string', description: 'The one-in-four question exactly as asked, with this option and the goal\u2019s window filled in.' },
       }, ['quote', 'low', 'high', 'answering']),
       same_cohort: obj({
         quote: { type: 'string', description: 'The user\u2019s complete statement that the customers come from the same people the conversion is measured on.' },
