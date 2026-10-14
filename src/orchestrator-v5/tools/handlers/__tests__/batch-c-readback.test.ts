@@ -340,7 +340,10 @@ const hiringAnswer = (request: Rec): Rec[] => [
   answered(idOf(request, 'Hire two developers'), 0.31, { mean: 8, std: 4, p10: 3, p50: 8, p90: 13 }),
   answered(idOf(request, 'Carry on with the current team'), 0, { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 }),
 ];
-const DOING_NOTHING = (label: string): string => `Doing nothing: no change to ‘${label}’ in this model, by assumption.`;
+/** AMENDED (AIE #94 6160089127; was "Doing nothing: no change to ‘<goal>’ in this model, by assumption."): a CHANGE goal's
+ * status-quo row is the AIE's generic line. */
+const DOING_NOTHING = (label: string): string => `Carrying on as now: this Run uses ‘${label}’ as its unchanged reference, by assumption. `
+  + `Its own chance of meeting the recorded target is not shown. You can review what could make ‘${label}’ change if you carried on as now.`;
 
 describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "% higher than today", the status quo by assumption, Olumi\'s sizes named', () => {
   it('RED: the stored Run licenses each option on the ruled sentence; the status quo is "no change, by assumption" with no figure or interval', async () => {
