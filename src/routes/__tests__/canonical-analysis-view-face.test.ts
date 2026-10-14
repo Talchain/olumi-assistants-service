@@ -16,9 +16,11 @@ const saved: Json = JSON.parse(readFileSync(new URL('./fixtures/canonical-view-b
 const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
+// C1 (14 Oct): the goal states its target. These rows rank the cell's OTHER reasons; with no target and no licence the
+// missing target leads (`c1-root-cause-next-step.test.ts`).
 const graph = { nodes: [
   { id: 'raise', kind: 'option', label: 'Raise' }, { id: 'keep', kind: 'option', label: 'Keep' },
-  { id: 'price', kind: 'factor', label: 'Price' }, { id: 'revenue', kind: 'goal', label: 'Revenue' },
+  { id: 'price', kind: 'factor', label: 'Price' }, { id: 'revenue', kind: 'goal', label: 'Revenue', goal_threshold_raw: 1000, goal_direction: '>=' },
 ], edges: [] };
 const licence = { code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
   option_ids: ['raise', 'keep'], withheld_option_ids: ['raise'], pct_by_option: { keep: 63 } };

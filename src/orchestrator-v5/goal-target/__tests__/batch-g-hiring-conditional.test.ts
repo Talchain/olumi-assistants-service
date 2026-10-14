@@ -41,7 +41,10 @@ const WITHHOLD = 'The chance of reaching your target for ‘productivity’ (up 
   + 'the model has not established how much of these effects would be in place by then.';
 const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than today at three months';
 /** Amendment 1, read in the change frame (DL ruling after G r1: the AIE's D2 exact equality in the Run's own recorded frame). */
-const DOING_NOTHING = 'Doing nothing: no change to ‘productivity’ in this model, by assumption.';
+/** AMENDED (AIE #94 6160089127; was "Doing nothing: no change to ‘productivity’ in this model, by assumption."): a CHANGE goal's
+ * status-quo row is the AIE's generic line (no figures: the LEVEL line is for a level goal's held level and target only). */
+const DOING_NOTHING = 'Carrying on as now: this Run uses ‘productivity’ as its unchanged reference, by assumption. Its own chance of '
+  + 'meeting the recorded target is not shown. You can review what could make ‘productivity’ change if you carried on as now.';
 const SQ_ASSUMED = 'This assumes carrying on as now leaves ‘productivity’ unchanged through month three; each option is measured against that.';
 const SQ_MOVED = 'Not shown: this run’s result for carrying on as now doesn’t match ‘productivity’ as it stands today in the model, so it needs checking first.';
 const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
@@ -186,6 +189,16 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
       expect(licence.withheld_reason_by_option?.[SQ], String(p)).toEqual({ reason: 'reference_moved', line: SQ_MOVED });
       expect(licence.notes, String(p)).not.toContain(SQ_ASSUMED);
     }
+  });
+
+  it('CONTRAST (status-quo words, AIE #94 6160089127): a CHANGE goal holding a level in the target\'s unit still says the generic line', () => {
+    // The LEVEL line names a held reference value beside a LEVEL target; "at least 10% higher than today" is not one.
+    const g = withGoal(FX.graph, (goal) => {
+      goal.observed_state = { value: 0.5, raw_value: 50, unit: '%', source: 'user_override', extractionType: 'explicit' };
+    });
+    const licence = goalChanceLicenceForAgent(runAsTheHandlerDoes({ graph: g }).view)!;
+    expect(licence.status_quo).toEqual({ option_id: SQ, line: DOING_NOTHING });
+    expect(JSON.stringify(licence)).not.toContain('held reference value');
   });
 
   it('D2 PAIRING FROM THE PRODUCER (AIE 6133027121): a Run recorded in another or unknown frame is not read as paired', () => {

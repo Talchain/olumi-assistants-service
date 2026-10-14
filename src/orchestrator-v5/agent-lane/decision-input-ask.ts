@@ -13,6 +13,7 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { goalHasStatedTarget, isProvisionalObjective } from '../goal-target/goal-target-gap.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
 import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalDeadline, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { goalHorizonSteadyWhyLine, goalStockMethodWhyLine } from '../goal-target/goal-horizon-detail.js';
@@ -33,7 +34,6 @@ import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
-const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
 const TARGET_ASK_TAIL = "I'll propose it as your target.";
 
@@ -52,15 +52,8 @@ function goalOf(graph: unknown): Rec | undefined {
   return goals.length === 1 ? goals[0] : undefined;
 }
 
-/**
- * Whether the goal carries a target the user stated: any of the fields the goal-target writer sets, or (RT-10 B′ R3) the
- * goal's own limit row, read by the ONE target reader — "at most 400" is a target, so it is never asked for again.
- */
-export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
-  const g = recordOf(graph);
-  return finite(goal.goal_threshold_raw) || finite(goal.success_threshold) || finite(goal.goal_threshold)
-    || (g !== undefined && statedGoalTargetOf(g, goal) !== null);
-}
+// The target predicate and the provisional-objective rule live with the "no target" gap (ONE authority, C1 r1).
+export { goalHasStatedTarget };
 
 export interface DecisionInputAskContext {
   /**
@@ -396,7 +389,7 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
   if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineFromRecord(graph, goal.id) === undefined ? chanceGoalDeadlineAsk(label) : null;
-  return goal.provenance === 'ai_inferred' ? provisionalObjectiveAsk(label)
+  return isProvisionalObjective(goal) ? provisionalObjectiveAsk(label)
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
 
