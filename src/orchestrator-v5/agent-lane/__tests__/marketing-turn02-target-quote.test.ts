@@ -156,6 +156,12 @@ describe('marketing turn 02: each quoted target is verified on the card, an unve
       quote: CONVERSION_WORDS } as never) as Rec;
     expect(r.revised_draft?.holds_this_target).toBe('unknown');
   });
+  it('NEGATIVE: the card\u2019s same-figure target on ANOTHER quantity is never verified by the user\u2019s quote for this one', async () => {
+    // The served drafter text with the customers target relabelled: the card now holds \u2018Partner sign-ups\u2019 at least 20.
+    const { caps } = lane(server(), RAW.split('New customers in first 3 months').join('Partner sign-ups'));
+    const b = await caps.proposeGoalTarget!(turn as never, { ...customers, quote: CUSTOMER_WORDS } as never) as Rec;
+    expect(b, JSON.stringify(b)).toMatchObject({ ok: true, revised_draft: { holds_this_target: 'unknown' } });
+  });
   it('a card gone from the store WITHOUT a withdrawal is this turn’s own preparation: offered again, same id', async () => {
     const { caps, proposals } = lane(server());
     const a = await caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
