@@ -186,7 +186,10 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     const caps = createAgentCapabilities(dispatch, store);
     const words = `${fromLabel} is strong`;
     const userText = named || singular ? words : 'Offer a strength for this link';
-    const context = { ...ctx, user_text: userText, user_turn_text: userText };
+    // These named-band rows answer the current prospect → revenue review card.
+    const context = { ...ctx, user_text: userText, user_turn_text: userText,
+      ...(named ? { grounded_selection: { element_ids: [], unresolved: 'none' as const },
+        grounded_links: [{ from: FROM, to: TO }] } : {}) };
     const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const, rationale: userText,
       ...(named ? { from_words: words } : {}) };
     const args = singular ? link : { links: [link], whole_request: true };
