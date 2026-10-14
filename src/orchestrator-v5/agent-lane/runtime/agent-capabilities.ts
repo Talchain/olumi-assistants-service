@@ -2,6 +2,7 @@ import { verbatimSourceLine } from '../quote-confirmation.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
@@ -1736,12 +1737,17 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
   const unitOfNode = (id: string): string => {
     const n = ((view as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
       { observed_state?: { unit?: unknown }; unit_reading?: { unit?: unknown } } | undefined;
+    const goalUnit = readGoalRecord(view, id)?.target?.unit;
     // No-dead-end (C)/(B): a level-less mediator is measured in its derived unit, as the writer reads it (a gauge only as
     // the target of the answer), so the Agent can ask for the figure in it. Every other end reads exactly as before.
     const mediated = mediatorReadings(view).get(id);
     const derived = mediated === undefined || (mediated.via === 'gauge' && id !== to.id) ? undefined : mediated.unit;
     return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit
-      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit : derived ?? 'its own unit';
+      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit
+      // A goal's unit is its target's (hiring served 14 Oct: "Productivity is measured in its own unit" left the Agent
+      // nothing to retry with; the writer accepts "%", `linkEffectEndUnits`).
+      : typeof goalUnit === 'string' && goalUnit.trim() !== '' ? goalUnit
+      : derived ?? 'its own unit';
   };
   switch (reason) {
     case 'unit_mismatch': {

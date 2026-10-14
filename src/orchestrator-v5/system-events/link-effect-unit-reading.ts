@@ -12,6 +12,7 @@ import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-v
 import type { LinkEffectStatement } from './link-effect-edit.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 import { canAdoptLabelUnit, labelHeadUnit } from '../agent-lane/label-head-unit.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -314,6 +315,10 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
   return {};
 }
 
+/** A goal whose target is a change from today (the one goal record's frame), never a level. */
+const goalMeasuredAsChange = (graph: unknown, node: Rec): boolean => node.kind === 'goal' && typeof node.id === 'string'
+  && /^change_/.test(readGoalRecord(graph, node.id)?.target?.frame ?? '');
+
 export function prepareLinkEffectUnitReadings(
   graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
   options?: { readonly link_selected?: boolean },
@@ -371,7 +376,10 @@ export function prepareLinkEffectUnitReadings(
       if ((unitOf(node) !== undefined || percentLevels.has(String(node.id)))
         // A bare % on a percent LEVEL is two readings whatever frame it is stored on (Codex r1 HIGH: a capless 0 resolves to
         // frame 1, and an explicit-100-only test skipped the question); the writer's own dry run decides what it can size.
-        && (percentLevels.has(String(node.id)) || isPercentageLevelUnit(establishedUnit, 100))) {
+        && (percentLevels.has(String(node.id)) || (isPercentageLevelUnit(establishedUnit, 100)
+          // Batch C gap 1 (the sizer's own rule, `targetUnitWords`): a goal measured AS a change has a '%' that IS a share of
+          // today's level, never a percentage level, so "8% of today's" is not two readings (hiring served 14 Oct 16:39Z).
+          && !goalMeasuredAsChange(graph, node)))) {
         const level = usersLevelOf(node);
         // Science F1: 10% of 0 is 0, so at the user's own 0 the % can only be points: no question, and the card says
         // points for approval. Only a TYPED 0 settles it; Olumi's estimated 0 is read through the question like any level.
