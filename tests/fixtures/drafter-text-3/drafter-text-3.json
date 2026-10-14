@@ -1,0 +1,11 @@
+{
+ "_source": {
+  "draft": "recovery/prompt/DRAFTER-TEXT-3-DRAFT.txt",
+  "draft_sha256": "84f3abd1b6561dc67d678036e4a3dd7cbc496254ea295a6ea1ebd8ad51e617ac",
+  "status": "AIE_TEXT_PENDING: PROMPT's draft, extracted programmatically; replaced byte for byte from the AIE packet when it answers"
+ },
+ "goal_is_the_aim": "The goal carries the user's governing aim and its stated target. A deadline or launch date is a condition on that goal (its horizon), not the goal, unless the user says delivering that event is itself the aim. Further targets with the same purpose may stay in `constraints` as targets; never move the governing target there in favour of an event the user did not name as the aim.",
+ "date_not_asked": "In `unknowns`, ask how long today's team would take, then when new people would start. Do not ask for the date.",
+ "unknowns_description": "Questions the user could answer, and uncertainties in the decision or the brief, in plain words. Do not describe how the model will treat, admit, verify, record or count a figure: Olumi states what it holds.",
+ "goal_level_in_other_words": "When the brief states where the goal quantity stands today in other words, for example what an existing team, process or system delivers now in the goal's unit, that is the goal's current level: set goal.baseline_value to it with baseline_known true and baseline_provenance \"explicit\"."
+}
