@@ -35,8 +35,6 @@ const FX = JSON.parse(readFileSync(new URL('./fixtures/marketing-2992-served-bas
 const RAW = readFileSync(new URL('./fixtures/marketing-2992-drafter-raw-f81dfd89.json', import.meta.url), 'utf8');
 const SID = FX.scenario_id;
 const L20 = FX.l20.message;
-const SPEND_ID = 'agent-lane:annual_campaign_spend:<=';
-const baseSpend = (): Rec => structuredClone((FX.graph.goal_constraints as Rec[]).find((r) => r.constraint_id === SPEND_ID)!);
 
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed ledger. */
 function server(graph0: Rec = FX.graph) {

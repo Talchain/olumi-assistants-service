@@ -3627,6 +3627,7 @@ export function createAgentCapabilities(
     // target call after `withdraw_proposal` returned the withdrawn id as offered, and the reply described a card the user
     // never saw. Its id is consumed for this turn (`proposalsAwaitingApproval`), so the call says so instead. Only a recorded
     // withdrawal refuses: a card merely gone from the store (evicted) is this turn's own preparation and is offered again.
+    // AIE_TEXT_PENDING (marketing turn 02): the withdrawn refusal's detail.
     if (withdrawnProposals.has(draft.proposal.proposal_id)) {
       return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'This revised-draft card was withdrawn earlier this turn, so it is not offered and nothing has changed. Never say a card is shown.' };
     }
