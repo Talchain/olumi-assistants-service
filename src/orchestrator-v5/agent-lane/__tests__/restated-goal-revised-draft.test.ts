@@ -690,7 +690,7 @@ describe('later human work is kept: carried by identity, read as context, named 
   it('G3 (adopted): a later message is the drafter\'s context only, after the brief and typed goal, never part of them; the press binds it', async () => {
     const s = server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'],
       later_user_messages: [{ turn_id: 'chip-turn-run-analysis', text: 'Run the analysis' }] } });
-    const { caps, proposals, inputs } = laneWith(s);
+    const { caps, inputs } = laneWith(s);
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
