@@ -115,7 +115,7 @@ import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-senten
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceSayPromisedThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceSayPromisedThisTurn, goalChanceWithheldOptionsFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
@@ -5134,11 +5134,49 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
       return reading !== undefined && action.detail === reading.words;
     });
+    const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
+    // ⛔ Bound by IDENTITY, never an equal value (DL lesson 08:08Z; Codex r1 on #3027). The card is this turn's Run only
+    // when the shipped view names a Run (a non-empty run id, which DGAI's card binding needs: `mapV5Blocks`,
+    // `matchesCanonicalRun` 'card') whose run-fact identity (`compareAnalysisRunFactIdentity`: scenario, graph hash,
+    // `computed_at`) is the Run THIS turn executed, from that Run's own output: the Run press or the Agent's
+    // `run_analysis` (`run_identity`), else the first pass (its own block and stamp, as goal certainty binds it). That
+    // output carries no run id; an earlier Run of the same graph has another `computed_at`. And current, not stale.
+    const thisTurnRun = ((): unknown => {
+      for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
+        if (result.tool_calls[i]!.name !== 'run_analysis') continue;
+        const out = result.tool_results[i] as { ran?: unknown; run_identity?: unknown } | undefined;
+        if (out?.ran === true) return out.run_identity;
+      }
+      if (fa?.ran !== true) return undefined;
+      const executed = fa.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as { computed_against_hash?: unknown } | undefined;
+      return { scenario_id: scenarioId, graph_hash_at_run: executed?.computed_against_hash,
+        computed_at: (fa.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
+    })();
+    const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
+      ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
+        staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] }
+      : undefined;
+    const cardBound = cardView !== undefined && cardView.staleness?.stale === false
+      && typeof cardView.run?.run_id === 'string' && cardView.run.run_id !== ''
+      && compareAnalysisRunFactIdentity(thisTurnRun, { scenario_id: scenarioId, graph_hash_at_run: cardView.run.graph_hash_at_run,
+        computed_at: cardView.run.computed_at }).status === 'match'
+      && (analysisResult as { computed_against_hash?: unknown }).computed_against_hash === cardView.run.graph_hash_at_run;
+    // ⭐ THE CARD SAYS IT (Paul via DL, 14 Oct: no host line that repeats what the card already shows). When this turn's
+    // bound current card shows a withheld cell for every option the withheld line covers, each cell carries its own reason
+    // ("Not shown. …", from the same Run's warnings), so the host does not say it again. The AI holds the same
+    // `goal_chance.say` in this turn's own tool output. A `say_shown` promise keeps the line: the AI was told it is shown.
+    const withheldOptions = goalChanceWithheldOptionsFromThisTurn(result.tool_results);
+    const cardShowsWithheld = cardBound && withheldOptions !== undefined && ((): boolean => {
+      const cells = new Map(cardView!.options.map(({ option_id, cell }) => [option_id, cell] as const));
+      const covered = withheldOptions === 'all' ? [...cells.keys()] : withheldOptions;
+      return covered.length > 0 && covered.every((id) => cells.get(id)?.kind === 'withheld');
+    })();
     // BYPASS1: on an ordinary AI reply the AI explains the withholding from `goal_chance.say`; a turn that ran an analysis
     // or explains the current Run keeps the line with the rest of the chance face (never-reask, one-reply-build rows).
     const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
       || (fastPath === 'explain' && narrationStatus !== 'stale');
-    goalChanceOwed = stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn) ? null
+    goalChanceOwed = stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn)
+      || (!sayPromised && cardShowsWithheld) ? null
       : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
         identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
@@ -5157,7 +5195,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * own product finding holds (`breakEvenFor` returns null otherwise) — and never for a product this readback's run
      * EVALUATED (`identityEvaluated`, C46 × R3-4, Canonical criterion 1): the engine computed it, so nothing is "added up".
      */
-    const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
     const breakEven = ranAnalysisThisTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 ? breakEvenFor(readbackGraph, identityEvaluated) : null;
@@ -5197,32 +5234,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // not said again here; what it rests on still is (DL ruling on #3027), and the AI's answer explains it. No such card
       // (an Explain, a view that cannot ship, another or a stale Run): the line stays, the truthful fallback. By the Run's
       // identity and the cell's own face, never by words.
-      // ⛔ Bound by IDENTITY, never an equal value (DL lesson 08:08Z; Codex r1 on #3027). The card is this turn's Run only
-      // when the shipped view names a Run (a non-empty run id, which DGAI's card binding needs: `mapV5Blocks`,
-      // `matchesCanonicalRun` 'card') whose run-fact identity (`compareAnalysisRunFactIdentity`: scenario, graph hash,
-      // `computed_at`) is the Run THIS turn executed, from that Run's own output: the Run press or the Agent's
-      // `run_analysis` (`run_identity`), else the first pass (its own block and stamp, as goal certainty binds it). That
-      // output carries no run id; an earlier Run of the same graph has another `computed_at`. And current, not stale.
-      const thisTurnRun = ((): unknown => {
-        for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
-          if (result.tool_calls[i]!.name !== 'run_analysis') continue;
-          const out = result.tool_results[i] as { ran?: unknown; run_identity?: unknown } | undefined;
-          if (out?.ran === true) return out.run_identity;
-        }
-        if (fa?.ran !== true) return undefined;
-        const executed = fa.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as { computed_against_hash?: unknown } | undefined;
-        return { scenario_id: scenarioId, graph_hash_at_run: executed?.computed_against_hash,
-          computed_at: (fa.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
-      })();
-      const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
-        ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
-          staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown } }[] }
-        : undefined;
-      const cardBound = cardView !== undefined && cardView.staleness?.stale === false
-        && typeof cardView.run?.run_id === 'string' && cardView.run.run_id !== ''
-        && compareAnalysisRunFactIdentity(thisTurnRun, { scenario_id: scenarioId, graph_hash_at_run: cardView.run.graph_hash_at_run,
-          computed_at: cardView.run.computed_at }).status === 'match'
-        && (analysisResult as { computed_against_hash?: unknown }).computed_against_hash === cardView.run.graph_hash_at_run;
       const cardFaces = new Map(cardBound
         ? cardView.options.flatMap(({ option_id, cell }) => (cell.kind === 'figure' || cell.kind === 'range')
           && typeof cell.face === 'string' ? [[option_id, cell.face] as const] : []) : []);
