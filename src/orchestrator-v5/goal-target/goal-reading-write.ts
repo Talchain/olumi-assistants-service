@@ -26,7 +26,7 @@ import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
-import { readGoalRecord } from './goal-record.js';
+import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { sayFigureWithoutRounding } from '../agent-lane/say-figure.js';
 
@@ -41,20 +41,37 @@ export interface ApprovedGoalReading {
   /** The user's own words of the turn the card was made on, verbatim: the answer, kept in the committed row's receipt. */
   readonly answer_words?: string;
   /**
-   * The goal's whole meaning as the card showed it ({@link goalMeaningOf}: label, stated target and horizon, through the ONE
-   * record): a renamed goal, a changed unit or a moved deadline does not move the analysis hash, so the card is bound to it.
+   * The goal's complete saved reading as the card showed it ({@link goalReadingProjectionOf}): a renamed goal, a changed
+   * unit, period or deadline does not always move the analysis hash, so the card is bound to all of it.
    */
   readonly expected_goal?: unknown;
 }
 
+/** The goal's complete saved reading: what the card says, and so all that it binds. */
+export interface GoalReadingProjection {
+  readonly label: string;
+  readonly target: GoalRecord['target'];
+  readonly horizon: GoalRecord['horizon'];
+  /** The period the goal's figures are per (`goal_period`: week, month …), or null. */
+  readonly period: string | null;
+  /** The reading as the card says it, without its question: reference, denominator, window, effect unit and conditions. */
+  readonly reading: Omit<GoalTargetBasis, 'open_question'> | null;
+}
+
 /**
- * The goal's label, stated target and horizon, through the ONE goal record (S5): what a card about its reading was shown
- * against. The horizon is part of it (Codex check on #2995 @5897d933): a deadline moved to six months after the commit must
- * never be "confirmed" as the three-month reading.
+ * ⭐ ONE PROJECTION (Codex check r2 on #2995: horizon, then `goal_period`, each found missing in turn). The card's words are
+ * rendered from it ({@link goalReadingWords}), the card carries it as `expected_goal`, and the door and the read-back
+ * deep-compare it: no member the card says, or that changes what its figure means, can move unseen. Through the ONE goal
+ * record (S5) for the label, target and horizon; the goal's own `goal_period`; and the validated reading (`goalTargetBasisOf`).
  */
-export function goalMeaningOf(graph: unknown, goalId: string): { readonly label: string; readonly target: unknown; readonly horizon: unknown } | undefined {
+export function goalReadingProjectionOf(graph: unknown, goalId: string): GoalReadingProjection | undefined {
   const record = readGoalRecord(graph, goalId);
-  return record === null ? undefined : { label: record.label, target: record.target, horizon: record.horizon };
+  if (record === null) return undefined;
+  const node = ((graph as { nodes: unknown[] }).nodes).find((n): n is Rec => isRec(n) && n.kind === 'goal' && n.id === goalId);
+  const basis = goalTargetBasisOf(node);
+  const reading = basis === undefined ? null : (({ open_question: _question, ...rest }) => rest)(basis);
+  return { label: record.label, target: record.target, horizon: record.horizon,
+    period: typeof node?.goal_period === 'string' ? node.goal_period : null, reading };
 }
 
 export type GoalReadingRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'no_open_question' | 'not_a_reading_question'
@@ -74,16 +91,16 @@ export function answeredBasisOf(expected: Readonly<Rec>): Rec {
 }
 
 /**
- * The goal's target in words, read through the ONE goal record (S5) and said as the readiness words and E's sentence say a
- * change (`sayGoalChange`: "up at least 10% from today"), at the reading's period, with what 100% is: "‘productivity’ up at
- * least 10% from today at three months, measured against today's development productivity". The card's and the receipt's
- * one description; `undefined` when it cannot be said exactly.
+ * The goal's target in words, from its ONE projection ({@link goalReadingProjectionOf}) and said as the readiness words and
+ * E's sentence say a change (`sayGoalChange`: "up at least 10% from today"), at the reading's period, with what 100% is:
+ * "‘productivity’ up at least 10% from today at three months, measured against today's development productivity". The
+ * card's and the receipt's one description; `undefined` when it cannot be said exactly.
  */
-export function goalReadingWords(graph: unknown, goalId: string, basis: GoalTargetBasis): string | undefined {
-  const record = readGoalRecord(graph, goalId);
-  const target = record?.target;
-  const label = record?.label.trim() ?? '';
-  if (target == null || target.raw === undefined || label === '' || /[\r\n]/.test(label)) return undefined;
+export function goalReadingWords(projection: GoalReadingProjection | undefined): string | undefined {
+  const target = projection?.target;
+  const basis = projection?.reading;
+  const label = projection?.label.trim() ?? '';
+  if (basis == null || target == null || target.raw === undefined || label === '' || /[\r\n]/.test(label)) return undefined;
   // Every digit: this is what the user confirms (`sayFigureWithoutRounding`; a saved 0.125% was said "0.13%", Codex buddy r3).
   const change = sayGoalChange(target.frame, target.raw, target.unit, (v, u) => sayFigureWithoutRounding(v, u ?? ''), target.comparator);
   const also = basis.also_required ?? [];
@@ -129,7 +146,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id);
   if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
   if (matches[0]!.kind !== 'goal') return { kind: 'refused', reason: 'not_a_goal' };
-  if (approved.expected_goal !== undefined && !isDeepStrictEqual(goalMeaningOf(persistedGraph, approved.goal_id), approved.expected_goal)) {
+  if (approved.expected_goal !== undefined && !isDeepStrictEqual(goalReadingProjectionOf(persistedGraph, approved.goal_id), approved.expected_goal)) {
     return { kind: 'refused', reason: 'goal_changed' };
   }
   const held = matches[0]!.goal_target_basis;
@@ -166,7 +183,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
       rerun_recommended: true,
     },
   });
-  const reading = goalReadingWords(graph, approved.goal_id, basis) ?? `the target for ‘${label}’ as the model states it`;
+  const reading = goalReadingWords(goalReadingProjectionOf(graph, approved.goal_id)) ?? `the target for ‘${label}’ as the model states it`;
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: goalReadingRecordedWords(reading, approved.answer_words) };
 }

@@ -21,7 +21,7 @@ import { figureTheUserWroteFor } from '../agent-lane/stated-by-user.js';
 import { unitsConflict } from '../agent-lane/unit-conflict.js';
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
-import { goalMeaningOf, goalReadingWords } from './goal-reading-write.js';
+import { goalReadingProjectionOf, goalReadingWords } from './goal-reading-write.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -170,7 +170,8 @@ export function heldChangeTargetAnswer(args: {
   const goal = goalNodeOf(graph.raw, goalId);
   const basis = goalTargetBasisOf(goal);
   const stored = goal?.goal_target_basis;
-  const reading = basis === undefined ? undefined : goalReadingWords(graph.raw, goalId, basis);
+  const projection = goalReadingProjectionOf(graph.raw, goalId);
+  const reading = goalReadingWords(projection);
   if (basis?.open_question === undefined || basis.open_question === CONDITIONS_NOT_KEPT || !isRec(stored) || reading === undefined) {
     return { ok: true, mutated: false, already_saved: true, saved_goal: saved, compared: [...COMPARED_MEMBERS.compared],
       not_compared: [...COMPARED_MEMBERS.not_compared], ...(reading !== undefined ? { saved_reading: reading } : {}), note: alreadySavedNote(reading) };
@@ -184,7 +185,7 @@ export function heldChangeTargetAnswer(args: {
     user_id: args.user_id,
     base_graph_identity_hash: graph.graph_hash,
     operations: [{ op: CONFIRM_GOAL_READING_OP, path: goalId, value: { expected_basis: stored, open_question: basis.open_question,
-      expected_goal: goalMeaningOf(graph.raw, goalId), ...(answered ? { answer_words: turn } : {}) } }],
+      expected_goal: projection, ...(answered ? { answer_words: turn } : {}) } }],
     provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: confirmGoalReadingCard(reading, basis.open_question),

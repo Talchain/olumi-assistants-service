@@ -29,7 +29,7 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import type { SessionTurnWrite } from '../../session/store.js';
 import { CONDITIONS_NOT_KEPT } from '../goal-target-basis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
-import { answeredBasisOf, applyGoalReadingEdit } from '../goal-reading-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf } from '../goal-reading-write.js';
 import { heldChangeTargetAnswer, savedGoalMeaningOf } from '../held-change-target.js';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
 
@@ -65,6 +65,19 @@ const RECEIPT = `Confirmed the saved target reading: ${READING}. Your recorded a
 /** At least 10 %: the reconstructed second turn-14 call, as the hook passes it (`TARGET_OPERATOR[type]`, value, unit). */
 const AT_LEAST_10 = { operator: '>=', value: 10, unit: '%' };
 const goalOf = (body: Rec): Rec => (body.graph.nodes as Rec[]).find((n) => n.id === GOAL)!;
+/**
+ * The card's goal projection on the 13:18 read, a literal (Codex check r2 on #2995): the label, target, horizon, the goal's
+ * period and the reading without its question — everything the card says, so everything the read-back must still hold.
+ */
+const EXPECTED_GOAL = {
+  label: 'productivity',
+  target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' },
+  horizon: { as_stated: 'three months' },
+  period: null,
+  reading: { quantity_frame: 'change', target_frame: 'change_abs', target_raw: 10, reference: 'today', denominator: 'today\'s development productivity',
+    period_months: 3, period_kind: 'at_end', effect_unit: '% of today\'s productivity', effects_at_period_end: false,
+    also_required: ['maintaining code quality', 'launch readiness'], source: 'olumi_reading' },
+};
 
 /** Exactly what the hook passes: the turn's context, the caller's own graph read, the goal, the requested target. */
 function answer(body: Rec, requested: Rec = AT_LEAST_10, said = CLARIFIED, proposals = new ProposalStore()) {
@@ -159,7 +172,7 @@ describe('G: the user\'s answer to the goal\'s open question reaches the saved r
     expect(proposals.outstanding(String(ASKED.scenario_id), null).map((x) => x.proposal_id)).toEqual([p!.proposal_id]);
     expect(proposals.get(String(p!.proposal_id))?.operations).toEqual([{ op: 'confirm_goal_reading', path: GOAL,
       value: { expected_basis: goalOf(ASKED).goal_target_basis, open_question: QUESTION,
-        expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' }, horizon: { as_stated: 'three months' } },
+        expected_goal: EXPECTED_GOAL,
         answer_words: CLARIFIED } }]);
     // The user authors the answer and the approval, never Olumi's reading: the card is the user's statement of which reading.
     expect(proposals.get(String(p!.proposal_id))?.provenance.authored_by).toBe('user_stated');
@@ -278,7 +291,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
       afterCommitNext: (f: (g: Rec) => void) => { afterCommit = f; } };
   }
   /** The 13:18 graph with ONLY the question removed from the goal's reading: the one write's whole postimage. */
-  const answered = (): Rec => { const g = structuredClone(ASKED.graph) as Rec; delete goalOf({ graph: g }).goal_target_basis.open_question; return g; };
+  const answered = (body: Rec = ASKED): Rec => { const g = structuredClone(body.graph) as Rec; delete goalOf({ graph: g }).goal_target_basis.open_question; return g; };
 
   it('RED→GREEN: the pressed card writes ONE commit removing only the question; the read-back, receipt and row say so', async () => {
     const w = persisted(ASKED);
@@ -289,7 +302,7 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(r.follow_up).toBe(RECEIPT);
     expect(w.commits).toHaveLength(1);
     expect(w.commits[0]!.goal_reading).toEqual({ goal_id: GOAL, expected_basis: goalOf(ASKED).goal_target_basis, answer_words: CLARIFIED,
-      expected_goal: { label: 'productivity', target: { raw: 10, cap: 200, unit: '%', frame: 'change_abs', comparator: '>=', comparator_source: 'goal_direction', source: 'brief_extraction' }, horizon: { as_stated: 'three months' } } });
+      expected_goal: EXPECTED_GOAL });
     expect(w.rows).toHaveLength(1);
     // Byte equality: the whole postimage is the read with that one member gone; the reading's bytes, key order included.
     expect(w.graph()).toEqual(answered());
@@ -365,6 +378,91 @@ describe('G: approve → the one writer → read-back → cold reopen, on the 13
     expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, applied: false });
     expect(w.rows).toHaveLength(0);
     expect(w.graph()).toEqual(moved);
+  });
+
+  /**
+   * ⭐ CLASS (Codex check r2 on #2995: the horizon, then `goal_period`, each found missing in turn). EVERY member of the card's
+   * goal projection is bound, before the press (the door) and after the commit (the read-back). The flips are GENERATED from
+   * the projection's own leaves, on the 13:18 goal with every member held (a period, a months horizon and a calendar deadline
+   * besides its stated words); a member added to the projection without a flip here fails the coverage row.
+   */
+  describe('every field of the card\'s goal projection is bound (generated flip-one-field)', () => {
+    const FULL: Rec = structuredClone(ASKED);
+    Object.assign(goalOf(FULL), { goal_period: 'month', goal_horizon_months: 3, goal_horizon: { deadline: '2027-01-13' } });
+    const leaves = (v: unknown, path: readonly string[] = []): string[][] => v !== null && typeof v === 'object'
+      ? Object.entries(v as Rec).flatMap(([k, x]) => leaves(x, [...path, k])) : [[...path]];
+    const other = (v: unknown): unknown => typeof v === 'number' ? v + 1 : typeof v === 'boolean' ? !v : typeof v === 'string' ? `${v} (moved)` : 'moved';
+    /** Where each non-reading member is held on the goal (the projection reads these, through the ONE record). */
+    const NODE_FIELD: Readonly<Record<string, (goal: Rec, value: unknown) => void>> = {
+      'label': (g, v) => { g.label = other(v); },
+      'target.raw': (g, v) => { g.goal_threshold_raw = other(v); },
+      'target.cap': (g, v) => { g.goal_threshold_cap = other(v); },
+      'target.unit': (g, v) => { g.goal_threshold_unit = other(v); },
+      'target.frame': (g) => { g.goal_threshold_frame = 'level'; },
+      'target.comparator': (g) => { g.goal_direction = '<='; },
+      'target.comparator_source': (g) => { delete g.goal_direction; },
+      'target.source': (g, v) => { g.threshold_source = other(v); },
+      'horizon.months': (g, v) => { g.goal_horizon_months = (v as number) + 3; },
+      'horizon.deadline': (g) => { g.goal_horizon = { deadline: '2027-04-13' }; },
+      'horizon.as_stated': (g) => { g.goal_deadline_as_stated = 'three weeks'; },
+      'period': (g) => { g.goal_period = 'week'; },
+    };
+    /** The flipped graph: one member moved, at its source; a reading member is moved in the stored reading itself. */
+    const flipped = (graph: Rec, path: readonly string[]): Rec => {
+      const g = structuredClone(graph);
+      const goal = goalOf({ graph: g });
+      const value = path.reduce<unknown>((at, k) => (at as Rec)[k], goalReadingProjectionOf(graph, GOAL));
+      if (path[0] === 'reading') {
+        const parent = path.slice(1, -1).reduce<Rec>((at, k) => at[k] as Rec, goal.goal_target_basis as Rec);
+        parent[path.at(-1)!] = other(value);
+      } else NODE_FIELD[path.join('.')]!(goal, value);
+      return g;
+    };
+    const paths = leaves(goalReadingProjectionOf(FULL.graph, GOAL)).map((p) => p.join('.'));
+
+    it('COVERAGE: the projection holds every member, and every non-reading member has a flip (a new member fails here)', () => {
+      expect(paths.filter((p) => !p.startsWith('reading.')).sort()).toEqual(Object.keys(NODE_FIELD).sort());
+      expect(paths).toEqual(expect.arrayContaining(['period', 'horizon.months', 'horizon.deadline', 'horizon.as_stated',
+        'reading.reference', 'reading.denominator', 'reading.period_months', 'reading.also_required.0']));
+    });
+
+    it.each(paths)('%s moved after the commit → the read-back refuses: no receipt, never "confirmed"', async (path) => {
+      const w = persisted(FULL);
+      const { card, press, proposals } = w.open();
+      const c = card();
+      expect(c.proposal_id, 'the card is offered on the full goal').toBeDefined();
+      const pid = String(c.proposal_id);
+      // Another writer replaces the goal after the commit with the one-member flip; the store's own bytes are what is read back.
+      const moved = goalOf({ graph: flipped(answered(FULL), path.split('.')) });
+      let stored: unknown;
+      w.afterCommitNext((g) => {
+        (g.nodes as Rec[]).splice((g.nodes as Rec[]).findIndex((n) => n.id === GOAL), 1, structuredClone(moved));
+        stored = goalReadingProjectionOf(g, GOAL);
+      });
+      const r = await press(pid);
+      // The flip applied: the stored projection is not the card's.
+      expect(stored).toBeDefined();
+      expect(stored).not.toEqual(w.commits[0]!.goal_reading!.expected_goal);
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' });
+      expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
+      expect(proposals.isApplied(pid)).toBe(false);
+    });
+
+    it.each(paths)('%s moved before the press → nothing written', async (path) => {
+      const w = persisted(FULL);
+      const { card, press } = w.open();
+      const pid = String(card().proposal_id);
+      const moved = flipped(FULL.graph, path.split('.'));
+      expect(goalReadingProjectionOf(moved, GOAL)).not.toEqual(goalReadingProjectionOf(FULL.graph, GOAL));
+      w.setGraph(moved);
+      const r = await press(pid);
+      // Refused by whichever gate meets it first (the base's own hash, the stale reading, or the door's projection).
+      expect(r.ok, JSON.stringify(r)).toBe(false);
+      expect(r.applied).not.toBe(true);
+      expect(JSON.stringify(r)).not.toContain('Confirmed the saved target reading');
+      expect(w.rows).toHaveLength(0);
+      expect(w.graph()).toEqual(moved);
+    });
   });
 
   it('landed but unconfirmed: the retry recovers through the writer\'s verified no-op — applied once, never "superseded" by its own write', async () => {

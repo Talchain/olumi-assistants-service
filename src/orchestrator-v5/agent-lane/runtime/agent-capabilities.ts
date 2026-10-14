@@ -6,7 +6,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { answeredBasisOf, applyGoalReadingEdit, goalMeaningOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
+import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamTimeReadHolds, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -3758,14 +3758,15 @@ export function createAgentCapabilities(
     const check = await readGraph(ctx.scenario_id);
     const goal = check?.nodes.find((n) => n.id === op.path && n.kind === 'goal') as Record<string, unknown> | undefined;
     const basis = goalTargetBasisOf(goal);
-    // The receipt says the card's reading, so the read-back holds the card's goal too (its label and target): a goal renamed
-    // or re-targeted after the commit is never "confirmed" under the new words (Codex buddy r3).
+    // The receipt says the card's reading, so the read-back holds the card's WHOLE projection (label, target, horizon, period
+    // and reading): any member moved after the commit is never "confirmed" under the new words (Codex check r2 on #2995).
+    const projection = check === null ? undefined : goalReadingProjectionOf(check.raw, op.path);
     if (check === null || goal === undefined || basis === undefined || basis.open_question !== undefined
       || !isDeepStrictEqual(goal.goal_target_basis, answeredBasisOf(expected))
-      || !isDeepStrictEqual(goalMeaningOf(check.raw, op.path), v.expected_goal)) return notConfirmed;
+      || !isDeepStrictEqual(projection, v.expected_goal)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
-    const reading = goalReadingWords(check.raw, op.path, basis) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
+    const reading = goalReadingWords(projection) ?? `the target for ‘${String(goal.label)}’ as the model states it`;
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts,
       follow_up: goalReadingRecordedWords(reading, answer) };
   };
