@@ -5381,7 +5381,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // leaves the whole line said, so nothing the card does not show disappears.
       const onCard = new Set(screenLines.filter((l) => cardFaces.get(l.option_id) === l.chance).map((l) => l.option_id));
       const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
-        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
+        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent, cardDetail)
           .filter((note) => cardDetail === null || !cardDetail.has(note)), { onCard });
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
