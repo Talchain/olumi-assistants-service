@@ -104,6 +104,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
+import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
@@ -1147,15 +1148,25 @@ function placeExplainCaveat(text: string, caveat: string): string {
   return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
 }
 
-/** Read only the same selected, persisted Run; no transport keep-list or second selection authority. */
-export async function persistedFactorReviewFor(scenarioId: string, read: DecisionReviewRead, requestId: string): Promise<unknown> {
+/**
+ * Read only the same selected, persisted Run; no transport keep-list or second selection authority.
+ * ⭐ SPEED cut 3: a Run no longer stores the factor review, so the LIVE press (`computeIfAbsent`) computes it for that same
+ * bound Run, from the Run's own sensitivity, in this turn's provider policy. A replay never calls a model: stored only.
+ */
+export async function persistedFactorReviewFor(scenarioId: string, read: DecisionReviewRead, requestId: string,
+  computeIfAbsent = false): Promise<unknown> {
   const expected = runExplanationChip(scenarioId, read);
   if (expected === null) return undefined;
   try {
     const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, includeFactorEnrichments: true });
     const actual = runExplanationChip(scenarioId, { graphHash: read.graphHash,
       analysisState: current.analysis_state, analysisResult: current.analysis_result });
-    return actual?.id === expected.id ? current.factor_enrichments : undefined;
+    if (actual?.id !== expected.id) return undefined;
+    if (current.factor_enrichments !== undefined || !computeIfAbsent) return current.factor_enrichments;
+    const sensitivity = ((current.analysis_result as { enrichment?: { factor_sensitivity?: unknown } } | null | undefined)
+      ?.enrichment)?.factor_sensitivity;
+    // Its own signal, so the extraction's cap (`AGENT_FACTOR_REVIEW_TIMEOUT_MS`) cancels a hung provider call, not only stops waiting.
+    return await agentFactorEnrichments(read.graph, sensitivity, requestId, new AbortController().signal);
   } catch {
     return undefined;
   }
@@ -4503,7 +4514,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     if (decisionReviewRequested) {
       decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead,
-        factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id)), recentReplies: await repliesToCheckAsks(
+        factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id), true), recentReplies: await repliesToCheckAsks(
         [goalChanceWithheldForAgent(composedRead.analysisResult, composedRead.graph)?.say], historyReader, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };

@@ -79,7 +79,11 @@ async function runCapture(capture: Capture, options: { agent?: boolean; sensitiv
     analysisState: { ...capture.analysis_state, run_state: { kind: 'complete_current', computed_at: stored.result.computed_at } },
     analysisResult, analysisReady: buildCanonicalAnalysisReadyFromGraph(graph as never),
     factorEnrichments: readFactorEnrichments(stored.result.enrichment?.factor_enrichments) };
-  return { outcome, stored, read, policy };
+  // ⭐ SPEED cut 3: the Run stores no review; the Agent's review press computes it from the same Run's sensitivity, in the
+  // turn's provider policy (`persistedFactorReviewFor`'s live path). The conventional lane has no such press.
+  const pressed = options.agent === false ? undefined : await runWithProviderPolicy(policy, () => agentFactorEnrichments(graph,
+    (analysisResult as { enrichment?: { factor_sensitivity?: unknown } }).enrichment?.factor_sensitivity, 'fr2-press', undefined));
+  return { outcome, stored, read: { ...read, factorEnrichments: read.factorEnrichments ?? pressed }, policy };
 }
 
 describe('FR2 factor review from witnessed Run shapes', () => {
@@ -95,12 +99,13 @@ describe('FR2 factor review from witnessed Run shapes', () => {
   });
 
   it.each(captures.filter(c => !c.top_controllable))(
-    'RED at base: $name supplies and stores its observable rank-1 driver', async capture => {
+    'RED: $name supplies its observable rank-1 driver at the review press; the Run stores none', async capture => {
       const { stored, read, policy } = await runCapture(capture);
       const top = capture.top_factor_id;
       expect(providerInputs[0]!.factor_sensitivity).toContainEqual(expect.objectContaining({ factor_id: top, rank: 1 }));
       expect(providerInputs[0]!.controllable_factors).toContainEqual(expect.objectContaining({ factor_id: top }));
-      expect(stored.result.enrichment).toHaveProperty('factor_enrichments', expect.arrayContaining([enrichment(top, 1)]));
+      expect(stored.result.enrichment ?? {}).not.toHaveProperty('factor_enrichments');
+      expect(read.factorEnrichments).toEqual(expect.arrayContaining([enrichment(top, 1)]));
       expect(policy.calls).toMatchObject([{ site: 'extraction.openai', model: 'gpt-4.1-2025-04-14', outcome: 'allowed' }]);
       const label = capture.graph.nodes.find(n => n.id === top)!.label;
       const words = `The result moves most with ‘${label}’. A question to test it: ${QUESTION}`;
