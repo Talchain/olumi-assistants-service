@@ -37,6 +37,7 @@ import {
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { midSentence } from '../agent-lane/guidance/render.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -605,7 +606,16 @@ export function goalChanceLicenceOf(
     }
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
-  const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
+  // ⭐ AIE #94 6160376175 (hiring row 3): on the bound percent CHANGE from today (a change quantity this Run scored as the paired
+  // change from today), a shortfall is a share of today's level of the goal ("21% of today’s productivity"): never percentage
+  // points, never a share of the target. Any other "%" change says no shortfall (it would be ambiguous); other units keep their own.
+  const percentChange = changeFrame !== undefined && target.unit.trim() === '%';
+  const goalWords = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label)
+    ? midSentence(goal.label.trim()) : undefined;
+  const ofToday = percentChange && changeFrame === 'change_abs' && pairedChange && basis?.reference === 'today' && goalWords !== undefined
+    ? ` of today’s ${goalWords}` : undefined;
+  const shortfall = percentChange && ofToday === undefined ? {}
+    : shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope, ofToday ?? '');
   // Amendment 7 (independent check r1 item 6): every Olumi input on the goal paths — links, starting values, option settings.
   // ⛔ Re-scope (r2 BLOCKING 4; re-scope r1 BLOCKING 2): over everything upstream of EVERY node of the event this Run sent —
   // each target and each included limit (the joint rests on all of them), by any path — one census (`goalChanceEstimateCounts`).
@@ -1116,7 +1126,7 @@ function spreadNotesOf(
 function shortfallNotesOf(
   sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
   pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
-  unit: string, graph: unknown, envelope: Rec,
+  unit: string, graph: unknown, envelope: Rec, reference = '',
 ): Record<string, string> {
   const notes: Record<string, string> = {};
   // goalChanceScreenLinesForAgent shows no per-option point under `similar` or a superlative.
@@ -1153,8 +1163,10 @@ function shortfallNotesOf(
     const figure = sayFigureAsWritten(amount, unit);
     // A two-state unit may format a difference as "on"; a shortfall requires a numeric amount.
     if (!/\d/.test(figure)) continue;
+    // The caller's reference words follow the amount ("21% of today’s productivity"); empty for a level.
+    const said = `${figure}${reference}`;
     const template = pct[id] === 0 ? TYPICAL_SHORTFALL_TEMPLATE : SHORTFALL_TEMPLATE;
-    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : figure) });
+    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : said) });
   }
   return notes;
 }

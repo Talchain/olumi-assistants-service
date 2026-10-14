@@ -10,8 +10,8 @@
  *
  * The corpus is that Run's own graph, brief and option rows (`tests/fixtures/hiring-shortfall/…`, `_source`), through the REAL
  * Run handler with PLoT answering those rows. The first row asserts what was served.
- * ⚠ AIE_TEXT_PENDING (DL 14 Oct): "21%" for a change target, "%" vs "percentage points of today's productivity" (#94).
- * Level targets keep today's words.
+ * ⭐ The words are the AIE's (#94 6160376175): on the bound percent change from today, the shortfall is a share of today's level
+ * of the goal, "21% of today’s productivity": not percentage points, not a share of the target. Level targets keep today's words.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -29,9 +29,9 @@ const TWO = 'hire_two_developers';
 const rowOf = (id: string): Rec => (FX.option_comparison as Rec[]).find((r) => r.option_id === id)!;
 
 /** The real Run handler on the served stored graph and brief; PLoT answers with the served rows. */
-async function runServed(briefText: string | null): Promise<Rec> {
+async function runServed(briefText: string | null, graph: Rec = FX.graph): Promise<Rec> {
   const port = {
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(FX.graph), briefText, revision: 7 })),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(graph), briefText, revision: 7 })),
     readMostRecentPendingActions: vi.fn(async () => []),
   };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-hiring-shortfall', port as never);
@@ -68,11 +68,12 @@ describe('hiring row 3: the Run records its threshold on the licence it states, 
     expect(licence).toMatchObject({ form: 'each', pct_by_option: FX.served_licence.pct_by_option, target: FX.served_licence.target });
     // The samples' frame: 0.1 lies inside each licensed option's p10..p90 (e.g. -0.079..0.319); 10 lies above every p90.
     expect(licence.sent_threshold).toEqual({ value: 0.1, field: 'goal_threshold', frame: 'delta' });
-    // By hand from the served rows: target 10 (% of today's productivity) minus the worst 1 in 20 on the target's scale
-    // (p05 × cap 100): 10 − (−11.41) = 21.41 → "21% or more"; 10 − (−15.20) = 25.20 → "25% or more" (never rounded up).
+    // By hand from the served rows: target +10% of today's productivity minus the worst 1 in 20 on the target's scale
+    // (p05 × cap 100): 10 − (−11.41) = 21.41 → "21% … or more"; 10 − (−15.20) = 25.20 → "25% … or more" (never rounded up).
+    // The AIE's exact words (#94 6160376175), byte for byte for the tech lead.
     const lines = {
-      [LEAD]: 'In its worst 1 in 20 runs of this model, ‘Hire a Tech Lead’ falls short of your target by 21% or more.',
-      [TWO]: 'In its worst 1 in 20 runs of this model, ‘Hire Two Developers’ falls short of your target by 25% or more.',
+      [LEAD]: 'In its worst 1 in 20 runs of this model, ‘Hire a Tech Lead’ falls short of your target by 21% of today’s productivity or more.',
+      [TWO]: 'In its worst 1 in 20 runs of this model, ‘Hire Two Developers’ falls short of your target by 25% of today’s productivity or more.',
     };
     expect(licence.shortfall_note_by_option).toEqual(lines);
     // What the Agent says: the screen line of each licensed option carries its shortfall.
@@ -80,6 +81,15 @@ describe('hiring row 3: the Run records its threshold on the licence it states, 
       .filter((l) => l.shortfall_note !== undefined).map((l) => [l.option_id, l.shortfall_note]));
     expect(said).toEqual(lines);
     expect(goalChanceLicenceForAgent({ type: 'analysis_result', enrichment: result.enrichment })?.shortfall_note_by_option).toEqual(lines);
+  });
+
+  it('CONTRAST (AIE binding): a "%" change measured from the launch, not today, says no shortfall, never an ambiguous "21%"', async () => {
+    const graph = structuredClone(FX.graph) as Rec;
+    const goal = (graph.nodes as Rec[]).find((n) => n.id === 'productivity')!;
+    goal.goal_target_basis = { ...goal.goal_target_basis, reference: 'launch' };
+    const licence = licenceOf(await runServed(FX.brief, graph));
+    expect(licence?.pct_by_option, 'the chance itself is still licensed').toEqual(FX.served_licence.pct_by_option);
+    expect(licence).not.toHaveProperty('shortfall_note_by_option');
   });
 
   it('CONTRAST: the same Run with no brief read has no conditional licence, so no figure and no shortfall line (fail-safe)', async () => {
