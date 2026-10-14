@@ -17,6 +17,7 @@ import { quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeCard, tea
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
+import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
 /**
@@ -1937,6 +1938,9 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     // ⭐ DL 0df0e1 ruling C (6 Oct): where each option's chance reaches the Agent, so does the Run's licence to compare them.
     ...goalFacts,
     ...(participation !== undefined ? { option_participation: participation } : {}),
+    // ⭐ GOAL-REACH (#2838 rebuilt, DL 14 Oct): every licensed option below the floor → the model's own reason and the one
+    // question, as a fact of this same current Run, for the AI to word (`out-of-reach-why.ts`).
+    ...((why) => (why !== null ? { goal_out_of_reach: goalOutOfReachFact(why) } : {}))(current ? outOfReachWhyOf(g.analysis_result, g.raw) : null),
   } };
 }
 

@@ -1,0 +1,42 @@
+{
+ "_capture": "P02 final wave C3, scenario 23b1495c, CEE 2334956288d3a87eaece7a5ab3d948b20a5f9dfb (frozen), turn-009 rerun-sized response .blocks[0].enrichment: the GOAL_CHANCE_LICENSED record only, verbatim",
+ "inference_warnings": [
+  {
+   "code": "GOAL_CHANCE_LICENSED",
+   "form": "each",
+   "target": {
+    "unit": "£/month",
+    "value": 20000,
+    "comparator": "at_least"
+   },
+   "message": "Each option’s chance of meeting your goal is licensed on this Run.",
+   "severity": "info",
+   "option_ids": [
+    "keep_pro_at_49",
+    "raise_pro_to_59"
+   ],
+   "horizon_line": "This model doesn't yet say whether any option gets there within 12 months.",
+   "pct_by_option": {
+    "keep_pro_at_49": 0,
+    "raise_pro_to_59": 0
+   },
+   "horizon_untested": true,
+   "summary_withheld": {
+    "form": "all_likely_to_miss",
+    "cause": "olumi_existence_assumption"
+   },
+   "no_driver_by_option": {
+    "keep_pro_at_49": "none",
+    "raise_pro_to_59": "none"
+   },
+   "user_link_existence": {
+    "links": 1,
+    "one_in": 5
+   },
+   "display_rounding_by_option": {
+    "keep_pro_at_49": "whole",
+    "raise_pro_to_59": "whole"
+   }
+  }
+ ]
+}
