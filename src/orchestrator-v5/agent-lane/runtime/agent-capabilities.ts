@@ -288,6 +288,7 @@ import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysis
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
+import { linkStrengthsPostimageIsScoped } from '../../system-events/option-intervention-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
@@ -3995,16 +3996,16 @@ export function createAgentCapabilities(
     });
     /**
      * ⭐ #3002 card_receipt (AIE packet 2b19ae59): the receipt, the card's left-out links included, is said only once the WHOLE
-     * postimage reads back: every approved link as approved (`holds`), and everything else, each left-out link's value and
-     * source included, exactly as it was when approved. Otherwise the save is unconfirmed, in the AIE's words, and nothing
-     * says it was recorded or left unchanged.
+     * postimage reads back, otherwise the save is unconfirmed, in the AIE's words, and nothing says it was recorded or left
+     * unchanged. Whole means all three (buddy r1 on 0bbc66bc: an approved link's spread or source could move unseen):
+     *  · every approved link as approved (`holds`);
+     *  · the graph the analysis reads is the one the writer committed (`res.graph_hash`): every size and spread, each link's
+     *    direction and its source and sizing marks, and every figure that decides a Run;
+     *  · the link writer's own scope rule: only the approved links changed, each only in what that writer owns, so each
+     *    left-out link (its review stamp and display included) and everything else are as they were when approved.
      */
-    const approvedKeys = new Set(sent.map((l) => `${l.from}::${l.to}`));
-    const allButApproved = (raw: unknown): unknown => {
-      const g = isPlainRecord(raw) ? raw : {};
-      return { ...g, edges: (Array.isArray(g.edges) ? g.edges : []).filter((e) => !(isPlainRecord(e) && approvedKeys.has(`${String(e.from)}::${String(e.to)}`))) };
-    };
-    const retained = check !== null && isDeepStrictEqual(allButApproved(check.raw), allButApproved(approvedRead.raw));
+    const retained = check !== null && check.graph_hash === res.graph_hash
+      && linkStrengthsPostimageIsScoped(approvedRead.raw, check.raw, sent.map(({ from, to }) => ({ from, to })));
     if (!holds || !retained) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         follow_up: LINK_SET_SAVE_NOT_CONFIRMED,

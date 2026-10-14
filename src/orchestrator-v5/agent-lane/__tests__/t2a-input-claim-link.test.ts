@@ -625,6 +625,34 @@ describe('#3002 the AIE\u2019s texts and the whole-postimage receipt (packet 2b1
     expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status).toBe(AIE.unconfirmed);
     expect(read().edges.find((e) => e.from === 'price')!.strength.mean, 'the approved link did land').not.toBe(0.55);
   });
+  // ⭐ Buddy r1 on 0bbc66bc: an APPROVED link must read back whole too, never only its mean and its whose-mark.
+  const review = { links: [{ from_label: 'Quality', to_label: 'MRR', strength: 'strong', origin: 'stored' }], rationale: 'Run a pre-mortem' } as never;
+  it.each([
+    ['an approved review\u2019s spread moved (0.1 → 0.99)', review, (g: ReturnType<typeof initial>) => { g.edges.find((e) => e.from === 'quality')!.strength.std = 0.99; }],
+    ['an approved Olumi estimate\u2019s source moved', mixed({ origin: 'third_party', source: 'Alice' }),
+      (g: ReturnType<typeof initial>) => { g.edges.find((e) => e.from === 'price')!.provenance.source = 'brief_extraction'; }],
+    // Outside what the analysis reads (only the writer's scope rule sees it): a review stamp appears on the LEFT-OUT link.
+    ['a left-out link gained a review stamp', mixed({ origin: 'third_party', source: 'Alice' }),
+      (g: ReturnType<typeof initial>) => { (g.edges.find((e) => e.from === 'quality')!.provenance as Record<string, unknown>).reviewed_by_user = { intent: 'confirm', at: '2026-10-14T09:00:00.000Z' }; }],
+  ] as const)('⭐ RED→GREEN: %s after the write → UNCONFIRMED, in the AIE\u2019s words: no receipt', async (_, args, tamper) => {
+    const { caps } = harness(0.55, tamper);
+    const ctx = contextOf(asked, {});
+    const p = await caps.proposeLinkStrengths!(ctx, args);
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_verified', follow_up: AIE.unconfirmed });
+  });
+  it('CONTROL: the same review, read back as written, is recorded as a review of Olumi\u2019s estimate', async () => {
+    const { caps, read } = harness(0.55);
+    const ctx = contextOf(asked, {});
+    const before = read().edges.find((e) => e.from === 'quality')!;
+    const p = await caps.proposeLinkStrengths!(ctx, review);
+    const out = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const after = read().edges.find((e) => e.from === 'quality')!;
+    expect(after.strength).toEqual(before.strength);
+    expect([after.provenance.source, after.provenance.magnitude]).toEqual([before.provenance.source, before.provenance.magnitude]);
+  });
   it('CONTROL: another writer\u2019s unconfirmed result keeps the generic words (no follow-up of its own)', () => {
     const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: true, refusal: 'not_verified' }]).status;
     expect(status).not.toBe(AIE.unconfirmed);
