@@ -171,9 +171,11 @@ describe('targetTheQuoteStates: the literal checks, one per check', () => {
     expect(targetTheQuoteStates(CONVERSION_WORDS, L20, T(15, '%', '>=', 'conversion rate'))).toBe(false);
     expect(targetTheQuoteStates(L20, L20, T(20, 'customers', '>=', 'New customers in first 3 months'))).toBe(true);
   });
-  it('the figure written twice could be two quantities’: not verified', () => {
-    const text = 'We need 20 new customers and 20 partner sign-ups.';
-    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'Partner sign-ups'))).toBe(false);
+  it('the figure written twice: each writing binds its own part, so the right one is found and no other is credited', () => {
+    const text = 'We need 20 partner sign-ups and 20 new customers.';
+    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'New customers'))).toBe(true);
+    expect(targetTheQuoteStates(text, text, T(20, 'sign-ups', '>=', 'Partner sign-ups'))).toBe(true);
+    expect(targetTheQuoteStates(text, text, T(20, 'customers', '>=', 'Monthly churn'))).toBe(false);
   });
   it('the label must sit in its figure’s own part: 20 is the customers’, not the partners’', () => {
     const text = 'We need 20 new customers and 30 partner sign-ups.';

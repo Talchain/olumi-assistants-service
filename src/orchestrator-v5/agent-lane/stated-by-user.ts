@@ -418,10 +418,12 @@ const OPERATOR_OF: Readonly<Record<StatedComparator, string>> = { at_least: '>='
  * goal) and `propose_goal_target`'s `quote` against the revised-draft card's targets (marketing turn 02: "secure 20 new
  * customers within the first 3 months" read NOT on the card's ‘New customers in first 3 months’). True only when:
  *  · the quote is verbatim in `text` (whole words);
- *  · the target's figure is written in it ONCE, in the target's unit (twice, it could belong to two quantities);
- *  · a comparator bound to THAT figure (`comparatorTheUserWroteFor`) is the target's own, strictness included ("at least"
+ *  · the target's figure is written in it, in the target's unit;
+ *  · a comparator bound to that figure (`comparatorTheUserWroteFor`) is the target's own, strictness included ("at least"
  *    is >=, "over" is >), so another figure's "over" is never this one's;
- *  · the target's own label is named in THAT figure's part of the quote, between the figures written before and after it.
+ *  · the target's own label is named in the part of the quote that writing of the figure sits in, between the figures
+ *    written before and after it (each writing is bound to its own part, so "20 partner sign-ups and 20 new customers"
+ *    gives the second 20 to the customers and the first to no one else's label).
  * Positions of written figures only: no verb or word list, and no other node's label is read.
  */
 export function targetTheQuoteStates(quote: unknown, text: string,
@@ -431,16 +433,17 @@ export function targetTheQuoteStates(quote: unknown, text: string,
   if (said === '' || said.length > 400 || quoteSpansIn(text, said).length === 0) return false;
   const written = findStatedAmounts(said);
   const own = written.filter((a) => amountIs(a, target.figure, target.unit, unitPhraseFamily(target.unit), said));
-  if (own.length !== 1) return false;
-  const at = own[0]!;
-  const comparator = comparatorTheUserWroteFor(said, at.magnitude);
+  if (own.length === 0) return false;
+  const comparator = comparatorTheUserWroteFor(said, own[0]!.magnitude);
   if (comparator !== null && OPERATOR_OF[comparator] !== target.operator) return false;
-  const atEnd = at.index + at.matchedText.length;
-  const others = [...written, ...countsInWords(said)].map((a) => ({ start: a.index, end: a.index + a.matchedText.length }))
-    .filter((a) => a.end <= at.index || a.start >= atEnd);
-  const from = Math.max(0, ...others.filter((a) => a.end <= at.index).map((a) => a.end));
-  const to = Math.min(said.length, ...others.filter((a) => a.start >= atEnd).map((a) => a.start));
-  return factorTheUserNamed(target.label, said.slice(from, to), { options: [], others: [] });
+  const spans = [...written, ...countsInWords(said)].map((a) => ({ start: a.index, end: a.index + a.matchedText.length }));
+  return own.some((at) => {
+    const atEnd = at.index + at.matchedText.length;
+    const others = spans.filter((a) => a.end <= at.index || a.start >= atEnd);
+    const from = Math.max(0, ...others.filter((a) => a.end <= at.index).map((a) => a.end));
+    const to = Math.min(said.length, ...others.filter((a) => a.start >= atEnd).map((a) => a.start));
+    return factorTheUserNamed(target.label, said.slice(from, to), { options: [], others: [] });
+  });
 }
 
 /** A figure's scope among a model's QUANTITIES (every node but options and the decision): `target`'s label, and the rest. */
