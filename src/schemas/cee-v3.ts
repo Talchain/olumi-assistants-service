@@ -764,6 +764,13 @@ export const NodeV3 = z.object({
    */
   already_true_quote: z.string().min(1).optional().catch(undefined),
   /**
+   * ⭐ S2 the user's own occurrence estimate for a RISK (AIE 6179240850): their complete verified statement (source, speaker,
+   * qualifier, the period it covers), kept beside the `event_risk` block their card press wrote, so reopen, read-back and the AI
+   * see what they said, not a bare figure. Written only by `applyRiskOccurrenceEdit`. CEE-owned; not in the analysis hash.
+   * Malformed on read degrades to absence.
+   */
+  occurrence_statement: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  /**
    * ⭐ AIE LAWS RULING, SAME COHORT (option nodes only; science PR-4, `goal-target/cohort-forecast.ts`). This option's forecast
    * of the goal window's ONE cohort: the people it reaches over the window (a point, its own uncertainty excluded and said so)
    * and their conversion's likely range, read as the MIDDLE HALF (25th–75th percentile; never a min–max, never a 90% interval).

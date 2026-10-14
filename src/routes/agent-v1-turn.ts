@@ -130,7 +130,7 @@ import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue, identityReadingOf } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { briefHoldsNowArgs, briefHoldsNowToIssue, heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
-import { typedOccurrenceArgs, typedOccurrenceToIssue } from '../orchestrator-v5/agent-lane/risk-occurrence-statement.js';
+import { precedingAssistantText, typedOccurrenceArgs, typedOccurrenceToIssue } from '../orchestrator-v5/agent-lane/risk-occurrence-statement.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -3128,6 +3128,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     const history = histories.get(sessionId);
+    // Olumi's previous reply, from this session's own items: what binds an answer to its question about one risk's chance.
+    const precedingAsk = precedingAssistantText(history);
     let budget = conversationBudgetFor(false);
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
@@ -3206,7 +3208,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
     const authorshipWords = histories.authorshipWords(sessionId);
-    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n"), user_text_complete: refusal !== 'unknown_session' && earlierWordsKnown && authorshipWords.complete };
+    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n"), user_text_complete: refusal !== 'unknown_session' && earlierWordsKnown && authorshipWords.complete, ...(precedingAsk === undefined ? {} : { preceding_assistant_text: precedingAsk }) };
     // The existing K2-bound press authorises one calculation on this turn, not model writes.
     const runPress = approvedProposal === undefined && typedRunOf(body);
     let runPressConsumed = false;
@@ -4729,7 +4731,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // itself, quoting their statement: the SAME tool, once, writing nothing; the door re-verifies it and only the press records it.
     const typedOccurrence = fastPath === 'approve' || readbackGraph == null || typedNow === null || !typedOccurrenceToIssue({ toolCalls: result.tool_calls,
       mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 })
-      ? undefined : typedOccurrenceArgs(readbackGraph, typedNow);
+      ? undefined : typedOccurrenceArgs(readbackGraph, typedNow, { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
+        ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) });
     if (typedOccurrence !== undefined) {
       const issued = await dispatchTool('propose_assumptions', JSON.stringify(typedOccurrence), toolCtx, capabilities, mode);
       result = { ...result,

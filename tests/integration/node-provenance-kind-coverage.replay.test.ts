@@ -710,6 +710,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // whose reading that is (`stated_in_brief`) — a statement about the model's form, never a magnitude.
       "nonlinear_identity",
       "observed_state",
+      // S2 the user's own risk estimate, 14 Oct (AIE 6179240850) — THE VALUE-BEARING DECISION: `occurrence_statement` is NOT
+      // value-bearing and joins neither `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is the user's complete verified statement
+      // beside the `event_risk` block (which IS value-bearing and carries the figure); the statement is source text and Olumi's
+      // reading of it, so it can never make a node look sized on its own.
+      "occurrence_statement",
       "option_status",
       "prior",
       // MG #2295, 29 Sep (DL #72 5888551510) — THE VALUE-BEARING DECISION: `proposed_by` is NOT value-bearing and must
