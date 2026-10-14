@@ -64,7 +64,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 // Observe the real link-set door's input and the operations it prepares; the capability itself runs unchanged.
-const doors: { ctx: Json; operations: Json[]; public_label: unknown }[] = [];
+const doors: { ctx: Json; operations: Json[]; public_label: unknown; refusal: unknown }[] = [];
 vi.mock('../runtime/agent-capabilities.js', async (original) => {
   const actual = await original<typeof import('../runtime/agent-capabilities.js')>();
   return { ...actual, createAgentCapabilities: (...input: Parameters<typeof actual.createAgentCapabilities>) => {
@@ -73,7 +73,7 @@ vi.mock('../runtime/agent-capabilities.js', async (original) => {
     return { ...capabilities, proposeLinkStrengths: async (...args: Parameters<typeof proposeLinkStrengths>) => {
       const result = await proposeLinkStrengths(...args);
       const proposal = input[1].get(String(result.proposal_id));
-      doors.push({ ctx: args[0] as Json, operations: [...(proposal?.operations ?? [])] as Json[], public_label: result.public_label });
+      doors.push({ ctx: args[0] as Json, operations: [...(proposal?.operations ?? [])] as Json[], public_label: result.public_label, refusal: result.refusal });
       return result;
     } };
   } };
@@ -95,7 +95,10 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
       const answered = thisTurn.some((i) => i.type === 'function_call_output');
       if (!answered && proposeOn !== null && lastUserText(body) === proposeOn.message) {
         return reply([{ type: 'function_call', name: 'propose_link_strengths', call_id: 'fixture_link_set',
-          arguments: JSON.stringify({ links: proposeOn.links, rationale: 'The user asked for these link strengths.' }) }]);
+          // ⛔ INPUT CHANGE (#3002, known-origin transport): each link declares its origin: user when it quotes the user; olumi, with Olumi's own basis, when not.
+          arguments: JSON.stringify({ links: proposeOn.links.map((l) => typeof (l as { from_words?: unknown }).from_words === 'string'
+            ? { origin: 'user', ...l } : { origin: 'olumi', basis: 'Olumi\u2019s own estimate from the model', ...l }),
+            rationale: 'The user asked for these link strengths.' }) }]);
       }
       return reply([{ type: 'message', content: [{ type: 'output_text', text: 'Noted.' }] }]);
     }));
@@ -138,6 +141,17 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     await send({ agent_session_id: session, message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
     return { op: ops[0]!, label: String(doors[0]!.public_label), ctx: doors[0]!.ctx };
   };
+  /** T2A5: the user's own words, not verifiably quoted, keep an unknown origin: no card, nothing written, the edge unchanged. */
+  const proposeRefused = async (session: string, message: string, extra: Json, link: Json) => {
+    const before = JSON.stringify(edgeNow(...CHURN));
+    proposeOn = { message, links: [link] };
+    const body = await send({ agent_session_id: session, message, ...extra });
+    proposeOn = null;
+    expect(doors, 'the stubbed model reached the real link-set door').not.toHaveLength(0);
+    expect(doors[0]!.refusal).toBe('origin_unknown');
+    expect((body.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'))).toHaveLength(0);
+    expect(JSON.stringify(edgeNow(...CHURN)), 'nothing written').toBe(before);
+  };
   const CHURN = ['monthly_churn', 'paying_subscribers'] as const;
   const CHURN_EDGE = { id: 'monthly_churn→paying_subscribers', kind: 'edge' };
   const NEW_EDGE = { id: 'monthly_new_paying_subscribers→paying_subscribers', kind: 'edge' };
@@ -152,13 +166,19 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4): a band is the user's only with the AI's own quote of THIS message.
   // EXPECTATION CHANGED: "Monthly churn is strong." unquoted, old user_stated → new model_proposed; its quoted twin keeps it.
   it.each([
-    ['Pro plan price is strong.', [CHURN_EDGE], 'model_proposed', 'Pro plan price is strong'],
-    ['Monthly churn is strong.', [CHURN_EDGE], 'model_proposed', undefined],
+    // ⛔ EXPECTATION CHANGED (#3002 r2, DL three tiers): a quote the host cannot verify is UNKNOWN, never Olumi's (old
+    // model_proposed → new origin unknown, nothing prepared). Same for the ambiguous two-link selection below.
+    ['Pro plan price is strong.', [CHURN_EDGE], 'unknown', 'Pro plan price is strong'],
+    // ⭐ T2A5 (AIE 6157593360): EXPECTATION CHANGED, old (T2A3) model_proposed → new origin unknown: no quote of the user's
+    // own words is ever relabelled Olumi's estimate.
+    ['Monthly churn is strong.', [CHURN_EDGE], 'unknown', undefined],
     ['Monthly churn is strong.', [CHURN_EDGE], 'user_stated', 'Monthly churn is strong'],
     // PL 22:07Z: two selected links are an ambiguous selection: no link is credited, even the one whose end is named.
-    ['Monthly churn is strong.', [CHURN_EDGE, NEW_EDGE], 'model_proposed', 'Monthly churn is strong'],
+    ['Monthly churn is strong.', [CHURN_EDGE, NEW_EDGE], 'unknown', 'Monthly churn is strong'],
   ] as const)('blocking 1: "%s" with %j selected → %s, on the card and in the saved graph (from_words %s)', async (message, selected, author, quote) => {
     expect(edgeNow(...CHURN).provenance.source, 'precondition: Olumi’s placeholder').toBe('cee_hypothesis');
+    if (author === 'unknown') return proposeRefused(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
+      { ...churnLink('strong'), ...(quote === undefined ? {} : { from_words: quote }) });
     const { op, label, ctx } = await proposeAndApprove(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
       { ...churnLink('strong'), ...(quote === undefined ? {} : { from_words: quote }) }, CHURN.join('::'));
     expect(ctx.grounded_links, 'the UI selection reaches the door as the host-resolved links')
@@ -171,30 +191,38 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
   it.each([
     ['Olumi says Monthly churn has a weak effect on Paying subscribers. Is that right?', 'model_proposed'],
     ['You suggested Monthly churn has a weak effect on Paying subscribers; I disagree.', 'model_proposed'],
-    // ⛔ T2A3 DL ruling: EXPECTATION CHANGED, old user_stated → new model_proposed: an earlier message credits nothing
-    // (staging never did) until T2A5's quote.
-    ['Monthly churn has a weak effect on Paying subscribers.', 'model_proposed'],
-  ] as const)('blocking 2: earlier "%s", then a weak estimate → %s, on the card and in the saved graph', async (earlier, author) => {
+    // ⭐ T2A5 (AIE 6157593360): EXPECTATION CHANGED. Not quoted, old (T2A3) model_proposed → new origin unknown; quoted by the
+    // AI, the user's own earlier statement is credited again (old model_proposed → new user_stated).
+    ['Monthly churn has a weak effect on Paying subscribers.', 'unknown'],
+    ['Monthly churn has a weak effect on Paying subscribers.', 'user_stated', 'Monthly churn has a weak effect on Paying subscribers.'],
+  ] as const)('blocking 2: earlier "%s", then a weak estimate → %s, on the card and in the saved graph (from_words %s)', async (earlier, author, quote?: string) => {
     const session = `t2a3-${randomUUID()}`;
     await send({ agent_session_id: session, message: earlier });
     expect(doors, 'turn 1 proposes nothing').toHaveLength(0);
-    const { op, label, ctx } = await proposeAndApprove(session, LATER, {}, churnLink('weak'), CHURN.join('::'));
+    if (author === 'unknown') return proposeRefused(session, LATER, {}, churnLink('weak'));
+    const { op, label, ctx } = await proposeAndApprove(session, LATER, {}, { ...churnLink('weak'), ...(quote === undefined ? {} : { from_words: quote }) }, CHURN.join('::'));
     expect(String(ctx.user_text), 'the earlier turn is retained, verified history').toContain(earlier);
     expect(op.value).toMatchObject({ band: 'weak', author });
-    expect(label.includes('your estimate'), 'an earlier message is never the user\u2019s estimate yet').toBe(false);
+    expect(label.includes('your estimate')).toBe(author === 'user_stated');
     expectSaved(author, 0.1);
   });
 
-  // ⛔ T2A3 DL ruling (Codex FAIL on c78b4ad4, items 1–2): the AI leaves `from_words` out for words that are not the user's
-  // own (the tool's contract), and the host reading never overrides that. RED on 54a63088 (each saved as the user's).
+  // ⛔ T2A3 (Codex FAIL on c78b4ad4, items 1–2): the AI leaves `from_words` out for words that are not the user's own, and
+  // the host reading never overrides that. RED on 54a63088 (each saved as the user's). ⭐ T2A5 (AIE 6157593360): EXPECTATION
+  // CHANGED, old (T2A3) model_proposed → new origin unknown: the band the conversation holds for this link is neither the
+  // user's (unverified) nor relabelled Olumi's estimate.
   it.each([
-    ['Monthly churn has strong evidence for its effect on Paying subscribers.', [], 'model_proposed', undefined],
-    ['Alice says Monthly churn has a strong effect on Paying subscribers.', [], 'model_proposed', undefined],
-    ['These estimates came from Olumi. Monthly churn has a strong effect on Paying subscribers.', [], 'model_proposed', undefined],
-    ['Monthly churn is strong evidence for the model.', [CHURN_EDGE], 'model_proposed', undefined],
+    ['Monthly churn has strong evidence for its effect on Paying subscribers.', [], 'unknown', undefined],
+    ['Alice says Monthly churn has a strong effect on Paying subscribers.', [], 'unknown', undefined],
+    ['These estimates came from Olumi. Monthly churn has a strong effect on Paying subscribers.', [], 'unknown', undefined],
+    ['Monthly churn is strong evidence for the model.', [CHURN_EDGE], 'unknown', undefined],
+    // A quote that drops "Alice says" is not a receipt (AIE: a substring loses its qualifying context).
+    ['Alice says Monthly churn has a strong effect on Paying subscribers.', [], 'unknown', 'Monthly churn has a strong effect on Paying subscribers.'],
     // Control on the same path: the user's own sentence, quoted by the AI, is theirs.
     ['Monthly churn has a strong effect on Paying subscribers.', [], 'user_stated', 'Monthly churn has a strong effect on Paying subscribers'],
   ] as const)('Codex item: "%s" with %j selected → %s (from_words %s), on the card and in the saved graph', async (message, selected, author, quote) => {
+    if (author === 'unknown') return proposeRefused(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
+      { ...churnLink('strong'), ...(quote === undefined ? {} : { from_words: quote }) });
     const { op, label } = await proposeAndApprove(`t2a3-${randomUUID()}`, message, { selected_elements: selected },
       { ...churnLink('strong'), ...(quote === undefined ? {} : { from_words: quote }) }, CHURN.join('::'));
     expect(op.value).toMatchObject({ band: 'strong', author });
@@ -202,13 +230,10 @@ describe('T2A3 on /agent/v1/turn: whose band a link strength is, from the select
     expectSaved(author, 0.55);
   });
 
-  it('Codex item, earlier message: "Alice says …", then a later estimate → Olumi’s (RED on 54a63088)', async () => {
+  // ⭐ T2A5 (AIE 6157593360): EXPECTATION CHANGED, old (T2A3) Olumi's estimate → new origin unknown, nothing written.
+  it('Codex item, earlier message: "Alice says …", then a later estimate quoting it without "Alice says" → origin unknown (RED on 54a63088)', async () => {
     const session = `t2a3-${randomUUID()}`;
     await send({ agent_session_id: session, message: 'Alice says Monthly churn has a strong effect on Paying subscribers.' });
-    const { op, label } = await proposeAndApprove(session, LATER, {},
-      { ...churnLink('strong'), from_words: 'Monthly churn has a strong effect on Paying subscribers' }, CHURN.join('::'));
-    expect(op.value).toMatchObject({ band: 'strong', author: 'model_proposed' });
-    expect(label.includes('your estimate')).toBe(false);
-    expectSaved('model_proposed', 0.55);
+    await proposeRefused(session, LATER, {}, { ...churnLink('strong'), from_words: 'Monthly churn has a strong effect on Paying subscribers' });
   });
 });
