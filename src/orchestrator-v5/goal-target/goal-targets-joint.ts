@@ -370,7 +370,10 @@ export function goalTargetsBlockOf(args: {
     }
     const absent = comparedFor(t.constraint_id).filter((id) => !Object.hasOwn(pct, id)
       && !targetWarnings(t).some((w) => !Array.isArray(w.option_ids) || w.option_ids.includes(id)));
-    if (absent.length > 0) notes.push(`${t.clause}: This Run did not return a usable chance for ${listWords(absent.map((id) => `‘${labelOf(id) ?? id}’`))}.`);
+    // A target this Run left unscored has its own reason said above (marketing e2e 25d14238: said once, never a second note).
+    if (absent.length > 0 && args.perLimit?.find((v) => v.constraint_id === t.constraint_id)?.state !== 'unscored') {
+      notes.push(`${t.clause}: This Run did not return a usable chance for ${listWords(absent.map((id) => `‘${labelOf(id) ?? id}’`))}.`);
+    }
     if (Object.keys(pct).length === 0) return [];
     return [{ constraint_id: t.constraint_id, words: t.clause, pct_by_option: pct,
       ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}) }];

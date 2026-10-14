@@ -172,7 +172,9 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
  * below"); the status quo row by assumption (amendment 1); then the licence's disclosures (amendments 1, 2, 4, 7, 10). Read only
  * from the Run's stored licence (`goalChanceFactsForAgent`); [] when it carries none or the Run is not current.
  */
-export function goalChanceNotesForAgent(result: unknown, graph: unknown, current: boolean): string[] {
+export function goalChanceNotesForAgent(result: unknown, graph: unknown, current: boolean,
+  /** The Run's card under this reply: a note it shows is said there, once. A group is said only for notes the card does not show. */
+  onCard?: { has(line: string): boolean } | null): string[] {
   const facts = goalChanceFactsForAgent(result, graph, current);
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
@@ -202,6 +204,9 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
   if (facts.goal_chance_status_quo !== undefined) out.push(facts.goal_chance_status_quo.line);
   const saidGroups = new Set<number>();
   for (const note of facts.goal_chance_notes ?? []) {
+    // ⭐ Marketing e2e 25d14238 (DL 14 Oct, judge item 2): the card listed each note and the reply said them again, joined
+    // into a group line no card line equals, so the route's card filter missed it ("…current level is missing." ×3).
+    if (onCard?.has(note) === true) continue;
     const groups = targets?.note_groups?.flatMap((group, index) => group.source_notes.includes(note) ? [{ group, index }] : []) ?? [];
     if (groups.length === 0) out.push(note);
     for (const { group, index } of groups) {

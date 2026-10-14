@@ -59,6 +59,7 @@ import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, G
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
+import { GOAL_TARGET_ROLE } from '../../goal-target/goal-targets-joint.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
@@ -2197,7 +2198,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id);
       // Record the additional typed cause only AFTER the target gate has applied its original P1/P5 outcome rules.
-      response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis);
+      response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis, snapshot.goal_constraints);
       if (response !== before) {
         log.info(
           {
@@ -4066,8 +4067,13 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   return withholdOptionGoalFigures(response, new Set(ids), recorded, { keepOutcome, keepOrdering: true });
 }
 
-/** The engine's current-level refusal is a typed per-option withhold even when an earlier gate removed the figures. */
-export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph: unknown): E {
+/**
+ * The engine's current-level refusal is a typed per-option withhold even when an earlier gate removed the figures.
+ * ⭐ Marketing e2e 25d14238 (DL 14 Oct, judge item 2/5): the refusal is about the GOAL's own level, so it binds to the goal's
+ * own stated target row(s) (`constraint_ids`). Unbound, the several-targets licence read it as every target's reason and
+ * told the customer target "Conversion rate's current level is missing". No stored target row: unbound, as before.
+ */
+export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph: unknown, storedConstraints?: unknown): E {
   if (response === null || typeof response !== 'object' || Array.isArray(response)
     || thresholdReasonOf(response)?.reason !== 'missing_goal_baseline') return response;
   const env = response as Record<string, unknown>;
@@ -4076,10 +4082,14 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
   const { scored } = goalFigureOptions(response);
   if (goal === undefined || scored.length === 0) return response;
   const label = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'The goal';
+  const ownTargets = (Array.isArray(storedConstraints) ? storedConstraints : []).flatMap((r) => r !== null && typeof r === 'object'
+    && (r as Record<string, unknown>).role === GOAL_TARGET_ROLE && (r as Record<string, unknown>).node_id === goal.id
+    && typeof (r as Record<string, unknown>).constraint_id === 'string' ? [(r as Record<string, unknown>).constraint_id as string] : []);
   return withholdOptionGoalFigures(response, new Set(scored), {
     code: GOAL_FIGURES_MISSING_CURRENT_LEVEL, severity: 'warning',
     message: `Not shown. ${label}'s current level is missing.`,
     node_ids: [String(goal.id)], option_ids: scored,
+    ...(ownTargets.length > 0 ? { constraint_ids: ownTargets } : {}),
     detail: { reason: 'missing_goal_baseline' },
   }, { keepOutcome: true, keepOrdering: true });
 }
