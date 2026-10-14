@@ -457,11 +457,11 @@ describe('narration recovery from the known held result', () => {
 });
 
 describe('callEffortFor: the effort the route sends', () => {
-  it('RED: Sol conversation (high) narrating → its banked narrate effort, low', () => {
+  it('RED: Sol conversation (low since SPEED, 14 Oct) narrating → its banked narrate effort, low', () => {
     expect(callEffortFor(budgetFor('gpt-6.1-sol', 'conversation'), { reasoning_role: 'narrate' })).toBe('low');
   });
   it('CONTROL: not narrating → the budget\'s own effort; a model with no narrate entry is never changed', () => {
-    expect(callEffortFor(budgetFor('gpt-6.1-sol', 'conversation'), {})).toBe('high');
+    expect(callEffortFor(budgetFor('gpt-6.1-sol', 'conversation'), {})).toBe('low');
     expect(callEffortFor(conversationBudgetFor(true), { reasoning_role: 'narrate' })).toBe(conversationBudgetFor(true).reasoning_effort);
     expect(callEffortFor(budgetFor('gpt-5.6-sol', 'conversation'), { reasoning_role: 'narrate' })).toBeUndefined();
   });
