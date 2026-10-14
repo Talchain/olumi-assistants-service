@@ -1,7 +1,7 @@
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
-import { modelGapOf } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { goalTargetGapOf } from '../orchestrator-v5/goal-target/goal-target-gap.js';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
@@ -169,10 +169,10 @@ export function projectCanonicalAnalysisCells(
       ? [[row.id, row.label] as const] : [];
   }));
   // C1 (Paul's funding test, 14 Oct): with no goal target no option can have a chance of meeting it, so the missing target
-  // is the ONE root reason, ahead of placeholder and horizon reasons. Read from the standing gap (`modelGapOf`, the action
-  // bar's "Set target"), in its own words.
-  const gap = modelGapOf(graph);
-  const targetMissing = gap?.kind === 'goal_target_missing' ? { code: GOAL_TARGET_MISSING, message: gap.question } : undefined;
+  // is the ONE root reason, ahead of placeholder and horizon reasons. The standing gap's own reader and words
+  // (`goal-target-gap.ts`, which `modelGapOf` and the action bar's "Set target" read).
+  const gap = goalTargetGapOf(graph);
+  const targetMissing = gap === null ? undefined : { code: GOAL_TARGET_MISSING, message: gap.question };
   const compared = rec(rec(result)?.enrichment)?.option_comparison;
   // The roster belongs to the served Run, not today's graph or a refused attempt.
   const optionIds = [...new Set([
