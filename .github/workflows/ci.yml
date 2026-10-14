@@ -506,15 +506,13 @@ jobs:
   # --jq '.required_status_checks.contexts'). The tsc step tolerates a committed
   # baseline of pre-existing test-file type errors (scripts/ci/typecheck-baseline.txt)
   # and FAILS only on NEW drift (a new erroring file, or the total count rising
-  # past baseline). The architecture steps are shrink-only (Paul 14 Oct: stop
-  # per-journey mechanisms): a new agent tool, CAS door member or drafter field fails.
+  # past baseline). Paul's lean-deploy rule keeps census/ratchet guards ADVISORY, so the
+  # architecture counts run in the separate non-required `architecture-counts` job below.
   typecheck-drift:
     name: Typecheck Drift (ratchet)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Architecture counts (shrink-only; Paul 14 Oct)
-        run: bash scripts/ci/architecture-counts.sh
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -529,10 +527,34 @@ jobs:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
       - name: Generate OpenAPI types
         run: pnpm openapi:generate
-      - name: Architecture guards (statement-door freeze; provenance direct reads; shrink-only)
-        run: npx vitest run tests/contract/statement-door-tools.guard.test.ts src/cee/provenance/__tests__/provenance-reads-guard.test.ts --no-file-parallelism
       - name: Typecheck drift ratchet (full tsc; baseline-tolerant)
         run: bash scripts/ci/typecheck-ratchet.sh
+
+  # Architecture counts: ADVISORY (not in staging's required contexts; Paul's lean-deploy rule,
+  # CLAUDE.md §7: census and ratchet guards never block). A red here is a WARNING the DL reads on
+  # every PR: a new agent tool, CAS door member or drafter field means a mechanism was added
+  # instead of extended (SYSTEMS-REPLAN). Counts are not quality proof.
+  architecture-counts:
+    name: Architecture counts (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Architecture counts (shrink-only warning)
+        run: bash scripts/ci/architecture-counts.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - name: Architecture guards (statement-door freeze; provenance direct reads)
+        run: npx vitest run tests/contract/statement-door-tools.guard.test.ts src/cee/provenance/__tests__/provenance-reads-guard.test.ts --no-file-parallelism
 
   # Job B: Security audit
   security:
