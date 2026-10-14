@@ -100,16 +100,17 @@ describe('W3: the route says an interior chance is a recorded model chance (AIQ 
     // Inspect this retained clause only: the neighbouring clause begins at the next exact host instruction.
     const lines = HOST_TOOL_CONTRACT.match(/For a CURRENT saved Run,.*?(?= Earlier assistant replies can describe a Run)/g) ?? [];
     expect(lines, 'control: exactly one saved-Run instruction line').toHaveLength(1);
-    expect(lines[0]).toContain('recorded model chance, not a guarantee');
-    // ⛔ CHANGED EXPECTATION (G, AIE #94 6133027121): the headline no longer directs whole-goal words; the licensed target wording does.
-    expect(lines[0]).toContain('the per-option headline is its chance, in this model, on current information');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry carries each rule below in its
+    // own words (a model result, never a guarantee; licensed scope; exact 0/1 only from goal_certainty; stale never current).
+    expect(lines[0]).toContain('earned: true permits only the licensed conditional model result, never a guarantee');
+    expect(lines[0]).toContain('State a goal chance only where the selected current Run actually licenses that option, quantity, target, unit, reference and period, retaining its in-this-model meaning and supplied qualifications.');
     // AIQ 5903007662: the prompt is read by every journey, so its example carries no journey's figure.
     expect(lines[0]).not.toMatch(/\\u00a3\d|£\d|\b\d{2,3}(,\d{3})+\b|\b\d+% of model runs/);
-    expect(lines[0]).toContain('For an exact 0 or 1, use only its projected goal_certainty');
+    expect(lines[0]).toContain('For an exact 0 or 1, follow the projected goal_certainty');
     expect(lines[0]).not.toContain('For goal certainty, use only its projected goal_certainty');
     // PR Review 5903031170: "unchecked" is about exact 0/1 only; stale blocks every chance.
-    expect(lines[0]).toContain('If goal_certainty is unchecked, say only that an exact 0 or 1 cannot be confirmed');
-    expect(lines[0]).toContain('If the Run is stale, say no chance can be confirmed');
+    expect(lines[0]).toContain('If goal_certainty is unchecked, say the exact 0 or 1 cannot be confirmed; no raw probability field overrides this or any other withholding.');
+    expect(lines[0]).toContain('If the Run is stale, do not present its chances as current.');
     expect(lines[0]).not.toContain('If goal_certainty is unchecked or the Run is stale, say the chance cannot be confirmed');
   });
 });

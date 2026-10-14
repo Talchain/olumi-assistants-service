@@ -157,8 +157,19 @@ describe('deterministic deadline card on the first Agent turn', () => {
     const done = await w.caps.authoriseChange({ ...w.ctx('Yes'), typed_approval_of: String(out.proposal_id) }, { proposal_id: String(out.proposal_id) });
     expect(done).toMatchObject({ ok: true, applied: true });
     expect(goal(w.read()).goal_horizon.deadline).toBe('2027-04-30');
+    // DLf5 (DL-approved flip, PL AMEND 22:37Z): was `unreadable_deadline`. "ten months" resolves, so the user's phrase owns
+    // the date and a malformed OPTIONAL model date beside it is ignored: the source-first tuple, the user's, nothing written.
     for (const deadline_date of ['2027-02-30', 'tomorrow', 123, null]) {
-      expect(await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', deadline_date, rationale: '' }), w.ctx('ten months'), w.caps, 'full'))
+      const kept = await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'ten months', deadline_date, rationale: '' }), w.ctx('ten months'), w.caps, 'full');
+      expect(kept, String(deadline_date)).toMatchObject({ ok: true, mutated: false });
+      const proposal = w.proposals.get(String(kept.proposal_id))!;
+      expect(proposal.provenance.authored_by).toBe('user_stated');
+      expect(proposal.operations[0]).toMatchObject({ op: 'set_goal_deadline', value: { deadline: '2027-08-10', reference: R } });
+    }
+    expect(goal(w.read()).goal_horizon.deadline, 'nothing written without approval').toBe('2027-04-30');
+    // Words that do not resolve still refuse a malformed fallback date.
+    for (const deadline_date of ['2027-02-30', 'tomorrow', '2026-01-01']) {
+      expect(await dispatchTool('propose_goal_deadline', JSON.stringify({ deadline_words: 'after the spring launch', deadline_date, rationale: '' }), w.ctx('after the spring launch'), w.caps, 'full'))
         .toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_deadline' });
     }
   });

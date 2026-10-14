@@ -223,7 +223,9 @@ describe('SYS1 ordinary Responses transport', () => {
     dump('llm-after.json', JSON.stringify(result, null, 2));
   });
   it('RED schema: the existing interpretation schema and adapter success payload retain their bytes', async () => {
-    expect(jsonSha(RUN_INTERPRETATION_FORMAT.schema)).toBe('3539e2bc2bf7963a295ae854719e99354383cbc93880efc1c7938f46f7c9bf83');
+    // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE C5, rulings 1ad7f7b2…): only `confirm_step`'s description changed; the previous
+    // schema with exactly that description swapped in is byte-equal to this one (3539e2bc… before).
+    expect(jsonSha(RUN_INTERPRETATION_FORMAT.schema)).toBe('a7b613f54c9487e83065952b4641db4fd5c06cb7f8278fc2effd9d01c1adb08e');
     const body = { model: 'gpt-x', instructions: 'unchanged', input: [], tools: [], text: { format: RUN_INTERPRETATION_FORMAT } };
     const rows = await runWithProviderPolicy({ ...OPENAI_ONLY('schema'), request_id: 'request-schema', scenario_id: scenario, turn_id: 'turn-schema' }, async () => {
       const { r } = await adapter.postResponses(body, { detail: { ...agentRequestIdentity('agent.interpret', body), purpose: 'conversation' } });

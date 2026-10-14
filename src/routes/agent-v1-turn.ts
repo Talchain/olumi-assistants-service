@@ -58,7 +58,7 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { answerRunNarrationOf, type CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -574,7 +574,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_new_limit for a budget ceiling the user stated in this message on an existing cost quantity (show its card exactly, including any offered reserve alternative; if no quantity matches, say the returned one line with no invented chip), propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_new_limit for a budget ceiling the user stated in this message on an existing cost quantity (Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved.), propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /**
  * How many recent answers the target ask reads to see whether it is already open (`decision-input-ask.ts`, PANEL 5944136475).
@@ -781,7 +781,7 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
  * ask 2/2 → 0/2 (D1 then asks once), every truth point kept; examine asks 2,1 → 1,1; inspect 84/88 → 86/81.
  */
 export const REPLY_LENGTH_INSTRUCTION =
-  'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Stay under 110 words on the turn that builds the model from a brief, under 100 when you explain an analysis result, and under 90 otherwise: these are limits, not targets. Ask at most one question, as your last sentence. On a turn that builds the model or runs the analysis, never ask for the goal\'s target or name it as the next step: Olumi asks for it after your words. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
+  'Answer the user directly and visibly with the relevant reasoning, uncertainty and next action. The host does not supply a separate explanatory answer. Ask for a necessary missing target or input yourself only when it has not already been supplied; do not re-ask a known figure. Keep concise ordinary replies, with enough detail for the actual question and proposed change. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
 
 /**
  * ⭐ AN OPTION IS NAMED ONLY IN THIS MODEL, AND NEVER "FRAGILE" (WORDING BATCH; DL 0df0e1 lease, 5 Oct ~15:0xZ; Acceptance
@@ -802,16 +802,7 @@ export const REPLY_LENGTH_INSTRUCTION =
  * without win_probability), so with no share the rule makes no claim about how runs fell at all.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
-  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d, '
-  + 'with X its display label and N the share of model runs credited to it, taken from the result; N is never its chance of reaching the goal. '
-  + 'That form holds whichever way the goal points and when runs tie, so use it rather than saying the option scored highest or came out lowest. '
-  + 'When you say what N means, say it as what it is: \u201cThat share is the part of this model\u2019s runs that supported it, not its chance of meeting your target.\u201d '
-  + 'Never write recommend or recommendation in any form, not even to deny it. '
-  + 'If the result gives no such share, make no claim about how runs fell: say what the result rests on instead. Keep any provisional or limit condition the rules above require in that same sentence. '
-  + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
-  + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
-  + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is. '
-  + "When the result gives options' chances of meeting the goal, lead with those chances as the rules below allow, and give any run share after them as supporting detail; never open with the share.";
+  'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.';
 
 /**
  * ⭐ D3 step 2, DL 0df0e1 ruling C (6 Oct): step 2 puts each option's licensed chance of meeting the goal in front of the
@@ -841,9 +832,11 @@ export const GOAL_CHANCE_RANKING_INSTRUCTION =
   + 'out options by it. '
   + SELECTED_RUN_SCOPE_INSTRUCTION;
 
+// Prompt P13 (AIE one-pass packet 94ad9c8f…): MODEL_RELATIVE_NAMING_INSTRUCTION is now the packet's P13 text, which the
+// AIE placed inside HOST_TOOL_CONTRACT's whole replaced entry, so it is sent ONCE there and no longer joined a second time.
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
-  [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
+  [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
 );
 
 /**
@@ -1160,8 +1153,9 @@ function explainRobustnessSentence(analysisResult: unknown, graph: unknown): str
  * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1), with ONE clause changed by S2i (DL P6, 7 Oct):
  * "say investigation priority is not established" → "make no claim about investigation priority beyond the screen's own
  * driver lines; if the screen shows no driver and no range, say it is not established yet" (served B1: "…so investigation
- * priority is not established." beside a range line). sha256 of this string begins d13dd401219ddcb7 (pinned by test;
- * 3d979e8406693be4 with the clause restored). Code only: no prompt store holds this text. APPENDED to the Agent instructions on
+ * priority is not established." beside a range line). PROMPT 28 (AIE packet P17) then replaced that clause's screen-lines
+ * deferral with the packet's driver sentence, keeping "make no claim about investigation priority": sha256 begins 272fbbd1fcbe6b2c
+ * (pinned by test; d13dd401219ddcb7 with the S2i clause restored, 3d979e8406693be4 with the banked clause). Code only: no prompt store holds this text. APPENDED to the Agent instructions on
  * fast path 3's single interpreting call, as the profile specifies ("appended only for the
  * existing Agent final-response path when explaining canonical analysis. No extra model
  * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
@@ -1178,7 +1172,7 @@ export const INTERPRET_ONLY_CONSTRAINT =
   + 'so never promise one or describe one as made. If the analysis did not run, say in plain words what it still '
   + 'needs; the user can ask you to suggest it.';
 
-export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
+export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, make no claim about investigation priority. Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty. If a sensitivity was not measured, say so rather than infer a decisive driver or an untested numerical effect.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
 /**
@@ -2321,6 +2315,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * the stored reply being Olumi's own fixed line, never from the user's words.
        */
       const replayChip = runExplanationChip(scenarioId, state);
+      // What this exact answer was sent with: this process's memory of its controls, else the narration stored WITH its row.
+      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
+      const durableNarration = prior.run_narration ?? undefined;
+      // Set when a result-first Run receipt is not KNOWN to be the current Run's: its own Run since moved (its key), or the
+      // Run it was sent with is unknown ('': a row written before migration 20261013230000). Answered below as that
+      // historical receipt, never on today's Run.
+      let historicalReceiptKey: string | undefined;
       const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT]);
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       // Legacy host receipts retain the existing current-state reconstruction below. This is
@@ -2390,7 +2391,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       } else if (approvedProposal === undefined && typedRunOf(body) && replayText.includes(RUN_RESULT_READY_TEXT)) {
         // B15: the atomic ready part may follow the typed chance headline in the stored derivation.
-        if (replayChip !== null) {
+        // A receipt is re-answered on the current Run only when it is KNOWN to be that Run's (this process's memory, else
+        // the narration stored with its row). Its own Run since moved, or unknown (a legacy row), it is replayed below as
+        // that historical receipt (PL #94 6135017311 item 4; DL rulings 14 Oct, superseding #2470's "built on the CURRENT
+        // result"): never on today's Run.
+        const sentRunKey = (rememberedControls?.narration ?? durableNarration)?.run_key ?? '';
+        if (replayChip !== null && replayChip.id !== `${RUN_EXPLANATION_PREFIX}${sentRunKey}`) {
+          historicalReceiptKey = sentRunKey;
+        } else if (replayChip !== null) {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
@@ -2417,7 +2425,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
           if (reasonNow !== null) owedNow.push(reasonNow);
-          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
+          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady, state.analysisResult);
           if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
             const basis = conditionalInputBasis({ graph: state.graph,
@@ -2470,7 +2478,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayText = RUN_RESULT_UNVERIFIED_TEXT;
         }
       }
-      const rememberedControls = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) : undefined;
       const remembered = rememberedControls?.actions ?? [];
       // AI-written loop answers need their ORIGINAL bound identity. Legacy host receipts
       // are regenerated from current state; receipts saying nothing ran are not analysis answers.
@@ -2478,24 +2485,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && !legacyRunReceipt
         && replayText !== RUN_FAILED_TEXT
         && replayText !== 'The analysis did not run. Press Run to try again.';
-      // Original bound controls only: never borrow today's key to identify yesterday's answer.
+      // Original bound controls only: never borrow today's key to identify yesterday's answer. After a restart, the
+      // narration persisted WITH this exact row names its Run, never the latest row's; a row without it leaves the Run
+      // unknown.
       const replayLoopRunKey = remembered.find(action => isRunExplanationChip(action.id))?.id.slice(RUN_EXPLANATION_PREFIX.length)
-        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey;
-      const replayLoopRunCurrent = replayLoopRun
+        || rememberedControls?.runControlKey || rememberedControls?.sizingRunKey
+        || durableNarration?.run_key || undefined;
+      // Currentness is a separate fact: an answer is re-sent as current only with the narration it was sent with (this
+      // process's memory, else its row's). A key alone names the original Run on the historical receipt.
+      const replayLoopRunCurrent = replayLoopRun && (rememberedControls !== undefined || durableNarration !== undefined)
         && typeof replayLoopRunKey === 'string' && replayChip?.id === `${RUN_EXPLANATION_PREFIX}${replayLoopRunKey}`;
-      const historicalLoopReplay = replayLoopRun && !replayLoopRunCurrent;
+      const historicalLoopReplay = (replayLoopRun && !replayLoopRunCurrent) || historicalReceiptKey !== undefined;
       if (replayLoopRunCurrent) {
-        replayNarration = rememberedControls?.narration;
+        replayNarration = rememberedControls?.narration ?? durableNarration;
       }
       if (historicalLoopReplay) {
         replayText = prior.assistant_message ?? '';
         // Empty means unknown original identity, never the current Run's identity.
-        replayNarration = { status: 'stale', run_key: replayLoopRunKey
+        replayNarration = { status: 'stale', run_key: historicalReceiptKey ?? replayLoopRunKey
           ?? (isRunExplanationChip(explanationId) ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : '') };
         boundControl.length = 0;
         // A warm answer with no original bound analysis controls must not gain a Run
         // control just from being resent. Cold/moved bound answers keep the historical exit.
-        if (rememberedControls === undefined || replayLoopRunKey !== undefined
+        if (historicalReceiptKey !== undefined || rememberedControls === undefined || replayLoopRunKey !== undefined
           || remembered.some(action => action.id === RUN_OFFER_CHIP.id)) boundControl.push(RUN_OFFER_CHIP);
       }
       const resultFirstReplay = !historicalLoopReplay && (replayNarration !== undefined || replayLoopRunCurrent);
@@ -2555,11 +2567,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (replayLoopRunCurrent) {
         // Preserve the sent controls and their order. Revalidate human approval independently,
         // but never manufacture Explain, sizing, or proposal controls on a verified warm resend.
+        // After a restart only this row's durable controls are known: those still valid, nothing else.
         const validDecisionIds = new Set(historicalDecisions.map(action => action.id));
-        replayActions.splice(0, replayActions.length, ...remembered.filter(action =>
+        replayActions.splice(0, replayActions.length, ...(rememberedControls === undefined ? stillValid : remembered.filter(action =>
           (typedApprovalOf({ chip: { id: action.id } }) === undefined
             && action.id !== AMEND_CHIP.id && declinedProposalOf(action.id) === undefined)
-          || validDecisionIds.has(action.id)));
+          || validDecisionIds.has(action.id))));
       }
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
@@ -2649,7 +2662,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
-        current: !replayLoopRun && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        current: !replayLoopRun && historicalReceiptKey === undefined && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
       });
@@ -2657,7 +2670,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
       // K2: committed loop prose already crossed the live gates. Preserve those exact bytes;
       // currentness belongs to typed controls/narration, not a new sentence in the saved answer.
-      if (replayLoopRun) gatedReplay.assistant_text = prior.assistant_message ?? '';
+      if (replayLoopRun || historicalReceiptKey !== undefined) gatedReplay.assistant_text = prior.assistant_message ?? '';
       return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
@@ -4878,7 +4891,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
     const rootLine = runPress && resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
-      ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
+      ? treatedAsZeroReplyLine(readbackGraph, analysisReady, analysisResult) : null;
     // GOAL-REACH 3b (DL CHANGES_REQUIRED #2816): an explicit Run says why the goal chance was refused (§(g)), on the same
     // binding as the root line; its replay says the same in the same place.
     const reasonLine = runPress && resultFirstRunCompleted
@@ -5477,6 +5490,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
+    const answerNarration = answerRunNarrationOf(wireBody.narration);
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
@@ -5547,6 +5561,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             suggested_actions: answerOffers,
             suggested_actions_run_key: answerOffersRunKey,
           } : {}),
+          // The narration this answer is sent with, stored WITH its row so a replay after a restart names its Run.
+          ...(answerNarration !== null ? { run_narration: answerNarration } : {}),
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
@@ -5643,7 +5659,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     // Remember only the controls actually sent, after egress and held-proposal reconciliation.
-    // This bounded in-process cache changes no persistence; a cold replay has no original key.
+    // This bounded in-process cache changes no persistence; a cold replay has only the narration persisted with its row.
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, {
       actions: wireBody.suggested_actions,
       ...(wireBody.narration !== undefined ? { narration: wireBody.narration as ReplayNarration } : {}),

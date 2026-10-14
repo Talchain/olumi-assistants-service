@@ -3613,7 +3613,7 @@ export function createAgentCapabilities(
       base_revision: g.graph_hash,
       revised_draft: { replaces_goal: goal.label, holds_this_target: holds },
       note: 'Nothing has changed yet. Offer this revised-draft card and briefly explain that it replaces the early draft. The card shows its '
-        + 'targets, limits, options and what is redrafted; do not repeat the full card or show its id. '
+        + 'targets, limits, options and what is redrafted; never show its id. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. '
         + 'Only the user pressing that card replaces the draft: never call authorise_change for it yourself.'
         + (holds ? '' : ` This target (${targetFigure(target.value, target.unit)}) is NOT in the revised draft: say so plainly, and never say it will be set.`),
     };
@@ -4049,8 +4049,37 @@ export function createAgentCapabilities(
     }
   };
 
+  /** How many date or duration phrases one message holds: every word start, read by the one reader over the words after
+   * it (`readStatedDeadline`, lead words only, as `eventDateSpans` does); overlapping readings are one phrase. ⛔ DLf5 r2
+   * (Codex on 3e43cebc: "thirteen weeks" was missed): FAIL SAFE, any time-unit word or month name the reader's spans do
+   * not cover ("thirteen weeks", "a fortnight", "in 180 days", "this year") is a phrase of its own. An "as of D" is not one. */
+  const datePhrasesIn = (text: string): number => {
+    const plain = text.replace(/(?:^|[^\p{L}\p{N}])as of\s+\d{4}-\d{2}-\d{2}(?=$|[^\p{L}\p{N}])/gu, ' ');
+    const spans: (readonly [number, number])[] = [];
+    for (const start of plain.matchAll(/\S+/gu)) {
+      const tail = plain.slice(start.index);
+      for (const word of tail.matchAll(/\S+/gu)) {
+        const end = word.index + word[0].length;
+        if (end > 80) break;
+        if (readStatedDeadline(tail.slice(0, end), '1900-01-01', { leadWordsOnly: true }) !== null) spans.push([start.index, start.index + end]);
+      }
+    }
+    const read = [...spans];
+    // "may" is a month only beside a number ("1 May", "May 2027"); every other unit word or month name always counts.
+    for (const m of plain.matchAll(/(?<![\p{L}\p{N}])(?:days?|weeks?|fortnights?|months?|quarters?|years?|january|february|march|april|june|july|august|september|october|november|december|(?<=\d\s{0,2})may|may(?=\s{0,2}\d))(?![\p{L}\p{N}])/gu)) {
+      if (!read.some(([from, to]) => m.index >= from && m.index < to)) spans.push([m.index, m.index + m[0].length]);
+    }
+    let phrases = 0;
+    let reach = -1;
+    for (const [from, to] of spans.sort((a, b) => a[0] - b[0])) {
+      if (from >= reach) phrases += 1;
+      reach = Math.max(reach, to);
+    }
+    return phrases;
+  };
+
   const proposePlacedDeadline = async (ctx: AgentToolContext, args: { rationale?: unknown; deadline_date?: unknown }, g: GraphRead, words: string, reference: string | undefined,
-    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReference = true): Promise<ToolResult> => {
+    dating?: { readonly turnText: string; readonly required?: Weekday }, userWords = true, userReading = true): Promise<ToolResult> => {
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const today = reference ?? todayInLondon((opts.now ?? (() => new Date()))());
       // ⭐ Recovery Batch B: "Last Friday was the 9th of October." — the user's own dating of the phrase's "last <weekday>",
@@ -4059,13 +4088,18 @@ export function createAgentCapabilities(
       const named = lastWeekdayNamedIn(words);
       const parsed = dating?.required !== undefined && datedWeekday?.weekday !== dating.required ? null
         : readStatedDeadline(words, today, { ...(datedWeekday !== null ? { lastWeekday: datedWeekday } : {}), relativeWeekdays: reference !== undefined });
-      if (args.deadline_date !== undefined && (!isCalendarDate(args.deadline_date) || args.deadline_date <= today)) {
+      // ⛔ DLf5 (served ffe10d51 deadline journey, 12 refusals): the model's OPTIONAL date is a fallback only. A blank one
+      // (`""`, whitespace, null) is absent, and it is checked only when the user's own phrase did not resolve: "in six
+      // months time" places 2027-04-13 whatever the model put beside it.
+      const modelDate = typeof args.deadline_date === 'string' && args.deadline_date.trim() !== '' ? args.deadline_date : undefined;
+      if (parsed === null && modelDate !== undefined && (!isCalendarDate(modelDate) || modelDate <= today)) {
         return { ok: false, mutated: false, refusal: 'unreadable_deadline', detail: 'The proposed deadline must be a valid future ISO calendar date.' };
       }
       // A resolved source owns both its date and stated count; a model date is only an interpretation fallback.
-      const stated: StatedDeadline | null = parsed ?? (args.deadline_date === undefined ? null
-        : { words, form: 'date' as const, date: args.deadline_date as string, reference: today });
-      const authoredBy = userWords && userReference && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
+      const stated: StatedDeadline | null = parsed ?? (modelDate === undefined ? null
+        : { words, form: 'date' as const, date: modelDate, reference: today });
+      // `userReading` false: the user's words, but WHICH of their phrases is the deadline is Olumi's reading (DLf5 Codex check).
+      const authoredBy = userWords && userReading && parsed !== null && parsed.date === stated?.date ? 'user_stated' : 'model_proposed';
       if (stated === null) {
         const deadlineAsk = chanceGoalDeadlineAsk(draftedTeamPartOf(g.raw)?.deliverable
           ?? (g.nodes.filter((n) => n.kind === 'goal').length === 1 ? g.nodes.find((n) => n.kind === 'goal')!.label : 'your goal'));
@@ -4759,7 +4793,7 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         card: { words: card.words, ...(card.one_off_words !== undefined ? { one_off_words: card.one_off_words } : {}) },
-        note: 'Nothing has changed yet. Ask the user `card.words` exactly as written, and tell them to confirm on the button. '
+        note: 'Nothing has changed yet. Explain the returned proposal or revised draft in your own words. Keep its actual quantities, units, timing, source and scope, including what it would replace or leave out. The existing card contains the complete change for approval; your explanation must not change the proposal, imply approval, or claim that it has already been saved. Tell them to confirm on the button. '
           + (card.one_off_words !== undefined ? 'The second button records the one-off reading shown on this card. ' : 'If they say no, nothing is recorded: carry on without it. ')
           + 'Never run the analysis again yourself.',
       };
@@ -5210,7 +5244,7 @@ export function createAgentCapabilities(
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
       if (inclusiveType === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',
-          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Tell the user that, in those words.` };
+          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
       }
       // ⛔ A figure in another kind of unit is never this goal's target (the lane's one family check, `unit-conflict.ts`).
       // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.
@@ -5317,7 +5351,7 @@ export function createAgentCapabilities(
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
-            + (levelLeftOut.host_line !== undefined ? '; Olumi already tells the user it was not included, so do not repeat it.' : '.') : ''),
+            + (levelLeftOut.host_line !== undefined ? '. Explain any actual exclusion or unsupported part recorded by the tool, and its effect on the proposed change or analysis. Keep the original reasoning and source available; do not imply the complete goal or condition was included when it was not.' : '.') : ''),
       };
     },
 
@@ -5401,7 +5435,18 @@ export function createAgentCapabilities(
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const asOfPattern = /(?:^|[^\p{L}\p{N}])as of\s+(\d{4}-\d{2}-\d{2})(?=$|[^\p{L}\p{N}])/gu;
       const typedAsOfDates = [...typed.matchAll(asOfPattern)].map(match => match[1]);
-      const asOf = typedAsOfDates.find(date => date === args.reference_date);
+      // ⛔ DLf5 Codex check (blocking 1) + buddy r2/r3: a typed "as of D" dates the deadline ONLY as part of the deadline's
+      // own phrase: right after its words ("<words>, as of D"), or opening it with nothing between but the reader's own lead
+      // words ("As of D, our deadline is <words>", read by `readStatedDeadline`, lead words only). "Revenue was 2m as of D,
+      // and/whereas/plus our launch deadline is …" keeps the host reference, and the card becomes Olumi's reading to check.
+      const beside = (date: string): boolean =>
+        new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}\\s*,?\\s*as of\\s+${date}(?=\\s*(?:$|[.;!?]))`, 'u').test(typed)
+        || typed.split(/[.;!?\n]/).some(sentence => {
+          const open = new RegExp(`^as of\\s+${date}\\s*,?\\s*(.*?)(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').exec(sentence.trim());
+          return open !== null && (open[1]!.trim() === '' || readStatedDeadline(`${open[1]!.trim()} ${plainOf(words)}`, '1900-01-01', { leadWordsOnly: true }) !== null);
+        });
+      const asOf = typedAsOfDates.find(date => date === args.reference_date && beside(date));
+      const echoedAsOfSetAside = asOf === undefined && typedAsOfDates.some(date => date === args.reference_date);
       // The ONE resolver (`draft-reference.ts`), shared with the route's automatic offer.
       const reference = draftReferenceDate({ ...(isCalendarDate(asOf) ? { asOf } : {}), versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
       if (args.reference_date !== undefined && args.reference_date !== asOf) {
@@ -5412,10 +5457,16 @@ export function createAgentCapabilities(
       }
       if (asOf !== undefined && !isCalendarDate(asOf)) return { ok: false, mutated: false, refusal: 'reference_invalid',
         detail: 'The reference must be a valid ISO calendar date. Nothing was prepared.' };
+      // ⛔ DLf5 Codex check (blocking 2): "Our office lease expires in six months, and our launch deadline is in nine months"
+      // with the quote "in six months" credited the lease. A message holding MORE THAN ONE date or duration phrase (read by
+      // the one reader, as `eventDateSpans` does; an "as of D" reference is not one) offers the card as Olumi's reading.
+      // The message the words came from (verified messages, newest first); words from no message are counted alone.
+      const source = writes(typed) ? typed : [...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse().map(plainOf)
+        .find(writes) ?? plainOf(words);
       return proposePlacedDeadline(ctx, args, g, words, reference,
         // A message that dates the weekday is held to its dating: a date that is not that weekday is asked about, never set aside.
         datedNow ? { turnText: ctx.user_turn_text ?? '', required: named! } : undefined,
-        origin === 'human', true);
+        origin === 'human', !echoedAsOfSetAside && datePhrasesIn(source) <= 1);
     },
 
     /**
@@ -6930,7 +6981,7 @@ export function createAgentCapabilities(
         if (res.status >= 400 && res.status < 500) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
             follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
-            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship. Ask what target they would like instead.` };
         }
         const after = await readGraph(ctx.scenario_id);
         // Landed is what the model HOLDS (the rule #1995 sets for every writer): another writer moving the revision afterwards
@@ -7097,7 +7148,7 @@ export function createAgentCapabilities(
         if (res.status === 'refused' && isTarget) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
             follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
-            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship. Ask what target they would like instead.` };
         }
         if (res.status === 'refused') {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
@@ -10202,8 +10253,7 @@ export function createAgentCapabilities(
       }
       return {
         ok: true, mutated: false, provisional_view: checked.view,
-        detail: 'Olumi shows this beneath your reply as one paragraph, labelled as your provisional view, with why the analysis '
-          + 'cannot confirm it yet. Do not repeat it, and do not rank or favour an option in your reply text.',
+        detail: 'Include your provisional interpretation in the reply, labelled as your view of the current model rather than a computed result or a human fact. Preserve the supplied uncertainty, source and unresolved conditions. A provisional view directs investigation in this model. It may name and explain options and their unresolved assumptions only from current supplied facts; preserve scope, source, uncertainty and conditions, and do not favour an option or turn the view into a recommendation.',
       };
     },
 

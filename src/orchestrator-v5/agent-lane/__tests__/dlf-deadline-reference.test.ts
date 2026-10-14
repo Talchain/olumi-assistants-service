@@ -179,10 +179,30 @@ describe('DLf: turn-13 deadline reaches the saved model', () => {
       .toMatchObject({ ok: false, mutated: false, refusal: 'reference_invalid' });
     expect(w.rows).toHaveLength(0);
   });
-  it.each(['2027-02-30', 'tomorrow', 123, null])('(d) malformed deadline %s still refuses', async deadline_date => {
+  // DLf5 (DL-approved flip, PL AMEND 22:37Z): was `unreadable_deadline`. The user's resolved phrase owns the date, so a
+  // malformed OPTIONAL model date beside it is ignored and the source-first host tuple is saved as the user's.
+  it.each(['2027-02-30', 'tomorrow', 123, null])('(d) malformed model deadline %s beside the resolved phrase is ignored: the phrase\u2019s date is saved', async deadline_date => {
     const w = world();
-    expect(await w.offer({ deadline_date })).toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_deadline' });
+    const card = await saveDeadline(w, { deadline_date });
+    expect(w.proposals.get(String(card.proposal_id))!.provenance.authored_by).toBe('user_stated');
+    expect(w.rows.filter(r => r.write.graph !== undefined)).toHaveLength(1);
+  });
+  it.each(['2027-02-30', 'tomorrow', '2026-01-01'])('(d) words that do not resolve plus an invalid fallback date %s still refuse', async deadline_date => {
+    const w = world();
+    expect(await w.offer({ deadline_words: 'after the spring launch', deadline_date }, 'We ship after the spring launch'))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_deadline' });
     expect(w.rows).toHaveLength(0);
+  });
+  // ⛔ DLf5: the served 22:19Z shape (ffe10d51, 12 refusals): Paul's phrase with a blank model date and a blank reference.
+  it.each(['', '  ', 'tomorrow', null])('(f) 22:19Z shape: model deadline %j never blocks the resolved phrase', async deadline_date => {
+    const w = world();
+    const said = 'We need to hit our launch deadline in six months time';
+    const card = await w.offer({ deadline_words: 'in six months time', deadline_date, reference_date: '' }, said);
+    expect(card.ok, JSON.stringify(card)).toBe(true);
+    expect(w.proposals.get(String(card.proposal_id))!.provenance.authored_by).toBe('user_stated');
+    expect(await w.approve(String(card.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(tuple(w.read())).toEqual(EXPECTED);
+    expect(w.rows.filter(r => r.write.graph !== undefined), 'one write').toHaveLength(1);
   });
   it.each([true, false, undefined])('(d) unverified words remain unknown with completeness %s', async user_text_complete => {
     const w = world();
