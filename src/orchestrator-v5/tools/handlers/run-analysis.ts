@@ -93,6 +93,7 @@ import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ratified constraint labels it names.
 import {
   deriveIntakeOptionReconciliation,
+  withoutUnwrittenOptionWords,
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
@@ -2551,11 +2552,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // projection. snapshot.options can include a value-less option the gate
     // excluded from PLoT. Recover existing source quotes only by canonical ID
     // from this same snapshot; labels never manufacture lineage.
-    const intakeReconciliation = deriveIntakeOptionReconciliation(
+    // ⭐ No option-words record on the served lane (its constructor never writes one) → no intake withhold: the goal-chance
+    // licence alone decides whether the most likely option is named (`withoutUnwrittenOptionWords`, DL 14 Oct).
+    const intakeReconciliation = withoutUnwrittenOptionWords(deriveIntakeOptionReconciliation(
       snapshot.briefText,
       finalWireOptions,
       snapshot.rawPersistedGraph ?? snapshot.graph,
-    );
+    ), finalWireOptions, snapshot.rawPersistedGraph ?? snapshot.graph);
     // ⚠ NO TELEMETRY EVENT HERE, AND THAT IS A DISCLOSED GAP RATHER THAN AN
     // OVERSIGHT. The obvious move — reuse `V5RunAnalysisConstraintUnevaluated`
     // with a discriminating code — is the exact conflation this module's

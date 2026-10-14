@@ -469,6 +469,27 @@ export function deriveIntakeOptionReconciliation(
 }
 
 /**
+ * ⭐ NO PRODUCER, NO GATE (DL 14 Oct; Paul: strip deterministic processes that are not working). The served agent lane
+ * writes no option-words record: none of its option nodes carries a source quote (today's served capacity capture: 45
+ * option nodes, none). So on a brief this module enumerates ("The options are A or B"), `identity_unverified` said only
+ * that the record was never written, and withheld the leader on every such brief. Where NO analysed option carries any
+ * record, the intake axis has nothing to judge: `not_applicable`, and the goal-chance licence alone decides whether the
+ * most likely option is named (the AI still reads the brief and the model, so it can say a listed option is missing).
+ * A model whose options DO carry a record (the v2 draft pipeline writes them) keeps the full check, unchanged.
+ */
+export function withoutUnwrittenOptionWords(
+  derived: IntakeOptionReconciliation,
+  optionsSource: unknown,
+  provenanceSource?: unknown,
+): IntakeOptionReconciliation {
+  if (derived.state !== 'identity_unverified') return derived;
+  const recorded = (entry: unknown): boolean => isRecord(entry) && sourceQuotes(entry).length > 0;
+  const written = readOptionRecords(optionsSource).some(recorded)
+    || provenanceGroups(provenanceSource ?? optionsSource).some((group) => group.some(recorded));
+  return written ? derived : reconciliation('not_applicable');
+}
+
+/**
  * ⭐ THE GATE — fold the intake answer into the persisted leader permission.
  *
  * `mayNameLeadingOption` (ROADMAP 1.215) is the estate's RATIFIED seam for a
