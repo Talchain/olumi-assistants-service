@@ -1064,11 +1064,22 @@ function perOneRangeRule(written: string): string {
  * writes outside a question gets the retry's own per-one words; the retry stays the backstop, unchanged. A brief that
  * writes no range is sent exactly as before, byte for byte.
  */
-export function firstConstructInput(brief: string): string {
+export function firstConstructInput(brief: string, context?: ConstructionContext): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
-  return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  const input = notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  return context === undefined ? input : `${input}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`;
 }
+
+/**
+ * ⭐ A REVISED DRAFT SEES THE CURRENT SAVED MODEL (current-model caller, DL 14 Oct; AIE 6807d4e3 `completion_scope`): the
+ * model as the agent already reads it (`projectModelContext`), so the revision keeps its structure. It is CONTEXT ONLY: it
+ * goes into the drafter's input and never into the text every quote, attestation and number check reads (`brief`), so
+ * nothing in the saved model can pass as the user's words. What the user set in it is carried by the caller with its own
+ * stamp, never re-authored by this draft. (Drafter text: AIE pending.)
+ */
+export interface ConstructionContext { readonly current_model: Record<string, unknown> }
+export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model, to revise (Olumi\'s record of the model, not the user\'s words; keep its structure and the labels of what you keep):';
 
 /** A missing option-to-goal mechanism, read from what admission actually kept. */
 export interface OutcomePathIssue {
@@ -1663,6 +1674,8 @@ export async function buildModelFromBrief(
   wideningCallStructured?: CallStructuredModel,
   /** Test-only observer of the candidate and shared admission path at the widening boundary. */
   observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
+  /** A revised draft's current saved model, as context only (`firstConstructInput`); omitted → today's input, byte for byte. */
+  context?: ConstructionContext,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
@@ -1675,7 +1688,7 @@ export async function buildModelFromBrief(
     const out = await callStructured({
       model: budget.model,
       instructions: buildInstructions,
-      input: firstConstructInput(brief),
+      input: firstConstructInput(brief, context),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
       schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),
