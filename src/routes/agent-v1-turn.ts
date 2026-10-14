@@ -5790,9 +5790,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       sentBody: wireBody as Record<string, unknown>,
       // The automatic first analysis is this turn's Run too; a later Run in the turn wins.
       toolResults: turnRunReceipts(fa, result.tool_results),
-      currentRun: finalRead.currentRun,
+      // The final read as it came: the Run it selected and the graph the reader checks, from one read.
+      read: finalRead,
       licence: leaderLicenceFromState(analysisState, analysisReady),
-      graph: readbackGraph ?? null,
       analysisReady,
     });
     if (runDelivery.kind === 'recorded' || runDelivery.reason !== 'no_run_this_turn') {
