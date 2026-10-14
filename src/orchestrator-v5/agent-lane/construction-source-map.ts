@@ -4,9 +4,12 @@
  * sentence, the drafted item it is about and the field it states. The host verifies each ONCE against the brief with the one
  * statement verifier (`verifyStatements`), one statement at a time, so a bad quote drops only itself. Admission, the compiler and
  * readiness then read this map instead of one carrier and one matcher per field (`baseline_evidence`, `stated_evidence`,
- * `already_true_evidence`, `effects_at_period_end`, `deadline_words`, the capacity-chain prose), each retired in its own step.
+ * `already_true_evidence`, `deadline_words`, the capacity-chain prose), each retired in its own step. A `measure` statement never
+ * sets `effects_at_period_end`: only a source-bound reading that ALL current effects are in place at the period's end supports that
+ * flag (AIE 6180193788 / 6180604131; T1H's M3). Measurement, target/reference and timing stay separate.
  *
- * AUTHOR (PL AMEND, 14 Oct 22:53Z; the first cause #3133 repaired): a statement verified for THIS subject is the user's; the
+ * AUTHOR (PL AMEND, 14 Oct 22:53Z; the first cause #3133 repaired): a statement verified, and bound by its own clause to THIS
+ * subject (step 2's frame check; a key made from drafted labels proposes a binding, never proves it), is the user's; the
  * drafter's own labelled estimate with no brief figure behind it is Olumi's; everything else (a refused or misattributed
  * statement, a brief figure with no statement, an ambiguous label) is UNKNOWN, retained here with its quote and the refusal's
  * reason, never dropped and never turned into Olumi's estimate. Figures come only from the quote's own words (`figuresIn`),
@@ -41,16 +44,38 @@ export interface RefusedStatement {
   readonly detail: string;
   readonly quote?: string;
   readonly key?: string;
+  /** The entry exactly as the drafter gave it (its known keys, plain values only): retained whole, never shortened (AIE 6180604131). */
+  readonly given: GivenStatement;
+}
+
+/** A drafter entry's own fields, copied as given: a quote is never shortened, a subject keeps every label it named. */
+export interface GivenStatement {
+  readonly [key: string]: string | number | boolean | null | { readonly [key: string]: string | null } | undefined;
 }
 
 export interface SourceMap {
   /** Verified statements by subject key (`subjectKey`), in brief order. */
   readonly verified: ReadonlyMap<string, readonly UserStatement[]>;
-  /** Authorship UNKNOWN: kept with the drafter's quote, subject and field as given, and why the host could not verify it. */
+  /**
+   * Authorship UNKNOWN: every entry the host could not verify, kept WHOLE with why (a refusal, or `not_checked` past the
+   * per-draft limit): out of verified numerical use, never out of the reasoning, never relabelled as Olumi's.
+   */
   readonly refused: readonly RefusedStatement[];
 }
 
+/** How many entries one draft has checked; the rest are retained unchecked (`not_checked`), never dropped. */
 const MAX = 60;
+const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions'] as const;
+const plain = (v: unknown): v is string | number | boolean | null => v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v));
+function givenOf(r: Record<string, unknown>): GivenStatement {
+  const out: Record<string, GivenStatement[string]> = {};
+  for (const k of GIVEN_KEYS) if (plain(r[k])) out[k] = r[k] as string | number | boolean | null;
+  const sub = r['subject'];
+  if (sub !== null && typeof sub === 'object' && !Array.isArray(sub)) {
+    out['subject'] = Object.fromEntries(Object.entries(sub as Record<string, unknown>).filter(([, v]) => v === null || typeof v === 'string')) as { [key: string]: string | null };
+  }
+  return out;
+}
 const text = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined);
 const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -72,8 +97,11 @@ function subjectOf(v: unknown): DraftedSubject | undefined {
 }
 
 /**
- * The figures a sentence writes, each as its two ends: every single figure, in digits or spelled ("six mid-weight developers", by
- * the one cardinal parser), and each pair written next to each other low → high ("6-10", "six to ten").
+ * The figures a sentence writes: every single figure, in digits or spelled ("six mid-weight developers", by the one cardinal
+ * parser). No two figures are paired into a range here: "cut legacy 25% to 15%" or "six developers and 25% legacy" are not
+ * ranges, and literal membership cannot tell them apart (AIE 6180604131). Step 2's clause-governed subject/frame check
+ * (factorLevelSpans + sameFrame, DL-adopted) decides which figure, or which pair, governs a subject; until then a range is not
+ * verified and stays unknown, retained.
  */
 export function figuresWritten(quote: string): readonly { readonly low: number; readonly high: number }[] {
   const spelled = [...quote.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) => {
@@ -81,29 +109,28 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
     return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
   });
   const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
-  const singles = amounts.map((a) => ({ low: a.magnitude, high: a.magnitude }));
-  const pairs = amounts.slice(1).flatMap((b, i) => {
-    const a = amounts[i]!;
-    const between = quote.slice(a.index + a.matchedText.length, b.index);
-    return a.magnitude < b.magnitude && /^\s*(?:-|–|—|to|and)\s*$/i.test(between) ? [{ low: a.magnitude, high: b.magnitude }] : [];
-  });
-  return [...singles, ...pairs];
+  return amounts.map((a) => ({ low: a.magnitude, high: a.magnitude }));
 }
 
-/** The drafter's `statements`, each verified once against the brief. Anything malformed or unverified is refused, never kept. */
+/** The drafter's `statements`, each verified once against the brief. Anything malformed, unverified or unchecked is retained whole as unknown. */
 export function sourceMapOf(raw: unknown, brief: string): SourceMap {
   const verified = new Map<string, UserStatement[]>();
   const refused: RefusedStatement[] = [];
-  const entries = Array.isArray(raw) ? raw.slice(0, MAX) : [];
+  const entries = Array.isArray(raw) ? raw : [];
   entries.forEach((entry: unknown, index) => {
     const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+    const given = givenOf(r);
     const subject = subjectOf(r['subject']);
     const field = STATEMENT_FIELDS.find((f) => f === r['field']);
     const form = STATEMENT_FORMS.find((f) => f === r['form']);
-    const quote = text(r['quote'], 400);
+    const quote = typeof r['quote'] === 'string' && r['quote'].trim() !== '' ? r['quote'] : undefined;
     const kept = (refusal: string, detail: string, key?: string): void => {
-      refused.push({ index, refusal, detail, ...(quote !== undefined ? { quote } : {}), ...(key !== undefined ? { key } : {}) });
+      refused.push({ index, refusal, detail, ...(quote !== undefined ? { quote } : {}), ...(key !== undefined ? { key } : {}), given });
     };
+    if (index >= MAX) {
+      kept('not_checked', `Only the first ${MAX} statements of a draft are checked; this one is retained unchecked, its authorship unknown.`);
+      return;
+    }
     if (subject === undefined || field === undefined || form === undefined) {
       kept('statement_malformed', 'A statement needs a subject (kind and label), one field and one form.');
       return;
