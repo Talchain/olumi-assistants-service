@@ -90,7 +90,17 @@ describe("captured causal repair boundary", () => {
     expect(parsed.edges.find((edge) => edge.from === ids.two && edge.to === ids.risk)?.strength.mean).toBe(0.42);
     const readiness = buildAnalysisReadyPayload(projection.options, ids.goal, parsed);
     expect(readiness.options.find((o) => o.id === ids.two)?.status).toBe("needs_user_mapping");
-    expect(readiness.user_questions?.join(" ")).toContain("Two Developers change Coordination Overhead Risk");
+    // ⚠ COPY UPDATED 23 Sep, INTENT UNCHANGED. The ask used to read "How does
+    // Two Developers change Coordination Overhead Risk?" — unanswerable, because
+    // a risk is a consequence rather than something an option sets. It now names
+    // the same two things, explains why the link cannot be used, and asks which
+    // FACTOR the option changes. This test's subject is the refusal surviving a
+    // round-trip (asserted below and unchanged), not the wording, so it is bound
+    // to the two identities the ask must name rather than to a sentence.
+    const ask = readiness.user_questions?.join(" ") ?? "";
+    expect(ask).toContain("Two Developers");
+    expect(ask).toContain("Coordination Overhead Risk");
+    expect(ask).toContain("which factor does");
     const admission = resolveRunAdmission(reopened);
     expect(admission.willProceed).toBe(false);
     expect(admission.assessment.blockingIssues.some((issue) => issue.option_id === ids.two && issue.code === "OPTION_NEEDS_MAPPING")).toBe(true);
