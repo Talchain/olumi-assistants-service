@@ -193,9 +193,7 @@ describe('Explain scoped assembly safety', () => {
       // head's (which reproduces 111192bc…); every changed leaf is exactly the five AIE constants, nothing else.
       // BYPASS1: the AIE's Q4 host entry only: 36,964 → 38,001 bytes (captured against staging's body; the tool-less Explain
       // carries no stated-figure rule).
-      // T2A5 (#3002, AIE T2A5): the AIE's coach sentence only: 38,001 → 38,008 bytes. The previous head's (staging 14b1e544) SENT
-      // instructions reproduce 22670bbd…; replacing exactly the AIE's three texts with staging's on the SENT body gives them.
-      .toBe('784408395d9202ebe2cbfe08b7104d89b6f6f6dd5eafc687f16a5963efa3d7b3');
+      .toBe('22670bbd50f8c219bf262af8b8bff60d3adbbfb7207c8c8a8374ed60e2a0ff49');
   },60000);
 });
 

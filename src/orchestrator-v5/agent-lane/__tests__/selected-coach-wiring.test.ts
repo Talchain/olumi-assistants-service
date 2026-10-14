@@ -35,10 +35,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // BYPASS1 (14 Oct): the AIE's Q4 next-step rule appended last (#94 6158232014, verbatim): 21,188 → 22,225 bytes. Every
 // captured body differs from staging's only by this HOST and, on the Agent call that offers tools, the stated-figure rule
 // after the shared instructions (10 leaves; 0 unexplained).
-// + T2A5 (#3002, AIE rulings on #94 6157593360, key T2A5): the AIE's coach sentence only (`coach-route-v0_2.ts`, "Links whose band
-//   the user themselves stated …"): +7 bytes in the host contract (22,225 → 22,232 bytes). The previous head's (staging 14b1e544) SENT bytes reproduce
-//   94d4e35f… / 2896fa86…; replacing exactly the AIE's three texts with staging's on the SENT bodies gives them byte for byte.
-const HOST_SHA = 'c716ececa934ccdbff3c7baa660ce804071471244d42f0360cfcc9fc0c62c019';
+const HOST_SHA = '94d4e35f5fa29a4ba645ba7c03d18438d1540a612d815d3ed9f204e81270be08';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -76,9 +73,8 @@ const HOST_SHA = 'c716ececa934ccdbff3c7baa660ce804071471244d42f0360cfcc9fc0c62c0
 // + #2994 AMEND (AIE Q2): the host contract above only: 32,007 → 32,185 bytes. The previous head's SENT prefix reproduces
 //   1a6ad616…; swapping in this HOST gives exactly this, and the captured bodies differ only by the five AIE constants.
 // + BYPASS1: the host contract above only: 32,185 → 33,222 bytes; staging's SENT prefix with this HOST swapped in.
-// + T2A5 (#3002): the host contract above only: 33,222 → 33,229 bytes (+7, the AIE's coach sentence); same leaf-diff proof.
-const RENDERED_SHA = 'ce17943464778aad30140ecfaed74790cc6544f3135aadf6d2c58d42b6f7d540';
-const RENDERED_BYTES = 33_229;
+const RENDERED_SHA = '2896fa86c033bf4ba49b8fafb95e5e91f7e862a855a8998e1c9f6bbf1add6c73';
+const RENDERED_BYTES = 33_222;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.

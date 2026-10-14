@@ -22,13 +22,9 @@ export const STRENGTHEN_PRESS_CHIP_ID = 'agent-next-strengthen';
 /** The proposal's basis (provenance, never shown as the user's words). */
 export const STRENGTHEN_CARD_RATIONALE = 'This link has no size yet; ask how much it changes its target.';
 
-/**
- * A sized link supplies its STORED band, declared `stored` so the door carries that band's stored origin by identity. An
- * unsized target supplies only its labels for a size ask.
- */
+/** A sized link supplies a proposed band. An unsized target supplies only its labels for a size ask. */
 export interface LinkStrengthsCardArgs {
-  readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength?: StrengthenPlaceholderTarget['band'];
-    readonly origin?: 'stored' }];
+  readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength?: StrengthenPlaceholderTarget['band'] }];
   readonly rationale: string;
 }
 
@@ -42,14 +38,8 @@ export function linkStrengthsCardArgs(
   link: Pick<StrengthenPlaceholderTarget, 'from_label' | 'to_label' | 'band'>,
   rationale: string,
 ): LinkStrengthsCardArgs {
-  /**
-   * ⭐ #3002 known-origin transport, the AIE's producer AMEND (packet 2b19ae59): this card's band is the link's STORED band
-   * (`linkTargetOf`), a copy, never a new estimate, and "not the user's" is not proof of Olumi's. It declares `stored`, and the
-   * door carries the stored origin by identity: Olumi's estimate stays Olumi's (the card reviews it), the user's stays the
-   * user's ("already"), and any other stored band is unknown, left out and named. No basis is claimed for it.
-   */
   return { links: [{ from_label: link.from_label, to_label: link.to_label,
-    ...(link.band === undefined ? {} : { strength: link.band, origin: 'stored' as const }) }], rationale };
+    ...(link.band === undefined ? {} : { strength: link.band }) }], rationale };
 }
 
 export interface StrengthenCard {

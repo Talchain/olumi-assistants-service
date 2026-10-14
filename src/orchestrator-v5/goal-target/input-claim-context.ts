@@ -214,39 +214,3 @@ export function namesBothEnds(text: string, nodes: readonly Entity[], from: stri
   return [labelOf(from), labelOf(to)].every((end) =>
     factorTheUserNamed(end, text, { options: [], others: nodes.map((n) => n.label).filter((x) => x !== end) }));
 }
-
-/**
- * ⭐ T2A5 (AIE rulings on 6157593360, 14 Oct): whose band a link set's `strength` is. The AI reads the meaning and quotes the
- * user's complete, still-operative statement as `from_words`; the host only VERIFIES it, mechanically:
- * - verbatim in a VERIFIED user message, this one or an earlier one (the latest that holds it);
- * - a whole statement of that message: a substring that drops "Alice says …", "Olumi suggested …" or "I disagree" is not;
- * - bound to THIS directed link by the quote's own words (both ends, or in THIS message "<X> effects" or the one bound
- *   selection), so one named end never binds;
- * - agreed by its whole message's reading (attribution, framing, dispute and disowning still reject it), and not superseded
- *   by a later verified message.
- * `copied`: no verified quote, yet the conversation (verified or not) reads THIS band for THIS link, so the band is copied
- * or unknown material, never Olumi's own new estimate (`statementOrigin` makes it unknown).
- */
-export function linkBandSource(quote: unknown, band: InfluenceBand, conversation: {
-  readonly messages: readonly string[]; readonly thisMessage?: string; readonly unverified?: string;
-}, nodes: readonly Entity[], from: string, to: string, bound: readonly Link[]): { readonly verified: boolean; readonly copied: boolean } {
-  const messages = conversation.messages.map(plainQuote);
-  const now = conversation.thisMessage === undefined ? -1 : messages.lastIndexOf(plainQuote(conversation.thisMessage));
-  const reading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, i === now ? { bound } : undefined);
-  // Copying is read more widely than credit: "<X> effects" in an earlier or unverified message also holds the band.
-  const copyReading = (i: number, text: string) => latestLinkBands(text, nodes, from, to, { bound: i === now ? bound : [] });
-  const namesTheLink = (text: string): boolean => namesBothEnds(text, nodes, from, to);
-  const said = typeof quote === 'string' ? plainQuote(quote) : '';
-  const whole = (message: string): boolean => wholeStatementIn(message, said);
-  let k = -1;
-  for (let i = messages.length - 1; i >= 0 && k < 0; i -= 1) if (whole(messages[i]!)) k = i;
-  const verified = k >= 0 && (reading(k, said)?.includes(band) ?? false) && (reading(k, messages[k]!)?.includes(band) ?? false)
-    // A later verified message that names this link without affirming THIS band (another band, a denial, a withdrawal)
-    // supersedes the quote.
-    && messages.slice(k + 1).every((m, j) => { const later = reading(k + 1 + j, m); return later === null ? !namesTheLink(m) : later.includes(band); });
-  // ANY verified message holding this band for this link, superseded or not (conflicting origin stays unknown, AIE), or
-  // unverified words holding it: copied or unknown material, never Olumi's own new estimate.
-  const copied = !verified && (messages.some((m, i) => copyReading(i, m)?.includes(band) ?? false)
-    || (latestLinkBands(conversation.unverified, nodes, from, to, { bound: [] })?.includes(band) ?? false));
-  return { verified, copied };
-}
