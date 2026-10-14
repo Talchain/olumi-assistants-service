@@ -4,7 +4,7 @@ import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
-import { linkBandSource } from '../../goal-target/input-claim-context.js';
+import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -13,7 +13,17 @@ import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalRea
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskHoldsNowCardWords, riskHoldsNowRecordedWords, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { userStatementOf, verifyStatements, type UserStatement } from '../user-statements.js';
+import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
+/**
+ * The binder's misses the option reading answers (served hiring negative r3): the clause split at a colon, an article that
+ * counts the option's noun rather than the label's, a source change the clause counts as one. Every other miss (which link,
+ * an unclear or level figure, a figure of another quantity) stands.
+ */
+const OPTION_READS_PAST: ReadonlySet<string> = new Set(['not_one_statement', 'figure_counts_another_unit', 'figures_not_in_statement']);
+/** ⛔ Wrong author (served hiring 14 Oct): Olumi's claim, reported, framed, disputed or disowned, is never the user's figure. */
+const NOT_THE_USERS_CLAIM = 'Nothing was prepared: these words report, dispute or disown Olumi\u2019s estimate, so they are not the user\u2019s own figure. '
+  + 'Ask the user for their own figure, in their words.';
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
@@ -5017,7 +5027,14 @@ export function createAgentCapabilities(
             else fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
             continue;
           }
-          const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
+          const contextMiss = linkEffectQuoteContextMiss(entryQuote, text);
+          if (contextMiss === null && quoteIsNotTheUsersClaim(text, entryQuote)) { fail('not_the_users_statement', NOT_THE_USERS_CLAIM); continue; }
+          const binderMiss = contextMiss ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
+          // S2: the statement read through the option that sets the source (`optionStatedLinkEffect`): it binds what the binder
+          // cannot read, and counts one of what the option adds in the source's own unit.
+          const viaOption = contextMiss !== null || (binderMiss !== null && !OPTION_READS_PAST.has(binderMiss)) ? null
+            : optionStatedLinkEffect(working, { from: from.id, to: to.id }, entryQuote, stated, { now: ctx.user_turn_text });
+          const miss = viaOption !== null ? null : binderMiss;
           if (miss === 'figures_not_in_statement') {
             // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510): ONE fixed
             // question, said exactly, with the canvas route that always works.
@@ -5033,7 +5050,9 @@ export function createAgentCapabilities(
               linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question), from, to));
             continue;
           }
-          const said = statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label }, statedScope) ?? entryQuote;
+          const said = (binderMiss === null ? statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label }, statedScope) : null)
+            ?? viaOption?.statement.quote ?? entryQuote;
+          if (viaOption?.per_source_change_unit !== undefined) stated.per_source_change_unit = viaOption.per_source_change_unit;
           const endpoints = linkEffectTargetOf(working, from.id, to.id);
           if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
             fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
@@ -5153,7 +5172,16 @@ export function createAgentCapabilities(
           ? { ok: false, mutated: false, refusal: 'no_such_link', detail: linkEffectNoSuchLinkWords(g.raw, from, to) }
           : { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
       }
-      const miss = linkEffectQuoteContextMiss(quote, text) ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
+      const contextMiss = linkEffectQuoteContextMiss(quote, text);
+      if (contextMiss === null && quoteIsNotTheUsersClaim(text, quote)) {
+        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: 'not_the_users_claim', detail: NOT_THE_USERS_CLAIM };
+      }
+      const binderMiss = contextMiss ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
+      // S2: the statement read through the option that sets the source (`optionStatedLinkEffect`): it binds what the binder
+      // cannot read, and counts one of what the option adds in the source's own unit.
+      const viaOption = contextMiss !== null || (binderMiss !== null && !OPTION_READS_PAST.has(binderMiss)) ? null
+        : optionStatedLinkEffect(g.raw, { from: from.id, to: to.id }, quote, statedEffect, { now: ctx.user_turn_text });
+      const miss = viaOption !== null ? null : binderMiss;
       if (miss === 'figures_not_in_statement') {
         // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510, where Olumi's
         // own suggested sentence was refused 3/3): ONE fixed question, said exactly, with the canvas route that always works.
@@ -5169,7 +5197,8 @@ export function createAgentCapabilities(
           detail: linkEffectUnitAskWords(ask, from, to) };
       }
       // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
-      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      const said = (binderMiss === null ? statingSentenceOf(quote, statedEffect, statedEnds, statedScope) : null) ?? viaOption?.statement.quote ?? quote;
+      if (viaOption?.per_source_change_unit !== undefined) statedEffect.per_source_change_unit = viaOption.per_source_change_unit;
       const endpoints = linkEffectTargetOf(g.raw, from.id, to.id);
       if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
         return { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
@@ -5181,7 +5210,7 @@ export function createAgentCapabilities(
       }
       // RT-6 row 1b (Science #87 6005615422): an end stated by its node's own LABEL is read as that node's unit, a reading
       // the card shows for approval (never a silent credit).
-      const labelled = withLabelCountUnits(g.raw, from.id, to.id, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit }, said);
+      const labelled = withLabelCountUnits(g.raw, from.id, to.id, statedEffect, said);
       const stated = labelled.effect;
       const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
       const selected = linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {};
