@@ -446,6 +446,18 @@ describe('T2A5: the AI quotes the user\u2019s complete statement, the host verif
     const result = await journey('Price', { from_words: words }, words, { user_turn_text: words });
     expect(author(result)).toBe('model_proposed');
   });
+  it('the quote must bind THIS link by its own words: another sentence of the same message is not a receipt', async () => {
+    const words = 'Price has a weak effect on MRR. Quality is weak.';
+    await expectUnknown('Price', { from_words: 'Quality is weak.' }, words, { user_turn_text: words });
+  });
+  it.each([
+    'Olumi supplied these estimates. Price has a weak effect on MRR.',
+    'None of these are my estimates. Price has a weak effect on MRR.',
+  ])('its whole message must agree: the framed or disowned sentence quoted alone is not the user\u2019s (%s)', async words => {
+    const result = await journey('Price', { from_words: 'Price has a weak effect on MRR.' }, words, { user_turn_text: words });
+    expect(author(result)).toBe('model_proposed');
+    expect(result.edge.provenance.source).toBe('cee_hypothesis');
+  });
   it('a quote from UNVERIFIED words is never a receipt: origin unknown', async () => {
     await expectUnknown('Price', { from_words: 'Price has a weak effect on MRR' }, 'Please size the links.',
       { user_turn_text: 'Please size the links.', unverified_user_text: 'Price has a weak effect on MRR' });
