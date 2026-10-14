@@ -3379,30 +3379,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         };
       }
     }
-    // Request 1 returns the existing canonical result without waiting for narration.
-    // Request 2 is a typed read-only follow-up; it cannot fall through to the tool-enabled Agent.
-    if (result === undefined && approvedProposal === undefined && isRunExplanationChip(explanationId)) {
-      const fastStartedAt = Date.now();
-      const st = await readBackState(readingDispatch, scenarioId);
-      explanationRead = st;
-      // This is the same cached canonical read, carrying the producer's selected-Run delta.
-      // Never recover a delta from an earlier tool output or calculate one in the narration layer.
-      const selectedRead = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
-      explanationBriefText = typeof selectedRead.json.brief_text === 'string' ? selectedRead.json.brief_text : null;
-      const currentRead = selectedRead.status === 200
-        ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
-      let matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
-        && (body['chip'] as { action_type?: unknown } | undefined)?.action_type !== 'run_analysis'
-        && runExplanationMatches(explanationId, scenarioId, st);
-      const priorAndRun = [
-        ...(history ?? []),
-        { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
-      ];
+    /**
+     * THE ONE INTERPRETING CALL over the Run the canonical read selects: the Explain press (request 2 below) and the automatic
+     * Run after a committed change (#3038; Paul, #94 6166259456: "run analysis and science-based AI coaching after every
+     * implemented change"). The same canonical assembly, asked-once handling, rerun plan from the selected delta (the
+     * comparison #3036 gives the model) and tool-less call; `admit` false spends no call.
+     */
+    const interpretSelectedRun = async (st: Awaited<ReturnType<typeof readBackState>>, runDelta: unknown,
+      conversation: readonly unknown[], admit: boolean) => {
+      let admitted = admit;
       // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
       const canonicalAfterRun: Awaited<ReturnType<typeof capabilities.getCanonicalState>> = { ...await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' }),
         ...await interventionForModel(st, 'narration') };
       // A refused canonical read follows the same early refusal as an unmatched Explain control.
-      if (canonicalAfterRun.ok !== true) matches = false;
+      if (canonicalAfterRun.ok !== true) admitted = false;
       const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;
       // ⭐ NEVER RE-ASK (G1b d4): retain the Explain path's asked-once handling on the canonical finding.
       const goalChanceRead = selectedRun?.goal_chance as { say: string } | undefined;
@@ -3430,7 +3420,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
         ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
       } };
-      const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
+      const explanationInput = [...conversation, { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];
       const standingAfterRun = leaderStandingOf(st);
@@ -3441,8 +3431,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const graphNodes = Array.isArray((st.graph as { nodes?: unknown } | null)?.nodes) ? (st.graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
       // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
       // from the pair's own persisted Run facts (never on the wire).
-      const pairRead = await rerunPairReadForRunDelta(scenarioId, String(req.id), currentRead?.run_delta);
-      const rerunPlan = rerunExplanationPlan(currentRead?.run_delta,
+      const pairRead = await rerunPairReadForRunDelta(scenarioId, String(req.id), runDelta);
+      const rerunPlan = rerunExplanationPlan(runDelta,
         (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
         [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
           ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
@@ -3452,8 +3442,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
-      runInterpreted = matches;
-      if (runInterpreted) try {
+      let words: string | null = null;
+      if (admitted) try {
         // 2a: the interpret role's measured budget (Sol, effort low) and a deadline; the Run stands whatever happens here.
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
@@ -3488,7 +3478,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
         else if (answer.trim().length > 0) {
           explanationReady = true;
-          narratorWords = answer;
+          words = answer;
           // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
           const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
           if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
@@ -3503,10 +3493,35 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
       }
+      return { admitted, interpreted, explanationReady, rerunPlan, words, providerMs: admitted ? Date.now() - providerStartedAt : 0 };
+    };
+    // Request 1 returns the existing canonical result without waiting for narration.
+    // Request 2 is a typed read-only follow-up; it cannot fall through to the tool-enabled Agent.
+    if (result === undefined && approvedProposal === undefined && isRunExplanationChip(explanationId)) {
+      const fastStartedAt = Date.now();
+      const st = await readBackState(readingDispatch, scenarioId);
+      explanationRead = st;
+      // This is the same cached canonical read, carrying the producer's selected-Run delta.
+      // Never recover a delta from an earlier tool output or calculate one in the narration layer.
+      const selectedRead = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+      explanationBriefText = typeof selectedRead.json.brief_text === 'string' ? selectedRead.json.brief_text : null;
+      const currentRead = selectedRead.status === 200
+        ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
+      const admit = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
+        && (body['chip'] as { action_type?: unknown } | undefined)?.action_type !== 'run_analysis'
+        && runExplanationMatches(explanationId, scenarioId, st);
+      const priorAndRun = [
+        ...(history ?? []),
+        { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
+      ];
+      const { admitted: matches, interpreted, explanationReady, rerunPlan, words, providerMs: interpretMs } =
+        await interpretSelectedRun(st, currentRead?.run_delta, recentRunExplanationConversation(history ?? []), admit);
+      runInterpreted = matches;
+      if (words !== null) narratorWords = words;
       narrationStatus = matches ? explanationReady ? 'ready' : 'unavailable' : 'stale';
       fastPath = 'explain';
       const ms = Date.now() - fastStartedAt;
-      const providerMs = runInterpreted ? Math.min(Date.now() - providerStartedAt, ms) : 0;
+      const providerMs = runInterpreted ? Math.min(interpretMs, ms) : 0;
       // M2: with no interpretation, a rerun still says Olumi's code line rather than nothing about what changed.
       const text = interpreted?.answer ?? (matches
         ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
@@ -4157,6 +4172,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (autoRun !== undefined && autoRun.ran !== true) {
       text = `${text}\n\n${interpretationUnavailableText({ ran: false, ...(autoRun.refusal !== 'run_failed' ? { refusal: autoRun.refusal } : {}),
         what_is_missing: (autoRun as { what_is_missing?: unknown }).what_is_missing }, true)}`;
+    }
+    /**
+     * ⭐ THE AUTOMATIC RUN IS INTERPRETED IN ITS OWN TURN (DL, after #3038): it ran after the Agent answered, so the Agent
+     * never read it. ONE interpreting call, the Explain press's own (`interpretSelectedRun`): the coaching on the NEW result,
+     * and what changed since the preceding Run (the selected delta, #3036's comparison). Only when the canonical read selects
+     * THIS Run (its identity); with no interpretation, the Explain press's own fallback words.
+     */
+    const autoRunIdentity = autoRun?.ran === true ? (autoRun as { run_identity?: unknown }).run_identity : undefined;
+    // A Run with no identity to bind is never interpreted, and costs no read.
+    if (autoRunIdentity !== undefined) {
+      const autoRead = await readBackState(readingDispatch, scenarioId);
+      const readRun = { scenario_id: scenarioId,
+        graph_hash_at_run: (autoRead.analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
+        computed_at: (autoRead.analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at };
+      // The read selects another Run: nothing more is read or called for this one.
+      const selected = compareAnalysisRunFactIdentity(autoRunIdentity, readRun).status === 'match';
+      // The same kept read (no write since), carrying the producer's selected-Run delta, as on the Explain press.
+      const selectedRead = selected ? await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}) : undefined;
+      const currentRead = selectedRead?.status === 200
+        ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
+      const interpretedRun = !selected ? undefined
+        : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true);
+      if (interpretedRun?.admitted === true) {
+        const said = interpretedRun.interpreted?.answer
+          ?? interpretedRun.rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true });
+        text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
+        result = { ...result,
+          // The next turn sees the interpretation: an id-less assistant message, which needs no reasoning item.
+          items: [...result.items, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }],
+          timing: { ...result.timing, provider_ms: result.timing.provider_ms + interpretedRun.providerMs,
+            provider_calls: result.timing.provider_calls + 1 } };
+      }
     }
     // The AIE conflict copy is a source-owned limitation, not a narration to paraphrase.
     const hiringConflicts = result.tool_results.filter(r => r.refusal === 'hiring_bound_conflict' && typeof r.detail === 'string');

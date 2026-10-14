@@ -37,6 +37,14 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 type Chip = { id: string; label: string; message: string; action_type?: string };
+/** The Explain press's interpreting call: no tools at all, `tool_choice: 'none'` (agent-v1-turn.ts `interpretSelectedRun`). */
+const isInterpretingCall = (body: Record<string, unknown>): boolean => body['tool_choice'] === 'none'
+  && Array.isArray(body['tools']) && (body['tools'] as unknown[]).length === 0;
+/** That call's request: the last input item's JSON (`{ request, canonical_state }`). */
+const interpretingRequestOf = (body: Record<string, unknown>): { request?: string; canonical_state?: { ok?: boolean } } => {
+  const last = (body['input'] as { content?: { text?: string }[] }[]).at(-1);
+  return JSON.parse(last?.content?.[0]?.text ?? '{}') as { request?: string; canonical_state?: { ok?: boolean } };
+};
 
 describe('the explicit Run is offered after a change the canonical readiness admits', () => {
   let app: FastifyInstance;
@@ -59,6 +67,12 @@ describe('the explicit Run is offered after a change the canonical readiness adm
   let approvalReads = 0;
   /** Scripted model outputs for an agent-loop turn, consumed in order before the default behaviour. */
   let script: Record<string, unknown>[] = [];
+  /** The Run response's own stamp (its result's graph hash, its `computed_at`); null → an unstamped Run, as before. */
+  let runStampedAt: string | null = null;
+  /** The preceding Run's delta the read (`current_read`) and the Run response carry; undefined → a first Run. */
+  let runDelta: unknown;
+  /** The interpreting call's words (tool-less, `tool_choice: 'none'`); null → the default answer below. */
+  let interpretation: string | null = null;
   /** A route instance on FRESH modules: an empty process cache and an empty proposal store. */
   async function buildRouteApp(): Promise<FastifyInstance> {
     vi.resetModules();
@@ -74,12 +88,17 @@ describe('the explicit Run is offered after a change the canonical readiness adm
         analysis_ready: readiness,
         analysis_state: runs > 0 ? { ...analysisState, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } } : analysisState,
         ...(runs > 0 ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } } } : {}),
+        ...(runs > 0 && runDelta !== undefined ? { current_read: { run_delta: runDelta } } : {}),
       };
     });
     a.post('/orchestrate/v2/turn', async (req) => {
       const b = req.body as { kind?: string; event?: { from: string; to: string }; chip?: { action_type?: string } };
       if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
       if (b.chip?.action_type === 'run_analysis') runs += 1;
+      if (b.chip?.action_type === 'run_analysis' && runStampedAt !== null) {
+        return { assistant_text: 'ok', blocks: [{ type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: {} }], analysis_ready: readiness,
+          analysis_state: { run_state: { kind: 'complete_current', computed_at: runStampedAt } }, ...(runDelta !== undefined ? { run_delta: runDelta } : {}) };
+      }
       return { assistant_text: 'ok', blocks: b.chip?.action_type === 'run_analysis' ? [{ type: 'analysis_result', data: {} }] : [], analysis_ready: readiness };
     });
     await a.register(agentV1TurnRoute);
@@ -92,6 +111,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       modelBodies.push(body);
       const runCall = runPressToolResponse(body);
       if (runCall) return runCall;
+      if (interpretation !== null && isInterpretingCall(body)) {
+        return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }] }), { status: 200 });
+      }
       if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
@@ -107,7 +129,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; graphReads = 0; approvalReads = 0; script = []; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; graphReads = 0; approvalReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -285,6 +307,77 @@ describe('the explicit Run is offered after a change the canonical readiness adm
    * ⛔ Independent review of #1792 (5806213240): the durable row keeps the words only, so a
    * retry of the SAME turn_id after a lost response replayed with no Run and no approve control.
    */
+  /**
+   * ⭐ THE AUTOMATIC RUN IS INTERPRETED IN ITS OWN TURN (DL, after #3038; Paul #94 6166259456: "science-based AI coaching
+   * after every implemented change"). The Run follows the approval, so no Agent read it: ONE interpreting call, the Explain
+   * press's own, over THIS Run (its run-fact identity on the read), and its words are the reply's coaching on the new result.
+   */
+  describe('the automatic Run is interpreted in its own turn', () => {
+    const RUN_AT = '2026-10-01T12:00:00.000Z';
+    const COACHING = 'This Run reads the model as you just saved it, with the link from Team size to Velocity included.';
+    /** The preceding Run's delta: the approved link entered the analysis (one typed row, complete coverage). */
+    const LINK_ENTERED = {
+      attribution_case: 'C1_attributable', input_coverage: 'complete', win_probabilities: [], goal_chances: [], flip_thresholds: [],
+      leader: { changed: false, noise_verdict: 'not_noise_qualified' },
+      input_changes: [{ entity_kind: 'link', field: 'presence', link: { from: 'f1', to: 'o1' }, before: null, after: { raw: true } }],
+    };
+    const CODE_LINE = 'The link from ‘Team size’ to ‘Velocity’ is now part of the analysis.';
+    const approveAndRun = async () => {
+      readiness = { status: 'ready', may_run: true };
+      interpretation = COACHING;
+      const b = await proposeThenApprove() as unknown as { assistant_text: string; suggested_actions: Chip[] };
+      expect(runs, 'the automatic Run ran once').toBe(1);
+      return b;
+    };
+
+    it('RED: approve → the Run runs → ONE interpreting call over THIS Run; the reply carries its coaching', async () => {
+      runStampedAt = RUN_AT;
+      const b = await approveAndRun();
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls, 'one interpreting call').toHaveLength(1);
+      const sent = interpretingRequestOf(calls[0]!);
+      const { RUN_EXPLANATION_MESSAGE } = await import('../run-explanation.js');
+      expect(sent.request, 'the Explain press\'s own request').toBe(RUN_EXPLANATION_MESSAGE);
+      expect(sent.canonical_state?.ok, 'over the canonical read after the Run').toBe(true);
+      expect(b.assistant_text).toContain(COACHING);
+    });
+
+    it('RED (compare): with the preceding Run\'s delta, the call is given the Run record and the reply leads with it', async () => {
+      runStampedAt = RUN_AT;
+      runDelta = LINK_ENTERED;
+      const b = await approveAndRun();
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0]!['instructions']), 'what changed, from the delta\'s typed row').toContain(`Run record: "${CODE_LINE}`);
+      expect(b.assistant_text).toContain(`${CODE_LINE}`);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(b.assistant_text.indexOf(CODE_LINE)).toBeLessThan(b.assistant_text.indexOf(COACHING));
+    });
+
+    it('ADVERSARIAL: the read selects another Run (same hash, another computed_at) → no interpreting call, no coaching', async () => {
+      runStampedAt = '2026-10-01T11:59:00.000Z';
+      const b = await approveAndRun();
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).not.toContain(COACHING);
+    });
+
+    it('CONTRAST: a Run with no stamp to bind → no interpreting call', async () => {
+      const b = await approveAndRun();
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(b.assistant_text).not.toContain(COACHING);
+    });
+
+    it('CONTRAST: a turn that commits nothing runs nothing and interprets nothing', async () => {
+      readiness = { status: 'ready', may_run: true };
+      runStampedAt = RUN_AT;
+      interpretation = COACHING;
+      const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.' } });
+      expect(t1.statusCode).toBe(200);
+      expect(runs).toBe(0);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+    });
+  });
+
   describe('a durable replay re-offers the original typed actions, re-validated on today\'s state', () => {
     const replay = async (payload: Record<string, unknown>) => {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
