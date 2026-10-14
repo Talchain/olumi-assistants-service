@@ -150,6 +150,12 @@ export function riskOccurrenceSubject(graph: unknown, nodeId: string):
     : { kind: 'eligible', node, window_months: window, goal_id: goalId as string, goal };
 }
 
+/** S2 holds now, from the brief: the risk's admission-verified brief sentence (`NodeV3.already_true_quote`), or `undefined`. */
+export function alreadyTrueQuoteOf(node: unknown): string | undefined {
+  const q = isRec(node) && node.kind === 'risk' ? node.already_true_quote : undefined;
+  return typeof q === 'string' && q.trim() !== '' && !/[\r\n]/.test(q) ? q.trim() : undefined;
+}
+
 /** The user's "holds now" as a validated block: certain over the window, the user's own (`ApprovedRiskOccurrence.holds_now`). */
 export function userHoldsNowBlock(windowMonths: number): EventRiskV1T | undefined {
   const parsed = EventRiskV1.safeParse({ version: 1,

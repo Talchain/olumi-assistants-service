@@ -756,6 +756,14 @@ export const NodeV3 = z.object({
    */
   relies_on: z.object({ option_id: z.string().regex(CANONICAL_ID_REGEX) }).strict().optional().catch(undefined),
   /**
+   * ⭐ S2 HOLDS NOW, FROM THE BRIEF (DL 14 Oct, marketing de659cfd: "I'm not that experienced with marketing" was asked as an
+   * occurrence). A RISK node only: the brief's own whole sentence saying this risk is ALREADY the case now, as the drafter read
+   * it (`already_true_evidence`) and admission verified it (a whole statement of the brief). It is not a level: the holds-now
+   * card quotes it, and only the user's press records the risk as holding (`event_risk`, basis user). CEE-owned; not in the
+   * analysis hash. Malformed on read degrades to absence.
+   */
+  already_true_quote: z.string().min(1).optional().catch(undefined),
+  /**
    * ⭐ AIE LAWS RULING, SAME COHORT (option nodes only; science PR-4, `goal-target/cohort-forecast.ts`). This option's forecast
    * of the goal window's ONE cohort: the people it reaches over the window (a point, its own uncertainty excluded and said so)
    * and their conversion's likely range, read as the MIDDLE HALF (25th–75th percentile; never a min–max, never a 90% interval).

@@ -1,6 +1,7 @@
 export { reencodedSiblingDiff } from './level-batch-frame.js';
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
+import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 import { readProductIdentityCarrier as readCarrier } from '../admission/identity-evaluations.js';
 /**
@@ -241,7 +242,9 @@ export interface CandidateModel {
    * `rerouteExtraParentsOfProductGoal` writes it on a duplicate effect, and automatic draft widening writes it on
    * a server-authored, zero-edge suggestion whose attachment is retained as metadata.
    */
-  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded'; draft_widening?: DraftRiskWideningT }[];
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded'; draft_widening?: DraftRiskWideningT;
+    /** S2 holds now, from the brief: the drafter's reading that the brief says this risk is ALREADY the case (a whole sentence). */
+    already_true_evidence?: { readonly quote: string } | null }[];
   readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
@@ -553,6 +556,8 @@ export interface AdmittedNode {
    */
   provenance?: ProvenanceDisplay;
   draft_widening?: DraftWideningT;
+  /** S2 holds now, from the brief: the brief's whole sentence saying this risk is already the case (`NodeV3.already_true_quote`). */
+  already_true_quote?: string;
   proposed_by?: 'olumi';
   analysis_participation?: 'included' | 'retained_excluded';
   /**
@@ -4172,6 +4177,10 @@ function admitOnce(
         ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
         ...(r.draft_widening !== undefined ? { draft_widening: r.draft_widening, proposed_by: 'olumi' as const,
           analysis_participation: 'retained_excluded' as const } : {}),
+        // ⭐ S2 holds now, from the brief (DL 14 Oct): kept only when it is a WHOLE sentence of the brief (T2A5's one check); any
+        // other words are dropped, so the risk keeps today's ask. Not a level: only the user's press on its card records it.
+        ...(typeof r.already_true_evidence?.quote === 'string' && typeof brief === 'string' && wholeStatementIn(brief, r.already_true_evidence.quote)
+          ? { already_true_quote: r.already_true_evidence.quote.trim() } : {}),
       };
       return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
     }),
