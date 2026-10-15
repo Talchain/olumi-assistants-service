@@ -6,7 +6,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { approvalChipsFor } from '../approval-chips.js';
 import { createProposal } from '../proposal.js';
-import { statedRangeAssumptionWords } from '../runtime/agent-capabilities.js';
+import { STATED_RANGE_CARD_CLOSING, statedRangeAssumptionWords } from '../runtime/agent-capabilities.js';
 
 describe('approval chips', () => {
   it('one proposal offered, nothing authorised → an approve chip and an amend chip', () => {
@@ -59,16 +59,19 @@ describe('approval chips', () => {
         expect(chip?.label).not.toBe('Use this reading');
         expect(chip?.message).not.toBe('Yes, use this reading.');
       });
-    it('the words keep the range as stated, then the fit as Olumi\'s proposed approximation (AIE 6183364243); never "middle half"', () => {
+    it('the words keep the range as stated, then the fit as Olumi\'s proposed approximation (AIE 6184022140, exact); never "middle half"', () => {
       const words = statedRangeAssumptionWords('5 days', '20 days');
-      expect(words).toBe(". Your stated range: 5 days to 20 days, with the qualification that it is likely, and no conditions recorded. "
-        + "For this scenario, Olumi proposes an equal-tail approximation: about one chance in four below 5 days and one in four above 20 days, "
-        + "based on Olumi's standard reading of a plain likely range, not on evidence about this case, with the limitation that how values "
-        + "spread between and beyond those ends is also Olumi's assumption. Your words did not specify those tail probabilities. "
-        + "Pressing records your original range as you stated it and adopts this approximation; you can instead change or reject it");
+      expect(words).toBe(". Your stated range is 5 days to 20 days, with its qualification read as “likely”; any other qualifications or "
+        + "conditions in your words were not read. Olumi proposes an equal-tail approximation, about one chance in four below 5 days and one in "
+        + "four above 20 days, for this analysis, based on how the analysis treats a likely range (as its lower and upper quarter points), a "
+        + "modelling convention, not evidence about this case or what “likely” means, with the limitation that the shape of the spread is also "
+        + "Olumi’s assumption: always above zero, with a longer tail on the high side. Your words did not specify those tail probabilities or how "
+        + "values are distributed");
+      expect(STATED_RANGE_CARD_CLOSING).toBe('Use this reading to record your original range as stated and adopt the shown Olumi approximation. '
+        + 'You can change or reject it instead.');
       expect(words).not.toMatch(/middle half/i);
-      // AIE 6183364243: convenience never grounds equal tails, and lowest/highest is not the only other meaning.
-      expect(words).not.toMatch(/so the analysis can use it|lowest and highest possible/i);
+      // AIE 6183364243 / 6184022140: convenience never grounds equal tails; nothing asserts there are no conditions or a standard.
+      expect(words).not.toMatch(/so the analysis can use it|lowest and highest possible|no conditions recorded|standard reading/i);
     });
   });
 

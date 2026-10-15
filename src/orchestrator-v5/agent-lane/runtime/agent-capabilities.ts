@@ -1037,17 +1037,22 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  */
 /** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
 /**
- * ⭐ C2 (AIE 6180618773 row 2, DL ruling A; card clause AIE 6183364243): the user's range AS STATED, then the equal-tail
- * fit as Olumi's proposed approximation, never as the user's own calibration. Its basis is Olumi's standard reading of a
- * plain likely range (not evidence), and the spread's shape is Olumi's too. Nothing is recorded before the press, which
- * records the range and adopts the approximation ("Use this reading", AIE 6181498097).
+ * ⭐ C2 (AIE 6180618773 row 2, DL ruling A; template AIE 6184022140, exact): the user's range AS STATED, then the equal-tail fit
+ * as Olumi's proposed approximation, never as the user's own calibration. Filled only with what this path holds: the range is
+ * decided from TYPED arguments (its meaning and that the user gave it), never read from their sentence, so its other
+ * qualifications and conditions were not read, and the card says so rather than asserting there are none. The basis is the
+ * analysis's own convention for a likely range (ISL samples it as the quartiles of a lognormal, RATIFIED_COVERAGE 0.5): a
+ * modelling convention, not evidence or the meaning of "likely"; the lognormal's shape is said as its limitation.
  */
 export const statedRangeAssumptionWords = (low: string, high: string): string =>
-  `. Your stated range: ${low} to ${high}, with the qualification that it is likely, and no conditions recorded. `
-  + `For this scenario, Olumi proposes an equal-tail approximation: about one chance in four below ${low} and one in four above ${high}, `
-  + `based on Olumi's standard reading of a plain likely range, not on evidence about this case, with the limitation that how values `
-  + `spread between and beyond those ends is also Olumi's assumption. Your words did not specify those tail probabilities. `
-  + `Pressing records your original range as you stated it and adopts this approximation; you can instead change or reject it`;
+  `. Your stated range is ${low} to ${high}, with its qualification read as “likely”; any other qualifications or conditions in your `
+  + `words were not read. Olumi proposes an equal-tail approximation, about one chance in four below ${low} and one in four above ${high}, `
+  + `for this analysis, based on how the analysis treats a likely range (as its lower and upper quarter points), a modelling convention, `
+  + `not evidence about this case or what “likely” means, with the limitation that the shape of the spread is also Olumi’s assumption: `
+  + `always above zero, with a longer tail on the high side. Your words did not specify those tail probabilities or how values are distributed`;
+/** AIE 6184022140's exact closing, said once on a card that carries a likely range. */
+export const STATED_RANGE_CARD_CLOSING = 'Use this reading to record your original range as stated and adopt the shown Olumi approximation. '
+  + 'You can change or reject it instead.';
 
 function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
@@ -7555,7 +7560,8 @@ export function createAgentCapabilities(
             // TEMPORAL (AIQ 5909998288 / 5914439702): the reading is part of what the user approves, in their units.
             + (i.likelyRange !== undefined ? statedRangeAssumptionWords(likelyBound(i.likelyRange.low, i.unit), likelyBound(i.likelyRange.high, i.unit)) : '')).join('; ') +
           ambiguousClause(ambiguous) +
-          gaps.declarations.map(d => `; ${optionGapApprovalWords(optionNodes.nodes.find(n => n.id === d.optionId)!.label, d.mechanisms, optionGapOperands(g.raw, d.optionId)!)}`).join(''),
+          gaps.declarations.map(d => `; ${optionGapApprovalWords(optionNodes.nodes.find(n => n.id === d.optionId)!.label, d.mechanisms, optionGapOperands(g.raw, d.optionId)!)}`).join('') +
+          (ordered.some((i) => i.likelyRange !== undefined) ? `. ${STATED_RANGE_CARD_CLOSING}` : ''),
       });
       proposals.put(proposal);
       return {
