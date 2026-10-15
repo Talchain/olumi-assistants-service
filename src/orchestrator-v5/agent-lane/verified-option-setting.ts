@@ -839,6 +839,19 @@ function statedSettingQuote(model: CandidateModel, option: Option, intervention:
   return elsewhere ? null : quote;
 }
 
+/**
+ * SYSTEM 2 step 4: the brief's sentence that a risk holds NOW, through its verified `holds_now` statement (`{risk, label}`), as
+ * the one quote the statement door's card binds by (`already_true_quote`). Unconditional only, and exactly one sentence: a
+ * conditional reading, or two different sentences, is not "true now" as said, so it stays in the map (retained, unknown) and the
+ * risk keeps today's ask. It records nothing: only the user's press on the card does (AIE 6178729504 / 6181498097).
+ */
+export function statedHoldsNowQuote(model: CandidateModel, riskLabel: string, brief: string | undefined): string | undefined {
+  if (typeof brief !== 'string') return undefined;
+  const statements = sourceMapOf(Reflect.get(model, 'statements'), brief).verified.get(subjectKey({ kind: 'risk', label: riskLabel }, 'holds_now')) ?? [];
+  const quotes = [...new Set(statements.filter((s) => s.form === 'holds_now' && s.negated !== true && s.conditions === undefined).map((s) => s.quote.trim()))];
+  return quotes.length === 1 && !/[\r\n]/.test(quotes[0]!) ? quotes[0] : undefined;
+}
+
 /** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
 function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   return factor?.baseline_evidence != null && levelInContext(model, factor, brief, factor.baseline_evidence.quote, (text) => {

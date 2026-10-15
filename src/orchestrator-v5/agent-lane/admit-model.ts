@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { carriesStatements, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, statedHoldsNowQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -4210,8 +4210,10 @@ function admitOnce(
           analysis_participation: 'retained_excluded' as const } : {}),
         // ⭐ S2 holds now, from the brief (DL 14 Oct): kept only when it is a WHOLE sentence of the brief (T2A5's one check); any
         // other words are dropped, so the risk keeps today's ask. Not a level: only the user's press on its card records it.
-        ...(typeof r.already_true_evidence?.quote === 'string' && typeof brief === 'string' && wholeStatementIn(brief, r.already_true_evidence.quote)
-          ? { already_true_quote: r.already_true_evidence.quote.trim() } : {}),
+        // SYSTEM 2 step 4 (the whole-raw switch): a draft with statements[] gives it only through the risk's verified holds_now statement.
+        ...((q) => (q !== undefined ? { already_true_quote: q } : {}))(carriesStatements(model) ? statedHoldsNowQuote(model, r.label, brief)
+          : typeof r.already_true_evidence?.quote === 'string' && typeof brief === 'string' && wholeStatementIn(brief, r.already_true_evidence.quote)
+            ? r.already_true_evidence.quote.trim() : undefined),
       };
       return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
     }),
