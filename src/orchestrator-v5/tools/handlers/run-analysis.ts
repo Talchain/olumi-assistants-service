@@ -63,7 +63,7 @@ import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail
 import { GOAL_TARGET_ROLE } from '../../goal-target/goal-targets-joint.js';
 import { withTargetForecasts } from '../../goal-target/cohort-forecast.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
-import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
+import { withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd } from '../../goal-target/goal-horizon-verdict.js';
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
@@ -2302,6 +2302,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
     // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
     response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
+    // M3c (AIE 6181933060): an option not fully in place at the target's month, on its own recorded lead, is withheld, never "no change".
+    response = withholdOptionsNotInPlaceAtPeriodEnd(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 

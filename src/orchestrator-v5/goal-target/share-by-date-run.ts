@@ -39,9 +39,16 @@ export function shareChanceRunBlock(graph: unknown): { reason_code: 'team_time_r
   return null;
 }
 
+/** AIE 6182987896 (exact): the missing timing of an option's freed time. */
+export const OPTION_TIMING_UNRESOLVED = 'Your statement does not establish when the freed time becomes fully effective. That timing remains unresolved.';
+const OPTION_TIMING_UNRESOLVED_SHOWN = `Not shown. ${OPTION_TIMING_UNRESOLVED}`;
+
 /** Exact words for capacity metadata that cannot support the added option. */
 function capacityInputFailure(extra: Rec): string | null {
   if (typeof extra.capacity_ratio === 'number') {
+    // ⛔ AIE 6182987896: a freed-time option whose timing the user's words did not give holds NO lead (never L = 0), so a deadline
+    // chance that depends on it is not shown, for this option only; the words are the AIE's.
+    if (extra.ratio_relation?.kind === 'freed_time' && extra.lead_low === undefined && extra.lead_high === undefined) return OPTION_TIMING_UNRESOLVED_SHOWN;
     // AIE 6175233964: an uncertain start, a ramp or a random ratio has no supported joint law here, so it fails closed.
     if (extra.lead_low !== extra.lead_high) {
       return "Not shown. This option's start is given as a range, and this forecast can't yet work out a capacity change with an uncertain start. Say when it would take full effect.";
@@ -252,7 +259,9 @@ export function capacityRatioWords(part: Rec | undefined): string {
   // the time freed goes to the deliverable (adopted by that press, still Olumi's), and Olumi's timing assumption.
   if (basis?.relation === 'freed_time' && basis.source !== null && typeof basis.source === 'object' && typeof c.capacity_ratio === 'number') {
     const s = basis.source as Rec;
-    const when = typeof c.lead_low === 'number' && c.lead_low > 0 ? `from ${months(c.lead_low)} months in` : 'from now';
+    // ⛔ AIE 6182987896: no lead held = the timing is unresolved, never "from now".
+    const when = typeof c.lead_low === 'number' ? (c.lead_low > 0 ? `from ${months(c.lead_low)} months in` : 'from now')
+      : 'once it takes full effect, which your statement does not establish';
     const rest = (x: unknown): string => `${months(100 - Number(x))}%`;
     return `your figure of ${withUnit(s.withOption, s.unit)} for ${q(s.label)} with this option (${withUnit(s.today, s.unit)} today), `
       + `Olumi’s assumption that all the rest of the team’s time (${rest(s.today)} today, ${rest(s.withOption)} with this option) goes to ${q(basis.capacity)}, `
