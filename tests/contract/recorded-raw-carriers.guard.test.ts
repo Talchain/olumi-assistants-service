@@ -13,11 +13,33 @@ import { BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter } from '.
 const LIST = 'scripts/ci/recorded-raw-carriers.json';
 const TOKEN = /\b(?:baseline_evidence|stated_evidence)\b/g;
 const CONTROL = /\bfactor_label\b/g;
+/**
+ * Every draft a JSON fixture holds (an object with a `goal` and `factors` or `options`, also inside a JSON string such as a captured answer's
+ * text). A capture whose every draft carries `statements[]` is statement-era: it never reaches the recorded-raw reader, so it is
+ * not a recording the list tracks (AIE 6183705670's D3r1/D5r1 captures). Unparseable JSON counts, conservatively.
+ */
+function drafts(v: unknown, out: Record<string, unknown>[] = []): Record<string, unknown>[] {
+  if (typeof v === 'string' && /^\s*\{/.test(v)) { try { drafts(JSON.parse(v), out); } catch { /* not JSON */ } return out; }
+  if (Array.isArray(v)) { for (const x of v) drafts(x, out); return out; }
+  if (v !== null && typeof v === 'object') {
+    const r = v as Record<string, unknown>;
+    if (r.goal !== undefined && (Array.isArray(r.factors) || Array.isArray(r.options))) out.push(r);
+    for (const x of Object.values(r)) drafts(x, out);
+  }
+  return out;
+}
+export function statementEra(text: string): boolean {
+  try { const all = drafts(JSON.parse(text)); return all.length > 0 && all.every((d) => Array.isArray(d.statements)); } catch { return false; }
+}
 function census(pattern: RegExp): Record<string, number> {
   const files = execFileSync('git', ['ls-files', 'src', 'tests', 'scripts'], { encoding: 'utf8' }).split('\n')
     .filter((f) => /\.(ts|mts|js|mjs|json)$/.test(f) && f !== LIST && f !== 'tests/contract/recorded-raw-carriers.guard.test.ts');
   const out: Record<string, number> = {};
-  for (const f of files) { const n = (readFileSync(f, 'utf8').match(pattern) ?? []).length; if (n > 0) out[f] = n; }
+  for (const f of files) {
+    const text = readFileSync(f, 'utf8');
+    if (f.endsWith('.json') && statementEra(text)) continue;
+    const n = (text.match(pattern) ?? []).length; if (n > 0) out[f] = n;
+  }
   return out;
 }
 
@@ -38,6 +60,16 @@ describe('recorded-raw carriers: shrink-only', () => {
     expect(Object.keys(now).length).toBeGreaterThan(0);
     expect(Object.keys(census(CONTROL)).length).toBeGreaterThan(Object.keys(now).length);
     expect(now['src/orchestrator-v5/agent-lane/verified-option-setting.ts']).toBeGreaterThan(0);
+  });
+
+  it('a statement-era capture is not a recording: exempt only when EVERY draft in it carries statements[] (contrast: one without)', () => {
+    const era = readFileSync('tests/fixtures/sys2/pre-h0h1-d3r1.json', 'utf8');
+    expect(era.match(TOKEN)?.length ?? 0).toBeGreaterThan(0);
+    expect(statementEra(era)).toBe(true);
+    const d = JSON.parse(era) as Record<string, string>;
+    const one = JSON.parse(d.call1_text!) as Record<string, unknown>; delete one.statements;
+    expect(statementEra(JSON.stringify({ ...d, call1_text: JSON.stringify(one) }))).toBe(false);
+    expect(statementEra(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007-draft.json', 'utf8'))).toBe(false);
   });
 
   it('the drafter is never sent them: the strict provider schema and the instructions name neither carrier', () => {
