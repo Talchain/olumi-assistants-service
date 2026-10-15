@@ -11,6 +11,7 @@ import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAft
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { runFactsOf } from '../run-facts.js';
 import { userStatementsOn } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
@@ -4895,6 +4896,7 @@ export function createAgentCapabilities(
       const scopeIssues = g.goal_scope_reconciliation ?? [];
       const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
+      const modelContext = withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead);
       // Opt-in interpreter section. The default state remains the ordinary Agent's assembly.
       let explanationSection: Record<string, unknown> | undefined;
       if (options?.section === 'run_explanation') {
@@ -4932,7 +4934,14 @@ export function createAgentCapabilities(
         })) } : {}),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
-        ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
+        ...modelContext,
+        // ⭐ S7 step 1: the ONE Run-facts packet every AI call after a Run reads (`run-facts.ts`), with the comparison with the
+        // preceding Run exactly as this state gates it (the licensed `analysis.run_delta`, Olumi's `rerun_record`).
+        ...(g.analysis_result === undefined || g.analysis_result === null ? {} : { run_facts: runFactsOf(g.analysis_result, g.raw,
+          isPlainRecord(g.analysis_state) && isPlainRecord(g.analysis_state.run_state) && g.analysis_state.run_state.kind === 'complete_current',
+          { analysisState: g.analysis_state, analysisReady: g.analysis_ready, comparison: {
+            prior_run_id: g.run_delta?.endpoints?.prior.run_id,
+            run_delta: isPlainRecord(modelContext.analysis) ? modelContext.analysis.run_delta : undefined, rerun_record: rerunRecord } }) }),
         // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
         // host contract tells the AI to end its reply with that step; no host line says it.
         ...nextStepFactOf(g),
