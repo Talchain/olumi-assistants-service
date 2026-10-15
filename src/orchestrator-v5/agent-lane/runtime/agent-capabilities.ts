@@ -3922,7 +3922,7 @@ export function createAgentCapabilities(
     // holds, that the revision drops. ⭐ DEMO (served 34a4a4cb, Paul's founder brief): a goal with NO numeric target ("Larger fund
     // secured") is no loss to a correction: the revision keeps it qualitative, and no target is ever invented for it.
     // ⛔ AIE #94 6194613256 / DL: a target can be held two ways, as a target ROW or as the goal's own stated figure
-    // (the one goal record's `target.raw`, e.g. "at least 1.3 million" whose unit the analysis cannot yet use). Both count; neither is dropped.
+    // (the one goal record's `target.raw`, e.g. a stated "at least 1.3" whose unit the analysis cannot yet use). Both count; neither is dropped.
     const goalIn = (raw: unknown): Record<string, unknown> | undefined =>
       (((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? []).find((n) => n?.kind === 'goal');
     const savedGoalNode = goalIn(g.raw);

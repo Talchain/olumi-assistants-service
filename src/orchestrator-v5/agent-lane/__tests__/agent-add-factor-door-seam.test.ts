@@ -507,7 +507,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const result = await turn({ message: 'Use those hiring times.', agent_session_id: randomUUID() });
     const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
     expect(call, JSON.stringify(output)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
-    expect(JSON.stringify(output)).toContain('origin stays unknown');
+    expect(JSON.stringify(output)).toContain(UNKNOWN_ORIGIN_DETAIL);
   });
 
   it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {
