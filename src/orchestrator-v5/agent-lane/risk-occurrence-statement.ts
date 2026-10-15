@@ -30,8 +30,9 @@ export interface OccurrenceContext {
 }
 
 const APPROXIMATE = /(?<![\p{L}])(?:about|around|roughly|approximately|maybe|perhaps)(?![\p{L}])/iu;
-const NEGATED = /(?<![\p{L}])(?:not|never|no|won['’]t|wouldn['’]t|isn['’]t|doesn['’]t|don['’]t|can['’]t|cannot)(?![\p{L}])/iu;
-const CONDITIONAL = /(?<![\p{L}])(?:if|unless|assuming|provided|once)(?![\p{L}])/iu;
+/** A statement that negates what it states, or states it under a condition: never read as stating it (shared with the timing door). */
+export const NEGATED = /(?<![\p{L}])(?:not|never|no|won['’]t|wouldn['’]t|isn['’]t|doesn['’]t|don['’]t|can['’]t|cannot)(?![\p{L}])/iu;
+export const CONDITIONAL = /(?<![\p{L}])(?:if|unless|assuming|provided|once)(?![\p{L}])/iu;
 
 function partsOf(graph: unknown): { readonly id: string; readonly kind: unknown; readonly label: string }[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];

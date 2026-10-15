@@ -163,7 +163,7 @@ describe('an accepted Olumi figure keeps Olumi as its origin and records the acc
     // ONE PROVENANCE AUTHORITY: the Agent is also told whose it is — Olumi's, accepted — never left to read the stamps.
     // S10 fix 1 (the "become yours" cause): the stored `user_assumption` stamp and its review never reach the Agent beside the
     // answer; the answer itself says Olumi's figure, accepted.
-    expect(seen.value_provenance).toEqual({ whose: 'olumi_accepted' });
+    expect(seen.value_provenance).toEqual({ whose: 'olumi_accepted', origin: 'olumi' });
   });
 
   it('TWIN: a figure the user then TYPES is theirs — user_override, user_set, and the acceptance review is cleared', async () => {
