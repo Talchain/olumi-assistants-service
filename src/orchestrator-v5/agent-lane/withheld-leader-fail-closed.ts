@@ -109,7 +109,6 @@ import {
 import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from '../compose/withheld-explanation-answer.js';
 import { claimPermissionsFrom } from './first-analysis.js';
-import { isLicensedChanceLine, licensedChancesOf, withoutLicensedFigures, type LicensedChances } from './licensed-chance-lines.js';
 import type { StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 
 /** The blanking token — the shared enforcer's own choice: not a word character, not whitespace. */
@@ -749,8 +748,6 @@ export interface RankingLabelContext {
   readonly optionLabels?: readonly string[];
   /** Every OTHER node's label (factors, outcomes, goals, risks): "- Development capacity: 60%" is that factor's level. */
   readonly nonOptionLabels?: readonly string[];
-  /** ⭐ S7 B1: the selected current Run's licensed chances; one option's own chance line is not a ranking (`licensed-chance-lines.ts`). */
-  readonly licensedChances?: LicensedChances;
 }
 
 const NO_LABELS: RankingLabelContext = { rankingShapedLabels: [], rankingShapedLabelWords: [] };
@@ -981,16 +978,14 @@ function blankStaffingLead(text: string, labels: RankingLabelContext): string {
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
 export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS, prior = ''): string[] {
   if (typeof sentence !== 'string' || sentence.trim() === '') return [];
-  // ⭐ S7 B1: one option's licensed chance, said as a chance at the goal's window, keeps its figures; its other words are classified.
-  const licensedLine = isLicensedChanceLine(sentence, labels.licensedChances, labels.optionLabels ?? []);
-  let text = blankStaffingLead(classificationCopy(licensedLine ? withoutLicensedFigures(sentence, BLANK) : sentence), labels);
+  let text = blankStaffingLead(classificationCopy(sentence), labels);
   for (const label of labels.rankingShapedLabels) text = text.replace(optionLabelPattern(classificationCopy(label)), BLANK);
   for (const word of labels.rankingShapedLabelWords) {
     // Case-SENSITIVE: the capitalised name, never the lower-case verb ("leads the comparison").
     text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(word)}(?![\\p{L}\\p{N}_])`, 'gu'), BLANK);
   }
   const codes = rankingCodesInBlanked(blankIdioms(blankScopedMetricComparison(text)));
-  if (!licensedLine && isShareSplit(classificationCopy(sentence), labels, classificationCopy(prior))) codes.push('share_split');
+  if (isShareSplit(classificationCopy(sentence), labels, classificationCopy(prior))) codes.push('share_split');
   const copy = classificationCopy(sentence);
   const key = labelKey(copy);
   const namesOption = (labels.optionLabels ?? []).some((l) => { const k = labelKey(l); return k.length > 0 && key.includes(k); }) || OPTION_CUE.test(copy);
@@ -1806,10 +1801,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         ? readbackSay : null;
       const protectedLines = [...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
         ...(opts.protectedHostLines ?? []).filter((line) => line !== '' && !line.includes('\n'))];
-      const runCurrent = (response as { analysis_state?: { run_state?: { kind?: unknown } } }).analysis_state?.run_state?.kind === 'complete_current';
-      const licensedChances = licensedChancesOf(resultBlock, opts.graph, runCurrent);
-      const projected = dropRankingSentences(projectionInput, { ...rankingLabelContext(opts.graph, opts.analysisReady),
-        ...(licensedChances !== undefined ? { licensedChances } : {}) },
+      const projected = dropRankingSentences(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
         protectedLines.length > 0 ? protectedLines : undefined);
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;

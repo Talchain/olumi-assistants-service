@@ -19,7 +19,6 @@ import { goalChanceScreenLinesForAgent } from '../../orchestrator-v5/agent-lane/
 import { analysisResultForAgent } from '../../orchestrator-v5/agent-lane/decision-sensitivity.js';
 import { projectGoalProbabilitiesForTransport } from '../../orchestrator-v5/compose/goal-probability-transport.js';
 import { projectCanonicalAnalysisView } from '../canonical-analysis-view.js';
-import { runLeaderOf } from '../../orchestrator-v5/agent-lane/run-facts.js';
 
 type Rec = Record<string, any>;
 const ROOT = new URL('./fixtures/b2-zero-spread/', import.meta.url);
@@ -89,8 +88,6 @@ function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
     analysisState: READ.analysis_state, analysisReady: READ.current_read.analysis_ready,
     currentResult } as never);
   return { enrichment, public_enrichment: publicEnrichment, canonical_view: canonicalView,
-    // S7 PR-A (#3192): the view's `leader` is the ONE leader source, built from these same inputs (pinned by identity below).
-    leader_expected: runLeaderOf(currentResult, READ.analysis_state, READ.current_read.analysis_ready, true),
     agent_facts: goalChanceFactsForAgent(currentResult, graph, true),
     screen_lines: goalChanceScreenLinesForAgent(currentResult, graph, true) };
 }
@@ -111,11 +108,7 @@ const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, in
 const licenceRecord = (enrichment: Rec): Rec | undefined => enrichment.inference_warnings
   .find((warning: Rec) => warning.code === GOAL_CHANCE_LICENSED);
 const keepCell = (view: Rec): Rec => view.options.find((row: Rec) => row.option_id === KEEP).cell;
-// S7 PR-A (#3192) added `leader` to the view after this staging control was frozen: it is compared by identity, not bytes.
-const otherwise = (view: Rec): Rec => {
-  const { leader: _leader, ...rest } = view;
-  return { ...rest, options: view.options.filter((row: Rec) => row.option_id !== KEEP) };
-};
+const otherwise = (view: Rec): Rec => ({ ...view, options: view.options.filter((row: Rec) => row.option_id !== KEEP) });
 const expectNoGenericCellCopy = (view: Rec): void => {
   for (const { cell } of view.options) {
     for (const field of ['face', 'why']) {
@@ -176,8 +169,6 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
     view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
     expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
-    expect(output.canonical_view.leader).toEqual(output.leader_expected);
-    expect(STAGING_CONTROL.canonical_view).not.toHaveProperty('leader');
     expect(JSON.stringify(output)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
     const forAgent = analysisResultForAgent({ ...sourceBlock, enrichment: output.public_enrichment }, READ.graph) as Rec;
     expect(JSON.stringify(forAgent)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
@@ -234,8 +225,6 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
     view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
     expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
-    expect(output.canonical_view.leader).toEqual(output.leader_expected);
-    expect(STAGING_CONTROL.canonical_view).not.toHaveProperty('leader');
     expectKeepZeroSpread(output.canonical_view);
   });
 
