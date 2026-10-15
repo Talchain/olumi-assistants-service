@@ -21,7 +21,7 @@ const D3 = JSON.parse(readFileSync('tests/fixtures/sys2/pre-h0h1-d3r1.json', 'ut
 const LABEL = 'Tickets resolved per additional specialist';
 const SENTENCE = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
 const DEFINITION = 'Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.';
-const factor = (r: Rec): Rec => r.factors.find((f: Rec) => f.label === LABEL);
+const factor = (r: Rec): never => r.factors.find((f: Rec) => f.label === LABEL) as never;
 const node = (r: Rec, brief: string): Rec => admitCandidateModel(r as never, {}, brief).nodes.find((n) => n.label === LABEL) as Rec;
 
 async function registered(): Promise<Rec> {
@@ -69,7 +69,7 @@ describe('a point the user states inside a range is theirs (DL 05:46Z, capacity 
   it('D3r1 (second brief): "£20 per customer per month" is theirs; "10–20% churn" is a different-frame repeat, the goal sentence is about the goal', () => {
     const raw = JSON.parse(D3.call2_text) as Rec;
     expect(D3.brief).toContain('could cause 10–20% churn');
-    const nodes = admitCandidateModel(raw as never, {}, D3.brief).nodes as Rec[];
+    const nodes = admitCandidateModel(raw as never, {}, D3.brief).nodes as unknown as Rec[];
     expect(nodes.find((n) => n.label === 'Monthly price')?.observed_state).toMatchObject({ raw_value: 20, source: 'brief_extraction' });
     // A real same-frame rival ("Paying customers at month 3") and no distinctive word: the 400 stays unconfirmed (ambiguity check).
     expect(nodes.find((n) => n.label === 'Paying customers today')?.provenance).toBe('unverified_brief');
@@ -78,7 +78,7 @@ describe('a point the user states inside a range is theirs (DL 05:46Z, capacity 
   it('CONTROL (D3r1): a SAME-frame repeat still refuses the £20', () => {
     const raw = JSON.parse(D3.call2_text) as Rec;
     const brief = D3.brief.replace('could cause 10–20% churn', 'could cause churn even at £20 per customer per month');
-    const price = raw.factors.find((f: Rec) => f.label === 'Monthly price');
+    const price = raw.factors.find((f: Rec) => f.label === 'Monthly price') as never;
     expect(verifiedFactorLevel(raw as never, price, D3.brief)).toBe(true);
     expect(verifiedFactorLevel(raw as never, price, brief)).toBe(false);
   });
