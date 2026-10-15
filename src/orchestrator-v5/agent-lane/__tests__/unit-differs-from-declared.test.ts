@@ -136,9 +136,9 @@ describe('unit differs from the declared factor unit', () => {
     for (const refusal of result.tool_results) expect(refusal).toMatchObject({ ok: false, mutated: false, refusal: 'unit_differs_from_declared', detail });
     expect(seen[1].tools.some(t => (t as { name: string }).name === 'propose_option_interventions')).toBe(true);
     expect(seen[2].tools.some(t => (t as { name: string }).name === 'propose_option_interventions')).toBe(false);
-    expect(JSON.stringify(seen[2].input)).toContain('was refused twice for the same reason');
+    expect(JSON.stringify(seen[2].input)).toContain('Do not repeat the same call while its arguments and relevant cause remain unchanged');
     expect(JSON.stringify(seen[2].input)).toContain(detail);
-    expect(seen[2].input).toContainEqual({ role: 'developer', content: [{ type: 'input_text', text: expect.stringContaining('was refused twice for the same reason (unit_differs_from_declared: ' + detail) }] });
+    expect(seen[2].input).toContainEqual({ role: 'developer', content: [{ type: 'input_text', text: expect.stringContaining('propose_option_interventions returned unit_differs_from_declared: ' + detail) }] });
     expect(result.stopped_reason).toBe('answered');
     expect(store.outstanding(ctx.scenario_id, ctx.authenticated_user_id)).toHaveLength(0);
   });
