@@ -1302,6 +1302,7 @@ describe('a correction to the model as a whole becomes an approved, saved revise
     // The construction read the brief AND this correction (revisedDraftBrief), and nothing is written before the press.
     expect(seen.length).toBe(1);
     expect(seen[0]).toContain(JSON.stringify(revisedDraftBrief(FX.brief_text, CORRECTION)).slice(1, 80));
+    expect(seen[0]).toContain(CORRECTION);
     expect(s.commits).toHaveLength(0);
     // The card is card-only: its chip is the revised-draft button, naming exactly this stored proposal.
     const chips = approvalChipsFor([{ name: 'propose_change', ok: true, mutated: false, proposal_id: String(offer.proposal_id) }],
