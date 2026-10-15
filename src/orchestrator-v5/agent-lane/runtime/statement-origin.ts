@@ -13,6 +13,8 @@ export function statementOrigin(verified: boolean, unknown: boolean, sourceCompl
  * origin records nothing as the user's figure, but the words stay in the conversation: never ask the user to say or confirm them
  * again. A correction to the model as a whole goes through propose_change op revise_model, which reads them as context.
  */
-export const UNKNOWN_ORIGIN_DETAIL = 'The retained source is not verified, so nothing was recorded as the user\u2019s own figure and its origin stays unknown. '
-  + 'Do not ask the user to repeat or confirm it: it stays in the conversation as context. If it changes the model as a whole, '
-  + 'offer propose_change op revise_model.';
+export const UNKNOWN_ORIGIN_DETAIL = 'The proposed figure could not be verified for this model field, so it was not recorded. Retain the '
+  // AIE #94 6194613256, exact.
+  + 'original words and any known speaker and source; an unverified field binding does not make that known origin unknown. Do not ask '
+  + 'the user to repeat or confirm supplied facts. Explain only genuinely missing or conflicting meaning. If this changes the model as '
+  + 'a whole, offer propose_change op revise_model.';
