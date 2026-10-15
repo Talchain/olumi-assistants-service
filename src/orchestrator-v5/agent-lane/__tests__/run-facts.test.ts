@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
-import { runFactsOf } from '../run-facts.js';
+import { runFactsOf, RUN_FACTS_USE, withMustSay } from '../run-facts.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { decisionSensitivityOf } from '../decision-sensitivity.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
@@ -113,3 +113,27 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
   });
 });
 
+
+describe('S7 PR-B: the AIE’s must-say lines are checked present in the AI’s reply, appended exactly when missing', () => {
+  const fx = JSON.parse(readFileSync('tests/fixtures/hiring-shortfall/served-hiring-post3000-run-turn17-20261014.json', 'utf8')) as Rec;
+  const notes = runFactsOf({ enrichment: { inference_warnings: [structuredClone(fx.served_licence)] } }, fx.graph, true).must_say;
+  it('hiring post3000: a reply that says none gets every line, word for word, once, in order', () => {
+    expect(notes.length).toBeGreaterThan(1);
+    const out = withMustSay('The tech lead option has the higher chance in this model.', notes);
+    expect(out.appended).toEqual(notes);
+    expect(out.text).toBe(['The tech lead option has the higher chance in this model.', ...notes].join('\n\n'));
+  });
+  it('a reply that already says a line (curly or straight quotes, any spacing) is not given it again', () => {
+    const first = notes[0]!;
+    const reply = `Here is the result.  ${first.replace(/[‘’]/g, "'")} More detail follows.`;
+    const out = withMustSay(reply, notes);
+    expect(out.appended).toEqual(notes.slice(1));
+    expect(out.text.split(first.slice(0, 30)).length).toBe(2);
+  });
+  it('marketing 7f5659fd (a second brief): the packet carries a `use` line only for a current Run', () => {
+    const [, body] = BRIEFS[1]!;
+    expect(runFactsOf(body.analysis_result, body.graph, true).use).toBe(RUN_FACTS_USE);
+    expect(runFactsOf(body.analysis_result, body.graph, false)).not.toHaveProperty('use');
+    expect(withMustSay('Nothing to add.', [])).toEqual({ text: 'Nothing to add.', appended: [] });
+  });
+});
