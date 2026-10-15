@@ -75,7 +75,7 @@
  */
 
 import { classifyEncodedInterventionAdmissibility } from '../../orchestrator/shared/encoded-intervention-admissibility.js';
-import { recoverScaleFrame } from './handlers/d1-shared/scale-frame.js';
+import { checkPairCoherence, recoverScaleFrame } from './handlers/d1-shared/scale-frame.js';
 
 /**
  * Factor scale descriptor extracted from a factor node's `observed_state`.
@@ -882,6 +882,13 @@ export function findScaleIncoherentBaselineFactorIds(
     // Round 2 learned this once already, at the writer: "the pair still
     // encodes the frame EXACTLY; refusing it was the defect."
     if (recoverScaleFrame({ value: baseline, raw_value: observed?.raw_value }) !== undefined) {
+      continue;
+    }
+    // ⭐ S4 NET LOSS (DL ruling 15 Oct): a pair coherent with the factor's own STORED frame is a resolved scale too. A
+    // stated negative level is the framed pair `{ value: raw / frame, raw_value: raw }` beside `scale_frame` (admission's
+    // `framedObservedState`, and the edit writer's own convention), which the pair alone cannot encode (no frame from a
+    // negative). A bare raw beside a frame (value === raw) is incoherent and still blocks.
+    if (checkPairCoherence({ storedFrame: node.scale_frame, value: baseline, raw_value: observed?.raw_value }) === 'coheres') {
       continue;
     }
     // Baseline outside [0,1] AND no frame encoded in its own pair: coherent

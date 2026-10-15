@@ -11,6 +11,10 @@
  * The fix asks the brief's wording in the deadline slot. PART 2 (Canonical #2231's `NodeV3.goal_deadline_as_stated`,
  * MG fills it): construction HOLDS the brief's words on the goal — verbatim, at most 60 characters, never converted to
  * a month count — and the question then says the model keeps the words but no date.
+ * ⭐ AIE #94 6184383302 (the goal-period role): with no count claimed, a period is the goal's deadline only inside the goal's own
+ * verified TARGET statement. The served E01 capture predates statements, so it carries no such evidence: its "by Q3" is now asked
+ * as the brief's words with the exact missing reading, and nothing is held. The rows about holding "by Q3" read the statement-era
+ * draft (`withGoalTarget`: the same answers plus the goal's target statement, which today's drafter sends).
  * Every row drives the REAL `buildModelFromBrief` (model call faked, nothing live).
  */
 import { asCurrentDraft } from './pre-r1-capture.js';
@@ -51,6 +55,12 @@ function candidate(horizon: number | null): CandidateModel {
   (c.goal as { horizon_months: number | null }).horizon_months = horizon;
   return c;
 }
+/** The statement-era draft: the same answers plus the goal's own target statement, the brief's goal sentence verbatim. */
+function withGoalTarget(c: CandidateModel, quote: string): CandidateModel {
+  return { ...c, statements: [{ quote, subject: { kind: 'goal', label: 'ship the new platform', to_label: null, factor_label: null },
+    field: 'target', form: 'describes', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }] } as unknown as CandidateModel;
+}
+const UNBOUND_BY_Q3 = 'Is "by Q3" the period by which "ship the new platform" should be achieved? Your brief does not say, so the model holds no deadline for it.';
 
 /** The fixture must be one the real drafter schema would accept (the pattern `construction-goal-losses-are-said` uses). */
 function assertRealSchemaWouldAccept(payload: Rec): void {
@@ -93,8 +103,18 @@ describe('T2: journey E\'s "by Q3" reaches the user in their own words', () => {
     expect(BRIEF.split('by Q3')).toHaveLength(2);
   });
 
-  it('⭐ RED (served E01, drafter typed no count): "by Q3" is the FIRST open question, verbatim, and the reply shows it', async () => {
-    const { questions } = await build(BRIEF, candidate(null));
+  it('⭐ AIE 6184383302 (served E01 as captured, no statements): "by Q3" is asked first in the brief\'s words with the missing reading; nothing is held', async () => {
+    for (const h of [null, 9]) {
+      const { goal, questions } = await build(BRIEF, candidate(h));
+      expect(questions[0], JSON.stringify(questions)).toBe(UNBOUND_BY_Q3);
+      expect(questions.some((q) => /within 9 months/.test(q)), 'the guess is never asked in its place').toBe(false);
+      expect(Object.hasOwn(goal, 'goal_deadline_as_stated'), String(h)).toBe(false);
+      expect(questions).toContain(SERVED.served.drafter_q3_question);
+    }
+  });
+
+  it('⭐ RED (statement era, drafter typed no count): "by Q3" is the FIRST open question, verbatim, and the reply shows it', async () => {
+    const { questions } = await build(BRIEF, withGoalTarget(candidate(null), BRIEF));
     expect(questions[0], JSON.stringify(questions)).toBe(ASK_BY_Q3);
     expect(questions.filter((q) => q === ASK_BY_Q3), 'asked once').toHaveLength(1);
     const line = replyLine(questions);
@@ -103,15 +123,15 @@ describe('T2: journey E\'s "by Q3" reaches the user in their own words', () => {
     expect(questions).toContain(SERVED.served.drafter_q3_question);
   });
 
-  it('⭐ RED (drafter guessed 9 months for "by Q3"): the guess is never asked as the user\'s deadline; "by Q3" is', async () => {
-    const { questions } = await build(BRIEF, candidate(9));
+  it('⭐ RED (statement era, drafter guessed 9 months for "by Q3"): the guess is never asked as the user\'s deadline; "by Q3" is', async () => {
+    const { questions } = await build(BRIEF, withGoalTarget(candidate(9), BRIEF));
     expect(questions[0], JSON.stringify(questions)).toBe(ASK_BY_Q3);
     expect(questions.some((q) => /within 9 months/.test(q)), JSON.stringify(questions)).toBe(false);
   });
 
-  it('⭐ RED (part 2): the registered goal HOLDS "by Q3" verbatim in goal_deadline_as_stated', async () => {
+  it('⭐ RED (part 2, statement era): the registered goal HOLDS "by Q3" verbatim in goal_deadline_as_stated', async () => {
     for (const h of [null, 9]) {
-      const { goal } = await build(BRIEF, candidate(h));
+      const { goal } = await build(BRIEF, withGoalTarget(candidate(h), BRIEF));
       expect(goal.goal_deadline_as_stated, String(h)).toBe('by Q3');
     }
   });
@@ -160,7 +180,8 @@ describe('⭐ FUNDING (Paul, 13 Oct 23:12Z): another quantity\'s length is never
   });
 
   it('CONTRAST: the goal\'s own forward-led deadline beside the runway is still held in its words', async () => {
-    const { goal } = await build(`${BRIEF.replace('by Q3', 'within 9 months')} ${RUNWAY}`, candidate(null));
+    const goalSentence = BRIEF.replace('by Q3', 'within 9 months');
+    const { goal } = await build(`${goalSentence} ${RUNWAY}`, withGoalTarget(candidate(null), goalSentence));
     expect(goal.goal_deadline_as_stated).toBe('within 9 months');
   });
 });

@@ -24,6 +24,9 @@ import { POLICY } from './guidance/policy.js';
 import { CANVAS_BAND_WORD, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 import { log } from '../../utils/telemetry.js';
+import { sayGoalChanceSide } from './goal-chance-side-words.js';
+
+export { sayGoalChanceSide };
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -120,19 +123,6 @@ export interface RunGoalChanceChange {
   readonly current: string;
   readonly prior_run_id: string;
   readonly current_run_id: string;
-}
-
-/** The screen's one edge-word rule for a displayed whole percentage (`sayDisplayedPct`; DGAI `goalChanceRangeLine`). */
-const sayPct = (p: number): string => (p === 0 ? 'less than 1%' : p === 100 ? 'more than 99%' : `about ${p}%`);
-const wholePct = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100;
-/** A `RunDeltaGoalChanceSide` as the screen says it; `undefined` for a withheld or unrecorded side. */
-export function sayGoalChanceSide(side: unknown): string | undefined {
-  const s = rec(side);
-  if (s?.kind === 'point' && wholePct(s.pct)) return sayPct(s.pct);
-  if (s?.kind === 'range' && wholePct(s.low_pct) && wholePct(s.high_pct) && s.low_pct <= s.high_pct) {
-    return `between ${sayPct(s.low_pct)} and ${sayPct(s.high_pct).replace(/^about /, '')}`;
-  }
-  return undefined;
 }
 
 /** Every option whose goal chance both Runs showed (point or range on each side), labelled; none without both Run ids. */
