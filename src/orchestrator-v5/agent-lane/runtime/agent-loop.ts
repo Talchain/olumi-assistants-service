@@ -192,7 +192,17 @@ export const REPEATED_REFUSAL_NARRATION = '{tool} returned {refusal}: {detail}. 
  * (tool + arguments, key order ignored) on an unchanged basis is not run again; a new revision, a new typed message or a
  * recovered service allows it. A transient refusal is never remembered, and with no known revision nothing is blocked.
  */
-export interface RetryBasis { readonly model_revision: string | null; readonly user_words: string }
+export interface RetryBasis { readonly model_revision: string | null; readonly user_words: string; readonly analysis: string }
+/**
+ * ⛔ #3255 follow-up (research-control-survives CONTRAST, bisected to #3255): a refusal can depend on the Run, not the model. A Run
+ * changes what is licensed (a leader, a result) WITHOUT a new graph revision, so "query_cannot_be_shown" on a withheld Run was
+ * remembered and blocked the same call once a Run licensed it. The basis also holds a digest of the state's Run view (`analysis`,
+ * `run_facts`, `claim_permissions`): a new Run or licence is a changed cause. No state given → one constant (nothing to compare).
+ */
+const analysisDigest = (state: unknown): string => {
+  const s = state !== null && typeof state === 'object' ? state as Record<string, unknown> : {};
+  return createHash('sha256').update(JSON.stringify([s.analysis ?? null, s.run_facts ?? null, s.claim_permissions ?? null])).digest('hex').slice(0, 16);
+};
 const TRANSIENT_REFUSAL = /unavailable|timeout|timed_out|not_prepared|could_not|unreadable|conflict|busy|rate_limit|threw/;
 const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical)
   : v !== null && typeof v === 'object' ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])])) : v;
@@ -205,7 +215,7 @@ export function callIdentity(name: string, args: unknown): string {
 const rememberedBasis = (r: ToolResult): RetryBasis | undefined => {
   const b = (r as { retry_basis?: unknown }).retry_basis as RetryBasis | undefined;
   return b !== undefined && b !== null && typeof b === 'object' && (typeof b.model_revision === 'string' || b.model_revision === null)
-    && typeof b.user_words === 'string' ? b : undefined;
+    && typeof b.user_words === 'string' && typeof b.analysis === 'string' ? b : undefined;
 };
 /** A refusal's model-facing output carries its cause basis: never a transient refusal's, and never without a known revision. */
 function withRetryBasis<T>(facing: T, result: ToolResult, basis: RetryBasis): T {
@@ -495,13 +505,14 @@ export async function runAgentTurn(
   const repeatOffered = new Set<string>();
   // ⭐ Lane A A2 / AIE-05: this turn's cause basis, and the earlier turns' refusals with theirs (`refusedEarlier`).
   const retryBasis: RetryBasis = { model_revision: input.canonicalContext?.expectation.graph_revision ?? null,
-    user_words: createHash('sha256').update(JSON.stringify(input.ctx.verified_user_messages ?? [])).digest('hex').slice(0, 16) };
+    user_words: createHash('sha256').update(JSON.stringify(input.ctx.verified_user_messages ?? [])).digest('hex').slice(0, 16),
+    analysis: analysisDigest(input.canonicalContext?.packet?.state) };
   const earlierRefused = refusedEarlier(input.history);
   const unchangedSince = (identity: string): ToolResult | undefined => {
     const r = earlierRefused.get(identity);
     const b = r === undefined ? undefined : rememberedBasis(r);
     return r !== undefined && b !== undefined && retryBasis.model_revision !== null && b.model_revision === retryBasis.model_revision
-      && b.user_words === retryBasis.user_words && !TRANSIENT_REFUSAL.test(String(r.refusal)) ? r : undefined;
+      && b.user_words === retryBasis.user_words && b.analysis === retryBasis.analysis && !TRANSIENT_REFUSAL.test(String(r.refusal)) ? r : undefined;
   };
   /** Writes so far this turn: a call repeated after one of them is a new attempt. */
   let writesThisTurn = 0;
