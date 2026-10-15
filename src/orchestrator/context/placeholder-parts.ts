@@ -31,6 +31,7 @@ import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.
 import { isPersonsOwnSetting, isPersonsOwnValue, isUserSizedWithoutOlumiMarks, isUserStatedStrength } from '../../cee/provenance/provenance-of.js';
 import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
+import { likelyRangeUseOf, rangeLawAdopted } from '../../orchestrator-v5/intervention-range.js';
 
 type Rec = Record<string, unknown>;
 
@@ -137,7 +138,8 @@ export function asAnalysed<G extends { nodes: readonly unknown[]; edges?: unknow
 export interface PlaceholderPartsFinding {
   readonly reason: PlaceholderPartsReason;
   readonly partId?: string;
-  readonly arm?: 'link' | 'level' | 'point';
+  /** `range_law` (AIE 6184726873): the option sets it with the person's likely range, read with an unadopted equal-tail approximation. */
+  readonly arm?: 'link' | 'level' | 'point' | 'range_law';
   readonly link?: { readonly from: string; readonly to: string };
 }
 
@@ -451,6 +453,13 @@ export function placeholderPartsFinding(
     // author, so it never does on its own.
     const theirs = isRec(setting) && (usersOwnSetting(setting) || (isRec(setting.range) && usersOwnSetting(setting.range)));
     if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point' };
+    // ⛔ AIE 6184726873: the person's likely range is sampled with Olumi's equal-tail approximation of it; until that is adopted
+    // (the card's press), the P rests on it, whoever gave the point.
+    const range = likelyRangeUseOf(targetId, setting);
+    const optionId = optionIdOf(o);
+    if (range !== undefined && range.persons_own && optionId !== undefined && !rangeLawAdopted({ nodes }, optionId, range)) {
+      return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'range_law' };
+    }
   }
   return null;
 }

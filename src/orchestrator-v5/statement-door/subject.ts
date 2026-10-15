@@ -58,7 +58,13 @@ export function resolveSubject(graph: unknown, ref: SubjectRef): SubjectResoluti
     const byId = str(id) === undefined ? undefined : nodes.filter((n) => n.id === str(id) && of(n));
     if (byId !== undefined) return byId.length === 1 ? byId[0] : undefined;
     const byLabel = str(label) === undefined ? [] : nodes.filter((n) => typeof n.label === 'string' && n.label.trim() === str(label) && of(n));
-    return byLabel.length > 1 ? 'ambiguous' : byLabel[0];
+    if (byLabel.length > 0) return byLabel.length > 1 ? 'ambiguous' : byLabel[0];
+    // ⛔ CASE ONLY (served cohort witness 15 Oct, CEE 87d5f90e: the goal is ‘conversion rate’, the AI wrote ‘Conversion rate’ →
+    // subject_not_found, and the chain never started). A label that differs ONLY by letter case names ONE node when exactly one
+    // matches; two such matches are ambiguous. Nothing else is loosened: no fuzzy, spacing or wording match (DL 15 Oct).
+    const folded = str(label)?.toLocaleLowerCase('en-GB');
+    const byCase = folded === undefined ? [] : nodes.filter((n) => typeof n.label === 'string' && n.label.trim().toLocaleLowerCase('en-GB') === folded && of(n));
+    return byCase.length > 1 ? 'ambiguous' : byCase[0];
   };
   const option = ref.option_id !== undefined || ref.option_label !== undefined ? nodeOf(ref.option_id, ref.option_label, ['option']) : undefined;
   if (option === 'ambiguous') return { kind: 'unresolved', reason: 'ambiguous' };

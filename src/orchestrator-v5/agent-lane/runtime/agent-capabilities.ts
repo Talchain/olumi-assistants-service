@@ -20,6 +20,7 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
   riskOccurrencePostimageNode, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
 import { optionCapacityRecordedWords } from '../../statement-door/fields/option-capacity.js';
+import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
 import { readStatement, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
 import { resolveSubject } from '../../statement-door/subject.js';
@@ -87,7 +88,7 @@ import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty
 import { runOptionSetForCopy, readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { reframedNodeIds } from '../refit-frames.js';
-import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
+import { acceptedOlumiEstimateSentence, goalChanceChangesOf, rerunRecordForModel, type RunGoalChanceChange } from '../rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -339,7 +340,7 @@ import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForecastOf, approvedStatementRecordOf, cohortForecastRecordedWords,
-  SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
+  SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -360,6 +361,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
+import { rangeApproximationWords, rangeLawAdopted } from '../../intervention-range.js';
 import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, linkDrawnByOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
@@ -1036,6 +1038,60 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  * proposal coordinate frame differs from the range this approval settles. The transaction re-encodes them together.
  */
 /** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
+/**
+ * ⭐ C2 (AIE 6180618773 row 2, DL ruling A; template AIE 6184022140, exact): the user's range AS STATED, then the equal-tail fit
+ * as Olumi's proposed approximation, never as the user's own calibration. Filled only with what this path holds: the range is
+ * decided from TYPED arguments (its meaning and that the user gave it), never read from their sentence, so its other
+ * qualifications and conditions were not read, and the card says so rather than asserting there are none. The basis is the
+ * analysis's own convention for a likely range (ISL samples it as the quartiles of a lognormal, RATIFIED_COVERAGE 0.5): a
+ * modelling convention, not evidence or the meaning of "likely"; the lognormal's shape is said as its limitation.
+ */
+export const statedRangeAssumptionWords = (low: string, high: string): string => `. ${rangeApproximationWords(low, high)}`;
+/** C2 join: what the Agent is told beside a likely range it proposed: the ends and the law have different authors. */
+export const LIKELY_RANGE_LAW_NOTE = 'The two ends are the user’s. The equal-tail approximation the analysis reads them with (about one chance '
+  + 'in four below and one in four above) is Olumi’s modelling convention, adopted only by the press: never call it the user’s calibration.';
+/** AIE 6184022140's exact closing, said once on a card that carries a likely range. */
+export const STATED_RANGE_CARD_CLOSING = 'Use this reading to record your original range as stated and adopt the shown Olumi approximation. '
+  + 'You can change or reject it instead.';
+
+/**
+ * C2 (DL 15 Oct): the user's words for their likely range, kept on the level card for the record its press writes when it adopts
+ * Olumi's approximation: their sentence that gives both ends in figures, else their latest message whole. The range itself is
+ * still decided from the TYPED arguments (Codex CR 5963331228 P1), never by this. `undefined` only with no words of theirs.
+ */
+function rangeWordsIn(now: string | null | undefined, conversation: string | null | undefined, low: number, high: number): string | undefined {
+  for (const text of [now, conversation]) {
+    for (const sentence of (text ?? '').split(/(?<=[.?!])\s+|\n+/)) {
+      const said = sentence.trim();
+      if (said !== '' && writtenIn(said, low) !== null && writtenIn(said, high) !== null) return said;
+    }
+  }
+  const latest = (now ?? '').trim() !== '' ? (now ?? '').trim() : (conversation ?? '').split('\n').map((l) => l.trim()).filter((l) => l !== '').at(-1);
+  return latest !== undefined && latest !== '' ? latest : undefined;
+}
+
+/**
+ * ⭐ C2 (AIE 6184726873; DL 15 Oct): the adoptions a level card's press writes in its levels commit. A card that showed Olumi's
+ * WHOLE approximation of the user's range (the C2 template for those exact ends, and its closing) adopts it, with their words and
+ * the exact ends, on the factor as `graph` holds it just before that commit. A card that did not show it records the range alone,
+ * and a chance resting on it stays withheld until the approximation is adopted.
+ */
+export function rangeLawsOfCard(card: { readonly public_label: string; readonly operations: readonly ProposalOperation[] }, graph: unknown): ApprovedStatementRecord[] {
+  if (!card.public_label.includes(STATED_RANGE_CARD_CLOSING)) return [];
+  return card.operations.filter((o) => o.op === 'set_option_intervention').flatMap((o) => {
+    const v = (o.value ?? {}) as { likely_range?: { low?: unknown; high?: unknown }; range_quote?: unknown; unit?: unknown };
+    const low = v.likely_range?.low;
+    const high = v.likely_range?.high;
+    const unit = typeof v.unit === 'string' ? v.unit : '';
+    if (typeof low !== 'number' || typeof high !== 'number' || typeof v.range_quote !== 'string'
+      || !card.public_label.includes(rangeApproximationWords(likelyBound(low, unit), likelyBound(high, unit)))) return [];
+    const [optionId, factorId] = o.path.split('::');
+    const approved = optionId === undefined || factorId === undefined ? undefined : rangeLawAdoption(graph, optionId, factorId,
+      [rangeLawStatementOf(optionId, factorId, v.range_quote, low, high, unit !== '' ? unit : undefined)], low, high, new Date().toISOString());
+    return approved !== undefined ? [approved] : [];
+  });
+}
+
 function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
 }
@@ -1217,7 +1273,9 @@ interface GraphRead {
  * where none is licensed or its C1 was checked down, Olumi's own leader-free record of what changed (`rerunRecordForModel`).
  * Both undefined for a first Run.
  */
-async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel> }> {
+async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel>;
+  /** S9: the goal chances both Runs showed, beside a licensed delta (whose projection drops `goal_chances`); in `rerunRecord` otherwise. */
+  goalChanceChanges: readonly RunGoalChanceChange[] }> {
   const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
   const delta = await selectedRunDeltaForModel(scenarioId, g, g.run_delta);
   const optionNames = optionNameAliasesForCurrentRun(g);
@@ -1236,7 +1294,10 @@ async function runComparisonFacts(scenarioId: string, requestId: string, g: Grap
   const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
     [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
     pairRead?.frameRefitLinks);
-  return { delta, rerunRecord };
+  // ⭐ S9 (capacity e2e R2e): the model-facing projection strips `goal_chances`, so beside a licensed delta they travel typed here.
+  const goalChanceChanges = rerunRecord !== undefined || delta === undefined ? []
+    : goalChanceChangesOf(g.run_delta, (id) => g.nodes.find((n) => n.id === id)?.label);
+  return { delta, rerunRecord, goalChanceChanges };
 }
 
 /** What a Run's output tells the model to do with its comparison facts (Paul #94 6166259456). */
@@ -2980,6 +3041,7 @@ export function createAgentCapabilities(
       author: levelOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
       ...levelFigureOf(o),
     }));
+    const rangeLaws = rangeLawsOfCard(parent, approvedRead.raw);
     // ⛔ THE LINKS AND LEVELS ARE ONE COMMIT OR NONE — so what would stop them is checked BEFORE anything is written.
     if (levelOps.length + linkOps.length + valueOps.length > 0) {
       if (opts.commitOptionLevels === undefined) {
@@ -3161,6 +3223,7 @@ export function createAgentCapabilities(
         ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
         ...(values.length > 0 ? { values } : {}),
         ...(frames.length > 0 ? { frames } : {}),
+        ...(rangeLaws.length > 0 ? { statement_record: rangeLaws } : {}),
       });
       if (res.status === 'unconfirmed') {
         // ⛔ The commit was attempted and could not be read back: neither saved nor refused (#1995's `not_confirmed`).
@@ -4883,7 +4946,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
+      const { delta, rerunRecord, goalChanceChanges } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
       // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
       // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
       let statedObjectionsUnreadable = false;
@@ -4947,6 +5010,7 @@ export function createAgentCapabilities(
         // host contract tells the AI to end its reply with that step; no host line says it.
         ...nextStepFactOf(g),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
+        ...(goalChanceChanges.length === 0 ? {} : { goal_chance_changes: goalChanceChanges }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
@@ -7218,6 +7282,8 @@ export function createAgentCapabilities(
         needsLink: boolean;
         /** The user's likely range for this level, raw units (TEMPORAL). */
         likelyRange?: { low: number; high: number };
+        /** The user's sentence that gives that range (`rangeSentenceIn`). */
+        rangeQuote?: string;
         mechanisms?: readonly string[];
         gapOperands?: Record<string, unknown>;
       }[] = [];
@@ -7317,14 +7383,17 @@ export function createAgentCapabilities(
          * arguments only (Codex CR 5963331228 P1: no parsing of the user's words). Both ends; the reading the Agent took
          * (`range_meaning`: only `likely_range` is recorded, so a 95% interval, a min–max or a bound is never stored as
          * one); that the USER gave it (`range_user_stated`); beside a level they gave; the level inside it. The user then
-         * approves the range AND its reading, shown on the approval ("read as the middle half of what's likely"): that
-         * approval is the provenance check. An invalid optional range is left out and disclosed; its level follows ordinary grounding.
+         * sees the range as they stated it and, separately, Olumi's assumption that about one in four falls below it and one in
+         * four above (C2, AIE 6180618773 row 2): the quartile fit is Olumi's disclosed approximation, adopted by the press, never
+         * the user's quartiles, and approval adopts it without making it theirs. An invalid optional range is left out and
+         * disclosed; its level follows ordinary grounding.
          */
         const hasLow = i?.likely_low !== undefined;
         const hasHigh = i?.likely_high !== undefined;
         const noRangeDeclared = i?.range_user_stated !== true
           && ((!hasLow && !hasHigh) || (i?.likely_low === 0 && i?.likely_high === 0));
         let likelyRange: { low: number; high: number } | undefined;
+        let rangeQuote: string | undefined;
         if (!noRangeDeclared && (hasLow || hasHigh || i?.range_meaning !== undefined || i?.range_user_stated === true)) {
           const low = Number(i?.likely_low);
           const high = Number(i?.likely_high);
@@ -7332,16 +7401,28 @@ export function createAgentCapabilities(
             : !(Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low) ? 'a likely range needs a positive low end below its high end'
             : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
             : i?.range_meaning !== 'likely_range'
-              ? `Olumi records only a LIKELY range (the middle half of what\u2019s likely); a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
+              ? `this writer records only a plain likely range; a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement, so the level is proposed without it`
             : !claimedByUser ? 'a likely range is recorded only beside a level the user gave (user_stated)'
             : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
             : null;
+          const meantOtherwise = hasLow && hasHigh && Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low
+            && i?.range_meaning !== 'likely_range';
           if (why !== null) {
             rangesNotRecorded.push({ option: option.label, factor: factor.label,
               reason: `No likely range was recorded: ${why}.`
-                + (i?.range_user_stated === true ? ' Ask the user to restate their likely range in their own words, then propose it again.' : '') });
+                // AIE 6183364243: a range the user meant otherwise keeps its meaning; never ask for a likely range instead.
+                + (i?.range_user_stated !== true ? ''
+                  : !meantOtherwise ? ' Ask the user to restate their likely range in their own words, then propose it again.'
+                  : i?.range_meaning === undefined
+                    ? ' Ask the user how they meant that range (a likely range, the lowest and highest possible, or a bound), then propose it again with that meaning.'
+                  : ' Tell the user that exact limitation, with their range in their words; do not ask them to restate it as a likely range just so a calculation can run.') });
           } else {
-            likelyRange = { low, high };
+            // C2 (DL 15 Oct): the press adopts Olumi's approximation of THEIR range, so the card keeps their words for it.
+            rangeQuote = rangeWordsIn(ctx.user_turn_text, ctx.user_text, low, high);
+            if (rangeQuote !== undefined) likelyRange = { low, high };
+            else rangesNotRecorded.push({ option: option.label, factor: factor.label,
+              reason: 'No likely range was recorded: there are no words of the user’s to record it from. '
+                + 'Ask the user to restate their likely range in their own words, then propose it again.' });
           }
         }
 
@@ -7469,7 +7550,7 @@ export function createAgentCapabilities(
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
-          ...(likelyRange !== undefined ? { likelyRange } : {}),
+          ...(likelyRange !== undefined && rangeQuote !== undefined ? { likelyRange, rangeQuote } : {}),
           ...(declaration.kind === 'valid' && gapOperands != null ? { mechanisms: declaration.mechanisms, gapOperands } : {}),
         });
       }
@@ -7483,9 +7564,11 @@ export function createAgentCapabilities(
         const current = (option.interventions ?? {})[level.factor.id] as { value?: unknown; range?: Record<string, unknown> } | number | undefined;
         const currentValue = typeof current === 'number' ? current : current?.value;
         const currentRange = typeof current === 'object' ? current?.range : undefined;
-        const rangeMoves = level.likelyRange !== undefined && !(currentRange?.low === level.likelyRange.low
+        // C2: the same range held but its approximation never adopted (recorded before the press adopted it) is still to approve.
+        const rangeMoves = level.likelyRange !== undefined && (!(currentRange?.low === level.likelyRange.low
           && currentRange?.high === level.likelyRange.high && currentRange?.meaning === 'likely_range'
-          && currentRange?.source === 'user_specified');
+          && currentRange?.source === 'user_specified')
+          || !rangeLawAdopted(g.raw, level.option.id, { factor_id: level.factor.id, low: level.likelyRange.low, high: level.likelyRange.high }));
         if ((currentValue === level.normalised || currentValue === level.raw) && !rangeMoves && level.mechanisms === undefined) {
           unchanged.push(`${level.option.label} already sets ${level.factor.label} to ${String(currentValue)}`);
           return false;
@@ -7520,7 +7603,7 @@ export function createAgentCapabilities(
         value: {
           normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
           ...(i.unit !== '' ? { unit: i.unit } : {}),
-          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, ...(i.rangeQuote !== undefined ? { range_quote: i.rangeQuote } : {}) } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
           ...(i.mechanisms !== undefined ? { unmodelled_mechanisms: i.mechanisms, gap_operands: i.gapOperands } : {}),
@@ -7538,9 +7621,10 @@ export function createAgentCapabilities(
         public_label:
           ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`
             // TEMPORAL (AIQ 5909998288 / 5914439702): the reading is part of what the user approves, in their units.
-            + (i.likelyRange !== undefined ? `, likely between ${likelyBound(i.likelyRange.low, i.unit)} and ${likelyBound(i.likelyRange.high, i.unit)} (read as the middle half of what\u2019s likely)` : '')).join('; ') +
+            + (i.likelyRange !== undefined ? statedRangeAssumptionWords(likelyBound(i.likelyRange.low, i.unit), likelyBound(i.likelyRange.high, i.unit)) : '')).join('; ') +
           ambiguousClause(ambiguous) +
-          gaps.declarations.map(d => `; ${optionGapApprovalWords(optionNodes.nodes.find(n => n.id === d.optionId)!.label, d.mechanisms, optionGapOperands(g.raw, d.optionId)!)}`).join(''),
+          gaps.declarations.map(d => `; ${optionGapApprovalWords(optionNodes.nodes.find(n => n.id === d.optionId)!.label, d.mechanisms, optionGapOperands(g.raw, d.optionId)!)}`).join('') +
+          (ordered.some((i) => i.likelyRange !== undefined) ? `. ${STATED_RANGE_CARD_CLOSING}` : ''),
       });
       proposals.put(proposal);
       return {
@@ -7556,7 +7640,8 @@ export function createAgentCapabilities(
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           ...(i.needsLink ? { adds_the_link: true } : {}),
-          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
+          // C2 join (AIE 6184022140): the ends are the user's; the law the analysis reads them with is Olumi's, kept apart.
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, likely_range_law: LIKELY_RANGE_LAW_NOTE } : {}),
           basis: i.basis,
           // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
           stated_by: i.userStated ? 'user' : 'olumi_estimate',
@@ -8472,6 +8557,7 @@ export function createAgentCapabilities(
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
           levels: levelInputs.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
+          ...((laws) => (laws.length > 0 ? { statement_record: laws } : {}))(rangeLawsOfCard(decision.proposal, (rebased ?? before).raw)),
         });
         } catch (error) {
           if (framedHere.length === 0) throw error;
@@ -11377,9 +11463,10 @@ export function createAgentCapabilities(
         };
         if (postRunRead && postRunRead.run_delta !== undefined
           && compareAnalysisRunFactIdentity(runIdentity, readRun).status === 'match') {
-          const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
+          const { delta, rerunRecord, goalChanceChanges } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
           if (delta !== undefined || rerunRecord !== undefined) {
             runComparison = { ...(delta !== undefined ? { run_delta: delta } : {}), ...(rerunRecord !== undefined ? { rerun_record: rerunRecord } : {}),
+              ...(goalChanceChanges.length === 0 ? {} : { goal_chance_changes: goalChanceChanges }),
               note: RUN_COMPARISON_NOTE };
           }
         }

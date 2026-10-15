@@ -3062,6 +3062,8 @@ export async function dispatchOptionLevelsBatch(
     readonly cohortForecast?: ApprovedCohortForecast;
     /** ⭐ M4-cohort (T8): the user's same-people answer, recorded on the goal (`user_statements`). Alone. */
     readonly statementRecord?: ApprovedStatementRecord;
+    /** ⭐ C2: the adoption of Olumi's approximation of each likely range a level of this batch writes. Never alone. */
+    readonly rangeLaws?: readonly ApprovedStatementRecord[];
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
@@ -3142,7 +3144,7 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.riskOccurrence === undefined && batch.cohortForecast === undefined && batch.statementRecord === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.riskOccurrence === undefined && batch.cohortForecast === undefined && batch.statementRecord === undefined && (batch.rangeLaws?.length ?? 0) === 0 && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: batch.canvasEdit === true, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
@@ -3161,6 +3163,7 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.riskOccurrence !== undefined ? { riskOccurrence: batch.riskOccurrence } : {}),
       ...(batch.cohortForecast !== undefined ? { cohortForecast: batch.cohortForecast } : {}),
       ...(batch.statementRecord !== undefined ? { statementRecord: batch.statementRecord } : {}),
+      ...((batch.rangeLaws?.length ?? 0) > 0 ? { rangeLaws: batch.rangeLaws } : {}),
       ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
       ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
@@ -3499,8 +3502,12 @@ export type CommitOptionLevelsInput = {
   readonly risk_occurrence?: ApprovedRiskOccurrence;
   /** ⭐ Science PR-4b: ONE approved card of the user's own cohort forecast — `expected_node` is the option the card showed. Alone. */
   readonly cohort_forecast?: ApprovedCohortForecast;
-  /** ⭐ M4-cohort (T8): ONE approved same-people answer, on the goal — `expected_goal` is the goal the card showed. Alone. */
-  readonly statement_record?: ApprovedStatementRecord;
+  /**
+   * ⭐ M4-cohort (T8): ONE approved same-people answer, on the goal — `expected_goal` is the goal the card showed. Alone.
+   * ⭐ C2 (AIE 6184726873): or, beside the levels that write them, the level card's adoptions of Olumi's equal-tail reading, one
+   * per likely range a level of THIS commit writes (`rangeLaws`; never alone). The same record member and writer either way.
+   */
+  readonly statement_record?: ApprovedStatementRecord | readonly ApprovedStatementRecord[];
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
@@ -3627,7 +3634,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.risk_occurrence.recorded_at !== undefined ? { recorded_at: input.risk_occurrence.recorded_at } : {}) } } : {}),
     ...(input.cohort_forecast !== undefined ? { cohortForecast: { ...input.cohort_forecast,
       own_write_landed: input.cohort_forecast.own_write_landed === true } } : {}),
-    ...(input.statement_record !== undefined ? { statementRecord: input.statement_record } : {}),
+    ...(input.statement_record !== undefined && 'node_id' in input.statement_record ? { statementRecord: input.statement_record } : {}),
+    ...(input.statement_record !== undefined && !('node_id' in input.statement_record) && input.statement_record.length > 0
+      ? { rangeLaws: input.statement_record } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,
