@@ -3924,13 +3924,14 @@ export function createAgentCapabilities(
       const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === id);
       return typeof n?.label === 'string' ? n.label : id;
     };
+    const draftedTargets = targetsHeldBy(candidate);
     const limits = limitsKeptBy(g.raw, candidate, targetFigure);
     const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
       `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
     if (limits.conflict) {
       // A real conflict refuses, and says which saved limit and what to ask (DL 15 Oct: never silently; coach the next step).
       const named = limits.conflicts.map((r) => sayRow(g.raw, r)).join('; ');
-      return notOffered('revised_draft_not_prepared', `The revised draft holds a different version of the saved limit ${named}, so it could not `
+      return notOffered('revised_draft_not_prepared', `The revised draft holds a different version of the saved ${limits.conflicts.some((r) => r.role === 'goal_target') ? 'limit or target' : 'limit'} ${named}, so it could not `
         + 'be carried forward unchanged. Nothing was offered or changed. Ask the user whether that limit still holds as saved, '
         + 'in their own words; do not choose between the two versions for them.');
     }
@@ -3944,6 +3945,9 @@ export function createAgentCapabilities(
     Object.assign(candidate, kept.replacement);
     // The drafter's targets are its reading of the user's goal: `limitsKeptBy` stores them `inferred`, never `explicit`.
     const held = targetsHeldBy(candidate);
+    // Carried rows are disclosed by their carry clause below, once. They are not a new target supplied by the drafter.
+    const newTargets = held.filter((t) => !limits.carried.some((r) => r.role === 'goal_target' && r.node_id === t.node_id)
+      && !limits.uncertain.some((r) => r.previous.role === 'goal_target' && r.previous.node_id === t.node_id));
     // ⭐ GEN #5 (Paul's funding test, 13 Oct): a deliverable done by its deadline (the event-by-date model) is a goal the user
     // stated, as a figure target is; it holds no target row, so it is recognised by its own definition.
     // ⛔ BY IDENTITY (Codex FAIL 3023 r1): the drafted event counts only when it IS the deliverable the user asked about — its own
@@ -3960,6 +3964,10 @@ export function createAgentCapabilities(
       (((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? []).find((n) => n?.kind === 'goal');
     const savedGoalNode = goalIn(g.raw);
     const draftGoalNode = goalIn(candidate);
+    // The refusal guards the governing GOAL's target. A target on an outcome (57801434's eventual larger fund)
+    // remains in the replacement, but neither requires a numeric goal nor masks a dropped goal-owned target.
+    const savedGoalTargets = targetsHeldBy(g.raw).filter((t) => t.node_id === savedGoalNode?.id);
+    const draftGoalTargets = draftedTargets.filter((t) => t.node_id === draftGoalNode?.id);
     // Through the ONE goal record (S5 census): its stated figure, unit and held comparator.
     const statedOf = (raw: unknown, node: Record<string, unknown> | undefined): { value: number; unit?: string; held?: string } | null => {
       const t = node === undefined || typeof node.id !== 'string' ? null : readGoalRecord(raw, node.id)?.target ?? null;
@@ -3974,7 +3982,7 @@ export function createAgentCapabilities(
     // £250,000 per year", "my earlier £250,000 target is withdrawn"; the statement verifier accepts each). A correction therefore
     // never replaces the saved target by figure presence: a new target goes through the goal contract (propose_goal_target), whose
     // redraft row is Olumi's reading (`limitsKeptBy`: inferred) on ONE card, and only the user's press saves it.
-    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated) {
+    if (correction && draftGoalTargets.length === 0 && event === null && savedGoalTargets.length === 0 && savedStated !== null && !stillStated) {
       // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
       return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
         + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `
@@ -3983,8 +3991,10 @@ export function createAgentCapabilities(
         + 'question. Do not offer or save a candidate that contradicts the user\'s explicit correction.');
     }
     /** A correction with no target ROW: the goal stays qualitative, or keeps its own stated figure exactly. */
-    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0 && (savedStated === null ? draftStated === null : stillStated);
-    if (held.length === 0 && event === null && !qualitativeKept) {
+    const qualitativeKept = correction && draftGoalTargets.length === 0
+      && (savedStated === null ? savedGoalTargets.length === 0 && draftStated === null : stillStated);
+    const dropsGoalTarget = correction && savedGoalTargets.length > 0 && draftGoalTargets.length === 0 && !stillStated;
+    if ((draftedTargets.length === 0 || dropsGoalTarget) && event === null && !qualitativeKept) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : NO_TARGET_DETAIL);
     }
@@ -4032,19 +4042,21 @@ export function createAgentCapabilities(
         + (draftStated === null ? 'has no numeric target, as before. '
           : `keeps the target you stated: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
             + `${draftStated.value}${draftStated.unit !== undefined ? ` ${draftStated.unit}` : ''}, as before. `)
-      : held.length > 0
+      : newTargets.length > 0
       ? `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave: `
-        + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
+        + `${newTargets.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
       : `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave (the draft modelled \u2018${goal.label}\u2019): `
         + `\u2018${event!.deliverable}\u2019, with the deadline date still to be confirmed. `)
-      + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
+      + (limits.limits.some((r) => r.role !== 'goal_target') ? `Limits in the revised draft: ${limits.limits.filter((r) => r.role !== 'goal_target').map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
+      + (qualitativeKept && limits.limits.some((r) => r.role === 'goal_target')
+        ? `Other targets in the revised draft: ${limits.limits.filter((r) => r.role === 'goal_target').map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
       + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
       + (limits.uncertain.length > 0 ? limits.uncertain.map(({ previous, proposed }) =>
         `Previous: ${sayRow(g.raw, previous)}; proposed: ${proposed.map((r) => sayRow(candidate, r)).join('; ')}. `).join('')
         + 'Do these describe the same limit? Both are retained unless you explicitly ask to remove one. ' : '')
       + (limits.withheld === undefined ? '' : `${limits.withheld} `)
       + (options.length > 0 ? `Options: ${options.join(', ')}. ` : '')
-      + (limits.dropped.length > 0 ? 'Earlier nodes needed by carried limits are kept; other estimates and links from Olumi are drafted afresh. '
+      + (limits.dropped.length > 0 ? `Earlier nodes needed by carried ${limits.dropped.some((r) => r.role === 'goal_target') ? 'limits or targets' : 'limits'} are kept; other estimates and links from Olumi are drafted afresh. `
         : 'Not carried: Olumi\u2019s earlier estimates and links, which are drafted afresh. ')
       + againstCurrent
       // Said once: a revised draft admitted over the link limit (build-model.ts `revisedDraftOverLinksOnly`).

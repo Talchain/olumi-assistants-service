@@ -29,6 +29,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { sentDigest } from '../../tools/handlers/run-input-snapshot.js';
@@ -1475,7 +1476,7 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(inputs[0]).not.toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: CHIP }));
   });
 
-  /** A redraft that draws the user's current aim as its own quantity, with the goal-contract target row (Olumi's reading). */
+  /** The former scripted reading: the requested figure is on another factor, while the governing goal stays qualitative. */
   const angelRow = (base: () => Rec = qualitative): Rec => {
     const c = base();
     const like = (c.factors as Rec[]).find((f) => f.label === 'Conversion rate')!;
@@ -1485,6 +1486,14 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     c.constraints = [...c.constraints, { metric: 'Angel funding secured', operator: '>=', value: 250000, unit: '\u00a3', provenance: 'explicit', frame: 'level', role: 'target' }];
     return c;
   };
+
+  it('a typed current-aim figure on another factor does not replace the raw governing-goal target', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), angelRow);
+    expect(await changeAs(caps, typedTurn([TYPED_250K])))
+      .toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    expect(s.commits).toHaveLength(0);
+  });
 
   /**
    * ⛔ BUDDY-A B1 (#3252 r1): a correction never replaces the saved target because a figure appears in a later message. The
@@ -1533,10 +1542,17 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
       + 'I need to complete the PoC. I have AI working on it, so I don\'t need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\n'
       + 'I need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.';
     const EVENTUAL = 'I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.';
-    const currentAim = (): Rec => { const c = angelRow(); c.statements = [
-      { quote: TYPED_250K, subject: { kind: 'goal', label: 'Larger fund secured', to_label: null, factor_label: null }, field: 'target', form: 'lower_bound',
+    const currentAim = (): Rec => {
+      // The scripted CURRENT governing goal owns this row. A row on another factor is not this positive control
+      // (BUDDY-A #3257 B1); keep the explicit current-aim expectation and strengthen its identity check below.
+      const c = qualitative();
+      c.goal = { ...c.goal, metric: 'Angel funding secured', unit: '\u00a3' };
+      c.links = c.links.map((l: Rec) => l.to === 'Larger fund secured' ? { ...l, to: 'Angel funding secured' } : l);
+      c.constraints.push({ metric: 'Angel funding secured', operator: '>=', value: 250000, unit: '\u00a3', provenance: 'explicit', frame: 'level', role: 'target' });
+      c.statements = [
+      { quote: TYPED_250K, subject: { kind: 'goal', label: 'Angel funding secured', to_label: null, factor_label: null }, field: 'target', form: 'lower_bound',
         value: 250000, low: null, high: null, unit: '\u00a3', qualifier: 'even', conditions: null },
-      { quote: EVENTUAL, subject: { kind: 'goal', label: 'Larger fund secured', to_label: null, factor_label: null }, field: 'relation', form: 'describes',
+      { quote: EVENTUAL, subject: { kind: 'goal', label: 'Angel funding secured', to_label: null, factor_label: null }, field: 'relation', form: 'describes',
         value: 1.3, low: null, high: null, unit: 'million (currency unspecified)', qualifier: 'eventually', conditions: 'a later, larger fund' },
     ]; return c; };
     const s = server({ graph: withRawTarget(), brief: FOUNDER, ledger: { first_user_message: FOUNDER,
@@ -1555,8 +1571,12 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
     const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
     const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
-    const targets = ((reopened.graph.goal_constraints ?? []) as Rec[]).filter((r) => r.role === 'goal_target');
+    // The goal's OWN row is its target, with or without the optional multi-target marker (readGoalRecord's contract).
+    const targets = ((reopened.graph.goal_constraints ?? []) as Rec[]).filter((r) => r.node_id === goal.id);
     // The current aim is the operative target, as the drafter's reading of the user's words (inferred), approved by the press.
+    expect(goal.label).toBe('Angel funding secured');
+    expect(readGoalRecord(reopened.graph, goal.id)?.target).toMatchObject({ raw: 250000, unit: '\u00a3' });
+    expect(targets.every((r) => r.node_id === goal.id), 'the governing goal owns its current target').toBe(true);
     expect(targets.map((r) => [r.value, r.unit, r.provenance]), 'the operative target is the current aim').toEqual([[250000, '\u00a3', 'inferred']]);
     expect(JSON.stringify(goal.user_statements ?? []), 'the eventual 1.3 million is kept, as the user\'s own words').toContain('eventually, a larger fund of at least 1.3 million');
   });
