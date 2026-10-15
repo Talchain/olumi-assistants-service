@@ -26,7 +26,7 @@ import { CONDITIONAL, NEGATED } from './risk.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
-import { effectsBasisWords, goalTargetBasisOf, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
+import { effectsBasisWords, goalTargetBasisOf, monthNumber, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
 import {
   answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, type ApprovedGoalReading, type GoalReadingProjection, type GoalReadingMembers,
 } from '../../goal-target/goal-reading-write.js';
@@ -276,9 +276,9 @@ export function optionLeadsCover(graph: unknown, goalId: string): boolean {
 
 /** The lead as the user's forecast says it, in months on the target's reference ("by month 2", "between month 2 and month 4"). */
 export function optionLeadWords(lead: Pick<OptionLead, 'low' | 'high' | 'low_exclusive'>): string {
-  if (lead.low !== undefined && lead.high !== undefined && lead.low !== lead.high) return `between month ${lead.low} and month ${lead.high}`;
-  if (lead.high !== undefined) return `by month ${lead.high}`;
-  return lead.low_exclusive === true ? `after month ${lead.low}` : `not before month ${lead.low}`;
+  if (lead.low !== undefined && lead.high !== undefined && lead.low !== lead.high) return `between ${monthNumber(lead.low)} and ${monthNumber(lead.high)}`;
+  if (lead.high !== undefined) return `by ${monthNumber(lead.high)}`;
+  return lead.low_exclusive === true ? `after ${monthNumber(lead.low!)}` : `not before ${monthNumber(lead.low!)}`;
 }
 
 const quoteOf = (s: UserStatement): string => `“${s.quote}”`;
@@ -303,7 +303,10 @@ function optionLeadBasisNote(graph: unknown, goalId: string, basis: GoalTargetBa
   const inPlace = (t?.options ?? []).filter((o) => o.kind === 'in_place' && o.lead !== undefined);
   if (inPlace.length === 0) return undefined;
   const quotes = [...new Set(inPlace.flatMap((o) => o.lead!.record.statements.map((st) => st.quote)))].map((q) => `“${q}”`);
-  const each = listed(inPlace.map((o) => `‘${o.label}’ as fully in place ${optionLeadWords(o.lead!)}`));
+  // Options read the same way are said together: "‘A’ and ‘B’ as fully in place by month two".
+  const byLead = new Map<string, string[]>();
+  for (const o of inPlace) byLead.set(optionLeadWords(o.lead!), [...(byLead.get(optionLeadWords(o.lead!)) ?? []), `‘${o.label}’`]);
+  const each = listed([...byLead].map(([lead, labels]) => `${listed(labels)} as fully in place ${lead}`));
   const assumed = inPlace.some((o) => o.lead!.reference_assumed === true) ? `, counted ${referenceWords(basis)} as your target is` : '';
   return `Timing basis: you stated ${quotes.join(' and ')}. This calculation reads ${each}${assumed}, and so in place at ${periodEndWords(basis)} `
     + `${referenceWords(basis)}. It assumes no further build-up after that point and holds everything else at today’s level; it does not model when the effects arrive.`;

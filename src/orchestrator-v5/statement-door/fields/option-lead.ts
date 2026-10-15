@@ -13,18 +13,19 @@
  * the months and the fingerprint of what the forecast was about (`timingFingerprintOf`: any change → stale). Pure.
  */
 import { coordinateClausesOf } from '../../agent-lane/link-effect-option-statement.js';
+import { factorTheUserNamed } from '../../agent-lane/stated-by-user.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import {
   applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord,
 } from '../../goal-target/cohort-forecast-write.js';
-import { periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
+import { monthNumber, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
 import { holdsUserStatement, userStatementRecord } from '../statements.js';
 import type { DoorSubject } from '../subject.js';
 import type { DoorWrite, FieldWriter } from '../write.js';
 import {
-  AFTER_LAUNCH, classifyOptionLead, effectOptions, FROM_TODAY, heldTiming, inQuote, optionLeadWords, referenceWords, stanceOf,
+  AFTER_LAUNCH, classifyOptionLead, effectOptions, FROM_TODAY, heldTiming, inQuote, optionEffectsOn, optionLeadWords, referenceWords, stanceOf,
   timingAskOf, timingFingerprintOf, type OptionLead, type TimingStance,
 } from './goal-timing.js';
 
@@ -44,7 +45,7 @@ const held = (graph: unknown): ReturnType<typeof heldTiming> => {
 };
 
 /** "not until", "not before", "no earlier than": a lower bound, said affirmatively (its "not" is no denial of the forecast). */
-const LOWER = /\b(?:not (?:until|before)|no (?:earlier|sooner) than|at (?:the )?earliest|at least|or later)\b/i;
+const LOWER = /\b(?:not (?:until|before)|no (?:earlier|sooner) than|at (?:the )?earliest|at least|or later)\b|\b(?:won['’]t|wouldn['’]t|will not|would not|isn['’]t|aren['’]t)\b[^.;,]*?\buntil\b/i;
 /** "by", "within", "no later than", "before": an upper bound only (it could be sooner). */
 const UPPER = /\b(?:by|within|no later than|in (?:under|less than)|before|inside)\b/i;
 
@@ -65,8 +66,14 @@ function leadReading(quote: string, words: string | undefined): LeadReading | { 
     return { refused: `Give reading_words: the user’s own words for when this option’s effect is fully in place, with its month figure(s), copied from “${quote}”.` };
   }
   const reference = FROM_TODAY.test(w) ? 'today' as const : AFTER_LAUNCH.test(w) ? 'launch' as const : undefined;
-  // The statement's own semantics (the shared NEGATED/CONDITIONAL): a lower bound's "not until" is not a denial.
-  const stance = stanceOf(quote.replace(LOWER, ' '));
+  // The statement's own semantics (the shared NEGATED/CONDITIONAL), read on the clause the months are in ("A by month 6, but the
+  // chatbot wouldn't be ready until month 8" denies nothing about A); a lower bound's "not until" is not a denial. A condition
+  // stated anywhere in the sentence ("If we hire before November, …") governs every clause after it.
+  // "won't be ready until month 8" is a lower bound too (ready at month 8, not before): its "won't" denies nothing.
+  const clause = coordinateClausesOf(quote).find((c) => inQuote(w, c)) ?? quote;
+  const unbounded = (t: string): string => t.replace(new RegExp(LOWER.source, 'gi'), ' ');
+  const conditional = stanceOf(unbounded(quote)) === 'conditional' || stanceOf(unbounded(clause)) === 'conditional';
+  const stance: TimingStance = conditional ? 'conditional' : stanceOf(unbounded(clause));
   if (months.length === 2) {
     const [a, b] = [Math.min(...months), Math.max(...months)];
     return { form: 'range', low: a, high: b, reference, stance, words: w };
@@ -84,6 +91,34 @@ function leadOfReading(r: LeadReading): Omit<OptionLead, 'record'> & { readonly 
     ...(r.low_exclusive === true ? { low_exclusive: true } : {}), ...(r.reference === undefined ? { reference_assumed: true } : {}), stance: r.stance };
 }
 
+/** The levers an option sets on the goal's path (the factors whose links reach the goal). */
+function leversOf(graph: unknown, option: Rec): Set<string> {
+  const goalId = goalIdOf(graph);
+  const set = new Set(isRec(option.interventions) ? Object.keys(option.interventions) : []);
+  return new Set(goalId === undefined ? [] : optionEffectsOn(graph, goalId).map((e) => String(e.from)).filter((f) => set.has(f)));
+}
+
+/**
+ * The ONE clause of the quote that names this option, by the lane's own label reader (`factorTheUserNamed`), as the link-effect
+ * door reads served hiring r4 (#3146): the options that set the SAME lever on the goal's path are one group ("each developer"
+ * names "Hire two developers" and "Hire one developer" alike); a clause names the group when it names one of them by words no
+ * other option shares, and names no option outside it. The clause must hold the reading words. Anything else binds nothing.
+ */
+export function clauseNamingOption(graph: unknown, optionId: string, quote: string, words: string): string | undefined {
+  const options = effectOptions(graph).concat(nodesOf(graph).filter((n) => n.kind === 'option' && n.is_baseline === true));
+  const self = options.find((o) => o.id === optionId);
+  if (self === undefined) return undefined;
+  const mine = leversOf(graph, self);
+  const group = options.filter((o) => o.id === optionId || [...leversOf(graph, o)].some((l) => mine.has(l)));
+  const others = options.filter((o) => !group.includes(o));
+  const label = (o: Rec): string => String(o.label ?? '');
+  const namesGroup = (clause: string): boolean => group.some((o) => factorTheUserNamed(label(o), clause, { options: others.map(label), others: [] }));
+  const namesOther = (clause: string): boolean => others.some((o) => factorTheUserNamed(label(o), clause,
+    { options: options.filter((x) => x.id !== o.id).map(label), others: [] }));
+  const governing = coordinateClausesOf(quote).filter((c) => namesGroup(c) && !namesOther(c) && inQuote(words, c));
+  return governing.length === 1 ? governing[0] : undefined;
+}
+
 const applies = (subject: DoorSubject, graph: unknown): boolean => subject.kind === 'option' && subject.field === 'lead'
   && held(graph) !== undefined && effectOptions(graph).some((o) => o.id === subject.id);
 
@@ -98,7 +133,7 @@ function atEndWords(lead: Omit<OptionLead, 'record'>, basis: GoalTargetBasis): s
 }
 
 const sayLead = (lead: Omit<OptionLead, 'record'>, basis: GoalTargetBasis): string =>
-  `${lead.stance === 'denied' ? 'not fully in place' : 'fully in place'} ${lead.stance === 'denied' ? `by month ${lead.low}` : optionLeadWords(lead)} ${referenceWords(basis)}`;
+  `${lead.stance === 'denied' ? 'not fully in place' : 'fully in place'} ${lead.stance === 'denied' ? `by ${monthNumber(lead.low!)}` : optionLeadWords(lead)} ${referenceWords(basis)}`;
 
 function readingOf(statements: readonly UserStatement[], words: string | undefined): LeadReading | undefined {
   if (statements.length !== 1) return undefined;
@@ -122,16 +157,20 @@ export const OPTION_LEAD_ROW: RoleRow = {
     return applies(subject, graph) && goalId !== undefined && timingAskOf(graph, goalId) !== undefined ? [{ kind: 'goal', id: goalId, field: 'lead' }] : [];
   },
   get writer() { return OPTION_LEAD_WRITER; },
+  // Bound by the ONE clause that names this option's group and holds the reading words (`clauseNamingOption`); otherwise by the
+  // door's usual rules (the words, the selection, or the ask it answers).
+  bindsWhole: (quote, subject, graph, words) => typeof words === 'string' && clauseNamingOption(graph, subject.id, quote,
+    words.trim().replace(/[.,;:!?]+$/, '')) !== undefined,
   read: (quote, subject, graph, words) => {
     const h = held(graph);
     if (!applies(subject, graph) || h === undefined) return { refused: 'This forecast is for an option with an effect on a goal read at its target’s end.' };
     const r = leadReading(quote, words);
     if ('refused' in r) return r;
     if (r.reference !== undefined && r.reference !== h.basis.reference) {
-      return { refused: `Not yet clear: whether month ${r.low ?? r.high} is ${referenceWords(h.basis)}, which is when this target is evaluated.` };
+      return { refused: `Not yet clear: whether ${monthNumber((r.low ?? r.high)!)} is ${referenceWords(h.basis)}, which is when this target is evaluated.` };
     }
     // The clause the months are written in binds the option ("…, and each developer from month 2"), never the whole sentence.
-    const clause = coordinateClausesOf(quote).find((c) => inQuote(r.words, c)) ?? quote;
+    const clause = clauseNamingOption(graph, subject.id, quote, r.words) ?? coordinateClausesOf(quote).find((c) => inQuote(r.words, c)) ?? quote;
     return { form: r.form, ...(r.low !== undefined ? { low: r.low } : {}), ...(r.high !== undefined ? { high: r.high } : {}), words: r.words, clause };
   },
   readingWords: (statements, _subject, label, graph, words) => {
