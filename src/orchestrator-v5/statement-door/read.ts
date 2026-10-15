@@ -90,7 +90,8 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     const answering = typeof raw === 'string' ? undefined : raw.answering;
     const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words);
     if ('refused' in fig) return { kind: 'refused', refusal: 'not_this_field', detail: `${fig.refused} Nothing was prepared. ${KEEP}` };
-    if (statementBoundTo(graph, subject, quote, ctx, answering) !== 'bound') {
+    const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
+    if (!whole && statementBoundTo(graph, subject, quote, ctx, answering) !== 'bound') {
       return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
@@ -105,6 +106,8 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     statements.push(v.statement);
     words ??= fig.words;
   }
+  const missing = row.incomplete?.(statements, subject, graph, words);
+  if (missing !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${missing} Nothing was prepared. ${KEEP}` };
   return { kind: 'read', reading: { subject, label, statements, reading: row.readingWords(statements, subject, label, graph, words),
     assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}) } };
 }

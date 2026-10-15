@@ -1,4 +1,5 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
+import { goalTargetBasisIn } from '../statement-door/fields/goal-timing.js';
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
 import { readGoalRecord } from './goal-record.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
@@ -8,7 +9,6 @@ import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
 import { goalKindOf } from './goal-kind.js';
 import { timeClassOf } from './time-class.js';
-import { goalTargetBasisOf } from './goal-target-basis.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
@@ -69,7 +69,7 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
     // Calendar dates have no bound carrier today; share-by-date's event chances already model time.
     if (heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date') return 'withhold';
     // Batch C: no held month, but the target's own stated period with effects at its end — the chance says that period.
-    const stated = goalTargetBasisOf(goal);
+    const stated = goalTargetBasisIn(graph, goal);
     return stated !== undefined && stated.effects_at_period_end && stated.open_question === undefined ? 'basis_at_h' : 'no_horizon';
   }
   // ⭐ EBD (Paul's hiring test, 12 Oct): a share-by-date forecast is computed AT its deadline (`withEventShareDate`
@@ -79,7 +79,8 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   if (accumulationTestedAtGoalHorizon(graph, envelope)) return 'computed_at_h';
   if (horizonSteadyAttested(graph)) return 'steady_attested';
   // ⛔ Amendment 2: never assume steady state for an urgent hire. Without an at-horizon basis the chance is withheld.
-  const basis = goalTargetBasisOf(goal);
+  // M3b: a recorded human forecast that is stale or puts the effects later never reads as at the horizon.
+  const basis = goalTargetBasisIn(graph, goal);
   if (basis === undefined || basis.open_question !== undefined || basis.period_months !== heldGoalHorizonMonths(goal)) return 'withhold';
   if (basis.effects_at_period_end) return 'basis_at_h';
   // ⭐ DL ruling 14 Oct (option A; AIE #94 6171728409: a chance only where the model supports it): a CHANGE target whose held month IS its own stated period, with
