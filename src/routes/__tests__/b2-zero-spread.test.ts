@@ -20,6 +20,8 @@ import { analysisResultForAgent } from '../../orchestrator-v5/agent-lane/decisio
 import { projectGoalProbabilitiesForTransport } from '../../orchestrator-v5/compose/goal-probability-transport.js';
 import { projectCanonicalAnalysisView } from '../canonical-analysis-view.js';
 import { runLeaderOf } from '../../orchestrator-v5/agent-lane/run-facts.js';
+import { applyStatementRecordEdit } from '../../orchestrator-v5/goal-target/cohort-forecast-write.js';
+import { rangeLawAdoption, rangeLawStatementOf } from '../../orchestrator-v5/statement-door/fields/range-law.js';
 
 type Rec = Record<string, any>;
 const ROOT = new URL('./fixtures/b2-zero-spread/', import.meta.url);
@@ -50,6 +52,20 @@ const LINE = 'Not shown yet: needs month-by-month changes';
 const IDS = ['raise_prices_10', STARTER, KEEP];
 const keepReason = { reason: 'zero_spread', side: 'falls_short', line: LINE };
 const sourceBlock = RUN.blocks.find((block: Rec) => block.type === 'analysis_result');
+/**
+ * C2 withhold (AIE 6184726873): Starter sets 'New starter subscribers' with the brief's 80–250, a likely range the analysis reads
+ * with Olumi's equal-tail approximation; a chance resting on it is withheld until that is adopted (`likely-range-law-join`). The
+ * Starter-point controls below are about the zero spread, so they hold the approximation ADOPTED, as its card's press records it.
+ */
+const ADOPTED: Rec = (() => {
+  const cell = READ.graph.nodes.find((n: Rec) => n.id === STARTER).interventions.new_starter_subscribers;
+  const { low, high, source_quote: quote } = cell.range;
+  const approved = rangeLawAdoption(READ.graph, STARTER, 'new_starter_subscribers',
+    [rangeLawStatementOf(STARTER, 'new_starter_subscribers', quote, low, high, cell.unit)], low, high, '2026-10-15T00:00:00.000Z')!;
+  const written = applyStatementRecordEdit(READ.graph, approved);
+  if (written.kind !== 'mutated') throw new Error(`the adoption was not written: ${written.kind}`);
+  return written.mutatedGraph as Rec;
+})();
 
 /**
  * The public fixture deliberately has no Keep P(goal): transport stripped its
@@ -104,7 +120,11 @@ const STARTER_RANGE = '‘Launch starter tier’: between about 95% and 99% chan
 // DL 12 Oct (LABEL-ONLY, last check BLOCKING 1): this capture's goal level and 'Starter support cost per subscriber' are
 // type-less `brief_extraction` — the person's by their stamp alone — so the result also carries the unverified note, once.
 const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true,
-  notes: ['Provisional: Olumi could not confirm where some figures behind this result came from.'] };
+  notes: ['Provisional: Olumi could not confirm where some figures behind this result came from.',
+    // C2 (AIE 6184022140 / 6184726873): Starter's 97% rests on the brief's 80–250 read with Olumi's equal-tail approximation, adopted (`ADOPTED`).
+    '‘Launch starter tier’ uses your range for ‘New starter subscribers’, 80 subscribers to 250 subscribers, read with Olumi’s '
+      + 'equal-tail approximation: about one chance in four below 80 subscribers and one in four above 250 subscribers, a modelling '
+      + 'convention, not your own calibration.'] };
 const withoutAmendment7 = (record: Rec): Rec => Object.fromEntries(Object.entries(record).filter(([key]) => !Object.hasOwn(AMENDMENT_7, key)));
 const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, inference_warnings: enrichment.inference_warnings
   .map((warning: Rec) => (warning.code === GOAL_CHANCE_LICENSED ? withoutAmendment7(warning) : warning)) });
@@ -201,7 +221,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     envelope.option_comparison.find((row: Rec) => row.option_id === KEEP).outcome = {
       p10: 110000, p50: 120000, p90: 130000, std: 10000, mean: 120000,
     };
-    const output = produced(envelope);
+    const output = produced(envelope, ADOPTED);
     const stored = licenceRecord(output.enrichment)!;
     expect(stored.pct_by_option).toEqual({ [STARTER]: 97 });
     expect(stored.withheld_option_ids).toEqual([KEEP]);
@@ -218,17 +238,19 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     // Batch C: ruling amendment 7 (independent check r1 item 6). Starter's 97% rests on Olumi's own option settings (150
     // subscribers and £49, both cee_hypothesis) and an Olumi starting value, so the licence now labels it provisional.
     // Exactly these three fields are added; every other byte stays staging's.
-    const licence = goalChanceLicenceOf(envelope, READ.graph, GOAL) as Rec;
+    const licence = goalChanceLicenceOf(envelope, ADOPTED, GOAL) as Rec;
     expect(Object.fromEntries(Object.keys(AMENDMENT_7).map(key => [key, licence[key]]))).toEqual(AMENDMENT_7);
     expect(JSON.stringify(withoutAmendment7(licence))).toBe(JSON.stringify(STAGING_CONTROL.licence));
-    const output = produced(envelope);
+    const output = produced(envelope, ADOPTED);
     expect(JSON.stringify(withoutAmendment7InRecord(output.enrichment))).toBe(JSON.stringify(STAGING_CONTROL.enrichment));
     expect(JSON.stringify(withoutAmendment7InRecord(output.public_enrichment))).toBe(JSON.stringify(STAGING_CONTROL.public_enrichment));
     // ⭐ S7 B2 (SESSION4 05:29Z): Starter's chance is shown as a range only, so the licence's notes now reach the AI beside it
     // (here the unverified-source provisional note). Exactly that key is added; every other byte stays staging's.
     const { goal_chance_notes: rangeNotes, ...agentFactsRest } = output.agent_facts;
     expect(rangeNotes).toEqual(licence.notes);
-    expect(rangeNotes).toEqual(['Provisional: Olumi could not confirm where some figures behind this result came from.']);
+    // C2 (AIE 6184726873): beside it, the adopted range's line, once (`AMENDMENT_7.notes`): both disclosures reach the AI.
+    expect(rangeNotes).toEqual(AMENDMENT_7.notes);
+    expect(rangeNotes[0]).toBe('Provisional: Olumi could not confirm where some figures behind this result came from.');
     expect(JSON.stringify(agentFactsRest)).toBe(JSON.stringify(STAGING_CONTROL.agent_facts));
     // Batch C: condition 6 / r1 item 6 (DL, 12 Oct). Starter's range rests on the same Olumi inputs as its point, so it says
     // so in the point's own words. Exactly that clause (and its count field) is added; every other byte stays staging's.
@@ -250,7 +272,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
 
   it('CONTROL (condition 6, per option): a range whose OWN settings are the user\'s names only the shared Olumi inputs', () => {
     // Batch C (DL, 12 Oct): Starter's two settings re-attributed to the brief; the starting value and relationships stay Olumi's.
-    const graph = structuredClone(READ.graph);
+    const graph = structuredClone(ADOPTED);
     const starter = graph.nodes.find((node: Rec) => node.id === STARTER);
     for (const cell of Object.values(starter.interventions) as Rec[]) cell.source = 'brief_extraction';
     // …and ANOTHER option's setting made Olumi's: never said on Starter's range.
