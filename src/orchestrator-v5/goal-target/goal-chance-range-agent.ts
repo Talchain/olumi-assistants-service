@@ -66,7 +66,10 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
   const out: Record<string, GoalChanceRangeDisplay> = {};
+  // AIE 6184726873: a chance withheld for resting on an unadopted equal-tail approximation shows no range either (it rests there too).
+  const rangeLawWithheld = (optionId: string): boolean => goalChanceLicenceForAgent(result)?.withheld_reason_by_option?.[optionId]?.reason === 'range_law_unadopted';
   for (const optionId of optionIds) {
+    if (rangeLawWithheld(optionId)) continue;
     const v = ranges[optionId]!;
     // ⛔ S2 review r1 #1 (Codex AMEND #87 6028260969): the SCREEN's words (DGAI `goalChanceRangeLine`): 0 is "less than 1%",
     // 100 is "more than 99%", the high end drops its "about"; an unresolved link label drops the line, never a raw id.
@@ -322,7 +325,8 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
     ...(chanceWords !== undefined ? { goal_chance_words: chanceWords } : {}),
-    ...(licence?.notes !== undefined && (hasChance || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),
+    // ⭐ S7 B2 (SESSION4 05:29Z): a range shown without a point is still a chance on screen, so its disclosures travel with it.
+    ...(licence?.notes !== undefined && (hasChance || hasRange || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),
     ...(licence?.status_quo !== undefined ? { goal_chance_status_quo: licence.status_quo } : {}),
     ...(licence?.targets !== undefined ? { goal_targets: licence.targets } : {}),
     ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),

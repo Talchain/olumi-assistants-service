@@ -15,6 +15,8 @@ import { RECORD_STATEMENT_OP, type DoorWriteMember } from './write.js';
 import type { ProposalOperation } from '../agent-lane/proposal.js';
 import { RISK_HOLDS_NOW_ROW, windowHoldsAskOf } from './fields/risk.js';
 import { SET_OPTION_CAPACITY_CHANGE_OP } from '../goal-target/option-capacity-change.js';
+import { RANGE_LAW_ROW, rangeLawUseOf } from './fields/range-law.js';
+import { rangeLawAdopted, rangeLawSubject } from '../intervention-range.js';
 import { timingAskOf } from './fields/goal-timing.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { cohortForecastAsks } from './fields/cohort-relation.js';
@@ -176,6 +178,18 @@ export function doorIssueArgs(graph: unknown, typed: string | null | undefined, 
     const subject: DoorSubject = { kind: 'risk', id: String(n.id), field: 'holds_now' };
     const quote = RISK_HOLDS_NOW_ROW.sourceOf?.(subject, graph);
     if (quote !== undefined && !('refused' in RISK_HOLDS_NOW_ROW.read(quote, subject, graph))) return { subject, quotes: [quote] };
+  }
+  // ⭐ AIE 6184726873: a person's likely range whose equal-tail approximation is not adopted gets its approximation card, quoting the
+  // words the range was stated in: the chance resting on it is withheld until that press, so the card is the next step.
+  for (const o of nodesOf(graph).filter((n) => n.kind === 'option' && typeof n.id === 'string')) {
+    const cells = isRec(o.interventions) ? o.interventions : isRec(o.data) && isRec(o.data.interventions) ? o.data.interventions : {};
+    for (const factorId of Object.keys(cells)) {
+      const subject = rangeLawSubject(String(o.id), factorId);
+      const use = rangeLawUseOf(subject, graph);
+      if (use === undefined || rangeLawAdopted(graph, String(o.id), use) || doorRowFor(subject, graph) !== RANGE_LAW_ROW) continue;
+      const quote = RANGE_LAW_ROW.sourceOf?.(subject, graph);
+      if (quote !== undefined && !('refused' in RANGE_LAW_ROW.read(quote, subject, graph))) return { subject, quotes: [quote] };
+    }
   }
   return undefined;
 }

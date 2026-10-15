@@ -877,6 +877,12 @@ export type OptionInterventionBatchExecutionInput =
     readonly cohortForecast?: ApprovedCohortForecast;
     /** ⭐ M4-cohort (T8): the user's same-people answer, the goal's `user_statements` only: ONE append, alone. */
     readonly statementRecord?: ApprovedStatementRecord;
+    /**
+     * ⭐ C2 (AIE 6184726873; DL 15 Oct): the adoption of Olumi's equal-tail reading of a likely range a level of THIS commit
+     * writes, by the press on the level card that showed it (`statedRangeAssumptionWords`). Each rides only with its own level
+     * and the exact ends that level writes, on the factor (`rangeLawAdopted`); never alone.
+     */
+    readonly rangeLaws?: readonly ApprovedStatementRecord[];
     readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
@@ -939,6 +945,14 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     || input.cohortForecast !== undefined || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
     return { kind: 'refused', reason: 'goal_relation_not_alone' };
   }
+  // ⭐ C2: an adoption rides only with the level that writes its range, with those exact ends.
+  const rangeLaws = input.rangeLaws ?? [];
+  if (rangeLaws.some(r => {
+    const s = r.user_statement.subject;
+    const a = r.user_statement.record.attest;
+    return s.kind !== 'factor' || s.field !== 'level' || s.option_id === undefined || r.node_id !== s.id || !input.targets.some(t => t.optionId === s.option_id
+      && t.factorId === s.id && t.figure?.likely_range?.low === a?.low && t.figure?.likely_range?.high === a?.high);
+  })) return { kind: 'refused', reason: 'range_law_without_its_level' };
   const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
   if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
   const optionGaps = gapInput.declarations;
@@ -995,7 +1009,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   }
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
-    goalReading: _callerReading, riskOccurrence: _callerRisk, cohortForecast: _callerForecast, statementRecord: _callerRecord, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    goalReading: _callerReading, riskOccurrence: _callerRisk, cohortForecast: _callerForecast, statementRecord: _callerRecord, rangeLaws: _callerRangeLaws, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -1389,7 +1403,25 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     valueConfirmations = [written.confirmation];
   }
-  const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
+  // ⭐ C2: each adoption on the factor as the values and frames left it; the card's factor is checked against the persisted base.
+  for (const r of rangeLaws) {
+    const nodeIn = (g: unknown): unknown => (isEditableGraph(g) ? g.nodes.find(n => n.id === r.node_id) : undefined);
+    if (!isDeepStrictEqual(nodeIn(before), r.expected_node)) return { kind: 'refused', reason: 'range_law_node_changed' };
+    const base = projectGraphForPersistence(levelBase as EditableGraph);
+    const onBase: ApprovedStatementRecord = { ...r, expected_node: structuredClone(nodeIn(base)) as ApprovedStatementRecord['expected_node'] };
+    const written = applyStatementRecordEdit(base, onBase);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `range_law_${written.reason}` };
+    if (written.kind === 'unchanged') continue;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !statementRecordPostimageIsScoped(base, graph, onBase)) return { kind: 'refused', reason: 'range_law_scope_mismatch' };
+    const hash = computeAnalysisAffectingGraphHash(graph);
+    if (!hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = hash;
+    valueFacts = [...valueFacts, ...written.handlerFacts];
+    valueConfirmations = [...valueConfirmations, written.confirmation];
+  }
+  const effectCount = rangeLaws.length + (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
     + (goalHorizon !== undefined ? 1 : 0) + (goalReading !== undefined ? 1 : 0) + (riskOccurrence !== undefined ? 1 : 0) + (cohortForecast !== undefined ? 1 : 0) + (statementRecord !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values

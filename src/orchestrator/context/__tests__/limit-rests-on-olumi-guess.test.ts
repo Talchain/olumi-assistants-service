@@ -20,6 +20,8 @@ import {
 } from '../placeholder-parts.js';
 import { collectLimitLevelOwners, readRatifiedConstraints, withholdOptionLimitScores } from '../constraint-feasibility.js';
 import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
+import { applyStatementRecordEdit } from '../../../orchestrator-v5/goal-target/cohort-forecast-write.js';
+import { rangeLawAdoption, rangeLawStatementOf } from '../../../orchestrator-v5/statement-door/fields/range-law.js';
 
 type Json = Record<string, any>;
 const FIX = JSON.parse(readFileSync(new URL('./fixtures/b6-cloud-r1-20260930.json', import.meta.url), 'utf8')) as {
@@ -160,8 +162,25 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
   };
   const USERS_RANGE = { low: 2, high: 5, meaning: 'likely_range', source: 'user_specified', source_quote: 'somewhere between 2 and 5 weeks' };
 
-  it('CONTROL: Olumi\'s point with the USER\'s stated range for it (#2382\'s stored shape) → kept', () => {
-    expect(moved(ranged(USERS_RANGE)).has('switch_to_gcp')).toBe(false);
+  /** C2 withhold (AIE 6184726873): the user's range with Olumi's equal-tail approximation ADOPTED, as its card's press records it. */
+  const adopted = (g: Json): Json => {
+    const approved = rangeLawAdoption(g, 'switch_to_gcp', TARGET,
+      [rangeLawStatementOf('switch_to_gcp', TARGET, USERS_RANGE.source_quote, 2, 5, 'weeks')], 2, 5, '2026-10-15T00:00:00.000Z')!;
+    const written = applyStatementRecordEdit(g, approved);
+    if (written.kind !== 'mutated') throw new Error(`the adoption was not written: ${written.kind}`);
+    return written.mutatedGraph as Json;
+  };
+
+  it('CONTROL: Olumi\'s point with the USER\'s stated range for it (#2382\'s stored shape), its approximation adopted → kept', () => {
+    expect(moved(adopted(ranged(USERS_RANGE))).has('switch_to_gcp')).toBe(false);
+  });
+
+  it('RED (AIE 6184726873): the same user\'s range with its approximation NOT adopted → withheld until it is', () => {
+    expect(moved(ranged(USERS_RANGE)).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
+    // An adoption of OTHER ends is not this range's.
+    const g = adopted(ranged(USERS_RANGE));
+    g.nodes.find((n: Json) => n.id === 'switch_to_gcp').interventions[TARGET].range = { ...USERS_RANGE, high: 6 };
+    expect(moved(g).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
   });
 
   it('RED (AIQ 5914222384, "no author"): the same range with no `source` → withheld', () => {

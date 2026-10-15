@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { approvalChipsFor } from '../approval-chips.js';
 import { createProposal } from '../proposal.js';
+import { STATED_RANGE_CARD_CLOSING, statedRangeAssumptionWords } from '../runtime/agent-capabilities.js';
 
 describe('approval chips', () => {
   it('one proposal offered, nothing authorised → an approve chip and an amend chip', () => {
@@ -30,6 +31,48 @@ describe('approval chips', () => {
     const [chip] = approvalChipsFor(calls, () => ({ proposal, result }));
     expect(chip).toMatchObject({ id: `agent-approve-proposal:${proposal.proposal_id}`, detail: proposal.public_label });
     expect(approvalChipsFor(calls, () => ({ proposal, result: { ...result, public_label: 'different range' } }))).toEqual([]);
+  });
+
+  /**
+   * ⭐ C2 (AIE 6180618773 row 2, DL ruling A): a level card that carries the user's range rests on Olumi's quartile assumption,
+   * so its press adopts a reading, "Use this reading" (AIE 6181498097), and its words keep the range as stated and the fit as
+   * Olumi's, never the user's "middle half". Two briefs: a migration's downtime, and a trial's duration.
+   */
+  describe('C2 — a level card with the user\'s range: Olumi\'s approximation, adopted by the press', () => {
+    const card = (path: string, raw: number, low: number, high: number, range: boolean) => createProposal({
+      scenario_id: 'scenario-c2', user_id: 'user-c2', base_graph_identity_hash: 'base-c2',
+      operations: [{ op: 'set_option_intervention', path, value: { raw, normalised: 0.25, authored_by: 'user_stated',
+        ...(range ? { likely_range: { low, high } } : {}) } }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'stored card',
+    });
+    const chipFor = (proposal: ReturnType<typeof createProposal>) => approvalChipsFor(
+      [{ name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: proposal.proposal_id }],
+      () => ({ proposal, result: { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label } }))[0];
+    it.each([['migration downtime', 'opt_lift::fac_downtime', 10, 5, 20], ['trial duration', 'trial::duration', 0.3, 0.1, 0.5]])(
+      'RED (%s): the range card\'s button is "Use this reading", its message the same press', (_brief, path, raw, low, high) => {
+        expect(chipFor(card(path, raw, low, high, true))).toMatchObject({ label: 'Use this reading', message: 'Yes, use this reading.' });
+      });
+    it.each([['migration downtime', 'opt_lift::fac_downtime', 10], ['trial duration', 'trial::duration', 0.3]])(
+      'CONTRAST (%s): the same level with no range keeps its own button', (_brief, path, raw) => {
+        const chip = chipFor(card(path, raw, 0, 0, false));
+        expect(chip?.label).not.toBe('Use this reading');
+        expect(chip?.message).not.toBe('Yes, use this reading.');
+      });
+    it('the words keep the range as stated, then the fit as Olumi\'s proposed approximation (AIE 6184022140, exact); never "middle half"', () => {
+      const words = statedRangeAssumptionWords('5 days', '20 days');
+      expect(words).toBe(". Your stated range is 5 days to 20 days, with its qualification read as “likely”; any other qualifications or "
+        + "conditions in your words were not read. Olumi proposes an equal-tail approximation, about one chance in four below 5 days and one in "
+        + "four above 20 days, for this analysis, based on how the analysis treats a likely range (as its lower and upper quarter points), a "
+        + "modelling convention, not evidence about this case or what “likely” means, with the limitation that the shape of the spread is also "
+        + "Olumi’s assumption: always above zero, with a longer tail on the high side. Your words did not specify those tail probabilities or how "
+        + "values are distributed");
+      expect(STATED_RANGE_CARD_CLOSING).toBe('Use this reading to record your original range as stated and adopt the shown Olumi approximation. '
+        + 'You can change or reject it instead.');
+      expect(words).not.toMatch(/middle half/i);
+      // AIE 6183364243 / 6184022140: convenience never grounds equal tails; nothing asserts there are no conditions or a standard.
+      expect(words).not.toMatch(/so the analysis can use it|lowest and highest possible|no conditions recorded|standard reading/i);
+    });
   });
 
   /**

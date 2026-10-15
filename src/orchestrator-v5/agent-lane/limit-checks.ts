@@ -24,6 +24,7 @@ import {
 } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
+import { likelyRangeLawWords, likelyRangeUseOf, rangeLawAdopted } from '../intervention-range.js';
 
 export interface LimitCheck {
   /** The join key for MG's per-limit ask (`limited-level-ask.ts`, seam 5865033356): its sentence rides here verbatim. */
@@ -92,7 +93,31 @@ function guessWords(
   if (f.arm === 'point') {
     return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
   }
+  // AIE 6184726873: the next step is the approximation card (the route offers it), never a re-ask of the range they gave.
+  if (f.arm === 'range_law') {
+    return { why: `it uses an equal-tail approximation for ${q(target)} that has not been adopted. Your stated range remains recorded.`, ask: '' };
+  }
   return null;
+}
+
+/** C2 join: each checked option's likely range on the limit's own quantity, as Olumi's approximation of it (`likelyRangeLawWords`). */
+function likelyRangeLinesFor(graph: unknown, targetId: string | null, withheldLabels: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>): string[] {
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (targetId === null || !Array.isArray(nodes)) return [];
+  const recs = nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object');
+  const target = recs.find((n) => n.id === targetId)?.label;
+  if (typeof target !== 'string' || target.trim() === '') return [];
+  return recs.filter((o) => o.kind === 'option').flatMap((o) => {
+    const label = typeof o.label === 'string' ? o.label.trim() : '';
+    const id = optionIdOf(o);
+    if (label === '' || withheldLabels.has(label) || (id !== undefined && leftOutOptionIds?.has(id))) return [];
+    const sets = [o.interventions, (o.data as { interventions?: unknown } | undefined)?.interventions]
+      .find((x): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x) && targetId in x);
+    const use = sets === undefined ? undefined : likelyRangeUseOf(targetId, sets[targetId]);
+    // An unadopted range of the person's withholds the option instead (`placeholderPartsFinding`'s range_law arm).
+    if (use === undefined || (use.persons_own && (id === undefined || !rangeLawAdopted(graph, id, use)))) return [];
+    return [likelyRangeLawWords(label, target, use)];
+  });
 }
 
 const andList = (xs: readonly string[]): string =>
@@ -136,7 +161,7 @@ function withheldOptionsFor(
     if (finding.reason === OLUMI_GUESS_LIMIT_REASON) {
       if (words === null) continue;
       out.guesses.set(words.why, [...(out.guesses.get(words.why) ?? []), label]);
-      out.guessAsk ??= words.ask;
+      if (words.ask !== '') out.guessAsk ??= words.ask;
       continue;
     }
     out.byReason.set(finding.reason, [...(out.byReason.get(finding.reason) ?? []), label]);
@@ -262,7 +287,10 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const rowSays = levelUnverified && row.state === 'estimate_only' ? ['Not confirmed from your brief'] : !b6 ? [sentenceFor(label, row.state, row.reason)]
       : row.state === 'unscored' ? [`${q(label)} isn’t shown for any option.`]
         : row.state === 'estimate_only' && row.reason === 'level_olumi_estimate' ? [] : [sentenceFor(label, row.state, row.reason)];
-    const say = [...rowSays, ...why, ...guessed].join(' ');
+    // C2 join (AIE 6184022140): an option checked on this limit through its own likely range rests on Olumi's equal-tail
+    // approximation of it, said once per option (never on an option the row did not check).
+    const ranged = row.state === 'unscored' ? [] : likelyRangeLinesFor(graph, limit?.node_id ?? null, new Set(perOption.labels), leftOutOptionIds);
+    const say = [...rowSays, ...why, ...guessed, ...ranged].join(' ');
     // The link-size questions are MG's ask, never the sentence's (one wording, one producer): after the level ask.
     const allAsks = [...(ask !== undefined && !b6 ? [ask] : []), ...(perOption.guessAsk !== undefined ? [perOption.guessAsk] : []), ...perOption.asks].join(' ');
     out.push({

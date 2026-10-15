@@ -132,6 +132,21 @@ export function sameUnit(a: unknown, b: unknown): boolean {
   return pa !== null && pb !== null && JSON.stringify(pa) === JSON.stringify(pb);
 }
 
+/**
+ * The SAME limit re-spelled by a later draft (served marketing turn 02, 15 Oct: "% of founder time" → "%" on the same id;
+ * 13 Oct: "GBP/year" → "£"): the later unit names the same quantity as the earlier one once a part it LEAVES UNSTATED — a
+ * share's base, money's period — is read as the earlier unit's. Every part both units state must agree, through the full
+ * reader (`readUnitParts`): two different bases ("% of founder time" | "% of my time"), periods, currencies, scales,
+ * denominators or qualifiers are never the same. Only the later unit's silence is filled, never the earlier one's.
+ */
+export function sameUnitAsEarlier(earlier: unknown, later: unknown): boolean {
+  if (sameUnit(earlier, later)) return true;
+  const e = readUnitParts(earlier);
+  const l = readUnitParts(later);
+  if (e === null || l === null) return false;
+  return JSON.stringify({ ...l, base: l.base ?? e.base, period: l.period ?? e.period }) === JSON.stringify(e);
+}
+
 /** C1's own reading, before the full reader's veto: counts, money (currency, period, denominator), else words. */
 function c1SameUnit(a: unknown, b: unknown): boolean {
   const ca = readCount(a); const cb = readCount(b);

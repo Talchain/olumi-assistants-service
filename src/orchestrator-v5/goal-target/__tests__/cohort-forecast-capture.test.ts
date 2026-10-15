@@ -66,7 +66,8 @@ function world(start: Rec = plain(F.graph)) {
     const out = await executeOptionInterventionBatch({ scenarioId: SID, turnId: input.turn_id, requestId: 'cf', requestHash: `cf:${input.turn_id}`,
       stage: 'frame', freshness: 'fresh', hasExistingAnalysis: false, expectedGraphHash: input.base_graph_hash, targets: [],
       ...(input.cohort_forecast !== undefined ? { cohortForecast: input.cohort_forecast } : {}),
-      ...(input.statement_record !== undefined ? { statementRecord: input.statement_record } : {}) }, store);
+      // One record alone, mapped as the real door maps it (C2: an array is the level card's adoptions, never alone).
+      ...(input.statement_record !== undefined && 'node_id' in input.statement_record ? { statementRecord: input.statement_record } : {}) }, store);
     if (out.kind === 'refused') return { status: 'refused', reason: out.reason };
     if (out.kind === 'unchanged') return { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(graph() as never)!, receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
     if (out.kind !== 'committed') return { status: 'unconfirmed' };
