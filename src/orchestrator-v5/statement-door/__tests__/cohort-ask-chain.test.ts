@@ -58,7 +58,7 @@ const BRIEFS = [
     figures: E.inputs as Record<string, { people_reached: number; conversion_middle_half_pct: [number, number] }> },
   { name: 'recruitment funnel', graph: RECRUITMENT, rate: 'Offer acceptance rate', count: 'Engineers hired',
     same: 'Yes, the engineers we hire are the candidates who accept our offers.',
-    figures: { carry_on_as_now: { people_reached: 6, conversion_middle_half_pct: [40, 65] }, start_a_referral_scheme: { people_reached: 9, conversion_middle_half_pct: [55, 80] } } },
+    figures: { carry_on_as_now: { people_reached: 6, conversion_middle_half_pct: [40, 65] }, start_a_referral_scheme: { people_reached: 9, conversion_middle_half_pct: [55, 80] } } as Record<string, { people_reached: number; conversion_middle_half_pct: [number, number] }> },
 ];
 
 const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');

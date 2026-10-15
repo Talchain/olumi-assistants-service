@@ -115,7 +115,7 @@ export const COHORT_RELATION_ROW: RoleRow = {
     const [conv] = byForm(statements, 'range');
     const [ppl] = byForm(statements, 'point');
     return conv === undefined || ppl === undefined ? `Recorded from your words about ‘${label.trim()}’.`
-      : cohortForecastRecordedWords(label, { people_reached: ppl.low!, conversion_middle_half_pct: [conv.low!, conv.high!] } as CohortForecast);
+      : cohortForecastRecordedWords(label, { people_reached: ppl.low!, conversion_middle_half_pct: [conv.low!, conv.high!] });
   },
 };
 

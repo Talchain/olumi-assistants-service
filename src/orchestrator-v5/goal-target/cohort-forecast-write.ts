@@ -152,7 +152,7 @@ export function cohortForecastCardWords(optionLabel: string, f: CohortForecast, 
   ].join('\n');
 }
 
-export const cohortForecastRecordedWords = (optionLabel: string, f: CohortForecast): string =>
+export const cohortForecastRecordedWords = (optionLabel: string, f: Pick<CohortForecast, 'people_reached' | 'conversion_middle_half_pct'>): string =>
   `Recorded from your words: your forecast that ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, with about one chance in four that its `
   + `underlying conversion rate is below ${f.conversion_middle_half_pct[0]}% and one in four that it is above ${f.conversion_middle_half_pct[1]}%.`;
 
