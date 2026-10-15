@@ -284,7 +284,7 @@ describe('the same offer pressed twice prepares ONE card (amendment 6)', () => {
     modelCalls = 0;
     const first = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
-    expect(first.assistant_text).toBe('The comparison rests on a link nobody has sized yet.\n\nHow much does "Quarterly revenue" change when "Enterprise prospect signing likelihood" goes up by one percentage point?');
+    expect(first.assistant_text).toBe('A link on the path to your goal has no size yet.\n\nHow much does "Quarterly revenue" change when "Enterprise prospect signing likelihood" goes up by one percentage point?');
     expect(second.assistant_text).toBe(first.assistant_text);
     for (const b of [first, second]) {
       expect(b._agent?.tool_calls ?? []).toEqual([]);
