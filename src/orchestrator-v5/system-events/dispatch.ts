@@ -3453,6 +3453,8 @@ export type CommitOptionLevelsInput = {
     readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
     readonly reversal?: ApprovedLinkEffect['reversal'];
     readonly link_selected?: true;
+    /** S5 effect range: Olumi's midpoint of the user's range (AIE 6187341689), bound into `reading_token`. */
+    readonly representative?: ApprovedLinkEffect['representative'];
   };
   /** Several approved natural-effect edits, held together by one approval and one commit. */
   readonly link_effects?: readonly {
@@ -3604,6 +3606,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token,
       ...(input.link_effect.reversal !== undefined ? { reversal: input.link_effect.reversal } : {}),
       ...(input.link_effect.link_selected === true ? { link_selected: true as const } : {}),
+      ...(input.link_effect.representative !== undefined ? { representative: input.link_effect.representative } : {}),
       ...(input.link_effect.unit_readings !== undefined ? { unit_readings: input.link_effect.unit_readings } : {}) } } : {}),
     ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { linkEffects: input.link_effects.map((effect) => ({ from: effect.from, to: effect.to, effect: effect.effect,
       edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token,

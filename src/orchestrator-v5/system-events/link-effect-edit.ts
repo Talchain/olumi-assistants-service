@@ -59,6 +59,16 @@ export interface LinkEffectStatement {
   readonly per_source_change_unit: string;
 }
 
+/**
+ * ⭐ S5 effect range (AIE 6187341689): the user gave only a RANGE for the effect ("30 to 60 subscribers lost for each £1"). A range
+ * does not author a point: `amount` is then Olumi's calculated midpoint of these signed ends, a separately labelled representative
+ * effect the card showed and the user adopted, stored as Olumi's estimate (accepted), never as the user's figure.
+ */
+export interface LinkEffectRepresentative {
+  readonly low: number;
+  readonly high: number;
+}
+
 /** A displayed direction correction, approved as part of the exact link-effect reading. */
 export interface LinkEffectReversal {
   readonly from: 'positive' | 'negative';
@@ -101,6 +111,8 @@ export interface ApplyLinkEffectEditParams {
    * only that door admits a refit postimage (`linkEffectRefitPostimageIsScoped`). Absent ⇒ `not_representable`, as before.
    */
   readonly frameRefit?: true;
+  /** S5 effect range: `effect.amount` is Olumi's midpoint of these ends (AIE 6187341689), shown on the card and adopted. */
+  readonly representative?: LinkEffectRepresentative;
 }
 
 export type LinkEffectRefusal =
@@ -113,6 +125,8 @@ export type LinkEffectRefusal =
   | 'definitional_link'
   | 'unit_mismatch'
   | 'unconvertible'
+  /** S5: a midpoint never replaces a size the user already stated for this link. */
+  | 'representative_over_users_figure'
   | Exclude<LinkSizeProblem, 'unconvertible'>;
 
 export type LinkEffectEditResult =
@@ -420,9 +434,11 @@ export function linkEffectReadingToken(reading: {
   readonly unit_readings?: readonly LinkEffectUnitReading[];
   readonly reversal?: LinkEffectReversal;
   readonly link_selected?: true;
+  readonly representative?: LinkEffectRepresentative;
 }): string {
   const { amount, amount_unit, per_source_change, per_source_change_unit } = reading.effect;
   const bound = { from: reading.from, to: reading.to, effect: { amount, amount_unit, per_source_change, per_source_change_unit }, quote: reading.quote,
+    ...(reading.representative !== undefined ? { representative: { low: reading.representative.low, high: reading.representative.high } } : {}),
     ...(reading.unit_readings?.length ? { unit_readings: reading.unit_readings } : {}),
     ...(reading.reversal !== undefined ? { reversal: reading.reversal } : {}),
     ...(reading.link_selected === true ? { link_selected: true } : {}) };
@@ -448,9 +464,13 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (typeof params.quote !== 'string' || params.quote.trim() === '' || params.quote.length > QUOTE_MAX) return refuse('quote_invalid');
   if (typeof params.reading_token !== 'string'
     || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote, unit_readings: params.unit_readings,
-      reversal: params.reversal, link_selected: params.link_selected })) {
+      reversal: params.reversal, link_selected: params.link_selected, representative: params.representative })) {
     return refuse('reading_not_confirmed');
   }
+  // ⭐ S5 effect range: the midpoint is arithmetic on the two signed ends the card showed, exactly; a sign is applied once.
+  const rep = params.representative;
+  if (rep !== undefined && (!finite(rep.low) || !finite(rep.high) || !(rep.low < rep.high) || rep.low * rep.high <= 0
+    || effect.amount !== (rep.low + rep.high) / 2)) return refuse('reading_not_confirmed');
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
     return refuse('invalid_graph');
   }
@@ -554,7 +574,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // ⭐ G1b answer door: the range the user wrote around their figure in the quoted sentence (`centreRangeOfQuote`, the
   // door's own reading, bound by the reading token through the quote) is carried exactly as construction carries the same
   // sentence from a brief (`natural_effect.stated_range`, `end: 'centre'`), so the chat and the brief size it alike.
-  const centre = centreRangeOfQuote(params.quote, effect);
+  // S5: a midpoint is no point the user wrote, so the quote's range is never read as "about N" around it.
+  const centre = rep !== undefined ? undefined : centreRangeOfQuote(params.quote, effect);
   const sizing = sizeLink(
     { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true,
       ...(centre !== undefined ? { stated_range: centre } : {}) },
@@ -566,6 +587,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // sizing problem is still a refusal.
   const fitsByRefit = params.frameRefit === true && sizing.problem === 'not_representable' && sizing.outcome === 'user_stated';
   if (sizing.problem !== undefined && !fitsByRefit) return refuse(sizing.problem);
+  // S5: construction's refit is for a size the user stated; an Olumi midpoint never moves the frames.
+  if (rep !== undefined && fitsByRefit) return refuse('not_representable');
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side names who sized it, so no reader turns a
@@ -595,10 +618,23 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true || unitReadings.some(r => r.node_id === to)
       ? { amount_unit: effect.amount_unit } : {}),
   };
-  // The confirmed reading is identity content, outside the analysis hash; every other provenance key (not Olumi's) survives.
-  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
-    source_quote: params.quote, reading: 'agent_proposed_user_confirmed' };
-  edge.provenance_display = 'user_set';
+  if (rep !== undefined) {
+    // ⭐ S5 effect range (AIE 6187341689): Olumi's calculated midpoint, adopted by the press: OLUMI's estimate, accepted (its review
+    // stamp), never `user_specified`/`user_stated` and no natural effect said as theirs. The user's range stays in their words
+    // (`source_quote`) and its two ends beside the midpoint, so no reader says it as their figure.
+    if (provenance.source === 'user_specified') return refuse('representative_over_users_figure');
+    const { reading: _noUserReading, ...keptOlumi } = keptProvenance as Rec;
+    edge.provenance = { ...keptOlumi, magnitude: 'olumi_estimate', source_quote: params.quote,
+      representative_midpoint: { low: rep.low, high: rep.high, amount: effect.amount, amount_unit: effect.amount_unit,
+        per_source_change: effect.per_source_change, per_source_change_unit: effect.per_source_change_unit },
+      reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } };
+    edge.provenance_display = 'ai_inferred';
+  } else {
+    // The confirmed reading is identity content, outside the analysis hash; every other provenance key (not Olumi's) survives.
+    edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
+      source_quote: params.quote, reading: 'agent_proposed_user_confirmed' };
+    edge.provenance_display = 'user_set';
+  }
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.
   if (edge.defaulted === true) edge.exists_defaulted = true;
   delete edge.defaulted;
@@ -674,5 +710,6 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     },
   });
   return { kind: 'mutated', mutatedGraph: written, graph: parsed.data, handlerFacts: [fact as HandlerFact],
-    ...(sizing.statement !== undefined ? { statement: sizing.statement } : {}), ...(refitFrom !== undefined ? { refitFrom } : {}) };
+    // A midpoint is never said back as the user's size ("You said …").
+    ...(sizing.statement !== undefined && rep === undefined ? { statement: sizing.statement } : {}), ...(refitFrom !== undefined ? { refitFrom } : {}) };
 }
