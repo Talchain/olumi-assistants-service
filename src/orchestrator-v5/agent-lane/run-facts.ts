@@ -73,14 +73,21 @@ export interface RunComparison {
 
 /**
  * ⭐ S7 PR-B: how the AI uses the packet, said once beside it (the `rerun_record.use` convention). Model-facing prompt text:
- * AIE FYI on #94. The host no longer writes these lines itself; the egress check holds the AI to them.
+ * the AIE's EXACT words (#94 6183364243, replacing the FYI'd draft 6183014787).
  */
-export const RUN_FACTS_USE = 'These are the selected Run\u2019s own facts. Give each option\u2019s chance only as `chances` gives it, with its '
-  + 'range and uncertainty where given, and never as a share of runs. Explain each `withheld` reason in plain words, once. Say each '
-  + 'line in `must_say` word for word, once. Name an option as most likely to meet the goal only where `leader.goal_chance_leader` '
-  + 'names it; where `leader.similar_option_ids` lists options, say their chances are similar; never call any option best, a winner '
-  + 'or recommended. Where `comparison` is given, say what changed since the '
-  + 'preceding Run from it alone. Never estimate a figure these facts do not give.';
+export const RUN_FACTS_USE = 'These are the selected Run\'s own facts, bound to its revision and Run identity. Give goal chances only where chances '
+  + 'licenses them, preserving the actual option, target, unit/reference/window, conditions and uncertainty. Do not relabel '
+  + 'a win share, input, effect or sampling precision as goal chance. Explain each applicable withheld reason once and '
+  + 'retain every required scope, exclusion and assumption disclosure. Use the supplied must_say wording once where it '
+  + 'applies; do not repeat the same reason elsewhere. Name the option most likely to meet the goal only when '
+  + 'leader.goal_chance_leader positively licenses that meaning and identity; where leader.similar_option_ids applies, '
+  + 'describe the licensed similarity without implying exact equality. Never call an option best, a winner or recommended, '
+  + 'or choose for the user. Where comparison is given, explain the actual change and recorded result from it alone, '
+  + 'including an unchanged result when supplied. State the actual measured mechanism or sensitivity only where licensed; '
+  + 'graph proximity is not a driver. Reuse retained human statements with their source, qualifications and unresolved '
+  + 'binding, and give at most one justified next reasoning step. Do not invent figures, dates, laws or missing facts. If '
+  + 'required grounding or a valid reply cannot be retained, coaching is incomplete; do not borrow another Run or treat a '
+  + 'surviving card as completed coaching.';
 
 export interface RunFacts {
   /** How the AI uses these facts (`RUN_FACTS_USE`), present only with a current Run's facts. */

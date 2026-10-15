@@ -115,6 +115,10 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
 
 
 describe('S7 PR-B: the packet says how the AI uses it, only beside a current Run', () => {
+  it('`use` is the AIE’s EXACT text (#94 6183364243), character for character', () => {
+    expect(RUN_FACTS_USE).toBe("These are the selected Run's own facts, bound to its revision and Run identity. Give goal chances only where chances licenses them, preserving the actual option, target, unit/reference/window, conditions and uncertainty. Do not relabel a win share, input, effect or sampling precision as goal chance. Explain each applicable withheld reason once and retain every required scope, exclusion and assumption disclosure. Use the supplied must_say wording once where it applies; do not repeat the same reason elsewhere. Name the option most likely to meet the goal only when leader.goal_chance_leader positively licenses that meaning and identity; where leader.similar_option_ids applies, describe the licensed similarity without implying exact equality. Never call an option best, a winner or recommended, or choose for the user. Where comparison is given, explain the actual change and recorded result from it alone, including an unchanged result when supplied. State the actual measured mechanism or sensitivity only where licensed; graph proximity is not a driver. Reuse retained human statements with their source, qualifications and unresolved binding, and give at most one justified next reasoning step. Do not invent figures, dates, laws or missing facts. If required grounding or a valid reply cannot be retained, coaching is incomplete; do not borrow another Run or treat a surviving card as completed coaching.");
+  });
+
   it.each(BRIEFS)('%s: `use` is RUN_FACTS_USE on the current Run and absent on a stale one', (_n, body) => {
     expect(runFactsOf(body.analysis_result, body.graph, true).use).toBe(RUN_FACTS_USE);
     expect(runFactsOf(body.analysis_result, body.graph, false)).not.toHaveProperty('use');
