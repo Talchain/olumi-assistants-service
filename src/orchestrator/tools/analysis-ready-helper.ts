@@ -47,6 +47,7 @@ import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-ana
 import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
 import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
+import { findScaleIncoherentBaselineFactorIds } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -97,6 +98,7 @@ export type CanonicalReadinessIssueCode =
   | 'UNREACHABLE_CONTROLLABLE_FACTOR'
   | 'MISSING_FACTOR_LEVEL'
   | 'IDENTITY_FRAME_MISSING'
+  | 'FACTOR_LEVEL_SCALE_UNRESOLVED'
   | 'INTERNAL_ERROR';
 
 export interface CanonicalReadinessIssue {
@@ -1537,6 +1539,28 @@ function appendSemanticIssues(
  * normalisations that are safe because they preserve user-supplied values.
  * Both the wire projection and Run admission are adapters over this record.
  */
+/**
+ * The factors the Run's baseline gate refuses (`baseline_scale_unresolved`), computed as the Run computes them: every option
+ * node's merged intervention objects (`mergeInterventionSourceObjects`, the Run loader's own merge), options holding no value
+ * left out (the analysable gate), then the unadopted-Olumi-suggestion rule (`filterOlumiProposedOptions`). Readiness has no
+ * scaffold, so no value is CEE-supplied here, as none is in the user's options the Run reads.
+ */
+function baselineScaleGaps(nodes: readonly unknown[], graph: unknown): Array<{ id: string; label: string; value: number }> {
+  const options = nodes
+    .filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'option'
+      && typeof (n as { id?: unknown }).id === 'string')
+    .map((n) => ({ id: n.id as string, option_id: n.id as string, interventions: mergeInterventionSourceObjects(n) }));
+  const valued = options.filter((o) => Object.keys(o.interventions).length > 0);
+  const submitted = filterOlumiProposedOptions({ submitted: valued, graph,
+    unanalysableOptionIds: options.filter((o) => !valued.includes(o)).map((o) => o.option_id) }).options;
+  const ids = findScaleIncoherentBaselineFactorIds(nodes,
+    submitted.map((o) => (o.interventions !== null && typeof o.interventions === 'object' ? o.interventions as Record<string, unknown> : {})));
+  return ids.map((id) => {
+    const node = nodes.find((n) => (n as { id?: unknown }).id === id) as { label?: unknown; observed_state?: { value?: unknown } } | undefined;
+    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(node?.observed_state?.value) };
+  });
+}
+
 export function assessCanonicalAnalysisReadiness(
   graph: unknown,
 ): CanonicalReadinessAssessment {
@@ -1709,6 +1733,23 @@ export function assessCanonicalAnalysisReadiness(
         code: 'MISSING_FACTOR_LEVEL',
         category: 'option_values',
         message: levelGapAsk(gap, graph),
+        repairability: 'human_input_required',
+        factor_id: gap.id,
+        factor_label: gap.label,
+      });
+    });
+
+    // ⭐ ONE PREDICATE WITH THE RUN (S10/S7, 15 Oct: readiness said READY while every Run refused "a bare amount with no
+    // range"). The Run's own baseline gate (`findScaleIncoherentBaselineFactorIds`, run-analysis.ts) over the options the Run
+    // would send — those holding a value (the analysable gate), then `filterOlumiProposedOptions`' own rule — so readiness
+    // and the Run cannot disagree. Asked as that factor's level, in its unit or with its range: never "no control can repair it".
+    baselineScaleGaps(parsed.data.nodes, graph).forEach((gap, index) => {
+      blockingIssues.push({
+        issue_id: `level_scale_${index + 1}`,
+        code: 'FACTOR_LEVEL_SCALE_UNRESOLVED',
+        category: 'numeric_integrity',
+        message: `What is "${gap.label}" today, in its own unit (for example £ per year, %, or a count)? It is recorded as ${gap.value} `
+          + 'with no unit or range, so the analysis cannot use it yet. A range is fine if you are not sure.',
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,
