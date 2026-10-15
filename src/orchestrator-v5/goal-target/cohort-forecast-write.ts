@@ -236,45 +236,60 @@ export function cohortForecastPostimageIsScoped(before: unknown, after: unknown,
 }
 
 /**
- * ⭐ M4-cohort (science table T8): the user's answer that the count target counts converts among the SAME people the rate target
- * is measured on, recorded on the GOAL (its relation, `user_statements`) by the door's press. It is the goal's fact, said once for
- * every option; readiness then asks each option's forecast instead of re-asking it. Nothing else on the goal moves.
+ * ⭐ THE WORDS-ONLY STATEMENT RECORD (door member `statement_record`): the user's verified statements recorded on their subject's
+ * node (`user_statements`) by the door's press, and nothing else on the node moves. Two subjects use it:
+ *  · M4-cohort (science table T8): the GOAL's relation, the user's answer that the count target counts converts among the SAME
+ *    people the rate target is measured on, said once for every option; readiness then asks each option's forecast;
+ *  · M3c (AIE 6181933060): an OPTION's lead, when its effect is fully in place, with Olumi's reading of the months (`attest`).
+ *    The record itself is what the timing reader and the analysis hash read (`optionLeadOf`).
  */
-export interface ApprovedGoalRelation {
-  readonly goal_id: string;
-  /** The goal node exactly as stored when the card was made: the stale gate. */
-  readonly expected_goal: Readonly<Rec>;
+export interface ApprovedStatementRecord {
+  readonly node_id: string;
+  /** The node exactly as stored when the card was made: the stale gate. */
+  readonly expected_node: Readonly<Rec>;
   readonly user_statement: { readonly subject: DoorSubject; readonly record: UserStatementRecord };
 }
 
-export type GoalRelationEditResult =
+export type StatementRecordEditResult =
   | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
   | { readonly kind: 'unchanged' }
-  | { readonly kind: 'refused'; readonly reason: 'invalid_graph' | 'invalid_statement' | 'goal_not_found' | 'goal_changed' };
+  | { readonly kind: 'refused'; readonly reason: 'invalid_graph' | 'invalid_statement' | 'node_not_found' | 'node_changed' };
 
-export function applyGoalRelationEdit(persistedGraph: unknown, approved: ApprovedGoalRelation): GoalRelationEditResult {
+/** The subjects this member records, each with the statements it holds: never a figure-bearing record in place of its own carrier. */
+function recordable(subject: DoorSubject, record: UserStatementRecord): boolean {
+  if (subject.kind === 'goal' && subject.field === 'relation') return record.statements.length === 1 && record.statements[0]!.form === 'holds_now';
+  if (subject.kind === 'option' && subject.field === 'lead') {
+    return record.statements.length >= 1 && record.statements.length <= 2 && record.attest !== undefined && typeof record.attest.fingerprint === 'string';
+  }
+  return false;
+}
+
+export function applyStatementRecordEdit(persistedGraph: unknown, approved: ApprovedStatementRecord): StatementRecordEditResult {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) return { kind: 'refused', reason: 'invalid_graph' };
   const said = approved.user_statement;
   const record = userStatementRecordOf(said.record);
-  if (said.subject.kind !== 'goal' || said.subject.id !== approved.goal_id || said.subject.field !== 'relation'
-    || said.record.subject_key !== subjectKey(said.subject) || record === undefined || record.statements.length !== 1
-    || record.statements[0]!.form !== 'holds_now') return { kind: 'refused', reason: 'invalid_statement' };
-  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id && n.kind === 'goal');
-  if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
+  if (said.subject.id !== approved.node_id || said.record.subject_key !== subjectKey(said.subject) || record === undefined
+    || !recordable(said.subject, record)) return { kind: 'refused', reason: 'invalid_statement' };
+  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.node_id && n.kind === said.subject.kind);
+  if (matches.length !== 1) return { kind: 'refused', reason: 'node_not_found' };
   // A retry after this press landed finds exactly these words held: the verified no-op.
   if (holdsUserStatement(persistedGraph, said.record, said.subject)) return { kind: 'unchanged' };
-  if (!isDeepStrictEqual(matches[0], approved.expected_goal)) return { kind: 'refused', reason: 'goal_changed' };
+  if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'node_changed' };
   const graph = withUserStatement(structuredClone(persistedGraph) as Rec & { nodes: unknown[] }, said.record, said.subject);
-  if (graph === undefined) return { kind: 'refused', reason: 'goal_not_found' };
-  const label = String(matches[0]!.label ?? approved.goal_id).trim();
+  if (graph === undefined) return { kind: 'refused', reason: 'node_not_found' };
+  const label = String(matches[0]!.label ?? approved.node_id).trim();
+  const lead = said.subject.field === 'lead';
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph', fact_version: 1, noop: false,
-    result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+    result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
+      affected_entities: [{ kind: said.subject.kind, label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: 'Recorded from your words that both targets count the same people', impact: 'low', rerun_recommended: false },
+      safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place' : 'Recorded from your words that both targets count the same people',
+      impact: 'low', rerun_recommended: lead },
   });
-  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact], confirmation: sameCohortRecordedWords(graph) };
+  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
+    confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.` : sameCohortRecordedWords(graph) };
 }
 
 /** The labels of the goal's two cohort targets, the rate (a percentage of the people reached) and the count, or `undefined`. */
@@ -292,12 +307,12 @@ export function sameCohortLabelsOf(graph: unknown): { readonly rate: string; rea
 export function sameCohortRecordedWords(graph: unknown): string {
   const l = sameCohortLabelsOf(graph);
   return l === undefined ? 'Recorded from your words that both targets count the same people.'
-    : `Recorded from your words: ‘${l.count}’ counts the people who convert among the same people your ‘${l.rate}’ is measured on.`;
+    : `Recorded from your words: your answer that your ‘${l.count}’ come from the same people your ‘${l.rate}’ is measured on.`;
 }
 
 /** The post-image holds exactly this write and nothing else (the dispatch's scope check, as for the forecast). */
-export function goalRelationPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedGoalRelation): boolean {
-  const written = applyGoalRelationEdit(before, approved);
+export function statementRecordPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedStatementRecord): boolean {
+  const written = applyStatementRecordEdit(before, approved);
   return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
 }
 
@@ -324,7 +339,7 @@ export function approvedCohortForecastOf(op: { readonly path: string; readonly v
 }
 
 /** A stored card's `user_statement` (the door's record of the words): absent, well-formed, or `null` when malformed. */
-function userStatementCarriedBy(v: Rec): ApprovedGoalRelation['user_statement'] | undefined | null {
+function userStatementCarriedBy(v: Rec): ApprovedStatementRecord['user_statement'] | undefined | null {
   if (v.user_statement === undefined) return undefined;
   const u = isRec(v.user_statement) ? v.user_statement : {};
   const subject = isRec(u.subject) ? u.subject : undefined;
@@ -335,21 +350,21 @@ function userStatementCarriedBy(v: Rec): ApprovedGoalRelation['user_statement'] 
   return record.subject_key === subjectKey(parsed) ? { subject: parsed, record } : null;
 }
 
-/** The proposal op of the goal's same-people answer (`path` is the goal's id, `value` is what {@link approvedGoalRelationOf} reads). */
-export const SET_GOAL_RELATION_OP = 'set_goal_relation' as const;
+/** The proposal op of the goal's same-people answer (`path` is the goal's id, `value` is what {@link approvedStatementRecordOf} reads). */
+export const SET_STATEMENT_RECORD_OP = 'set_statement_record' as const;
 
 /** The goal relation card as its stored operation carries it, or `undefined` if malformed. */
-export function approvedGoalRelationOf(op: { readonly path: string; readonly value?: unknown }): ApprovedGoalRelation | undefined {
+export function approvedStatementRecordOf(op: { readonly path: string; readonly value?: unknown }): ApprovedStatementRecord | undefined {
   const v = isRec(op.value) ? op.value : {};
   const said = userStatementCarriedBy(v);
-  if (!isRec(v.expected_goal) || said === undefined || said === null) return undefined;
-  return { goal_id: op.path, expected_goal: v.expected_goal, user_statement: said };
+  if (!isRec(v.expected_node) || said === undefined || said === null) return undefined;
+  return { node_id: op.path, expected_node: v.expected_node, user_statement: said };
 }
 
 /** A held goal relation card still applies to `graph` exactly when its own writer would not refuse it there. */
-export function goalRelationCardHolds(op: { readonly path: string; readonly value?: unknown }, graph: unknown): boolean {
-  const approved = approvedGoalRelationOf(op);
-  return approved !== undefined && applyGoalRelationEdit(graph, approved).kind !== 'refused';
+export function statementRecordCardHolds(op: { readonly path: string; readonly value?: unknown }, graph: unknown): boolean {
+  const approved = approvedStatementRecordOf(op);
+  return approved !== undefined && applyStatementRecordEdit(graph, approved).kind !== 'refused';
 }
 
 /** A held forecast card still applies to `graph` exactly when its own writer would not refuse it there. */

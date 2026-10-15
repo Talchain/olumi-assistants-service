@@ -21,11 +21,12 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import { provenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { isOlumiProposedOption } from '../../context/olumi-proposed-option.js';
 import { CONDITIONAL, NEGATED } from './risk.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
-import { effectsBasisWords, goalTargetBasisOf, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
+import { effectsBasisWords, goalTargetBasisOf, monthNumber, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
 import {
   answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, type ApprovedGoalReading, type GoalReadingProjection, type GoalReadingMembers,
 } from '../../goal-target/goal-reading-write.js';
@@ -45,7 +46,7 @@ const edgesOf = (graph: unknown): Rec[] => (isRec(graph) && Array.isArray(graph.
 const labelOf = (graph: unknown, id: unknown): string => String(nodesOf(graph).find((n) => n.id === id)?.label ?? id);
 
 /** The options whose effects the target is read with: every option but carrying on as now and those set aside. */
-function effectOptions(graph: unknown): Rec[] {
+export function effectOptions(graph: unknown): Rec[] {
   return nodesOf(graph).filter((n) => n.kind === 'option' && n.is_baseline !== true && n.option_status !== 'removed'
     && n.option_status !== 'infeasible' && typeof n.id === 'string').sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
@@ -63,13 +64,13 @@ export function optionEffectsOn(graph: unknown, goalId: string): Rec[] {
     .sort((a, b) => `${String(a.from)}>${String(a.to)}`.localeCompare(`${String(b.from)}>${String(b.to)}`));
 }
 
-interface HeldTiming {
+export interface HeldTiming {
   readonly goal: Rec;
   readonly basis: GoalTargetBasis;
   readonly projection: GoalReadingProjection;
   readonly effects: readonly Rec[];
 }
-function heldTiming(graph: unknown, goalId: string): HeldTiming | undefined {
+export function heldTiming(graph: unknown, goalId: string): HeldTiming | undefined {
   const goal = nodesOf(graph).find((n) => n.kind === 'goal' && n.id === goalId);
   const basis = goalTargetBasisOf(goal);
   const projection = goalReadingProjectionOf(graph, goalId);
@@ -97,9 +98,9 @@ export function timingFingerprintOf(graph: unknown, goalId: string): string | un
   return createHash('sha256').update(canonical({ effects, options, target })).digest('hex').slice(0, 32);
 }
 
-const listed = (xs: readonly string[]): string => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+export const listed = (xs: readonly string[]): string => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const effectWords = (graph: unknown, e: Rec): string => `‘${labelOf(graph, e.from)}’ on ‘${labelOf(graph, e.to)}’`;
-const referenceWords = (basis: GoalTargetBasis): string => (basis.reference === 'launch' ? 'after launch' : 'from today');
+export const referenceWords = (basis: GoalTargetBasis): string => (basis.reference === 'launch' ? 'after launch' : 'from today');
 const endWords = (graph: unknown, goalId: string, basis: GoalTargetBasis): string => {
   const deadline = goalDeadlineFromRecord(graph, goalId);
   return `${periodEndWords(basis)} ${referenceWords(basis)}${deadline !== undefined && basis.reference === 'today' ? ` (${sayDate(deadline)})` : ''}`;
@@ -116,9 +117,9 @@ export function timingAskOf(graph: unknown, goalId: string): StatementAsk | unde
 const UNIVERSAL = /\b(?:all|every|each|both)\b/i;
 const plain = (t: string): string => t.toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 /** The reading words are the user's own, a run of the verified quote (never Olumi's paraphrase). */
-const inQuote = (words: string, quote: string): boolean => words.trim() !== '' && plain(quote).includes(plain(words));
-const FROM_TODAY = /\b(?:from (?:today|now)|from this month)\b/i;
-const AFTER_LAUNCH = /\b(?:after|from|post)[ -](?:the )?launch\b/i;
+export const inQuote = (words: string, quote: string): boolean => words.trim() !== '' && plain(quote).includes(plain(words));
+export const FROM_TODAY = /\b(?:from (?:today|now)|from this month)\b/i;
+export const AFTER_LAUNCH = /\b(?:after|from|post)[ -](?:the )?launch\b/i;
 /** The one month the reading words state (digits only: the figure is the user's, never a word Olumi turned into one). */
 function monthIn(words: string): number | undefined {
   const figures = [...words.matchAll(/(?<![\d.])(\d{1,2})(?![\d.])/g)].map((m) => Number(m[1]));
@@ -141,7 +142,7 @@ interface TimingReading {
 export type TimingStance = 'affirmed' | 'denied' | 'conditional';
 type TimingVerdict = { readonly kind: 'complete'; readonly r: TimingReading; readonly later: boolean; readonly attests: boolean }
   | { readonly kind: 'missing'; readonly what: readonly string[] };
-const stanceOf = (quote: string): TimingStance => (NEGATED.test(quote) ? 'denied' : CONDITIONAL.test(quote) ? 'conditional' : 'affirmed');
+export const stanceOf = (quote: string): TimingStance => (NEGATED.test(quote) ? 'denied' : CONDITIONAL.test(quote) ? 'conditional' : 'affirmed');
 
 /** The statements' timing against the held target: complete (in place at the end, or later), or exactly what is missing. */
 function timingVerdict(graph: unknown, h: HeldTiming, r: TimingReading): TimingVerdict {
@@ -187,9 +188,97 @@ export function humanEffectsTimingOf(graph: unknown, goalId: string): HumanEffec
  */
 export function goalTargetBasisIn(graph: unknown, goal: unknown): GoalTargetBasis | undefined {
   const basis = goalTargetBasisOf(goal);
-  if (basis === undefined || !basis.effects_at_period_end || !isRec(goal) || typeof goal.id !== 'string') return basis;
+  if (basis === undefined || !isRec(goal) || typeof goal.id !== 'string') return basis;
   const human = humanEffectsTimingOf(graph, goal.id);
-  return human === undefined || human.kind === 'in_place' ? basis : { ...basis, effects_at_period_end: false };
+  if (basis.effects_at_period_end) return human === undefined || human.kind === 'in_place' ? basis : { ...basis, effects_at_period_end: false };
+  // ⭐ M3c (AIE 6181933060): with no forecast for the goal as a whole, the options' OWN recorded leads give the reading at the
+  // target's end: an option fully in place by then is read there; one that is not (or may not be) is withheld on its own
+  // (`withholdOptionsNotInPlaceAtPeriodEnd`), never read as "no change". Every option with an effect must have a current lead.
+  return human === undefined && optionLeadsCover(graph, goal.id) ? { ...basis, effects_at_period_end: true } : basis;
+}
+
+// ---------------------------------------------------------------- M3c: each option's own lead (AIE 6181933060)
+
+/** The effects ONE option carries onto the goal: each link on the goal's path leaving a factor that option sets. */
+function effectsOfOption(graph: unknown, goalId: string, option: Rec): Rec[] {
+  const set = new Set(isRec(option.interventions) ? Object.keys(option.interventions) : []);
+  return optionEffectsOn(graph, goalId).filter((e) => set.has(String(e.from)));
+}
+
+/**
+ * An option's recorded lead: when its effect is FULLY in place, in months on the target's own reference, as Olumi read the user's
+ * words (`attest`). `high` = in place by then; `low` = not before then (`low_exclusive`: "not in place by `low`").
+ */
+export interface OptionLead {
+  readonly low?: number;
+  readonly high?: number;
+  readonly low_exclusive?: boolean;
+  /** The words gave no reference; the months are read on the target's own (disclosed). */
+  readonly reference_assumed?: boolean;
+  readonly stance: TimingStance;
+  readonly record: UserStatementRecord;
+}
+export const optionLeadSubject = (optionId: string): DoorSubject => ({ kind: 'option', id: optionId, field: 'lead' });
+
+export function optionLeadOf(graph: unknown, optionId: string): OptionLead | undefined {
+  const option = nodesOf(graph).find((n) => n.kind === 'option' && n.id === optionId);
+  const record = userStatementOnNode(option, subjectKey(optionLeadSubject(optionId)));
+  const a = record?.attest;
+  if (record === undefined || a === undefined) return undefined;
+  const num = (k: string): number | undefined => (typeof a[k] === 'number' && Number.isFinite(a[k]) ? a[k] as number : undefined);
+  const low = num('month_low'), high = num('month_high');
+  if (low === undefined && high === undefined) return undefined;
+  const stance: TimingStance = a.stance === 'denied' || a.stance === 'conditional' ? a.stance : 'affirmed';
+  return { ...(low !== undefined ? { low } : {}), ...(high !== undefined ? { high } : {}), ...(a.low_exclusive === true ? { low_exclusive: true } : {}),
+    ...(a.reference_assumed === true ? { reference_assumed: true } : {}), stance, record };
+}
+
+/**
+ * ONE rule (AIE 6181933060): L ≤ M → in place at M; L > M → not in place at M; a lead whose span straddles M → neither can be said.
+ * A conditional forecast attests nothing. The k law never applies here: a level at M is the effect in place at M, or not.
+ */
+export function classifyOptionLead(lead: Pick<OptionLead, 'low' | 'high' | 'low_exclusive' | 'stance'>, months: number): 'in_place' | 'later' | 'straddles' | 'unknown' {
+  if (lead.stance === 'conditional') return 'unknown';
+  if (lead.stance === 'affirmed' && lead.high !== undefined && lead.high <= months) return 'in_place';
+  if (lead.low !== undefined && (lead.low > months || (lead.low_exclusive === true && lead.low >= months))) return 'later';
+  return 'straddles';
+}
+
+export type OptionTimingKind = 'in_place' | 'later' | 'straddles' | 'unknown' | 'stale' | 'no_effect';
+export interface OptionTiming {
+  readonly option_id: string; readonly label: string; readonly kind: OptionTimingKind; readonly lead?: OptionLead;
+  /** Olumi's suggestion, not yet adopted (`isOlumiProposedOption`): with no lead it never blocks the reading, and is withheld if scored. */
+  readonly olumi_proposed?: true;
+}
+
+/** Every option with an effect on the goal, classified at the target's month by its own current lead (stale when the model moved). */
+export function optionTimingAtPeriodEnd(graph: unknown, goalId: string): { readonly basis: GoalTargetBasis; readonly options: readonly OptionTiming[] } | undefined {
+  const h = heldTiming(graph, goalId);
+  const fingerprint = timingFingerprintOf(graph, goalId);
+  if (h === undefined || fingerprint === undefined) return undefined;
+  const options = effectOptions(graph).map((o): OptionTiming => {
+    const option_id = String(o.id), label = String(o.label ?? o.id).trim();
+    if (effectsOfOption(graph, goalId, o).length === 0) return { option_id, label, kind: 'no_effect' };
+    const lead = optionLeadOf(graph, option_id);
+    if (lead === undefined) return { option_id, label, kind: 'unknown', ...(isOlumiProposedOption(o) && o.analysis_participation !== 'included' ? { olumi_proposed: true as const } : {}) };
+    if (lead.record.attest?.fingerprint !== fingerprint) return { option_id, label, kind: 'stale', lead };
+    return { option_id, label, kind: classifyOptionLead(lead, h.basis.period_months), lead };
+  });
+  return { basis: h.basis, options };
+}
+
+/** The options' own leads cover the reading: every option with an effect has a current lead that says in place, later or straddles. */
+export function optionLeadsCover(graph: unknown, goalId: string): boolean {
+  const t = optionTimingAtPeriodEnd(graph, goalId);
+  const withEffect = t?.options.filter((o) => o.kind !== 'no_effect' && !(o.kind === 'unknown' && o.olumi_proposed === true)) ?? [];
+  return withEffect.length > 0 && withEffect.every((o) => o.kind === 'in_place' || o.kind === 'later' || o.kind === 'straddles');
+}
+
+/** The lead as the user's forecast says it, in months on the target's reference ("by month 2", "between month 2 and month 4"). */
+export function optionLeadWords(lead: Pick<OptionLead, 'low' | 'high' | 'low_exclusive'>): string {
+  if (lead.low !== undefined && lead.high !== undefined && lead.low !== lead.high) return `between ${monthNumber(lead.low)} and ${monthNumber(lead.high)}`;
+  if (lead.high !== undefined) return `by ${monthNumber(lead.high)}`;
+  return lead.low_exclusive === true ? `after ${monthNumber(lead.low!)}` : `not before ${monthNumber(lead.low!)}`;
 }
 
 const quoteOf = (s: UserStatement): string => `“${s.quote}”`;
@@ -199,9 +288,30 @@ const said = (s: readonly UserStatement[]): string => s.map(quoteOf).join(' and 
 export function timingBasisNote(graph: unknown, goalId: string, basis: GoalTargetBasis): string | undefined {
   const human = humanEffectsTimingOf(graph, goalId);
   const h = heldTiming(graph, goalId);
+  if (human === undefined && h !== undefined && basis.effects_at_period_end) return optionLeadBasisNote(graph, goalId, h.basis);
   if (human?.kind !== 'in_place' || h === undefined || !basis.effects_at_period_end) return undefined;
   return `Timing basis: you stated ${said(human.record.statements)}. This calculation reads ${listed(h.effects.map((e) => effectWords(graph, e)))} at `
     + `${periodEndWords(basis)} on that forecast. It does not model when they arrive.`;
+}
+
+/**
+ * M3c's disclosure beside the chance (AIE 6181933060: L and its assumptions disclosed): which options are read as in place at the
+ * target's month, on which of the user's words, and what that reading assumes. The options that are not are said by their withhold.
+ */
+function optionLeadBasisNote(graph: unknown, goalId: string, basis: GoalTargetBasis): string | undefined {
+  const t = optionTimingAtPeriodEnd(graph, goalId);
+  // Olumi's own suggestion, not adopted, is left out of the comparison (`filterOlumiProposedOptions`): it is never named here.
+  const proposed = new Set(nodesOf(graph).filter((n) => n.kind === 'option' && isOlumiProposedOption(n) && n.analysis_participation !== 'included').map((n) => n.id));
+  const inPlace = (t?.options ?? []).filter((o) => o.kind === 'in_place' && o.lead !== undefined && !proposed.has(o.option_id));
+  if (inPlace.length === 0) return undefined;
+  const quotes = [...new Set(inPlace.flatMap((o) => o.lead!.record.statements.map((st) => st.quote)))].map((q) => `“${q}”`);
+  // Options read the same way are said together: "‘A’ and ‘B’ as fully in place by month two".
+  const byLead = new Map<string, string[]>();
+  for (const o of inPlace) byLead.set(optionLeadWords(o.lead!), [...(byLead.get(optionLeadWords(o.lead!)) ?? []), `‘${o.label}’`]);
+  const each = listed([...byLead].map(([lead, labels]) => `${listed(labels)} as fully in place ${lead}`));
+  const assumed = inPlace.some((o) => o.lead!.reference_assumed === true) ? `, counted ${referenceWords(basis)} as your target is` : '';
+  return `Timing basis: you stated ${quotes.join(' and ')}. This calculation reads ${each}${assumed}, and so in place at ${periodEndWords(basis)} `
+    + `${referenceWords(basis)}. It assumes no further build-up after that point and holds everything else at today’s level; it does not model when the effects arrive.`;
 }
 
 /** The withhold's words where the user's recorded forecast puts the effects after the target's end (never "not stated"). */

@@ -11,6 +11,7 @@ import {
   GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_HORIZON_NOT_TESTED,
   GOAL_FIGURES_SHARE_APPROXIMATION, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_FIGURES_WITHHELD_CODES, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_OPTION_NOT_IN_PLACE,
   readOptionResultSources,
 } from '../../../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
@@ -29,6 +30,10 @@ import { withShareByDateChanceGate } from '../../../goal-target/goal-chance-rang
 import { readFileSync } from 'node:fs';
 import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { isOlumiSideThreshold, thresholdReasonOf, THRESHOLD_REASONS } from '../../../compose/claim-safety-cage.js';
+import { withholdOptionsNotInPlaceAtPeriodEnd } from '../../../goal-target/goal-horizon-verdict.js';
+import { applyStatementRecordEdit } from '../../../goal-target/cohort-forecast-write.js';
+import { readStatement } from '../../../statement-door/read.js';
+import { doorRowFor } from '../../../statement-door/role-table.js';
 
 type Rec = Record<string, any>;
 type Graph = { nodes: Rec[]; edges: Rec[]; [key: string]: unknown };
@@ -64,6 +69,9 @@ export const KNOWN_GAPS = new Set<string>([
   // GOAL-REACH 3b (Science §(g)): user-side threshold reasons whose control is not a bar action yet.
   // "Show what ‘{option}’ changes": PLoT's detail names no option, and no setting-removal writer exists (UNVERIFIED).
   'THRESHOLD:goal_pinned_by_intervention',
+  // M3c (AIE 6181933060): an option the user's own lead puts after the goal's month. Its recovery is the user's forecast
+  // (said again through the door's lead card in chat) or a different target month; neither is a bar action yet.
+  GOAL_FIGURES_OPTION_NOT_IN_PLACE,
   // §(g) "a target stated as an amount": every goal door refuses a CHANGE-framed target (`goal_is_a_change`:
   // propose_goal_target, goal_target_edit, add-constraint), so Set target would be INERT here (Codex r1, #2816).
   'THRESHOLD:change_rel_base_zero',
@@ -188,8 +196,26 @@ const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readon
     return { graph, result: withholdUnusableGoalChances(result, graph, 'mrr') };
   }, resolves: [] },
   [GOAL_FIGURES_CHANCE_AS_GOAL]: { make: chanceAsGoal, resolves: [] },
+  [GOAL_FIGURES_OPTION_NOT_IN_PLACE]: { make: optionNotInPlace, resolves: [] },
   [GOAL_FIGURES_NO_STATED_TARGET]: { make: noTarget, resolves: ['set_goal'] },
 };
+
+/** M3c's real producer: served hiring r4 with the developers' lead ("not until month 4") recorded through the door. */
+function optionNotInPlace(): Fixture {
+  let graph = JSON.parse(readFileSync(new URL('../../../statement-door/__tests__/fixtures/hiring-negative-r4-turn09.json', import.meta.url), 'utf8')).graph as Graph;
+  const quote = 'The tech lead would lift productivity from month 2, but each developer not until month 4.';
+  for (const [id, label, words] of [['hire_a_tech_lead', 'Hire a Tech lead', 'lift productivity from month 2'],
+    ['hire_two_developers', 'Hire two developers', 'each developer not until month 4']] as const) {
+    const subject = { kind: 'option' as const, id, field: 'lead' as const };
+    const v = readStatement(graph, subject, label, [{ quote, reading_words: words }], { now: quote } as never, {});
+    if (v.kind !== 'read') throw new Error(`${id}: ${JSON.stringify(v)}`);
+    const w = doorRowFor(subject, graph)!.writer.approve(v.reading, graph) as Rec;
+    graph = (applyStatementRecordEdit(graph, w.payload) as Rec).mutatedGraph as Graph;
+  }
+  const result = { option_comparison: ['keep_current_team', 'hire_a_tech_lead', 'hire_two_developers'].map((option_id, i) => ({
+    option_id, probability_of_goal: 0.3 + i / 10, win_probability: 1 / 3, outcome: { mean: i, p10: 0, p90: 2 } })), inference_warnings: [] };
+  return { graph, result: withholdOptionsNotInPlaceAtPeriodEnd(result, graph) as Rec };
+}
 
 function readOf({ graph, result }: Fixture): ActionRead {
   const graphHash = computeAnalysisAffectingGraphHash(graph as never)!;
