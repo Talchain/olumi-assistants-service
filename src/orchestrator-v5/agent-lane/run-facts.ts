@@ -72,22 +72,16 @@ export interface RunComparison {
 }
 
 /**
- * ⭐ S7 PR-B: how the AI uses the packet, said once beside it (the `rerun_record.use` convention). Model-facing prompt text:
- * the AIE's EXACT words (#94 6183364243, replacing the FYI'd draft 6183014787).
+ * ⭐ S7 (PoC switch, AI_WRITES_RUN_TURN): how the AI writes the Run turn from the packet, said once beside it. The AIE's ONE
+ * consolidated Run instruction, byte-exact (#94 6188855695; replaces 6183364243 and T1H's proposed paragraph): five paragraphs.
  */
-export const RUN_FACTS_USE = 'These are the selected Run\'s own facts, bound to its revision and Run identity. Give goal chances only where chances '
-  + 'licenses them, preserving the actual option, target, unit/reference/window, conditions and uncertainty. Do not relabel '
-  + 'a win share, input, effect or sampling precision as goal chance. Explain each applicable withheld reason once and '
-  + 'retain every required scope, exclusion and assumption disclosure. Use the supplied must_say wording once where it '
-  + 'applies; do not repeat the same reason elsewhere. Name the option most likely to meet the goal only when '
-  + 'leader.goal_chance_leader positively licenses that meaning and identity; where leader.similar_option_ids applies, '
-  + 'describe the licensed similarity without implying exact equality. Never call an option best, a winner or recommended, '
-  + 'or choose for the user. Where comparison is given, explain the actual change and recorded result from it alone, '
-  + 'including an unchanged result when supplied. State the actual measured mechanism or sensitivity only where licensed; '
-  + 'graph proximity is not a driver. Reuse retained human statements with their source, qualifications and unresolved '
-  + 'binding, and give at most one justified next reasoning step. Do not invent figures, dates, laws or missing facts. If '
-  + 'required grounding or a valid reply cannot be retained, coaching is incomplete; do not borrow another Run or treat a '
-  + 'surviving card as completed coaching.';
+export const RUN_FACTS_USE = [
+  "After a Run, write contextual coaching from the CURRENT run_facts and the retained turnContext. Lead with each option’s chance of meeting the stated goal as the packet displays it, preserving its point or range, uncertainty, target, unit, reference, window and conditions. Where a chance is unavailable, explain the actual supplied reason once; do not invent a reason or promise that one input will unlock every result.",
+  "Explain what the current model implies and why, using its actual causal reasoning and evidence. Distinguish verified human statements, derived readings and Olumi’s provisional estimates; identify which findings depend on those estimates. Approval does not change authorship. Preserve material qualifications, disagreement, exclusions and unresolved assumptions. Describe a driver or sensitivity as measured only when the packet says it was measured.",
+  "Include each applicable must_say disclosure once, using its supplied words, without repeating the same explanation elsewhere. When comparison is present, explain the recorded input change AND the actual before-and-after result from that bound pair, including unchanged results. Keep each endpoint’s Run, scope and qualifications; empty win shares do not establish that goal-chance comparisons are absent. A first Run need not have a comparison.",
+  "Use only supplied engine/packet figures for analysis claims. Attribute retained user figures separately; an input, effect, win share or sampling-precision percentage is not a goal chance. Do not invent numbers, dates, distributions, certainty or causal validation. If current facts are missing or conflict, state the precise limitation and retain the useful reasoning.",
+  "Where the packet supports it, say which option is most likely to meet the goal in this model, with its basis and uncertainty. Never call an option best, a winner or recommended, or choose for the user. Finish with at most one justified next reasoning step; reuse retained answers rather than asking for them again.",
+].join('\n\n');
 
 export interface RunFacts {
   /** How the AI uses these facts (`RUN_FACTS_USE`), present only with a current Run's facts. */

@@ -141,7 +141,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(run.assistant_text).toMatch(ESTIMATES_FACE);
   });
 
-  it('AI-written Run (a typed "Run it"): the chance face stays, and the step the host no longer asks is in the AI\'s input', async () => {
+  // ⭐ S7 PoC (AI_WRITES_RUN_TURN, Paul 15 Oct via DL 09:15Z): the AI writes the Run turn; the host appends no chance face. The
+  // fact reaches the AI instead: the run_analysis output it narrates from carries this Run's chance display.
+  it('AI-written Run (a typed "Run it"): the reply is the AI\'s (no host chance face); the chance and the step are in the AI\'s input', async () => {
     graph = NO_TARGET_GRAPH;
     outputs = [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
       [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis ran.' }] }]];
@@ -152,14 +154,16 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     const b = r.json() as Json;
     expect((b._agent.tool_calls as { name: string }[]).map((c) => c.name)).toContain('run_analysis');
     expect(b._diagnostic_trace.reply_author).toBe('ai');
-    expect(b.assistant_text).toMatch(CHANCE_LINE);
+    expect(b.assistant_text).not.toMatch(CHANCE_LINE);
     expect(b.assistant_text).toContain('The analysis ran.');
+    expect(sent[1] ?? '', 'the narrating call reads the Run\'s chance').toContain('goal_chance');
     expect(sent[0] ?? '').toContain('goal_target_missing');
     expect(sent[0] ?? '').toContain(Q4);
     expect(sent[0] ?? '').toContain(STATED_FIGURE);
   });
 
-  it('AI-written Explain with a ranking sentence: the gate still drops it (authority) and says why it cut it', async () => {
+  // S7 PoC: the gate still drops the ranking (a check); it no longer appends its own "why" to the AI's reply.
+  it('AI-written Explain with a ranking sentence: the gate still drops it (authority) and appends no host "why"', async () => {
     // The served Run named its leader; here the comparison is withheld (the separation could not be established).
     state = { ...READ.analysis_state, leader_claim: { permitted: false, separation: 'not_separated', withheld_reason: 'separation_unavailable' } };
     const run = await runPress();
@@ -176,8 +180,7 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(explain._diagnostic_trace.reply_author).toBe('ai');
     expect(explain.assistant_text).toContain('The analysis ran.');
     expect(explain.assistant_text).not.toContain(RANKING);
-    // The gate appends its reason only when it cut a sentence: the reply accounts for the cut (CI on #3001: 9 protected rows).
-    expect(explain.assistant_text).toMatch(NO_LEADER_CLOSING);
+    expect(explain.assistant_text).not.toMatch(NO_LEADER_CLOSING);
     expect(sent[0] ?? '').toContain('goal_chance_range_display');
     // Tool-less Explain: the next-step rule, never the tool-use rule.
     expect(sent[0] ?? '').toContain(Q4);
@@ -223,9 +226,11 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     for (const face of faces) expect(count(reply, face), face).toBe(0);
     expect(reply).not.toMatch(CHANCE_LINE);
     expect(count(reply, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(0);
-    // DL ruling on #3027 (PL 07:45Z): the coaching question on the consequential assumption, and what would change it, stay.
-    expect(count(reply, 'It rests most on Olumi’s own assumption that ‘Additional specialist capacity’ affects ‘Weekly support capacity’: in the model runs without that link, the chance is less than 1%. Is that right?')).toBe(1);
-    expect(count(reply, 'What would change it: ')).toBe(1);
+    // ⭐ S7 PoC (AI_WRITES_RUN_TURN): the AI wrote this reply, so the host no longer appends the coaching question or "What
+    // would change it" (was 1 each, DL ruling on #3027); the AI writes them from run_facts, which its narrating call carries.
+    expect(count(reply, 'It rests most on Olumi’s own assumption that ‘Additional specialist capacity’ affects ‘Weekly support capacity’: in the model runs without that link, the chance is less than 1%. Is that right?')).toBe(0);
+    expect(count(reply, 'What would change it: ')).toBe(0);
+    expect(sent.some((b) => b.includes('run_facts')), 'the narrating call carries the Run-facts packet').toBe(true);
   });
 
   it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
@@ -233,10 +238,11 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     served = withoutView;
     const run = await runPress();
     expect(run.canonical_analysis_view).toBeUndefined();
-    expect(count(run.assistant_text as string, 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.')).toBe(1);
-    // The truthful fallback: no card displays the chance, so the reply says it, with its shortfall, once.
-    expect(run.assistant_text).toMatch(CHANCE_LINE);
-    expect(count(run.assistant_text as string, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(1);
+    // ⭐ S7 PoC: the AI wrote the reply, so the host appends none of these (was 1 each); the AI says them from run_facts.
+    expect(count(run.assistant_text as string, 'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.')).toBe(0);
+    expect(run.assistant_text).not.toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, 'In its worst 1 in 20 runs of this model, ‘Add one specialist’ falls short of your target by 20 tickets per week or more.')).toBe(0);
+    expect(sent.some((b) => b.includes('run_facts')), 'the narrating call carries the Run-facts packet').toBe(true);
   });
 
   /**
@@ -311,8 +317,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     cell.face = (cell.face as string).replace(` ${shortfall}`, '');
     served = { ...CAPACITY, canonical_analysis_view: view };
     const run = await runPress();
-    expect(count(run.assistant_text as string, shortfall)).toBe(1);
-    expect(count(run.assistant_text as string, cell.face as string)).toBe(1);
+    // ⭐ S7 PoC: the AI wrote the reply; the host appends no chance line (was 1 each), whatever the card shows.
+    expect(count(run.assistant_text as string, shortfall)).toBe(0);
+    expect(count(run.assistant_text as string, cell.face as string)).toBe(0);
   });
 
   /**

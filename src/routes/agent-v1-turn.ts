@@ -154,6 +154,7 @@ import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDeriv
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
+import { AI_WRITES_RUN_TURN } from '../orchestrator-v5/agent-lane/ai-writes-run-turn.js';
 import { runToolOutputLicensesLeader } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -5234,7 +5235,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       || executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph) !== undefined;
     const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
       tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
-    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
+    // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
+    const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null;
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null || aiRunTurn ? scopedNarrationRaw
       : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
@@ -5398,7 +5401,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // user's model followed a reply about public evidence).
         // BYPASS1 keeps it: the gate appends its reason only when it cut a sentence, so the reply accounts for the cut.
         // SAY-SHOWN: where the AI was told `say` is shown, `say` gives the reason; the gate's own "why" would repeat it.
-        sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis'))
+        sayWhyWithheld: !aiRunTurn && fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis'))
           && !goalChanceSayPromisedThisTurn(result.tool_results),
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
         ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
@@ -5479,7 +5482,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // or explains the current Run keeps the line with the rest of the chance face (never-reask, one-reply-build rows).
     const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
       || (fastPath === 'explain' && narrationStatus !== 'stale');
-    goalChanceOwed = stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn)
+    goalChanceOwed = aiRunTurn || stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn)
       || (!sayPromised && cardShowsWithheld) ? null
       : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
         identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
@@ -5499,7 +5502,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * own product finding holds (`breakEvenFor` returns null otherwise) — and never for a product this readback's run
      * EVALUATED (`identityEvaluated`, C46 × R3-4, Canonical criterion 1): the engine computed it, so nothing is "added up".
      */
-    const breakEven = ranAnalysisThisTurn
+    const breakEven = ranAnalysisThisTurn && !aiRunTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 ? breakEvenFor(readbackGraph, identityEvaluated) : null;
     let breakEvenSaid: string | null = null;
@@ -5522,7 +5525,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** The screen's chance lines this turn owes (required evidence: the reply composer keeps them on the face). */
     const selectedRunCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
     let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
-    if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
+    if (!aiRunTurn && (ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
       // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
       // BYPASS1 keeps the chance face on every Run/Explain reply (the screen's lines are the headline, K-pinned).
@@ -5663,7 +5666,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
+      const edited = aiRunTurn ? driverEdited : withLeftOutOptionCorrectionAtEgress(driverEdited, {
         runOptionSet, optionParticipation, graph: readbackGraph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });
@@ -5879,6 +5882,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // AI-first N1: on an ordinary model-written turn the AI's answer is the reply. A Draft build keeps its receipt face and
         // a Run/Explain its chance face (the horizon marker stays beside a chance).
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
+          // A Draft build keeps its receipt face (S4's estimates/widened receipt); a Run/Explain reply is the AI's answer.
+          : aiRunTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const }
           : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const }
             : profile === 'coaching' && !runOrExplainTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const } : {}),
       });
