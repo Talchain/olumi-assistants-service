@@ -84,5 +84,11 @@ describe('S7 B1: one option’s licensed chance line is not a ranking (the gate 
     expect(isLicensedChanceLine('By month six, Hire a tech lead has about 38% chance of meeting the goal.', chances, labels)).toBe(false);
     expect(isLicensedChanceLine('By 14 January 2027, Hire a tech lead has about 38% chance of meeting the goal.', chances, labels)).toBe(false);
     expect(isLicensedChanceLine('Hire a tech lead has about 38% chance, and Hire two developers too.', chances, labels)).toBe(false);
+    // A win share is never a goal chance, even with the licensed figure and the word "chance" beside it.
+    expect(isLicensedChanceLine('Hire a tech lead has about 38% chance of meeting the goal.', chances, labels)).toBe(true);
+    for (const share of ['Hire a tech lead has about 38% chance, the share of simulations it won.',
+      'Hire a tech lead wins about 38% of runs, its chance of meeting the goal.']) {
+      expect(isLicensedChanceLine(share, chances, labels), share).toBe(false);
+    }
   });
 });
