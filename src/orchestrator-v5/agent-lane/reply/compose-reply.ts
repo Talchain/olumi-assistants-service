@@ -147,9 +147,10 @@ export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
  * Why a reply ships whole by the turn's identity: its profile is not `coaching`, the egress replaced the body, or no model
  * wrote words this turn (a card press, an uninterpreted Explain: `host_composed`). Uninterpreted Run uses coaching.
  * `ai_answer` (AI-first Lane 2, N1): an ordinary coaching turn the model wrote, neither a Draft build nor a Run/Explain.
+ * `ai_run_answer` retains Run/Explain evidence ordering checks while suppressing host additions.
  * The AI's answer is the reply: no face cut, no "More detail" fold, no host face lines; only the recorded copies go.
  */
-export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed' | 'ai_answer';
+export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed' | 'ai_answer' | 'ai_run_answer';
 
 export interface ReplyComposeInput {
   readonly eligibleIntervention?: EligibleIntervention;
@@ -671,6 +672,8 @@ function composeReplyShapeWhole(input: ReplyComposeInput): ReplyComposition {
 function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
   const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
+  // Suppressing coaching additions never suppresses a condition that licences a shown number.
+  const canQualifyChance = canMark || input.keepWhole === 'ai_run_answer';
   const foldedInput = foldQuotes(input.text);
   const disclosures = canMark ? (input.obligations ?? []).filter(o => o.disclosure !== undefined && o.ownsNextStep !== true)
     .flatMap(o => {
@@ -690,8 +693,8 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
         : input.text.split('\n').flatMap(raw => sentencesOf(BULLET_LINE.exec(raw)?.[2] ?? raw)).find(part => part.includes(written));
       return [{ ...o, text: sentence ?? written }];
     }) : [];
-  const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const horizonWithholdDetails = !canMark || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
+  const chanceDisclosure = canQualifyChance && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
+  const horizonWithholdDetails = !canQualifyChance || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
     : cell.reasons.filter(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED' || reason.code === 'HORIZON_NOT_TESTED')
       .flatMap(reason => typeof reason.message === 'string' && reason.message.trim() !== '' ? [reason.message] : []));
   /**
@@ -722,22 +725,22 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const method = goalStockMethodForRun(input.graph, input.analysisResult);
   const steadyAttested = goalHorizonVerdict(input.graph) === 'steady_attested';
   const horizonWithheld = chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested';
-  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && method === null && !horizonWithheld ? input.horizonLine : undefined;
+  const horizonDetail = canQualifyChance && input.faceContract === 'run' && !steadyAttested && method === null && !horizonWithheld ? input.horizonLine : undefined;
   const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
-  const steadyWhy = canMark && faceContract && steadyAttested && horizonBesideChance
+  const steadyWhy = canQualifyChance && faceContract && steadyAttested && horizonBesideChance
     ? goalHorizonSteadyWhyLine(input.graph) : undefined;
-  const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
+  const widenDetail = canQualifyChance && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonDetailBeyondLead, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canQualifyChance && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonDetailBeyondLead, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
-  const faceHostLines = !faceContract || !canMark ? [] : [
+  const faceHostLines = !faceContract || !canQualifyChance ? [] : [
     horizonDetail === undefined || !horizonBesideChance ? undefined : HORIZON_MARKER,
     input.faceContract === 'draft' ? input.widenedLine : undefined,
     widenedRiskMarker,
     input.faceContract === 'run' && horizonBesideChance && method !== null ? method.face : undefined,
-    input.whatChanges, input.estimatesLine,
+    canMark ? input.whatChanges : undefined, canMark ? input.estimatesLine : undefined,
   ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
   const inputQuestions = openQuestionsSegment(input.text);
   const addedFaceLines = [...faceHostLines, ...markerLines].filter(line => !input.text.includes(line));
@@ -851,7 +854,7 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   // proposal's disclosure and a method worksheet are verbatim; keepWhole turns are host-composed), never deduplicated.
   const whole = { ...initialMeasure, said_once_dropped: [] };
   if (input.keepWhole === 'ai_answer') return { text, shape: null, outcome: 'kept_whole', reason: 'ai_answer', measure: initialMeasure };
-  if (input.keepWhole !== undefined) return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
+  if (input.keepWhole !== undefined && input.keepWhole !== 'ai_run_answer') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
   if (input.profile === 'method_step' || input.profile === 'proposal') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.profile, measure: whole };
   if (owed.some((o) => o.text.length === 0 || o.text.includes('\n'))) {
     return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated', measure: initialMeasure };

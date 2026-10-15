@@ -228,6 +228,24 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(count(reply, 'What would change it: ')).toBe(1);
   });
 
+  it('B1: the actual interpreting packet retains the measured driver and its qualifications', async () => {
+    served = CAPACITY;
+    await runPress();
+    const packets = sent.flatMap(raw => {
+      const body = JSON.parse(raw) as Json;
+      return (body.input ?? []).flatMap((item: Json) => {
+        const text = item.content?.[0]?.text;
+        if (typeof text !== 'string') return [];
+        try { const value = JSON.parse(text) as Json; return value.canonical_state?.run_facts ? [value.canonical_state.run_facts] : []; }
+        catch { return []; }
+      });
+    });
+    expect(packets, 'actual canonical packet at the interpreting provider call').toHaveLength(1);
+    expect(packets[0].current).toBe(true);
+    expect(JSON.stringify(packets[0].chances.goal_chance_driver_display)).toContain('Additional specialist capacity');
+    expect(JSON.stringify(packets[0].chances.goal_chance_driver_display)).toContain('less than 1%');
+  });
+
   it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
     const { canonical_analysis_view: _dropped, ...withoutView } = CAPACITY;
     served = withoutView;
