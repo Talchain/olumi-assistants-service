@@ -53,20 +53,18 @@ describe('S4: a stated net loss is the user\'s own figure, read as its negative'
     expect(levels(goal)).toEqual([["Right now we're losing a net £2,000 a month after all costs.", -2000]]);
   });
 
-  const GROSS = "Our community gym has 320 members, and we lose 15 members a month at the moment.";
-  const asGross = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: GROSS } : s)) });
-  // S4 SHORTCUT (Paul 15 Oct 09:15Z; DL): the drafter's sign is TRUSTED; the host checks only that the quote writes the figure.
-  // Supersedes the two host sign-word controls of #3220/#3227 ("gaining a net 15", the gross "we lose 15" refused as −15).
-  it('S4 SHORTCUT: the drafter\'s −15 on "we lose 15 members a month" is the user\'s −15 (the sign is the drafter\'s reading)', async () => {
-    const n = node(await registered(GYM, asGross, GYM.brief.replace(LOSS, GROSS)), 'Net monthly member change');
-    expect(levels(n)).toEqual([[GROSS, -15]]);
-    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'brief_extraction', extractionType: 'explicit' });
+  it('CONTROL: the opposite direction ("gaining a net 15") never verifies −15; it stays retained, unverified', async () => {
+    const gaining = LOSS.replace('losing', 'gaining');
+    const edit = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: gaining } : s)) });
+    const n = node(await registered(GYM, edit, GYM.brief.replace(LOSS, gaining)), 'Net monthly member change');
+    expect(levels(n)).toEqual([]);
+    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'cee_inference', user_material_unverified: true });
   });
 
-  it('CONTROL (kept): a quote that does not write the figure ("a net 12") never verifies −15; it stays retained, unverified', async () => {
-    const twelve = LOSS.replace('net 15', 'net 12');
-    const edit = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: twelve } : s)) });
-    const n = node(await registered(GYM, edit, GYM.brief.replace(LOSS, twelve)), 'Net monthly member change');
+  const GROSS = "Our community gym has 320 members, and we lose 15 members a month at the moment.";
+  const asGross = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: GROSS } : s)) });
+  it('AIE 6187351293: a GROSS loss ("we lose 15 members a month") never verifies −15 for a net change; it stays retained, unverified', async () => {
+    const n = node(await registered(GYM, asGross, GYM.brief.replace(LOSS, GROSS)), 'Net monthly member change');
     expect(levels(n)).toEqual([]);
     expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'cee_inference', user_material_unverified: true });
   });
