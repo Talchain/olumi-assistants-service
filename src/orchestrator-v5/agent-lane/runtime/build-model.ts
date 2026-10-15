@@ -2272,8 +2272,8 @@ export async function buildModelFromBrief(
               ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
               : `${buildInstructions}  Repair only the listed construction issues while retaining every option, risk hypothesis, complete source statement, range, qualification, attributed disagreement, question, causal direction and path to the goal. Correct the action setting that is missing; do not replace its uncertain downstream response with a fixed intervention, invent a probability, or move a learning window into a deadline to clear validation. Preserve the existing supported readings and expose an unsupported numeric representation honestly.`,
           input: askedNow.length > 0
-            ? `${brief}\n\nConstruction issues: ${JSON.stringify(askedNow)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(previous)}`
-            : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
+            ? `${context === undefined ? brief : firstConstructInput(brief, context)}\n\nConstruction issues: ${JSON.stringify(askedNow)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(previous)}`
+            : `${context === undefined ? brief : firstConstructInput(brief, context)}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
           max_output_tokens: budget.max_output_tokens,
           reasoning_effort: budget.reasoning_effort,
           // The redraft of an unattested event goal re-chooses the goal (unpinned); a second size retry keeps the goal it chose.

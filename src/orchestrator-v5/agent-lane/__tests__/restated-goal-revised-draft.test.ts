@@ -1258,6 +1258,34 @@ describe('a revised draft over the link limit only is admitted as drafted (L20 s
     expect(String(sent[1]!.instructions)).not.toContain('Your previous model, to shrink');
   });
 
+  /**
+   * ⭐ AUDIT §1 (audit-simplification/CURRENT.md; Paul via DL 22:48Z): the revision's REPAIR request was the revision brief ALONE, so
+   * it lost the revision lead, the retained conversation (speaker and source) and the saved model the first request carried. It is
+   * now the first request's own input, then the issues: the same context assembler, nothing new.
+   */
+  it('⭐ AUDIT §1 RED: a revised draft\'s repair request carries the first request\'s whole context (lead, retained conversation, saved model), then its issues', async () => {
+    const s = server();
+    const { caps, sent } = servedLane(s);
+    await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(sent, 'the first pass and one repair retry').toHaveLength(2);
+    const first = String(sent[0]!.input);
+    expect(first, 'the first request holds the revision context').toContain(REVISION_LEAD);
+    expect(String(sent[1]!.input).startsWith(`${first}\n\nConstruction issues: `), String(sent[1]!.input).slice(0, 300)).toBe(true);
+    // Unknown stays unknown, typed stays typed: the conversation items are the first request's, byte for byte.
+    expect(String(sent[1]!.input)).toContain(`${LATER_MESSAGES_CONTEXT_LEAD} `);
+  });
+
+  it('AUDIT §1 CONTROL: an ordinary build with no revision context repairs on the brief alone, byte for byte as before', async () => {
+    const inputs: string[] = [];
+    const answers = [SERVED.first_pass, SERVED.size_retry];
+    const input = revisedDraftBrief(FX.brief_text, L20);
+    await buildModelFromBrief(SID, input, (async () => ({ status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } })) as never,
+      (async (req: { input: string }) => { inputs.push(String(req.input)); const text = answers[inputs.length - 1] ?? ''; return { text, status: 'completed' }; }) as never);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]!.startsWith(`${input}\n\nConstruction issues: `) || inputs[1]!.startsWith(`${input}\n\nYour previous model, to shrink: `), inputs[1]!.slice(0, 200)).toBe(true);
+    expect(inputs[1]).not.toContain(REVISION_LEAD);
+  });
+
   it('CONTRAST: a FIRST model over the link limit takes today\'s path: the size retry is asked, and the served pair is refused', async () => {
     let n = 0;
     const answers = [SERVED.first_pass, SERVED.size_retry];
