@@ -40,7 +40,9 @@ export interface RoleRow {
    * reason it is not this field's reading (a different window, a negated event, a bound the carrier cannot hold…), which keeps
    * the user's words as said.
    */
-  readonly read: (quote: string, subject: DoorSubject, graph: unknown, words?: string) => DoorFigure | { readonly refused: string };
+  readonly read: (quote: string, subject: DoorSubject, graph: unknown, words?: string,
+    /** The ask the statement answers, as the Agent named it (bound separately by `statementBoundTo`): a row may read a form only as that answer. */
+    answering?: string) => DoorFigure | { readonly refused: string };
   /** The level door member the reading is written through (`write.ts`). With `field`, the row's key: unique in the table. */
   readonly carrier: DoorWriteMember;
   /** Whether this row reads statements about this subject (its kind and the graph's structure); never by elimination. */
