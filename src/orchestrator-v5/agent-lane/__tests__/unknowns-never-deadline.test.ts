@@ -93,6 +93,26 @@ describe('brief 1 (D5): a statement the drafter filed as an unknown is never the
     expect(questions).toContain(UNBOUND);
   });
 
+  it.each(['D5_r1_A_corrected', 'D5_r1_C_corrected'])('PRECONDITION %s (corrected v2 run, c1e944a4, #3208 in): the learning statement is a goal measure, NOT filed in unknowns, and the run still saved "two months"', (key) => {
+    const e = ep(key);
+    for (let i = 0; i < e.calls.length; i += 1) {
+      const d = draft(e, i);
+      expect([(d.goal as Rec).horizon_months, (d.goal as Rec).deadline_words ?? null], `${key} call ${i + 1}`).toEqual([null, null]);
+      expect(d.unknowns as string[], `${key} call ${i + 1}`).not.toContain(LEARNING);
+      expect((d.statements as Rec[]).filter((st) => st.quote === LEARNING).map((st) => [(st.subject as Rec).kind, st.field]), `${key} call ${i + 1}`)
+        .toEqual([['goal', 'measure']]);
+      expect((d.statements as Rec[]).some((st) => st.field === 'target'), `${key} call ${i + 1}`).toBe(false);
+    }
+    expect(e.saved_goal_deadline_as_stated).toBe('two months');
+  });
+
+  it.each(['D5_r1_A_corrected', 'D5_r1_C_corrected'])('⭐ RED %s (the residual #3208 could not contain): no deadline is held; the words and the missing reading are asked', async (key) => {
+    const { goal, questions } = await build(ep(key));
+    expect(Object.hasOwn(goal, 'goal_deadline_as_stated'), JSON.stringify(goal.goal_deadline_as_stated)).toBe(false);
+    const metric = String((draft(ep(key)).goal as Rec).metric);
+    expect(questions).toContain(UNBOUND.replace('"customer trust"', `"${metric}"`));
+  });
+
   it('⭐ D5_r1_A UNFILED (the original failure, #3208 left it): the same answers with the learning statement not in unknowns still hold no deadline', async () => {
     const { goal, questions } = await build(ep('D5_r1_A'), (d) => ({ ...d,
       unknowns: (d.unknowns as string[]).filter((u) => u !== LEARNING),

@@ -54,7 +54,12 @@ function candidate(horizon: number | null): CandidateModel {
 }
 
 /** The goal node a fresh GraphV3 parse of the registered bytes holds. */
-async function registeredGoal(brief: string, horizon: number | null, firstQuestion?: string): Promise<Rec> {
+/** The statement-era draft (AIE 6184383302): the goal's own target statement, the brief's goal sentence verbatim (here, the whole brief). */
+const withGoalTarget = (c: CandidateModel, quote: string): CandidateModel => ({ ...c, statements: [{ quote,
+  subject: { kind: 'goal', label: 'MRR', to_label: null, factor_label: null }, field: 'target', form: 'describes',
+  value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }] }) as unknown as CandidateModel;
+
+async function registeredGoal(brief: string, horizon: number | null, firstQuestion?: string, governed = false): Promise<Rec> {
   let stored: string | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -63,7 +68,7 @@ async function registeredGoal(brief: string, horizon: number | null, firstQuesti
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   };
-  const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate(horizon)) });
+  const call: CallStructuredModel = async () => ({ text: JSON.stringify(governed ? withGoalTarget(candidate(horizon), brief) : candidate(horizon)) });
   const result = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
   expect(result.ok, JSON.stringify(result).slice(0, 300)).toBe(true);
   if (firstQuestion !== undefined) expect((result.open_questions as string[])[0]).toBe(firstQuestion);
@@ -189,11 +194,17 @@ describe('G1 holds exactly what attestHorizon attests, on the registered goal', 
 });
 
 
-it('at month 9 asks the proposed numeric count while a calendar-word deadline still asks its date', async () => {
+it('at month 9 asks the proposed numeric count while a calendar-word deadline still asks its date (statement era: the goal\'s target statement)', async () => {
   const numeric = await registeredGoal(withDeadline('at month 9'), 18,
-    'Does "MRR" get there within 9 months? The model holds no deadline yet, so no result answers that.');
+    'Does "MRR" get there within 9 months? The model holds no deadline yet, so no result answers that.', true);
   expect(numeric.goal_horizon_months).toBeUndefined();
   const calendar = await registeredGoal(withDeadline('by the end of March'), 9,
-    'Which date does "by the end of March" mean? It is the deadline your brief sets for "MRR"; the model keeps your words but no date, so no result answers whether it is met by then.');
+    'Which date does "by the end of March" mean? It is the deadline your brief sets for "MRR"; the model keeps your words but no date, so no result answers whether it is met by then.', true);
   expect(calendar.goal_horizon_months).toBeUndefined();
+});
+
+it('AIE 6184383302: the same unmatched spans with NO target statement are asked in the brief\'s words; the drafter\'s count is never asked in their place', async () => {
+  const numeric = await registeredGoal(withDeadline('at month 9'), 18,
+    'Your brief mentions "month 9". It does not say whether "MRR" should be achieved within that period, so the model holds no deadline for it.');
+  expect(Object.hasOwn(numeric, 'goal_deadline_as_stated')).toBe(false);
 });

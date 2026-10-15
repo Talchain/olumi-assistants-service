@@ -2611,12 +2611,13 @@ export async function buildModelFromBrief(
       openQuestions.unshift(deadlineHeld
         ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
         : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
-    } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
-      openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
     } else if (statedGoal.horizon.unbound !== undefined && calendarDeadline === undefined && goalMetric.trim() !== '') {
       // ⭐ AIE 6184383302: a period the brief writes outside the goal's target (a learning or measurement window, a start) keeps
-      // its words and the exact missing reading; it is never written as the goal's deadline.
+      // its words and the exact missing reading; it is never written as the goal's deadline, and a month count the drafter guessed
+      // for it is never asked in its place (the brief's words come first).
       openQuestions.unshift(`Your brief mentions "${statedGoal.horizon.unbound}". It does not say whether "${goalMetric}" should be achieved within that period, so the model holds no deadline for it.`);
+    } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
+      openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
     } else if (statedGoal.horizon.status === 'absent' && calendarDeadline !== undefined) {
       // ⭐ GEN D4 ITEM B (DL GO 14 Oct): a calendar point the drafter claimed, checked inside the goal's own verified
       // statement (`calendar-deadline-claim.ts`), is asked as Olumi's reading with that statement, so "that quarter" is
