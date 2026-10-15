@@ -114,7 +114,7 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
       const record = rerunRecordForModel(withheldShares(), false, R2E.graph.nodes)!;
       expect(record.prior_withheld).toBe(true);
       expect(record.goal_chance_changes).toEqual(plan.goalChanceChanges);
-      expect(record.use).toContain('except a goal chance in goal_chance_changes, as recorded there.');
+      expect(record.use).toContain('except a chance listed in goal_chance_changes, as recorded there.');
     });
 
     it('CONTRASTS: a share said to move fails; with no chance in both Runs the full ban stands for the same sentence', () => {

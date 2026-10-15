@@ -168,7 +168,7 @@ describe('the record\'s rule: how the typed answer uses it', () => {
     expect(TYPED_RERUN_RECORD_RULE).toContain('Never say nothing changed when code_line names a change.');
     expect(TYPED_RERUN_RECORD_RULE).toContain('first say code_line exactly');
     // S9 (PL 07:50Z): prior_withheld is the earlier Run's shares; a goal chance recorded in both Runs may be said to move.
-    expect(TYPED_RERUN_RECORD_RULE).toContain('If prior_withheld is true, never say anything rose, fell or moved, except a goal chance in goal_chance_changes, as recorded there.');
+    expect(TYPED_RERUN_RECORD_RULE).toContain('If prior_withheld is true, never say anything rose, fell or moved, except a chance listed in goal_chance_changes, as recorded there.');
     expect(TYPED_RERUN_RECORD_RULE).toContain('Unless attribution_case is C1_attributable, never say which change caused the difference.');
   });
 

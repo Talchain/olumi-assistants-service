@@ -19,6 +19,7 @@ import { executeOptionInterventionBatch } from '../../system-events/option-inter
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { optionTimingAtPeriodEnd } from '../fields/goal-timing.js';
+import { AGENT_TOOLS } from '../../agent-lane/runtime/agent-tools.js';
 
 type Rec = Record<string, any>;
 const SID = 'c3c0c3c0-0000-4000-8000-00000000c3c0';
@@ -107,3 +108,35 @@ describe('M3c on the real path: their words → one card per option → their pr
     expect(w.proposals.outstanding(SID, null)).toEqual([]);
   });
 });
+
+// ⭐ S5 (DL 15 Oct, unseen brief R4): the option's label was copied from the brief and the timing card "did not recognise the saved
+// option". The AI's state view gives each part its id; the tool's subject now takes it, and the id names the part exactly. No
+// label matching is loosened (only SCIENCE's case-only match stands).
+describe('the option is named by its id when a copied label differs from the stored one', () => {
+  const withId = (label: string, id: string | undefined, words: string): Rec => {
+    const a = args(label, words);
+    return { ...a, subject: { ...a.subject, ...(id !== undefined ? { id } : {}) } };
+  };
+  it('RED: the tool offers the AI the part\'s id (and the option\'s and a link end\'s), beside the label', () => {
+    const subject = (AGENT_TOOLS.find((t) => t.name === 'propose_statement') as Rec).parameters.properties.subject.properties as Rec;
+    expect(Object.keys(subject)).toEqual(expect.arrayContaining(['id', 'to_id', 'option_id']));
+    expect(subject.id.description).toBe('The part’s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.');
+  });
+  it('a label differing in punctuation ("Hire a Tech-lead") with the option\'s id → ONE card, naming the stored label', async () => {
+    const w = world();
+    const card = await w.caps.proposeStatement!(ctx(SAID) as never, withId('Hire a Tech-lead', 'hire_a_tech_lead', 'lift productivity from month 2') as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, statement: { subject: 'Hire a Tech lead', field: 'lead', quotes: [SAID] } });
+  });
+  it('CONTRAST: the same label without the id → not found, nothing prepared (no fuzzy match)', async () => {
+    const w = world();
+    expect(await w.caps.proposeStatement!(ctx(SAID) as never, withId('Hire a Tech-lead', undefined, 'lift productivity from month 2') as never))
+      .toMatchObject({ ok: false, refusal: 'subject_not_found' });
+    expect(w.proposals.outstanding(SID, null)).toEqual([]);
+  });
+  it('CONTRAST: an id no option has → not found, never the label\'s guess', async () => {
+    const w = world();
+    expect(await w.caps.proposeStatement!(ctx(SAID) as never, withId('Hire a Tech lead', 'no_such_option', 'lift productivity from month 2') as never))
+      .toMatchObject({ ok: false, refusal: 'subject_not_found' });
+  });
+});
+

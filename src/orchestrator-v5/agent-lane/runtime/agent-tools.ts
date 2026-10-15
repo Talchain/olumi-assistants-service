@@ -557,6 +557,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it.' },
         to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
         option_label: { type: 'string', description: 'Only when the statement is about what an option sets: that option\u2019s exact label.' },
+        // S5 (DL 15 Oct, unseen brief R4): a label copied from a brief can differ from the stored one in quotes, dashes or punctuation,
+        // and the part was "not recognised". The id names it exactly; no label matching is loosened.
+        id: { type: 'string', description: 'The part\u2019s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.' },
+        to_id: { type: 'string', description: 'Only for a link: the id of the part it points to.' },
+        option_id: { type: 'string', description: 'Only when the statement is about what an option sets: that option\u2019s id.' },
         field: { type: 'string', enum: ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation'] },
       }, ['kind', 'label', 'field']),
       statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({

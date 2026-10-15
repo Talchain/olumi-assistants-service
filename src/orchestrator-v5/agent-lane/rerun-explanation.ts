@@ -468,7 +468,7 @@ export const TYPED_RERUN_RECORD_RULE =
   + 'first say code_line exactly, as Olumi\u2019s record, then say what the latest Run shows. '
   + '\u201cSince the last run\u201d means the latest Run against the one before it; say any edit made after the latest Run separately. '
   + 'Never say nothing changed when code_line names a change. '
-  + 'If prior_withheld is true, never say anything rose, fell or moved, except a goal chance in goal_chance_changes, as recorded there. '
+  + 'If prior_withheld is true, never say anything rose, fell or moved, except a chance listed in goal_chance_changes, as recorded there. '
   + 'Unless attribution_case is C1_attributable, never say which change caused the difference. '
   + 'If the latest Run still holds its comparison back, name every link in unsized_goal_path_links as what the comparison still needs, ranking none.';
 
