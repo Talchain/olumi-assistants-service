@@ -99,7 +99,7 @@ export const COHORT_RELATION_ROW: RoleRow = {
       ...(conv === undefined ? [] : [`your estimates as about one chance in four below ${conv.low}% and one chance in four above ${conv.high}% `
         + `for the underlying conversion rate of ‘${label}’, among the people it reaches, during ${window}. These are your estimates, not a minimum and maximum`]),
       ...(ppl === undefined ? [] : [`your forecast that ‘${label}’ reaches ${sayPeople(ppl.low!)} during ${window}`]),
-      ...(byForm(statements, 'holds_now').length === 0 ? [] : ['the customers being counted among those same people, as you said']),
+      ...(byForm(statements, 'holds_now').length === 0 ? [] : ['your answer that they come from the same people']),
     ].join('; ');
   },
   assumptions(statements, _subject, graph) {
@@ -207,7 +207,8 @@ export const COHORT_SAME_PEOPLE_ROW: RoleRow = {
       ? { refused: 'That statement holds a figure, so it is not the answer to whether both targets count the same people. It is kept as said.' }
       : { form: 'holds_now' };
   },
-  readingWords: (_s, _subject, _label, graph) => `‘${countLabelOf(graph)}’ counts the people who convert among the same people your ‘${rateLabelOf(graph)}’ is measured on, as you said`,
+  // AIE 6182987896: only the relation the user answered, in the question's own words; no added definition of who converts.
+  readingWords: (_s, _subject, _label, graph) => `your answer that your ‘${countLabelOf(graph)}’ come from the same people your ‘${rateLabelOf(graph)}’ is measured on`,
   assumptions: () => [],
   recordedWords: (_s, _subject, _label, graph) => sameCohortRecordedWords(graph),
 };
