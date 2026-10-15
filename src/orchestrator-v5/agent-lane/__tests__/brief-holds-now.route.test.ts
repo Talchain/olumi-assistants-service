@@ -162,6 +162,12 @@ describe('the launch period: his answer to its ONE question is his forecast for 
     const v = readStatement(launch, holdsNow, LABEL, [ANSWER], { now: ANSWER }, { asks: doorAsks(launch) });
     expect(v.kind).toBe('refused');
   });
+  it('CONTRAST: a yes that names the risk but answers no question, or answers the NOW question, is never his forecast for the period', () => {
+    const named = 'Yes, my limited marketing experience will still be the case then.';
+    expect(readStatement(launch, holdsNow, LABEL, [named], { now: named }, { asks: doorAsks(launch) }).kind).toBe('refused');
+    const nowAsk = `Is ‘${LABEL}’ already true now?`;
+    expect(readStatement(launch, holdsNow, LABEL, [{ quote: 'Yes, it is.', answering: nowAsk }], { now: 'Yes, it is.' }, { asks: doorAsks(launch) }).kind).toBe('refused');
+  });
   it.each(['No, I’ll have learnt a lot by then.', 'Probably, yes.', 'Yes, if we don’t hire an agency.', 'I’m not sure.', 'Not really.'])(
     'CONTRAST: “%s” keeps his words as his answer and writes nothing', (said) => {
       const v = readStatement(launch, holdsNow, LABEL, [{ quote: said, answering: WINDOW_ASK }], { now: said }, { asks: doorAsks(launch) });
@@ -173,6 +179,8 @@ describe('the launch period: his answer to its ONE question is his forecast for 
     expect(doorIssueArgs(launch, ANSWER, { preceding_ask: `Here is where things stand. ${WINDOW_ASK} If you expect it will, say so.` }, turn))
       .toEqual({ subject: holdsNow, quotes: [{ quote: ANSWER, answering: WINDOW_ASK }] });
     expect(doorIssueArgs(launch, ANSWER, {}, turn)).toBeUndefined();
+    // Olumi's last reply asked something else: a yes answers THAT, never the period question.
+    expect(doorIssueArgs(launch, ANSWER, { preceding_ask: 'Shall I suggest some risks you have not considered?' }, turn)).toBeUndefined();
     expect(doorIssueArgs(launch, 'No, I’ll have learnt a lot by then.', { preceding_ask: WINDOW_ASK }, turn)).toBeUndefined();
   });
 });
