@@ -142,6 +142,12 @@ export const DEADLINE_CLAIM_QUESTION = 'Olumi reads "<deadline words>" as a cale
  * what is SENT requires every property, each missing key appended in order. Candidate-call schemas keep the new
  * evidence carrier optional; only the actual strict-provider boundary requires it. Existing frame/link handling stays.
  */
+/**
+ * ⛔ SYSTEM 2 retirement (DL ruling 15 Oct ~02:4xZ): carriers the drafter is no longer SENT. They stay optional in the
+ * candidate contract only so recordings made before SYSTEM 2 still validate (read through the one recorded-raw reader,
+ * `recordedRawLevelQuote` / `recordedRawSettingQuote`); the strict provider boundary drops them.
+ */
+const RECORDED_ONLY: ReadonlySet<string> = new Set(['baseline_evidence', 'stated_evidence']);
 export function strictForTheDrafter(schema: Record<string, unknown>, { providerBoundary = true } = {}): Record<string, unknown> {
   const walk = (s: unknown): unknown => {
     if (Array.isArray(s)) return s.map(walk);
@@ -153,10 +159,14 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
         : walk(v);
     }
     const properties = out['properties'];
+    // SYSTEM 2 retirement: a recorded-only carrier stays in the candidate contract (recordings validate) and is never SENT.
+    if (providerBoundary && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
+      for (const name of RECORDED_ONLY) delete (properties as Record<string, unknown>)[name];
+    }
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
-        if (!providerBoundary && (name === 'already_true_evidence' || name === 'evidence' || name === 'source_quote'
+        if (!providerBoundary && (RECORDED_ONLY.has(name) || name === 'already_true_evidence' || name === 'evidence' || name === 'source_quote'
           || name === 'unknown_concerns' || name === 'deadline_words' || name === 'statements')) continue;
         if (!required.includes(name)) required.push(name);
       }
@@ -290,6 +300,10 @@ export function buildCandidateSchema(): Record<string, unknown> {
       interventions: { type: 'array', description:
         'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
         items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, value_kind: { type: 'string', enum: ['absolute', 'additional'] }, unit: { type: 'string' }, provenance,
+          stated_evidence: { anyOf: [{ type: 'null' }, obj({
+            quote: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' }, amount_start: { type: 'integer' },
+            option_quote: { type: 'string' }, option_start: { type: 'integer' }, option_end: { type: 'integer' },
+          }, ['quote', 'start', 'end', 'amount_start', 'option_quote', 'option_start', 'option_end'])] },
         },
           ['factor_label', 'value', 'value_kind', 'unit', 'provenance']) },
       // ⛔ THE HELD STATUS QUO MUST NOT DEPEND ON WORDING (served c673223: "Continue
@@ -312,6 +326,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // factor carries no source, so no authority is claimed for the zero.
       // AIE (#94 6159308321; AIE-CONSTRUCTOR-D4-FIELD-AND-SOURCE-RULING-20261014.json): the whole description, byte for byte.
       baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or supported evidence. A provisional AI estimate keeps this false. EXCEPTION: for a factor explicitly defined as a CHANGE FROM TODAY, today\'s structural value is 0: baseline_known true, baseline_value 0. This is a definition, not a newly stated measurement, and does not state its value at a future horizon. For the existing NO-CHANGE FORECAST representation, derive the future change as the stated no-change forecast at its specified horizon minus the supported current level of the SAME quantity, with compatible units and reference. Preserve both sources, the horizon and conditions. Do not apply today\'s structural-zero exception to this future value: a valid derived change may be positive, negative or zero. Identify it as a derived conditional forecast, not a newly stated measurement or observed current level. Missing or incompatible operands remain unknown; never invent a value or probability law.' },
+      baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance: introducedBy,
       plausible_max: { type: 'number',

@@ -8,6 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
 
 const LIST = 'scripts/ci/recorded-raw-carriers.json';
 const TOKEN = /\b(?:baseline_evidence|stated_evidence)\b/g;
@@ -39,7 +40,8 @@ describe('recorded-raw carriers: shrink-only', () => {
     expect(now['src/orchestrator-v5/agent-lane/verified-option-setting.ts']).toBeGreaterThan(0);
   });
 
-  it('the drafter is never sent them: the sent schema and instructions name neither carrier', () => {
-    expect(readFileSync('src/orchestrator-v5/agent-lane/runtime/build-model.ts', 'utf8').match(TOKEN) ?? []).toHaveLength(1); // the retirement comment only
+  it('the drafter is never sent them: the strict provider schema and the instructions name neither carrier', () => {
+    expect(JSON.stringify(strictForTheDrafter(buildCandidateSchema()))).not.toMatch(TOKEN);
+    expect(String(BUILD_INSTRUCTIONS)).not.toMatch(TOKEN);
   });
 });
