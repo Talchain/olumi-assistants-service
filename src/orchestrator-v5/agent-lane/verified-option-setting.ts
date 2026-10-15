@@ -450,6 +450,37 @@ function restatesLevel(text: string, factor: Factor, value: number): boolean {
     && STATE_MARK.some(r => new RegExp(`${r.source}\\s+$`, 'iu').test(plain.slice(0, amount.index)))
     && sameFrame(plain, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount);
 }
+/**
+ * Every writing of this figure's magnitude in the sentence is a different KIND of quantity from this factor's (a share beside
+ * money, another currency): as written, never inferred. A same-kind repeat, whatever its wording or period, still counts.
+ */
+function differentFrameRepeat(text: string, factor: Factor, value: number): boolean {
+  const mine = readUnitParts(factor.unit);
+  if (mine === null) return false;
+  const hits = findLinkEffectAmounts(text).filter((amount) => amount.magnitude === Math.abs(value));
+  return hits.length > 0 && hits.every((amount) => {
+    const claim = statedTailParts(text, amount);
+    return claim !== null && (claim.kind !== mine.kind || claim.code !== mine.code);
+  });
+}
+
+/**
+ * DL ruling 15 Oct ~06:2xZ (one principle: a neighbouring sentence bounds a figure only if it speaks about THAT figure). A
+ * neighbour the host-verified source map holds ONLY as statements about other subjects (a definition of other quantities, "Total
+ * weekly support capacity is defined as … plus the additional specialist capacity."; the goal's target, "We want monthly
+ * recurring revenue to rise by at least 15% within three months.") is not a bound on this figure, when none of them is about this
+ * factor and the sentence writes no figure in this factor's strict frame. A correction ("Actually it is at most 25 tickets per
+ * week per specialist.") still refuses.
+ */
+function aboutOtherSubjects(model: CandidateModel, factor: Factor, brief: string, text: string): boolean {
+  const keys = [...sourceMapOf(Reflect.get(model, 'statements'), brief).verified.entries()]
+    .filter(([, statements]) => statements.some((s) => s.quote.trim() === text.trim())).map(([key]) => key);
+  if (keys.length === 0) return false;
+  const own = subjectKey({ kind: 'factor', label: factor.label }, 'level').split('|')[1]!;
+  if (keys.some((key) => key.split('|').slice(1, 4).includes(own))) return false;
+  return !findLinkEffectAmounts(text).some((amount) => sameFrame(text, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount));
+}
+
 /** V2: "Keep current staffing adds no specialist." — every qualifier quantifies ANOTHER factor's own noun (the next word
  * names it) and nothing in the sentence names the credited factor: an independent claim, not a bound on this figure. */
 function qualifiesOtherQuantity(model: CandidateModel, factor: Factor, text: string): boolean {
@@ -806,7 +837,10 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
     const own = label(factor.label);
     const rivals = [{ label: model.goal.metric, unit: model.goal.unit }, ...model.factors.filter((f) => f !== factor), ...model.outcomes, ...model.risks]
       .filter((r) => JSON.stringify(readUnitParts(r.unit)) === unit).map((r) => label(r.label));
-    if (!words(quote).map(singular).some((w) => !grammar(w) && own.has(w) && !rivals.some((r) => r.has(w)))) return false;
+    // AIE 6181498097: a label word is an AMBIGUITY check, never required of the human. With no other drafted item in this
+    // frame, the frame alone names the subject ("£20 per customer per month" → Monthly price); with rivals, a distinctive
+    // label word must still tell them apart.
+    if (rivals.length > 0 && !words(quote).map(singular).some((w) => !grammar(w) && own.has(w) && !rivals.some((r) => r.has(w)))) return false;
     if ([...map.verified.entries()].some(([other, statements]) => other !== key
       && statements.some((s) => s.quote === quote && (s.low === value || s.high === value)))) return false;
     // The four tests only settle WHICH subject; the sentence must still be this factor's current level in context.
@@ -926,6 +960,10 @@ function levelInContext(model: CandidateModel, factor: Factor, brief: string | u
     if (!currentLevelRole(a.text, { span, unit: factor.unit })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
       if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
+      // DL ruling 15 Oct ~06:2xZ: a neighbour bounds a figure only if it speaks about THAT figure. A repeat of the magnitude
+      // wholly outside this factor's strict frame ("10–20% churn" beside "£20 per customer per month") is another claim; a
+      // same-frame repeat still refuses.
+      if (differentFrameRepeat(text, factor, value)) return true;
       // An elliptical bound, correction, retraction or attributed sentence remains ambiguous.
       if (text.length > MAX_ASSERTION || !currentLevelRole(text) || words(text).some(w => NOT_POINT.has(w))) return false;
       const amounts = findLinkEffectAmounts(text);
@@ -939,7 +977,7 @@ function levelInContext(model: CandidateModel, factor: Factor, brief: string | u
         && currentQuantityLabel(claims[0]!.label) !== currentQuantityLabel(factor.label)
         && readUnitParts(claims[0]!.unit) !== null
         && JSON.stringify(readUnitParts(claims[0]!.unit)) !== JSON.stringify(readUnitParts(factor.unit));
-    }, text => differentGoalBound(model, factor, text) || qualifiesOtherQuantity(model, factor, text));
+    }, text => differentGoalBound(model, factor, text) || qualifiesOtherQuantity(model, factor, text) || aboutOtherSubjects(model, factor, brief, text));
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
       'agent-lane: a stated factor level could not be verified on a malformed draft; credit is withheld');
