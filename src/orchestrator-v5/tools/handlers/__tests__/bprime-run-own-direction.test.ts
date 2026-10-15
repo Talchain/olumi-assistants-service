@@ -21,13 +21,15 @@ import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
 import { convertingOlumiEstimate, scoredGoalIdOf, notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Json = Record<string, any>;
 const F = JSON.parse(readFileSync(new URL('./fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {

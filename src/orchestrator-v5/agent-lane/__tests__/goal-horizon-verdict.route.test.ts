@@ -19,9 +19,11 @@ import { applyGoalSteadyEdit } from '../../goal-target/goal-steady-write.js';
 import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { createRunAnalysisHandler, withholdGoalFiguresForUntestedHorizon } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, withholdGoalFiguresForUntestedHorizon, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 vi.mock('../../../config/index.js', async original => {
   const actual = await original<typeof import('../../../config/index.js')>();

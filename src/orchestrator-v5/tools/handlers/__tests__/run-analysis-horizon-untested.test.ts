@@ -11,7 +11,7 @@ import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler, withholdGoalFiguresForMissingCurrentLevel } from '../run-analysis.js';
+import { createRunAnalysisHandler, withholdGoalFiguresForMissingCurrentLevel, setHostLicenceStages } from '../run-analysis.js';
 import {
   GOAL_HORIZON_NOT_TESTED,
   decisionInputLines,
@@ -24,6 +24,8 @@ import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { goalKindOf } from '../../../goal-target/goal-kind.js';
 import { teamShareMoments } from '../../../goal-target/event-by-date-share.js';
 import { targetTestabilityOf } from '../../../admission/target-testability.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {

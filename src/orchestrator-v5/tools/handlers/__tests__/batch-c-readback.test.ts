@@ -21,7 +21,7 @@ import type { InternalDispatch } from '../../../agent-lane/runtime/agent-capabil
 import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
 import { sentDigest } from '../run-input-snapshot.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from '../../../goal-target/goal-target-basis.js';
@@ -35,6 +35,8 @@ import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-anal
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { toTypedRunRows } from '../../../runs/typed-run-rows.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 

@@ -11,7 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
-import { createRunAnalysisHandler, HOST_CAVEAT_CODE, setHostLicenceStages } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
+import { HOST_CAVEAT_CODE } from '../../../../orchestrator/context/option-result-source.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
 vi.mock('../../../drafter-raw/index.js', () => ({

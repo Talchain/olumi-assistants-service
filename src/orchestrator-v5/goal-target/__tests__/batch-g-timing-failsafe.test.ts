@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { AGENT_TOOLS, AIE_APPROVED_EFFECTS_TIMING_DESCRIPTION, dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { goalChanceLicenceForAgent } from '../goal-chance-licence.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;

@@ -50,6 +50,9 @@ import { dispatchStructuralChallenge, isExactlyThisRemoval, structuralChallengeR
 import { structuralChallengePressId, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence } from '../../agent-lane/method-turn/structural-challenge-turn.js';
 import type { StructuralChallengeFinalRead } from '../structural-challenge-dispatch.js';
 import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
+import { setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const SCENARIO = 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4';

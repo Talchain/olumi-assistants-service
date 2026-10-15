@@ -37,6 +37,9 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../../../agent-lane/withheld
 import { leaderLicenceShadow } from '../../../compose/leader-licence-shadow.js';
 import { runP0Graph } from './mc-p0-run-helper.js';
 import { appendLegacyFiguresAfterLeaderSentence, isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
+import { setHostLicenceStages } from '../run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type R = Record<string, any>;
 const fa027Graph = JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as R;

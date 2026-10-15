@@ -18,8 +18,10 @@ import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_F
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler, withholdGoalFiguresForUntestableTarget } from '../run-analysis.js';
+import { createRunAnalysisHandler, withholdGoalFiguresForUntestableTarget, setHostLicenceStages } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {

@@ -17,11 +17,13 @@ import { goalTargetBasisOf } from '../goal-target-basis.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { applyGoalReadingEdit } from '../goal-reading-write.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const RAW = readFileSync(new URL('./fixtures/hiring-a3ad3689-null-period-raw.txt', import.meta.url), 'utf8');

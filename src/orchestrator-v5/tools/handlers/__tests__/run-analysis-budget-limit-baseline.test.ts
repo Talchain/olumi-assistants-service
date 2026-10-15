@@ -31,13 +31,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createNoopSessionStore } from '../../../session/__tests__/fixtures.js';
-import { createRunAnalysisHandler, type ScenarioReader } from '../run-analysis.js';
+import { createRunAnalysisHandler, type ScenarioReader, setHostLicenceStages } from '../run-analysis.js';
 import { carryLevelLimitBaselines, levelLimitBaselineNodeIds } from '../level-limit-baseline.js';
 import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
 import { collectLimitLevelOwners, readRatifiedConstraints } from '../../../../orchestrator/context/constraint-feasibility.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(

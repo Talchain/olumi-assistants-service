@@ -3,13 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;

@@ -403,3 +403,34 @@ export function appendInferenceWarning<E>(envelope: E, warning: Record<string, u
     ...(Array.isArray(current.inference_warnings) ? current.inference_warnings : []), warning,
   ] } as E;
 }
+
+/**
+ * ⭐ S12 SHORTCUT (Paul 09:15Z 15 Oct): what the engine returned, shown, with each reason a host withhold stage would have withheld
+ * for carried instead as a disclosure (`HOST_CAVEAT`, its own code in `caveat_code`, severity info). The stage's own sentence and
+ * `*_withheld` flags are dropped: "withheld" is no longer true, and the AI words the caveat from its code and data. KEPT: the one
+ * numeric egress check (`egress`), PLoT's own withholds (in the engine's response) and the stages' run ledger (`_meta`).
+ */
+export const HOST_CAVEAT_CODE = 'HOST_CAVEAT';
+const warningsOf = (r: unknown): Record<string, unknown>[] => {
+  const e = r !== null && typeof r === 'object' && !Array.isArray(r) ? r as Record<string, unknown> : {};
+  const nested = e.enrichment !== null && typeof e.enrichment === 'object' ? (e.enrichment as Record<string, unknown>).inference_warnings : undefined;
+  return [...(Array.isArray(e.inference_warnings) ? e.inference_warnings : []), ...(Array.isArray(nested) ? nested : [])]
+    .filter((w): w is Record<string, unknown> => w !== null && typeof w === 'object' && !Array.isArray(w));
+};
+export function engineFiguresWithHostCaveats<E>(engine: E, staged: E, egress: <T>(run: T) => T): E {
+  const seen = new Set(warningsOf(engine).map((w) => JSON.stringify(w)));
+  let shown = egress(structuredClone(engine));
+  const kept = new Set(warningsOf(shown).map((w) => w.code));
+  const meta = staged !== null && typeof staged === 'object' ? (staged as Record<string, unknown>)._meta : undefined;
+  if (meta !== undefined && shown !== null && typeof shown === 'object') shown = { ...(shown as Record<string, unknown>), _meta: meta } as E;
+  const said = new Set<string>();
+  for (const w of warningsOf(staged)) {
+    if (seen.has(JSON.stringify(w)) || kept.has(w.code)) continue;
+    const key = `${String(w.code)}|${String(w.message ?? '')}`;
+    if (said.has(key)) continue;
+    said.add(key);
+    const rest = Object.fromEntries(Object.entries(w).filter(([k]) => !/withheld|^message$|^severity$|^code$/.test(k)));
+    shown = appendInferenceWarning(shown, { ...rest, code: HOST_CAVEAT_CODE, caveat_code: w.code, severity: 'info' });
+  }
+  return shown;
+}

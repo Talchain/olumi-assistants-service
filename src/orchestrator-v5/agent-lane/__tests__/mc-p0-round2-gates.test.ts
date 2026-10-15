@@ -3,6 +3,9 @@ import { describe, it, expect } from 'vitest';
 import * as admission from '../admit-model.js';
 import { edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 import { runP0Graph } from '../../tools/handlers/__tests__/mc-p0-run-helper.js';
+import { setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 const brief = readFileSync(new URL('../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
 const draw1 = () => JSON.parse(readFileSync(new URL('../../admission/__tests__/fixtures/mc-p0/draw1.json', import.meta.url), 'utf8'));
 const priceSentence = 'Each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.';

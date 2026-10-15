@@ -6,6 +6,9 @@ import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../../orchestrator/context/
 import { runP0Graph } from './mc-p0-run-helper.js';
 import { resolveAnalysisAdmission } from '../../../admission/analysis-admission.js';
 import { authorshipReasonForRun } from '../../../compose/authorship-reason-for-run.js';
+import { setHostLicenceStages } from '../run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-r0-1f9d769.json', import.meta.url), 'utf8'));
 // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.

@@ -56,7 +56,7 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, engineFiguresWithHostCaveats, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
@@ -2018,6 +2018,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ S12 SHORTCUT (Paul 09:15Z 15 Oct): what the engine returned, before the host withhold stages below. With
     // HOST_LICENCE_STAGES_OFF the stages still run (their ledgers and reasons are read), but they no longer delete figures.
     const engineResponse = structuredClone(response);
+    // The one numeric egress check (kept with the stages off): a goal chance only as a finite P of meeting a STATED target.
+    const egress = <T,>(run: T): T => withholdUnusableGoalChances(run, graphForAnalysis, snapshot.goal_node_id);
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
     const unresolvedLimits = unresolvedRetainedLimits(snapshot.rawPersistedGraph ?? snapshot.graph);
@@ -2257,7 +2259,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // minimised), else it is withheld with its typed cause (`goal-chance-gate.ts`), the brief's `goal_fit` with it.
     if (!chanceGoalWithheld) {
       const before = response;
-      response = withholdUnusableGoalChances(response, graphForAnalysis, snapshot.goal_node_id);
+      response = egress(response);
       if (response !== before) {
         log.info(
           { event: 'run_analysis.goal_chance_withheld_unusable', request_id: invocation.requestId, scenario_id: args.scenario_id },
@@ -2307,7 +2309,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
     // M3c (AIE 6181933060): an option not fully in place at the target's month, on its own recorded lead, is withheld, never "no change".
     response = withholdOptionsNotInPlaceAtPeriodEnd(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
-    if (hostLicenceStagesOff) response = engineFiguresWithHostCaveats(engineResponse, response, graphForAnalysis, snapshot.goal_node_id);
+    if (hostLicenceStagesOff) response = engineFiguresWithHostCaveats(engineResponse, response, egress);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -4156,39 +4158,10 @@ export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unk
 
 /**
  * ⭐ S12 SHORTCUT (Paul 09:15Z 15 Oct: "switch off the host layer… keep only engine numbers, the one numeric egress check, the
- * safe write and authorshipOf"). ONE switch (`setHostLicenceStages`, off by default): the 19 host withhold stages no longer delete what the engine returned. Each reason a
- * stage would have withheld for travels instead as a disclosure (`HOST_CAVEAT`, its own code in `caveat_code`, no
- * `withheld_claims`), so the AI says what the figure rests on. KEPT: the egress check (a goal chance reaches a reader only as a
- * finite probability of meeting a STATED target: `withholdUnusableGoalChances`), and PLoT's own withholds, which are in the
- * engine's response. The stages' run ledger (`_meta`) is kept. The licence's own guards stay: a target the engine was not asked
+ * safe write and authorshipOf"). ONE switch (`setHostLicenceStages`, off by default): the 19 host withhold stages no longer delete
+ * what the engine returned (`engineFiguresWithHostCaveats`). The licence's own guards stay: a target the engine was not asked
  * (not sent, a change over a period it did not score, an open reading, the same-cohort law's missing inputs) shows no chance.
  */
 let hostLicenceStagesOff = true;
 /** The one switch. Specs that pin a switched-off stage's old behaviour set it on for themselves (post-PoC deletion). */
 export function setHostLicenceStages(on: boolean): void { hostLicenceStagesOff = !on; }
-export const HOST_CAVEAT_CODE = 'HOST_CAVEAT';
-
-const warningsIn = (r: unknown): Record<string, unknown>[] => {
-  const e = isRecord(r) ? r : {};
-  const top = Array.isArray(e.inference_warnings) ? e.inference_warnings : [];
-  const nested = isRecord(e.enrichment) && Array.isArray(e.enrichment.inference_warnings) ? e.enrichment.inference_warnings : [];
-  return [...top, ...nested].filter(isRecord);
-};
-
-export function engineFiguresWithHostCaveats<E>(engine: E, staged: E, graph: unknown, goalId: unknown): E {
-  const seen = new Set(warningsIn(engine).map((w) => JSON.stringify(w)));
-  let shown = withholdUnusableGoalChances(structuredClone(engine), graph, goalId);
-  const egress = new Set(warningsIn(shown).map((w) => w.code));
-  if (isRecord(staged) && isRecord(shown) && staged._meta !== undefined) shown = { ...shown, _meta: staged._meta } as E;
-  const said = new Set<string>();
-  for (const w of warningsIn(staged)) {
-    if (seen.has(JSON.stringify(w)) || egress.has(w.code)) continue;
-    const key = `${String(w.code)}|${String(w.message ?? '')}`;
-    if (said.has(key)) continue;
-    said.add(key);
-    // The stage's own sentence said "withheld", which is no longer true: the AI words the caveat from its code and data.
-    const rest = Object.fromEntries(Object.entries(w).filter(([k]) => !/withheld|^message$|^severity$|^code$/.test(k)));
-    shown = appendInferenceWarning(shown, { ...rest, code: HOST_CAVEAT_CODE, caveat_code: w.code, severity: 'info' });
-  }
-  return shown;
-}

@@ -12,8 +12,10 @@ import { goalChanceWithheldForAgent, GOAL_CHANCE_WITHHELD_NOTE, OPTIONS_IDENTICA
 import { GOAL_FIGURES_PLACEHOLDER_PATH as PLACEHOLDER, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../../../orchestrator/context/option-result-source.js';
 import { TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS } from '../../../coaching/analysis-result-headline.js';
 import { detectIdenticalArms } from '../identical-arms.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
 import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 /**
  * DL GATE 1 v2 (5 Oct 2026): two arms the Run could not tell apart split each other's wins, so the comparison is withheld

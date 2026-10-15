@@ -10,13 +10,15 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { applyStatementRecordEdit } from '../../goal-target/cohort-forecast-write.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { readStatement } from '../read.js';
 import { doorRowFor } from '../role-table.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const HIRING = (): Rec => JSON.parse(readFileSync(new URL('./fixtures/hiring-negative-r4-turn09.json', import.meta.url), 'utf8')).graph as Rec;

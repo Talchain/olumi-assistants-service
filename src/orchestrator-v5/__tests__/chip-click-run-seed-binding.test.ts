@@ -39,6 +39,9 @@ import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import type { SessionStore, SessionTurnWrite } from '../session/store.js';
 import { makeMessagePayload } from './fixtures.js';
+import { setHostLicenceStages } from '../tools/handlers/run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 const storeHolder: { current: SessionStore } = { current: createNoopSessionStore() };
 vi.mock('../session/index.js', () => ({

@@ -54,6 +54,9 @@ import { dispatchStructuralChallenge } from '../structural-challenge-dispatch.js
 import { runArmsDistinct, runArmsIdentical } from '../../coaching/structural-challenge-compare.js';
 import { composeStructuralChallengeReply, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
 import { goalChanceDisplayForAgent } from '../../goal-target/goal-chance-licence.js';
+import { setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const SCENARIO = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';

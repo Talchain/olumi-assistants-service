@@ -31,7 +31,9 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { computeExpectedGraphCasHashes } from '../../../context/graph-cas-conflict.js';
 import { applyOlumiOptionAdoption } from '../../../system-events/olumi-option-adoption.js';
 import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const served = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as { graph: Rec };

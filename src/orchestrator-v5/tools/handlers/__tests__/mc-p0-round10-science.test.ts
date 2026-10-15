@@ -3,6 +3,9 @@ import { expect, it } from 'vitest';
 import { targetTestabilityOf, notTargetTestableSentence } from '../../../admission/target-testability.js';
 import { linkList, legacyLinkSentence } from '../../../agent-lane/unsized-path-cause.js';
 import { runP0Graph } from './mc-p0-run-helper.js';
+import { setHostLicenceStages } from '../run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type R = Record<string, any>;
 const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8,

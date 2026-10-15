@@ -19,9 +19,11 @@ import { sayDate } from '../../goal-target/deadline-date.js';
 import { teamShareMoments } from '../../goal-target/event-by-date-share.js';
 import { CHANCE_FREE_HORIZON_PREFIX, untestedHorizonLineForCells, withUntestedHorizonWarning } from '../decision-input-ask.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const fixture = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
