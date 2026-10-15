@@ -15,7 +15,7 @@
  *  · nobody has sized: no level by readiness's own rule (`riskHoldsALevel`) and no occurrence block at all;
  *  · is undecided (`analysis_participation` absent: an adopted risk asks; a `retained_excluded` one is already out);
  *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it, and a directed path to a goal;
- *  · is not something the Run needs: no option sets it and no limit names it (those keep asking, as before).
+ *  · is not something the Run needs: no option sets or links to it, and no limit names it (those keep asking, as before).
  * Pure; read on the model as saved by readiness, the Run's and what-if's compute projection, and the host's line.
  */
 import { authorshipOf, nodeIntroductionOf } from '../../cee/provenance/provenance-of.js';
@@ -39,9 +39,13 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
   const keptOut = new Set(nodes.filter((n) => n.analysis_participation === 'retained_excluded').map((n) => n.id));
   const causal = (id: unknown): boolean => kindOf.has(id) && !keptOut.has(id) && !['option', 'decision', 'constraint'].includes(String(kindOf.get(id)));
   const edges = graph.edges.filter(isRec).filter((e) => e.edge_type !== 'bidirected' && causal(e.from) && causal(e.to));
+  // AIE (6177505214): keep the protection for option-set risks. A risk an option sets (an intervention) OR acts on (an option → risk
+  // link, whose mechanism may still be unmapped: the blocked-journey golden's ‘Two Developers’ → ‘Coordination Overhead Risk’) is
+  // the option's own mechanism, never left out.
   const needed = new Set<unknown>([
     ...nodes.filter((n) => n.kind === 'option').flatMap((n) => [n.interventions, isRec(n.data) ? n.data.interventions : undefined]
       .flatMap((i) => (isRec(i) ? Object.keys(i) : []))),
+    ...graph.edges.filter(isRec).filter((e) => kindOf.get(e.from) === 'option').map((e) => e.to),
     ...limitNodeIds(graph),
   ]);
   const reachesGoal = (from: unknown): boolean => {

@@ -8,6 +8,7 @@ import type { StageContext } from "../../src/cee/unified-pipeline/types.js";
 import { fixBridgeChaining } from "../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js";
 import { validateGraph } from "../../src/validators/graph-validator.js";
 import { projectGraphAndOptionsToV3 } from "../../src/cee/transforms/schema-v3.js";
+import { unsizedOlumiRiskIds } from "../../src/orchestrator-v5/agent-lane/unsized-risk.js";
 import { buildAnalysisReadyPayload } from "../../src/cee/transforms/analysis-ready.js";
 import { projectGraphForPersistence } from "../../src/orchestrator-v5/persisted-graph-projection.js";
 import { resolveRunAdmission } from "../../src/orchestrator-v5/tools/handlers/analysis-ready-core.js";
@@ -99,7 +100,11 @@ describe("captured causal repair boundary", () => {
     const relation = parsed.edges.find((edge) => edge.from === ids.two && edge.to === ids.risk)!;
     const resolvedControl = projectGraphForPersistence(applyPatchOperations(parsed, [{ op: "remove_edge", path: `${relation.from}::${relation.to}` }]));
     expect(computeAnalysisAffectingGraphHash(reopened)).not.toBe(computeAnalysisAffectingGraphHash(resolvedControl));
-    expect(resolveRunAdmission(resolvedControl).willProceed).toBe(false);
+    // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214; was: still refused). With its option link removed the risk is an unsized root
+    // stamped Olumi's (`ai_inferred`, read by the one authority) that no option sets or acts on, so it is left out of the Run,
+    // not sampled and never zero, and the Run proceeds on what is supported.
+    expect(unsizedOlumiRiskIds(resolvedControl).has(ids.risk)).toBe(true);
+    expect(resolveRunAdmission(resolvedControl).willProceed).toBe(true);
     resolvedControl.nodes.find(n => n.id === ids.risk)!.observed_state = {
       value: 0.2, raw_value: 0.2, source: "cee_inference", extractionType: "inferred",
     };
@@ -172,7 +177,8 @@ describe("captured causal repair boundary", () => {
     const discardedRisk = applyPatchOperations(graph, [{
       op: "remove_edge", path: `${ids.two}::${ids.risk}`,
     }]);
-    expect(resolveRunAdmission(projectGraphForPersistence(discardedRisk)).willProceed).toBe(false);
+    // AMENDED (DL 15 Oct 23:19Z): the discarded risk is Olumi's unsized root, so it is left out; the offered value stays offered.
+    expect(unsizedOlumiRiskIds(projectGraphForPersistence(discardedRisk)).has(ids.risk)).toBe(true);
     // Explicit held risk premise for this positive control after its sole parent is removed.
     discardedRisk.nodes.find(n => n.id === ids.risk)!.observed_state = {
       value: 0.2, raw_value: 0.2, source: "cee_inference", extractionType: "inferred",
