@@ -267,7 +267,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(persisted).toEqual(before);
   });
 
-  it('RED: the starting-point card (values + a ranged level) adopts it in its ONE commit too', async () => {
+  it('RED: a ranged level proposed through the starting-point tool adopts it in its ONE commit too', async () => {
     const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED }, TEXT, true);
     expect(String(proposed.public_label)).toContain(STATED_RANGE_CARD_CLOSING);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
@@ -304,6 +304,8 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+    // The compound press (levels with a gap declaration) adopts the shown approximation in the same ONE write.
+    expect(adopted()).toBe(true);
     const option = (persisted as { nodes: Cell[] }).nodes.find(n => n.id === 'opt_lift')!;
     expect(option.unresolved_targets).toEqual(['supplier learning']);
     expect(option.user_questions).toEqual([expect.stringContaining('supplier learning')]);
