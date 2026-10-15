@@ -417,8 +417,12 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       // The verified earlier message is quoted as the source (#3069 fix-forward).
       expect(proposal?.public_label).toContain(`Your words: “${words}” in “Our deadline is ${words}”.`);
     } else {
-      expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
+      // ⚠ Lane A re-pin (#3255 A2 / AIE-05): a refusal's model-facing output also carries its declared `retry_basis` (the saved
+      // revision and the typed-words digest the cause depended on). The refusal itself stays exactly as before.
+      const { retry_basis: retryBasis, ...refusal } = output;
+      expect(refusal).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
         detail: UNKNOWN_ORIGIN_DETAIL });
+      expect(retryBasis).toMatchObject({ model_revision: expect.any(String), user_words: expect.stringMatching(/^[0-9a-f]{16}$/) });
       expect(await heldOnLatestRow()).toEqual([]);
       expect(approveChipOf(result)).toBeUndefined();
     }
