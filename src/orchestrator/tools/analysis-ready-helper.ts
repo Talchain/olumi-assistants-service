@@ -1559,7 +1559,12 @@ function runScaleGaps(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReady
   const baseline = findScaleIncoherentBaselineFactorIds(graph.nodes, raw, synthesised);
   const verdict = decideAnalysisScaleBlock(projectRequestInterventionsToWireScale(raw, buildFactorScaleMap(graph.nodes), synthesised), baseline);
   if (!verdict.blocked) return null;
-  return { reason: verdict.reason_code, gaps: verdict.unresolvedFactorIds.map((id) => {
+  // One question per factor: a factor an option sets as a CATEGORY is the encoding check's (`needs_encoding`), never a scale ask.
+  const categorical = new Set(raw.flatMap((ivs) => Object.entries(ivs)
+    .filter(([, v]) => isPlainObject(v) && (v as { value_type?: unknown }).value_type === 'categorical').map(([id]) => id)));
+  const ids = verdict.unresolvedFactorIds.filter((id) => !categorical.has(id));
+  if (ids.length === 0) return null;
+  return { reason: verdict.reason_code, gaps: ids.map((id) => {
     const node = graph.nodes.find((n) => n.id === id) as { label?: unknown; observed_state?: { value?: unknown; raw_value?: unknown; unit?: unknown } } | undefined;
     const v = node?.observed_state?.raw_value ?? node?.observed_state?.value;
     const unit = typeof node?.observed_state?.unit === 'string' && node.observed_state.unit.trim() !== '' ? node.observed_state.unit.trim() : undefined;
