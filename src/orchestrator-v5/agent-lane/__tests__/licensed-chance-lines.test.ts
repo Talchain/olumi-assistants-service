@@ -128,3 +128,41 @@ describe('S7 B1: one option’s licensed chance line is not a ranking (the gate 
     expect(isLicensedChanceLine('Hire a tech lead has about 38% chance of reaching at least 15% higher productivity.', chances, labels)).toBe(false);
   });
 });
+
+/**
+ * ⭐ S9 (DL 07:1xZ; capacity e2e R2e, CEE c1e944a4, leader withheld for an unsized goal path): the AI may say how an option's
+ * chance moved between the two Runs. The PRECEDING Run's figure passes the gate only inside a from→to comparison that states
+ * it before this Run's display, equal to THAT Run's licensed display (`run_delta.goal_chances`), for the same option and goal.
+ */
+describe('S9: a from→to comparison of one option’s licensed chances survives the withheld-leader gate', () => {
+  const R2E = (JSON.parse(readFileSync('tests/fixtures/s9-range-delta/R2e-automatic-50836bd2.json', 'utf8')) as Json).canonical_state as Json;
+  const gateR2e = (text: string, delta: unknown = R2E.current_read.run_delta): string => { // null = no recorded pair
+    const claim = R2E.analysis_state.leader_claim;
+    return String(enforceAgentLaneLeaderClaimsAtWire({ assistant_text: text, blocks: [R2E.analysis_result], suggested_actions: [],
+      analysis_state: R2E.analysis_state, ...(delta !== null ? { run_delta: delta } : {}) } as never, { requestId: 's9', exitPath: 'agent_lane_v1',
+      mayNameLeadingOption: false, separationEstablished: claim.separation === 'separated', leaderClaimWithheldReason: claim.withheld_reason,
+      graph: R2E.graph, analysisReady: R2E.analysis_ready, sayWhyWithheld: false } as never).response.assistant_text);
+  };
+  const SAID = '‘Add one specialist’ went from between about 30% and 36% to between about 54% and 59% chance of meeting your goal.';
+
+  it('R2e (served): the comparison sentence is kept; with no recorded pair it is still dropped', () => {
+    expect(R2E.analysis_state.leader_claim.permitted).toBe(false);
+    expect(gateR2e(SAID)).toContain(SAID);
+    expect(gateR2e(SAID, null), 'no run_delta: the earlier figures are unlicensed').not.toContain(SAID);
+    const chances = licensedChancesOf(R2E.analysis_result, R2E.graph, true, R2E.current_read.run_delta)!;
+    expect(chances.options.find((o) => o.label === 'Add one specialist')!.prior).toEqual({ display: 'between about 30% and 36%', figures: [30, 36] });
+  });
+
+  it('CONTRASTS: a wrong earlier figure, the earlier figure alone, the order reversed, or a pair not of this Run are dropped', () => {
+    const notThisRun = structuredClone(R2E.current_read.run_delta);
+    notThisRun.goal_chances.find((g: Json) => g.option_id === 'add_one_specialist').current = { kind: 'range', low_pct: 60, high_pct: 65, low_rounding: 'whole', high_rounding: 'whole' };
+    for (const [bad, delta] of [
+      [SAID.replace('between about 30% and 36%', 'between about 25% and 36%'), undefined],
+      ['‘Add one specialist’ had between about 30% and 36% chance of meeting your goal.', undefined],
+      ['‘Add one specialist’ went from between about 54% and 59% to between about 30% and 36% chance of meeting your goal.', undefined],
+      [SAID, notThisRun],
+    ] as const) {
+      expect(gateR2e(bad, delta ?? R2E.current_read.run_delta), bad).not.toContain(bad);
+    }
+  });
+});

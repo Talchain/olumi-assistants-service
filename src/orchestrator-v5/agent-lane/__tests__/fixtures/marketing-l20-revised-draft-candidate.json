@@ -1,6 +1,6 @@
 {
  "_generated_by": "restated-goal-revised-draft.test.ts row 'the L20 candidate fixture is the one the capability prepares' (proposals.get(offer).operations[0].value); regenerate by that row, never by hand",
- "operation_id": "55f339cc-0052-4c9b-bc6f-f847fec5d49a",
+ "operation_id": "16932482-2c98-440c-9bcb-02d51d08a540",
  "candidate": {
   "nodes": [
    {
@@ -39,8 +39,7 @@
      "effects_at_period_end": true,
      "source": "olumi_reading"
     },
-    "goal_direction": ">=",
-    "goal_deadline_as_stated": "3 months"
+    "goal_direction": ">="
    },
    {
     "id": "hire_a_marketing_manager",
