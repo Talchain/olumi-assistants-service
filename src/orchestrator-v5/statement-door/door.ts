@@ -9,12 +9,14 @@ import { userStatementOf, type UserStatement } from '../agent-lane/user-statemen
 import { riskOccurrenceAskWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP } from '../agent-lane/risk-occurrence.js';
 import type { StatementAsk } from './ask.js';
 import { readStatement, type DoorContext, type DoorQuote } from './read.js';
-import { ROLE_TABLE, rowKey, type RoleRow } from './role-table.js';
+import { doorRowFor, ROLE_TABLE, rowKey, type RoleRow } from './role-table.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from './subject.js';
 import { RECORD_STATEMENT_OP, type DoorWriteMember } from './write.js';
 import type { ProposalOperation } from '../agent-lane/proposal.js';
 import { RISK_HOLDS_NOW_ROW, windowHoldsAskOf } from './fields/risk.js';
+import { SET_OPTION_CAPACITY_CHANGE_OP } from '../goal-target/option-capacity-change.js';
 import { timingAskOf } from './fields/goal-timing.js';
+import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { cohortForecastAsks } from './fields/cohort-relation.js';
 import { SET_COHORT_FORECAST_OP, SET_GOAL_RELATION_OP } from '../goal-target/cohort-forecast-write.js';
 
@@ -72,6 +74,10 @@ export function asMemberOp(op: { readonly op: string; readonly value?: unknown }
   if (card.member === 'goal_relation' && typeof card.payload.goal_id === 'string') {
     return { op: SET_GOAL_RELATION_OP, path: card.payload.goal_id, value: card.payload };
   }
+  // M5: the option-capacity member's own registered revision (`applyOptionCapacityChange`), keyed by the option.
+  if (card.member === 'option_capacity' && typeof card.payload.option_id === 'string') {
+    return { op: SET_OPTION_CAPACITY_CHANGE_OP, path: card.payload.option_id, value: card.payload };
+  }
   return undefined;
 }
 
@@ -80,10 +86,22 @@ export const doorOperation = (card: DoorCard): ProposalOperation => ({ op: RECOR
 
 const nodesOf = (graph: unknown): Rec[] => (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : []);
 
+/**
+ * M5: readiness's ask for what an option sets a factor to ("… What should option ‘O’ set it to?"), in readiness's own words, where
+ * the door has the row for that subject (today an option's share of time in the deadline forecast). Its answer binds by the ask.
+ */
+function optionSettingAsks(graph: unknown): StatementAsk[] {
+  return assessCanonicalAnalysisReadiness(graph).blockingIssues.flatMap((i): StatementAsk[] => {
+    if (i.code !== 'MISSING_OPTION_VALUE' || typeof i.option_id !== 'string' || typeof i.factor_id !== 'string' || typeof i.message !== 'string') return [];
+    const subject: DoorSubject = { kind: 'factor', id: i.factor_id, option_id: i.option_id, field: 'level' };
+    return doorRowFor(subject, graph) === undefined ? [] : [{ subject, words: i.message }];
+  });
+}
+
 /** The readiness asks the door binds an answer to, each in the words readiness says (`analysis-ready-helper` levelGapAsk). */
 export function doorAsks(graph: unknown): StatementAsk[] {
-  // M4-cohort: each option's forecast questions and the goal's same-people question (readiness's own words).
-  return [...cohortForecastAsks(graph), ...nodesOf(graph).flatMap((n): StatementAsk[] => {
+  // M4-cohort: each option's forecast questions and the goal's same-people question; M5: an option's share (readiness's own words).
+  return [...cohortForecastAsks(graph), ...optionSettingAsks(graph), ...nodesOf(graph).flatMap((n): StatementAsk[] => {
     // M3b: the goal's ONE timing ask (every current option effect at the target's end point), so its answer binds by `answering`.
     if (n.kind === 'goal' && typeof n.id === 'string') { const t = timingAskOf(graph, n.id); return t === undefined ? [] : [t]; }
     if (n.kind !== 'risk' || typeof n.id !== 'string' || typeof n.label !== 'string') return [];

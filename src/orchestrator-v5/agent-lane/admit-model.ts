@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -3936,6 +3936,9 @@ function admitOnce(
     return { ...os, range: { low: theirs.low, high: theirs.high, meaning: 'min_max' as const, source: 'brief_extraction', source_quote: theirs.quote } };
   };
   const quotesBrief = (f: CandidateModel['factors'][number]): boolean => {
+    // SYSTEM 2's whole-raw switch: a draft with statements[] keeps a figure's human origin through its verified statement
+    // (or the brief writing it), never through the legacy `baseline_evidence`.
+    if (carriesStatements(model)) return statementCitesLevel(model, f, brief) || briefWritesFactorFigure(f, brief);
     const quote = f.baseline_evidence?.quote;
     const value = f.baseline_value;
     return (typeof quote === 'string' && typeof value === 'number' && Number.isFinite(value)
