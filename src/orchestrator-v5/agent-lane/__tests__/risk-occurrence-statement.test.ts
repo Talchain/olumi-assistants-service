@@ -6,6 +6,7 @@
  * complete statement kept beside it; readiness stops asking. Real capabilities, real writer, real readiness, the ONE shared
  * occurrence reader; only the read route and the level door's store are doubled.
  */
+import { unsizedOlumiRiskIds } from '../unsized-risk.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, riskOccurrenceAskWords, riskOccurrenceGoalSubject, riskOccurrenceIsCurrent, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
@@ -64,8 +65,12 @@ const asks = (g: Rec, id = RISK): string[] => (((buildCanonicalAnalysisReadyFrom
   .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === id).map((i) => i.message as string);
 
 describe('S2: the user’s own chance for a risk, recorded as theirs from their words (AIE 6179240850)', () => {
-  it('PRECONDITION (as served): the risk asks its chance within the goal’s window, and the user’s figure had no door (not a factor)', async () => {
-    expect(asks(G)[0]).toContain(riskOccurrenceAskWords(LABEL, 3));
+  // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214; was: readiness asks its chance within the goal's window). The risk is Olumi's
+  // own unsized suggestion (`ai_inferred`), so it is left out of the Run and readiness no longer asks; the user's own words below
+  // still size it through this door.
+  it('PRECONDITION (as served): the risk is left out of the Run, not asked, and the user’s figure had no door (not a factor)', async () => {
+    expect(asks(G)).toEqual([]);
+    expect([...unsizedOlumiRiskIds(G)]).toContain(riskOf(G).id);
     const bare = await world().caps.proposeAssumptions(ctx(SAID) as never,
       { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: '', user_stated: true }] } as never) as Rec;
     expect(bare).toMatchObject({ ok: false, refusal: 'nothing_to_adopt', not_a_factor: [{ label: LABEL, kind: 'risk' }] });
