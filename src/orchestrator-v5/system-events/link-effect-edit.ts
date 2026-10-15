@@ -627,7 +627,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     edge.provenance = { ...keptOlumi, magnitude: 'olumi_estimate', source_quote: params.quote,
       representative_midpoint: { low: rep.low, high: rep.high, amount: effect.amount, amount_unit: effect.amount_unit,
         per_source_change: effect.per_source_change, per_source_change_unit: effect.per_source_change_unit },
-      reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } };
+      // No timestamp: the press's dry run and the door's write must give the same edge token (its read-back proves the bytes).
+      reviewed_by_user: { intent: 'confirm' } };
     edge.provenance_display = 'ai_inferred';
   } else {
     // The confirmed reading is identity content, outside the analysis hash; every other provenance key (not Olumi's) survives.
