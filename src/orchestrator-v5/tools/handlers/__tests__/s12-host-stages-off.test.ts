@@ -52,37 +52,27 @@ const caveats = (out: Rec): Rec[] => recordsWith(out, 'caveat_code').filter((r) 
 
 afterEach(() => setHostLicenceStages(false));
 
-describe('S12: the engine\'s chance is shown unless the engine was not asked; host stage reasons become caveats', () => {
-  it('⭐ RED→GREEN capacity 880: "at least 100 tickets per week" — the engine\'s 30% and 40% are shown, provisional, with the stage\'s reason as a caveat', async () => {
-    setHostLicenceStages(true);
-    expect(Object.keys(licence(await run(CAPACITY()))?.pct_by_option ?? {}), 'stages on: hidden').toEqual([]);
-    setHostLicenceStages(false);
+const PRICING = (): Rec => graphIn('src/orchestrator-v5/agent-lane/__tests__/fixtures/pricing-e2e-2a35ff31-read02-after-reopen.json');
+
+describe('S12 (re-scoped, DL 10:1xZ): only stages whose figure IS the goal\'s own question go soft; "different question" guards stay on', () => {
+  it('⛔ capacity 880: the goal holds no current level, so the engine scored a 0.2 DELTA, not P(≥100/week) → still no chance, with the stages off', async () => {
     const out = await run(CAPACITY());
-    expect(licence(out)).toMatchObject({ pct_by_option: { keep_current_staffing: 30, add_one_specialist: 40 }, provisional: true,
-      target: { comparator: 'at_least', value: 100, unit: 'tickets per week' } });
-    const said = caveats(out);
-    expect(said.map((c) => c.caveat_code)).toContain('GOAL_FIGURES_TARGET_NOT_TESTABLE');
+    expect(Object.keys(licence(out)?.pct_by_option ?? {})).toEqual([]);
+    expect(caveats(out).map((c) => c.caveat_code)).not.toContain('GOAL_FIGURES_TARGET_NOT_TESTABLE');
+  });
+
+  it('pricing 2a35ff31: the placeholder-path reason travels as a caveat (structural fields only, never "Not shown"/"withheld" words)', async () => {
+    const said = caveats(await run(PRICING()));
+    expect(said.map((c) => c.caveat_code)).toContain('GOAL_FIGURES_PLACEHOLDER_PATH');
     for (const c of said) {
       expect(c.severity).toBe('info');
-      expect(Object.keys(c).some((k) => /withheld/.test(k)), JSON.stringify(c)).toBe(false);
-      expect(c.message).toBeUndefined();
+      expect(JSON.stringify(c)).not.toMatch(/Not shown|withheld/i);
     }
+    setHostLicenceStages(true);
+    expect(caveats(await run(PRICING())), 'stages on: no caveats, the old withhold').toEqual([]);
   });
 
-  it('CONTRAST hiring r4: a change over three months the engine did not score → still no chance shown; the reasons travel as caveats', async () => {
-    const out = await run(HIRING());
-    expect(Object.keys(licence(out)?.pct_by_option ?? {})).toEqual([]);
-    expect(caveats(out).length).toBeGreaterThan(0);
-  });
-
-  it('CONTRAST marketing run-08: the same-cohort law\'s inputs are missing → still no chance; the limit reasons travel as caveats', async () => {
-    const out = await run(MARKETING());
-    expect(Object.keys(licence(out)?.pct_by_option ?? {})).toEqual([]);
-    expect(caveats(out).map((c) => c.caveat_code)).toContain('GOAL_FIGURES_RETAINED_LIMIT_UNRESOLVED');
-  });
-
-  it('EGRESS kept: an option with no probability of meeting the goal (a win share only) or an impossible one shows no chance', async () => {
-    const out = await run(CAPACITY(), (i) => (i === 0 ? undefined : 1.4));
-    expect(Object.keys(licence(out)?.pct_by_option ?? {})).toEqual([]);
+  it('CONTRAST hiring r4 and marketing run-08: still no chance (the engine was not asked their question)', async () => {
+    for (const g of [HIRING(), MARKETING()]) expect(Object.keys(licence(await run(g))?.pct_by_option ?? {})).toEqual([]);
   });
 });

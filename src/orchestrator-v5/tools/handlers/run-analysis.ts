@@ -56,7 +56,7 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, engineFiguresWithHostCaveats, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, withHostCaveats, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
@@ -2017,9 +2017,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⭐ S12 SHORTCUT (Paul 09:15Z 15 Oct): what the engine returned, before the host withhold stages below. With
     // HOST_LICENCE_STAGES_OFF the stages still run (their ledgers and reasons are read), but they no longer delete figures.
-    const engineResponse = structuredClone(response);
-    // The one numeric egress check (kept with the stages off): a goal chance only as a finite P of meeting a STATED target.
+    // The one numeric egress check: a goal chance only as a finite P of meeting a STATED target.
     const egress = <T,>(run: T): T => withholdUnusableGoalChances(run, graphForAnalysis, snapshot.goal_node_id);
+    // A stage whose figure IS the goal's own question, resting on Olumi's inputs: with the stages off it no longer deletes the
+    // figure; its reason travels as a caveat (`withHostCaveats`). Every stage whose reason is that the engine answered a
+    // DIFFERENT question (level vs change, horizon, period-end, product, identity, open reading), lost a user's figure, or
+    // distorts the comparison stays ON (DL 10:1xZ: capacity's 0.2 delta threshold is not P(≥100) — blocking class).
+    const softly = <T,>(run: T, stage: (r: T) => T): T => (hostLicenceStagesOff ? withHostCaveats(run, stage(structuredClone(run))) : stage(run));
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
     const unresolvedLimits = unresolvedRetainedLimits(snapshot.rawPersistedGraph ?? snapshot.graph);
@@ -2031,10 +2035,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         return id === undefined ? [] : [id];
       }));
       response = withholdOptionLimitScores(response, new Map(ids.map((id) => [id, optionIds])));
-      response = withholdOptionGoalFigures(response, optionIds, {
+      response = softly(response, (r) => withholdOptionGoalFigures(r, optionIds, {
         code: RETAINED_LIMIT_WITHHOLD_CODE, severity: 'warning', source: 'cee',
         message: retainedLimitReason, constraint_ids: ids,
-      });
+      }));
       // Existing per-limit/joint refusal carriers. CEE's retained-question evidence, not an engine claim.
       const env = response as Record<string, unknown>;
       // Older engine envelopes carry the aggregate joint here instead of on each option.
@@ -2073,7 +2077,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       limitIdentityEvaluations,
     ).placeholderMovedOptionIds;
     if (placeholderMovedByLimit.size > 0) {
-      response = withholdOptionLimitScores(response, placeholderMovedByLimit);
+      response = softly(response, (r) => appendInferenceWarning(withholdOptionLimitScores(r, placeholderMovedByLimit),
+        { code: 'LIMIT_P_PLACEHOLDER_MOVED', severity: 'warning', source: 'cee', constraint_ids: [...placeholderMovedByLimit.keys()] }));
       log.info(
         {
           event: 'run_analysis.limit_p_withheld_for_placeholder_moved_options',
@@ -2186,8 +2191,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             links: allLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })),
           };
         }
-        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
-          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH, productGateWithholds));
+        response = softly(response, (r) => withholdOptionGoalFigures(r, new Set(goalPaths.map((p) => p.option_id)),
+          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH, productGateWithholds)));
         log.info(
           {
             event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
@@ -2278,7 +2283,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // the AI reads effects as in place by the period or not stated (the licence below reads the same value).
     const periodEndInputs = { sentRun: plotPayload, brief: snapshot.briefText ?? null, effects_timing: effectsTiming };
     const withholdForPeriodEnd = <E,>(run: E, graph: unknown, goalId: unknown): E => withholdForPeriodEndEffects(run, graph, goalId, periodEndInputs);
-    response = [withholdForOlumiGoalLevel, withholdForPeriodEnd]
+    const olumiGoalLevelSoftly = <E,>(run: E, graph: unknown, goalId: unknown): E => softly(run, (r) => withholdForOlumiGoalLevel(r, graph, goalId));
+    response = [olumiGoalLevelSoftly, withholdForPeriodEnd]
       .reduce((run, withhold) => withhold(run, graphForAnalysis, snapshot.goal_node_id), response);
 
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
@@ -2309,7 +2315,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
     // M3c (AIE 6181933060): an option not fully in place at the target's month, on its own recorded lead, is withheld, never "no change".
     response = withholdOptionsNotInPlaceAtPeriodEnd(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
-    if (hostLicenceStagesOff) response = engineFiguresWithHostCaveats(engineResponse, response, egress);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -4158,9 +4163,9 @@ export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unk
 
 /**
  * ⭐ S12 SHORTCUT (Paul 09:15Z 15 Oct: "switch off the host layer… keep only engine numbers, the one numeric egress check, the
- * safe write and authorshipOf"). ONE switch (`setHostLicenceStages`, off by default): the 19 host withhold stages no longer delete
- * what the engine returned (`engineFiguresWithHostCaveats`). The licence's own guards stay: a target the engine was not asked
- * (not sent, a change over a period it did not score, an open reading, the same-cohort law's missing inputs) shows no chance.
+ * safe write and authorshipOf"). ONE switch (`setHostLicenceStages`, off by default): the host stages whose figure IS the goal's
+ * own question, resting on Olumi's inputs, no longer delete it (`softly`); it is shown provisional with the reason as a caveat.
+ * Every "the engine answered a different question" stage, and the licence's own guards, stay on.
  */
 let hostLicenceStagesOff = true;
 /** The one switch. Specs that pin a switched-off stage's old behaviour set it on for themselves (post-PoC deletion). */
