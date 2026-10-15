@@ -14,7 +14,8 @@
  *   2. already in the model → gone, silent (applied elsewhere: fulfilment);
  *   3. past its stored lifetime → lapsed, SAID;
  *   4. the model moved → re-refereed by HOLD-WIPE's own rule (`threadHoldsThroughMutatingCommit`: the GM resume read,
- *      the add-factor recheck, the referee): sound → re-pinned; not → lapsed, SAID;
+ *      the add-factor recheck, the referee): sound → re-pinned; not → lapsed, SAID. An Agent card whose OWN subject is
+ *      unchanged (`stillApplies`: `heldCardStillApplies`, the rule its press reads) is carried; otherwise lapsed, SAID;
  *   5. carried with a refreshed lifetime ({@link HELD_PROPOSAL_TURN_BUDGET} rows, {@link PROPOSAL_IDLE_TTL_MS} idle).
  * And a hold this turn FOUND that is no longer on the latest row, for none of the reasons in 1–2, is SAID as no
  * longer waiting — never put back (Codex P1 on the design: resurrecting it could undo another request's decline).
@@ -81,6 +82,8 @@ export interface ReconcileInput {
   readonly declined: ReadonlySet<string>;
   readonly graph: unknown;
   readonly graphHash: string | undefined;
+  /** An Agent card that still applies to THIS graph by its own field-scoped rule (`heldCardStillApplies`). Absent: none does. */
+  readonly stillApplies?: (hold: PendingAction) => boolean;
   readonly scenarioId: string;
   readonly requestId: string;
   readonly nowMs: number;
@@ -95,7 +98,8 @@ export function reconcileHeldProposals(input: ReconcileInput): { carried: Pendin
     if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold)) || input.isApplied?.(heldProposalId(hold))) continue;
     if (fulfilledIn(hold, input.graph)) continue;
     if (isPendingActionExpired(hold, input.nowMs)) { lapsed.push({ hold, reason: 'idle' }); continue; }
-    if (!isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash) {
+    if (!isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash
+      && input.stillApplies?.(hold) !== true) {
       lapsed.push({ hold, reason: 'model_changed' }); continue;
     }
     live.push(hold);
@@ -112,7 +116,8 @@ export function reconcileHeldProposals(input: ReconcileInput): { carried: Pendin
   for (const hold of input.atStart) {
     if (!isHeldProposal(hold) || hold.scenario_id !== input.scenarioId || onLatest.has(hold.chip_id)) continue;
     if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold)) || input.isApplied?.(heldProposalId(hold)) || fulfilledIn(hold, input.graph)) continue;
-    lapsed.push({ hold, reason: !isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash ? 'model_changed' : 'gone' });
+    lapsed.push({ hold, reason: !isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash
+      && input.stillApplies?.(hold) !== true ? 'model_changed' : 'gone' });
   }
   return { carried: [...thread.threaded, ...live.filter(h => !isProductHold(h))].sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso)).map((h) => refreshedHold(h, input.nowMs)), lapsed };
 }

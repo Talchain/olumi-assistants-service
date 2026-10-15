@@ -715,3 +715,49 @@ describe('RULING A: the route card trusts the attested words; retired negatives 
     expect(history.reduce((n, t) => n + count(t, HIRING_CARD), 0)).toBe(1);
   });
 });
+
+/**
+ * ⭐ A HELD CARD LAPSES ONLY WHEN ITS OWN SUBJECT CHANGED (served hiring witness on 35a66525, turn 04,
+ * JUDGE-hiring-post3007-codex.md "False or lost"): approving two unrelated link strengths moved the model's hash, and the pending
+ * deadline card "no longer fits the model as it now stands, so it has lapsed" while the saved goal and its date were unchanged.
+ * The real route, the real reconcile (`lifecycle.ts`) and the real approval writer; the link change is written to the store as
+ * the strength approval writes it (one edge's strength moved, nothing else).
+ */
+describe('a held deadline card survives an unrelated model change, and lapses when its own date moved', () => {
+  const moveOneLink = (g: Rec): Rec => {
+    const decision = g.nodes.find((n: Rec) => n.kind === 'decision')?.id;
+    const e = g.edges.find((x: Rec) => x.from !== decision && typeof x.strength?.mean === 'number');
+    expect(e, 'an edge with a strength outside the decision').toBeDefined();
+    e.strength = { ...e.strength, mean: e.strength.mean === 0.5 ? 0.7 : 0.5 };
+    return g;
+  };
+  const onLatestRow = (w: ReturnType<typeof world>, chipId: string) =>
+    ((w.rows.find((r) => !r.turn_id.endsWith(':claim')) as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
+
+  it('⭐ RED→GREEN: card offered → a link strength lands → the next turn keeps the card (no lapse said) → Yes writes the date', async () => {
+    const w = world(), turn = await route(w), first = await turn(), { yes } = card(first);
+    const before = hash(w.read());
+    w.replace(moveOneLink(w.read()));
+    expect(hash(w.read()), 'the model moved').not.toBe(before);
+    const next = await turn({ agent_session_id: first._agent.session_id });
+    expect(String(next.assistant_text)).not.toMatch(/no longer fits the model/);
+    expect(onLatestRow(w, yes.id), 'the card is still held on the latest row').toBe(true);
+    const moved = structuredClone(w.read());
+    await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: first._agent.session_id });
+    const after = w.read();
+    expect(goal(after)).toMatchObject({ goal_horizon: { deadline: '2027-08-10' } });
+    expect(after.edges, 'the approved link is kept').toEqual(moved.edges);
+  });
+
+  it('NEGATIVE: the model moved AND the goal’s own date changed → the card lapses, said; Yes writes nothing', async () => {
+    const w = world(), turn = await route(w), first = await turn(), { yes } = card(first);
+    const g = moveOneLink(w.read());
+    goal(g).goal_horizon = { ...(goal(g).goal_horizon ?? {}), deadline: '2027-01-31' };
+    w.replace(g);
+    const next = await turn({ agent_session_id: first._agent.session_id });
+    expect(String(next.assistant_text)).toMatch(/no longer fits the model as it now stands, so it has lapsed/);
+    expect(onLatestRow(w, yes.id)).toBe(false);
+    await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: first._agent.session_id });
+    expect(goal(w.read()).goal_horizon.deadline).toBe('2027-01-31');
+  });
+});
