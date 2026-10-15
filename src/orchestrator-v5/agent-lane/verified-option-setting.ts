@@ -800,7 +800,7 @@ export function statementBindsFactorLevel(model: CandidateModel, factor: Factor,
 
 function boundByStatement(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   const value = factor.baseline_value;
-  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return false;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value === 0) return false;
   const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
   const unit = JSON.stringify(readUnitParts(factor.unit));
@@ -831,7 +831,8 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
     // week" for tickets per week per specialist), as `quoteBindsFactorFigure` already reads it; a different written one refuses.
     const inFrame = findLinkEffectAmounts(quote).filter((amount) => !ends.includes(amount.magnitude) &&
       sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount), true));
-    if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
+    // S4: a net loss (−15) is the statement's own verified reading of the figure its quote writes (15): magnitudes compare.
+    if (inFrame.length !== 1 || inFrame[0]!.magnitude !== Math.abs(value)) return false;
     const stated = inFrame[0]!;
     const label = (l: string): Set<string> => new Set(words(l).map(singular));
     const own = label(factor.label);
