@@ -352,7 +352,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { heldFigureOwnerOf, isHumanStatementSource, provenanceOf, settingDisplayOf, settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, linkDrawingDisplayOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -1429,20 +1429,12 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // Value provenance is a DIFFERENT fact from entity provenance: who put
           // this NUMBER here, versus where the entity came from. Collapsing them
           // is how a system-read figure inherits a user's authority.
-          // The user's REVIEW of the figure (an accepted or confirmed Olumi estimate) is a third fact, apart from
-          // whose number it is: without it the Agent could only answer "where did this come from?" from chat
-          // history, which a cold session does not have (52f8cd, #75 5921124922; AIQ 5921018606).
-          const review = os.reviewed_by_user !== null && typeof os.reviewed_by_user === 'object'
-            ? (os.reviewed_by_user as { intent?: unknown }).intent : undefined;
-          // ⭐ ONE PROVENANCE AUTHORITY: `whose` is `provenanceOf`'s answer — the Agent is told whose the figure is, never
-          // left to interpret the stamps, which stay beside it as the record.
+          // ⭐ S10 FIX 1 (DL 15 Oct): ONLY the authority's answer (`whose`, `heldFigureOwnerOf`), never the raw stamps beside
+          // it. Served: an approved Olumi estimate is STORED as `user_assumption` with `reviewed_by_user`, corrected only on read;
+          // given both, the Agent told Paul "proposed values become yours when you approve them". The user's review of the
+          // figure is in the answer (`olumi_accepted`), so a cold session still knows it (52f8cd, #75 5921124922).
           const whose = num(os.value) || num(os.raw_value) ? heldFigureOwnerOf(os) : undefined;
-          const valueProvenance = {
-            ...(str(os.source) ? { source: os.source } : {}),
-            ...(str(os.extractionType) ? { extraction_type: os.extractionType } : {}),
-            ...(str(review) ? { reviewed_by_user: review } : {}),
-            ...(whose !== undefined ? { whose } : {}),
-          };
+          const valueProvenance = whose !== undefined ? { whose } : {};
           return {
             // ⭐ THE ID. Without it the only way to act on an entity was a fuzzy
             // label match, which collides and cannot address two entities that
@@ -1488,7 +1480,8 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
                 ...(!users && str(r.source_quote) ? { quote: r.source_quote } : {}),
                 ...(point === 'stated_figure' ? { point: 'user_figure' } : point === 'midpoint' ? { point: 'olumi_midpoint' } : {}) } };
             })(),
-            ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
+            // S10 fix 1: who added the entity, as the ONE authority answers it (`authorshipOf`), never the raw node tag.
+            ...(n.provenance === undefined ? {} : { added_by: whoseOf(authorshipOf({ nodeTag: n.provenance })) }),
             // Any kind (T4i, DL 14 Oct): an excluded factor, risk or outcome reaches the Agent with its exclusion mark, as an
             // option does, so it is never described as part of the Run.
             ...(n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
@@ -1613,12 +1606,12 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
    * proposes reads them. A link from an option that carries any other strength or existence keeps its full form.
    */
   const structuralFrom = new Set(g.nodes.filter((n) => n.kind === 'decision' || n.kind === 'option').map((n) => n.id));
+  const kindOf = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
   const unitOfNode = nodeUnitOf(g.nodes);
   // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
   const endsOf = endsOfGraph(g.raw);
   const links = g.edges.map((e) => {
     const countedOnce = heldLinkOf(e, endsOf(e))?.reason === 'route_once';
-    const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
     const fixed = (st === undefined || (st.mean === 1 && (st.std === undefined || st.std === 0.01)))
       && (e.exists_probability === undefined || e.exists_probability === 1) && e.effect_direction !== 'negative';
@@ -1630,8 +1623,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       to: e.to,
       // ⛔ A link that HOLDS BY DEFINITION (checked: `holdsByDefinition`) is arithmetic, not "an assumption Olumi made":
       // its source is said as `by_definition`, never `cee_hypothesis` (DL #2445 condition 1; MG sweep C5).
-      ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? { source: 'by_definition', holds_by_definition: true }
-        : str(source) ? { source } : {}),
+      // ⭐ S10 fix 1: whose link it is, as the ONE authority answers who drew it (`linkDrawingDisplayOf` → `authorshipOf`), never
+      // the raw drawing stamp; how strong, and who sized it, stays `sizing`.
+      ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? { holds_by_definition: true }
+        : { whose: whoseOf(authorshipOf({ nodeTag: linkDrawingDisplayOf(e, { fromKind: kindOf.get(e.from) }).provenance })) }),
       // R11: the user confirmed Olumi's strength for this link — still Olumi's figure, but not one to ask about again.
       ...(edgeReviewedByUser(e) ? { confirmed_by_user: true } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),

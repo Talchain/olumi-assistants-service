@@ -158,9 +158,12 @@ describe('an accepted Olumi figure keeps Olumi as its origin and records the acc
     // …and it is the stored REVIEW that says so: the bare literal alone is the user's declared guess (DL CR 5921764485).
     expect(valueSourceAuthorship(node.observed_state?.source)).toEqual({ source: 'user', provenance: 'user_set' });
     const seen = projectEntity(node as never);
-    expect(seen.provenance).toBe('ai_inferred');
+    expect(seen.added_by).toBe('olumi');
+    expect(seen).not.toHaveProperty('provenance');
     // ONE PROVENANCE AUTHORITY: the Agent is also told whose it is — Olumi's, accepted — never left to read the stamps.
-    expect(seen.value_provenance).toEqual({ source: 'user_assumption', reviewed_by_user: 'confirm', whose: 'olumi_accepted' });
+    // S10 fix 1 (the "become yours" cause): the stored `user_assumption` stamp and its review never reach the Agent beside the
+    // answer; the answer itself says Olumi's figure, accepted.
+    expect(seen.value_provenance).toEqual({ whose: 'olumi_accepted' });
   });
 
   it('TWIN: a figure the user then TYPES is theirs — user_override, user_set, and the acceptance review is cleared', async () => {

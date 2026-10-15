@@ -383,9 +383,11 @@ describe('S6–S7: the actual Agent route owns the durable reconciliation and co
     const supplied = JSON.parse(String(text).slice(CURRENT_MODEL_STATE_PREFIX.length)) as Rec;
     expect(supplied.goal).toMatchObject({ id: 'mrr', scope: { extent: 'total', modelled: 'all revenue streams', component: { share: .3, basis: 'different', count_basis: 'registered accounts, not billable subscriptions', rate_id: 'pro_plan_price', count_id: 'pro_paying_subscribers' } } });
     const suppliedEntities = supplied.entities as Rec[];
-    expect(suppliedEntities.find(e => e.id === 'mrr')).toMatchObject({ raw_value: 10000, value_provenance: { source: 'user_override' } });
-    expect(suppliedEntities.find(e => e.id === 'pro_paying_subscribers')).toMatchObject({ raw_value: 300, value_provenance: { source: 'user_override' } });
-    expect(suppliedEntities.find(e => e.id === 'pro_plan_price')).toMatchObject({ raw_value: 49, value_provenance: { source: 'brief_extraction' } });
+    // S10 fix 1: the authority's answer, never the raw stamp (the user's typed figures are theirs; the brief's by its stamp).
+    expect(suppliedEntities.find(e => e.id === 'mrr')).toMatchObject({ raw_value: 10000, value_provenance: { whose: 'yours' } });
+    expect(suppliedEntities.find(e => e.id === 'pro_paying_subscribers')).toMatchObject({ raw_value: 300, value_provenance: { whose: 'yours' } });
+    expect(suppliedEntities.find(e => e.id === 'pro_plan_price')).toMatchObject({ raw_value: 49, value_provenance: { whose: 'brief' } });
+    for (const e of suppliedEntities) expect(e.value_provenance ?? {}).not.toHaveProperty('source');
     expect(suppliedEntities.some(e => e.raw_value === 3000 || e.raw_value === 3000 / 49)).toBe(false);
     expect(explanation.assistant_text).toContain('£10,000 total monthly MRR');
     expect(explanation.assistant_text).not.toContain('£14,700'); expect((explanation._agent as Rec).break_even).toBeUndefined();

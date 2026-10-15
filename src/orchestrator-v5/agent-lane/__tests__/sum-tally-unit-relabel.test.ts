@@ -139,16 +139,16 @@ describe('a part of a total is fixed by definition on every reader (DL #2445 con
     for (const e of partEdges(g)) expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', definitional: true });
   });
 
-  it('RED (C5): the Agent reads each part link as `by_definition`; an ordinary link keeps its own source (control)', async () => {
+  it('RED (C5): the Agent reads each part link as `by_definition`; an ordinary link says whose it is (control)', async () => {
     const g = await registered();
     const ctx = projectModelContext({ nodes: g.nodes, edges: g.edges, raw: g, analysis_state: undefined, analysis_ready: undefined } as never) as Rec;
     const links = ctx.links as Rec[];
     const parts = links.filter((l) => l.to === DRAFT_TOTAL && DRAFT_PARTS.includes(l.from));
     expect(parts).toHaveLength(2);
-    for (const l of parts) expect(l).toMatchObject({ source: 'by_definition', holds_by_definition: true });
-    const ordinary = links.filter((l) => l.to !== DRAFT_TOTAL && l.source !== undefined);
+    for (const l of parts) { expect(l).toMatchObject({ holds_by_definition: true }); expect(l).not.toHaveProperty('source'); expect(l).not.toHaveProperty('whose'); }
+    const ordinary = links.filter((l) => l.to !== DRAFT_TOTAL && l.whose !== undefined);
     expect(ordinary.length).toBeGreaterThan(0);
-    for (const l of ordinary) expect(l.source).not.toBe('by_definition');
+    for (const l of ordinary) { expect(l).not.toHaveProperty('holds_by_definition'); expect(l).not.toHaveProperty('source'); expect(l.whose).toBe('olumi'); }
   });
 });
 
