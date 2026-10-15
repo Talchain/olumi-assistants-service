@@ -58,7 +58,7 @@ export function optionEffectsOn(graph: unknown, goalId: string): Rec[] {
     grew = false;
     for (const e of edges) if (reaches.has(e.to) && !reaches.has(e.from)) { reaches.add(e.from); grew = true; }
   }
-  return edges.filter((e) => set.has(e.from) && reaches.has(e.to))
+  return edges.filter((e) => typeof e.from === 'string' && set.has(e.from) && reaches.has(e.to))
     .sort((a, b) => `${String(a.from)}>${String(a.to)}`.localeCompare(`${String(b.from)}>${String(b.to)}`));
 }
 
