@@ -358,7 +358,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
-import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, linkDrawingDisplayOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
+import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, linkDrawnByOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -1439,8 +1439,13 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // it. Served: an approved Olumi estimate is STORED as `user_assumption` with `reviewed_by_user`, corrected only on read;
           // given both, the Agent told Paul "proposed values become yours when you approve them". The user's review of the
           // figure is in the answer (`olumi_accepted`), so a cold session still knows it (52f8cd, #75 5921124922).
+          // PL 15 Oct (#3177): a known human source whose binding to THIS item is unverified (the served "80") stays the user's
+          // source with an unverified role, said as typed facts from the same authority, never "unknown origin".
           const whose = num(os.value) || num(os.raw_value) ? heldFigureOwnerOf(os) : undefined;
-          const valueProvenance = whose !== undefined ? { whose } : {};
+          const author = whose === undefined ? undefined : provenanceOf({ value: os });
+          const valueProvenance = whose === undefined || author === undefined ? {} : { whose,
+            origin: author.origin === 'human' ? 'user' : author.origin === 'ai' ? 'olumi' : 'unknown',
+            ...(author.role === 'unverified' ? { role: 'unverified' } : {}) };
           return {
             // ⭐ THE ID. Without it the only way to act on an entity was a fuzzy
             // label match, which collides and cannot address two entities that
@@ -1629,10 +1634,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       to: e.to,
       // ⛔ A link that HOLDS BY DEFINITION (checked: `holdsByDefinition`) is arithmetic, not "an assumption Olumi made":
       // its source is said as `by_definition`, never `cee_hypothesis` (DL #2445 condition 1; MG sweep C5).
-      // ⭐ S10 fix 1: whose link it is, as the ONE authority answers who drew it (`linkDrawingDisplayOf` → `authorshipOf`), never
+      // ⭐ S10 fix 1: whose link it is, as the ONE authority answers who drew it (`linkDrawnByOf`: an unrecognised stamp is unknown), never
       // the raw drawing stamp; how strong, and who sized it, stays `sizing`.
       ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? { holds_by_definition: true }
-        : { whose: whoseOf(authorshipOf({ nodeTag: linkDrawingDisplayOf(e, { fromKind: kindOf.get(e.from) }).provenance })) }),
+        : { whose: whoseOf(linkDrawnByOf(e, { fromKind: kindOf.get(e.from) })) }),
       // R11: the user confirmed Olumi's strength for this link — still Olumi's figure, but not one to ask about again.
       ...(edgeReviewedByUser(e) ? { confirmed_by_user: true } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),

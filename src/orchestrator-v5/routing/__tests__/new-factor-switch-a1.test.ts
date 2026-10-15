@@ -240,7 +240,7 @@ describe('R2 — today = 0 is Olumi\'s INFERENCE: "I supplied N+1 values" and "E
     expect(shown.value).toBe(0);
     // ONE PROVENANCE AUTHORITY: the Agent is also told whose it is — Olumi's — never left to read the stamps.
     // S10 fix 1: the Agent is given ONLY the authority's answer, never the raw stamps beside it.
-    expect(shown.value_provenance).toEqual({ whose: 'olumi' });
+    expect(shown.value_provenance).toEqual({ whose: 'olumi', origin: 'olumi' });
     expect(String(factor.observed_state.source)).not.toMatch(/^user/);
   });
 });

@@ -21,8 +21,9 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 const APPROXIMATE = /(?<![\p{L}])(?:about|around|roughly|approximately|maybe|perhaps)(?![\p{L}])/iu;
-const NEGATED = /(?<![\p{L}])(?:not|never|no|won['’]t|wouldn['’]t|isn['’]t|doesn['’]t|don['’]t|can['’]t|cannot)(?![\p{L}])/iu;
-const CONDITIONAL = /(?<![\p{L}])(?:if|unless|assuming|provided|once)(?![\p{L}])/iu;
+/** A statement that negates what it states, or states it under a condition: never read as stating it (shared with the timing row). */
+export const NEGATED = /(?<![\p{L}])(?:not|never|no|won['’]t|wouldn['’]t|isn['’]t|doesn['’]t|don['’]t|can['’]t|cannot)(?![\p{L}])/iu;
+export const CONDITIONAL = /(?<![\p{L}])(?:if|unless|assuming|provided|once)(?![\p{L}])/iu;
 const KEEP = 'Keep the user’s words exactly as they said them and do not ask them to repeat them.';
 const windowSaid = (months: number): string => (months === 1 ? 'a month' : `${months} months`);
 const percent = (p: number): number => Number((p * 100).toFixed(6));

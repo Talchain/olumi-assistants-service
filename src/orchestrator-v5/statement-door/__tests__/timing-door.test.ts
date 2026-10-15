@@ -177,3 +177,38 @@ describe('M3b TWO-BRIEF RULE: pricing MRR (2a35ff31), a level target at twelve m
     expect(goalHorizonVerdict(after)).toBe(goalHorizonVerdict(PRICING));
   });
 });
+
+describe('PL 15 Oct 00:49Z on #3171: a negated or conditional statement never attests the timing; a source correction stales it', () => {
+  const NOT = 'All of these effects would not be fully in place by month 3.';
+  const IF = 'If we hire by November, all of these effects would be fully in place by month 3.';
+  it.each([['hiring r4', R10], ['pricing MRR', PRICING]] as const)('%s: negated and conditional statements are refused with their words kept, never true', (_n, g) => {
+    for (const [said, words] of [[NOT, 'All of these effects would not be fully in place by month 3'], [IF, 'all of these effects would be fully in place by month 3']] as const) {
+      const v = read(g, [volunteered(said, words)], { now: said });
+      expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
+      expect((v as Rec).detail).toContain('Keep the user’s words exactly as they said them');
+      // With an answer to the ask too, it still never prepares: the dated statement itself is negated or conditional.
+      expect(read(g, [volunteered(said, words), answered(g)], { now: YES, conversation: said }).kind).toBe('refused');
+      expect(doorRowFor(subjectOf(g), g)!.bindsWhole!(said, subjectOf(g), g, words)).toBe(false);
+    }
+  });
+
+  it('an answer of "No" to the timing ask never confirms every effect and the end point', () => {
+    const no = { quote: 'No, not all of them.', answering: timingAskOf(R10, 'productivity')!.words };
+    const v = read(R10, [volunteered(), no], { now: no.quote, conversation: SAID });
+    expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
+    expect((v as Rec).detail).toMatch(/^Not yet clear:/);
+  });
+
+  it('a corrected effect source, or a changed condition on the target, makes the recorded forecast stale', () => {
+    const { after } = write(R10, [volunteered(), answered(R10)], { now: YES, conversation: SAID });
+    expect(humanEffectsTimingOf(after, 'productivity')?.kind).toBe('in_place');
+    const corrected = structuredClone(after);
+    const e = (corrected.edges as Rec[]).find((x) => x.from === 'tech_leads_hired' && x.to === 'productivity')!;
+    e.provenance = { ...e.provenance, source_quote: 'For this model: hiring a Tech lead would raise productivity by about 5% of today’s.' };
+    expect(humanEffectsTimingOf(corrected, 'productivity')?.kind).toBe('stale');
+    const condition = structuredClone(after);
+    goalOf(condition).goal_target_basis.also_required = ['maintaining code quality', 'no overtime'];
+    expect(humanEffectsTimingOf(condition, 'productivity')?.kind).toBe('stale');
+  });
+});
+
