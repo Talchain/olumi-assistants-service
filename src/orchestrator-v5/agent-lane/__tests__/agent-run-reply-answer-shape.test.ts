@@ -191,7 +191,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   /** The Run returns first; the existing bound Explain control makes the ONE narration call scripted here. */
   const typedRun = async (text: string, scenario = SCENARIO) => {
-    callModelOutputs = [say(text)];
+    // Script the new press interpretation separately; the existing attack/finding still belongs to Explain.
+    callModelOutputs = [say('The current model result is provisional.'), say(text)];
     const turnId = nextTurnId();
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: scenario, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
@@ -226,6 +227,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   });
   const runOnly = async (turnId = nextTurnId()) => {
     const payload = runOnlyPayload(turnId);
+    callModelOutputs = [[]]; // Exercise the original host/factual fallback, now after one empty interpretation.
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(response.statusCode, response.body).toBe(200);
     return { b: response.json() as Body & { narration?: { status: string; run_key: string }; _agent: { replayed?: boolean } }, turnId };
@@ -302,15 +304,16 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
 
   it('B15 / T1r: result-first Run keeps licensed findings and the host disclosure', async () => {
     hostRunFixture();
+    const fallback = 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
     expect(screen, 'positive control: two typed screen findings').toHaveLength(2);
     const { b, turnId } = await runOnly();
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(carriesResult(b)).toBe(true);
-    expect(fetch, 'Run makes only the pre-tool interpretation call').toHaveBeenCalledTimes(1);
+    expect(fetch, 'one Run tool request and one empty interpretation').toHaveBeenCalledTimes(2);
     expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
     expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
-    expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
+    expect(b._answer_shape!.detail).toContain(fallback);
     const horizon = untestedHorizonLine(readbackGraph, { besideChance: true, plural: true });
     expect(horizon, 'a horizon always accompanies these two non-event goal chances').not.toBeNull();
     expect([b._answer_shape!.headline, ...b._answer_shape!.bullets].slice(0, 3), 'chance findings and their own notes precede the mandatory horizon marker').toEqual([
@@ -325,7 +328,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
       expect(faceOf(b._answer_shape!)).toContain(line.chance);
       expect(b.assistant_text.split(line.chance)).toHaveLength(2);
     }
-    for (const part of [RUN_RESULT_READY_TEXT, RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
+    for (const part of [fallback, RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
       expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), 'each host sentence exactly once').toHaveLength(1);
     }
     const deliveredSentences = sentenceMultiset(b.assistant_text);
@@ -449,7 +452,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(first._answer_shape!.headline, 'B15: the live Run leads with its first chance finding').toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
     expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
     expect(rows.get(turnId)?.assistant_message!.startsWith(first._answer_shape!.headline)).toBe(true);
-    expect(first._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
+    expect(first._answer_shape!.detail).toContain('The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.');
     const { b: replay } = await runOnly(turnId);
     expect(replay._agent.replayed).toBe(true);
     expect(runRequests, 'the replay did not run again').toBe(1);
@@ -459,7 +462,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     // DL (reload = same): the replay re-applies the same composer to the same typed parts — same bytes, same shape.
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(replay._answer_shape).toEqual(first._answer_shape);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch, 'one initial Run call and interpretation; zero extra on replay').toHaveBeenCalledTimes(2);
   });
 
   it('2b-0 REPLAY PARITY GUARD: stored words the rebuild does not reproduce → legacy host words the rebuild does not reproduce ship whole, no shape', async () => {

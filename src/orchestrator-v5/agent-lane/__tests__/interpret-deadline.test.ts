@@ -77,6 +77,8 @@ describe('the Run interpreting call has a deadline', () => {
     });
     // Run completes through its loop; the optional Explain remains independently deadline-bound.
     expect(runModelCalls).toBe(1);
+    expect(interpretCalls, 'the press interpretation times out once, without retry').toBe(1);
+    interpretCalls = 0; // Keep the optional Explain's deadline assertions scoped to that request.
     expect(interpretCalls, 'the Explain provider has not been called yet').toBe(0);
     expect((first.json() as { _agent?: { tool_calls?: { name: string }[] } })._agent?.tool_calls?.map((c) => c.name)).toEqual(['run_analysis']);
     const started = Date.now();

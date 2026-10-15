@@ -401,9 +401,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const NOTHING_CHANGED = { ...LINK_ENTERED, attribution_case: 'C0_identical', input_changes: [] };
     const CODE_LINE = 'The link from ‘Team size’ to ‘Velocity’ is now part of the analysis.';
     /** The served UI Run press (witness turn 2's request body, ids aside). */
-    const press = async () => {
+    const press = async (reply = COACHING) => {
       readiness = { status: 'ready', may_run: true };
-      interpretation = COACHING;
+      interpretation = reply;
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
         kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message: 'Run analysis', source: 'chip_click',
         chip: { action_type: 'run_analysis' } } });
@@ -484,41 +484,43 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(b.narration?.status).toBe('pending');
     });
 
-    it('CONTRAST: the first Run with no committed change since the model was built (the construction\'s write only) → no call', async () => {
+    it('CONTRAST: the first Run with no committed change since the model was built (the construction\'s write only) → one same-Run interpretation', async () => {
       runStampedAt = RUN_AT;
       const { constructionOperationId } = await import('../runtime/build-model.js');
       const { registrationTurnId } = await import('../../graph-registration/registration-identity.js');
       ledger = { write_turn_ids: [registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF))], complete: true };
       const b = await press();
-      const { RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
-      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
-      expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(runs).toBe(1);
     });
 
-    it('CONTRAST: a ledger that is not a census is no evidence of a change → no call', async () => {
+    it('CONTRAST: a ledger that is not a census is no evidence of a change → one same-Run interpretation', async () => {
       runStampedAt = RUN_AT;
       ledger = { write_turn_ids: ['canvas-edit-turn'], complete: false };
       await press();
-      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
     });
 
-    it('CONTRAST: a re-run with nothing changed (C0_identical) → no interpreting call; the ready line stays', async () => {
+    it('CONTRAST: a re-run with nothing changed (C0_identical) with unavailable interpretation → one attempt; recorded facts only', async () => {
       runStampedAt = RUN_AT;
       runDelta = NOTHING_CHANGED;
-      const b = await press();
-      const { RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
-      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
-      expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+      // The existing no-invented-coaching negative remains binding.
+      const b = await press('');
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      const { RERUN_NO_CHANGE_LINES } = await import('../rerun-explanation.js');
+      expect(b.assistant_text).toContain(RERUN_NO_CHANGE_LINES.nothing);
+      expect(runs).toBe(1);
       expect(b.assistant_text).not.toContain(COACHING);
       expect(b.narration?.status).toBe('pending');
     });
 
-    it('CONTRAST: a first Run (no preceding Run, no delta) → no interpreting call; the ready line stays', async () => {
+    it('CONTRAST: a first Run (no preceding Run, no delta) → one same-Run interpretation', async () => {
       runStampedAt = RUN_AT;
       const b = await press();
-      const { RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
-      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
-      expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(runs).toBe(1);
     });
 
     it.each(['first', 'identical'] as const)('AIE-03: eligible %s explicit Run gets one same-Run interpretation, without an extra Run', async kind => {

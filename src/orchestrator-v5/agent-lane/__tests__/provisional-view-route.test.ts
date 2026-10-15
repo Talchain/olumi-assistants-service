@@ -225,11 +225,14 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
   const pressRun = async (interpretation: string = REPLY.text) => {
     turnSeq += 1;
     turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
-    callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }]];
+    // Script the setup press separately; the tested view/attack still belongs to Explain.
+    callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: 'The current model result is provisional.' }] }],
+      [{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }]];
     const before = modelRequests.length;
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
       stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
-    expect(modelRequests.length - before).toBe(1);
+    expect(modelRequests.length - before).toBe(2);
+    expect(callModelOutputs).toHaveLength(1); // The tested Explain reply is still queued.
     modelRequests.length = 0;
     return explainRun(app, SCENARIO, first);
   };

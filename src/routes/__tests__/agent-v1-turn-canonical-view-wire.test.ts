@@ -351,7 +351,8 @@ describe('canonical view on the same-page turn wire', () => {
     expect(runResponse.statusCode, runResponse.body).toBe(200);
     const first = runResponse.json();
     expect(first.canonical_analysis_view.options.some((row: Json) => row.cell.kind === 'withheld' && row.cell.reasons.length > 0)).toBe(true);
-    expect(modelBodies).toHaveLength(1); // Pre-tool Run interpretation only.
+    expect(modelBodies).toHaveLength(2); // Tool request, then the selected Run's one interpretation.
+    expect(modelBodies[1].tools).toEqual([]); expect(modelBodies[1].tool_choice).toBe('none');
     modelBodies.length = 0; // Inspect the next turn's retained history independently.
     const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       turn_id: randomUUID(), scenario_id: SCENARIO, agent_session_id: first._agent.session_id,

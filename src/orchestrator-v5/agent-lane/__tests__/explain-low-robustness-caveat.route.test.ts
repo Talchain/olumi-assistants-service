@@ -95,6 +95,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   let app: FastifyInstance;
   let narrator = NARRATOR;
   let providerCalls = 0;
+  let preparingRun = false;
   let emptyNarration = false;
   let readbackState: Record<string, unknown>;
   let readbackReady: typeof FX.state.analysis_ready;
@@ -110,6 +111,9 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
         { type: 'message', content: [{ type: 'output_text', text: 'The analysis result is available.' }] },
       ] }), { status: 200 });
       providerCalls += 1;
+      // Concurrent-write and caveat stimuli belong to Explain, not its setup Run.
+      if (preparingRun) return new Response(JSON.stringify({ output: [{ type: 'message',
+        content: [{ type: 'output_text', text: 'The current model result is provisional.' }] }] }), { status: 200 });
       duringNarration?.();
       return new Response(JSON.stringify({ output: emptyNarration ? [] : [
         { type: 'message', content: [{ type: 'output_text', text: narrator }] },
@@ -149,10 +153,16 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   type Body = { assistant_text: string; narration?: { status: string }; _answer_shape?: AnswerShape;
     analysis_state: { leader_claim: { permitted: boolean } }; _agent: { replayed?: boolean } };
   const run = async () => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const before = providerCalls;
+    const r = await (async () => {
+      preparingRun = true;
+      try { return await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
-    } });
+    } }); } finally { preparingRun = false; }
+    })();
+    expect(providerCalls - before, 'one interpretation on the setup press').toBe(1);
+    providerCalls = 0; // Original counts below measure only Explain/retry.
     expect(r.statusCode, r.body).toBe(200);
     expect(providerCalls).toBe(0);
     const first = r.json();

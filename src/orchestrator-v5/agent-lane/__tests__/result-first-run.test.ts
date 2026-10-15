@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_ANALYSIS_PROJECTION_KEY, ANALYSIS_PROJECTION_VERSION } from '../../context/graph-identity.js';
 import type { SessionStore } from '../../session/store.js';
-import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
+import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 const SCENARIO = '4d2c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const FACT = JSON.parse(readFileSync(new URL('./fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8'));
@@ -48,6 +48,7 @@ describe('two-request Run through the real handler and canonical analysis reader
   let savedReadback: Record<string, unknown>;
   let modelCallRunCounts: number[] = [];
   let mutateDuringExplanation: (() => void) | undefined;
+  let preparingRun = false;
   let providerMode: 'ok' | 'empty' | 'failed' | 'timeout' = 'ok';
   let hashOf: (g: unknown) => string | null;
   let timeoutController: AbortController | undefined;
@@ -62,6 +63,9 @@ describe('two-request Run through the real handler and canonical analysis reader
         ] }), { status: 200 });
       }
       modelBodies.push(body);
+      // Keep failure/concurrent-write stimuli on the Explain request under test.
+      if (preparingRun) return new Response(JSON.stringify({ output: [{ type: 'message',
+        content: [{ type: 'output_text', text: RUN_RESULT_READY_TEXT }] }] }), { status: 200 });
       mutateDuringExplanation?.();
       if (providerMode === 'timeout') return await new Promise<Response>((_resolve, reject) => {
         init.signal.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')), { once: true });
@@ -106,9 +110,19 @@ describe('two-request Run through the real handler and canonical analysis reader
   });
   beforeEach(() => { graph = GRAPH; briefText = 'The strategic brief'; fact = null; readFails = false; rows.length = 0; runs = 0; graphReads = 0; scenarioOwner = null; restored = null; editFacts = [];
     modelBodies = []; runModelBodies = []; modelCallRunCounts = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
-  const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-    turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
-  } });
+  const run = async () => {
+    const before = modelBodies.length;
+    preparingRun = true;
+    try {
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+      } });
+      expect(modelBodies.length - before, 'one interpretation on the selected setup Run').toBe(1);
+      expect(modelBodies.at(-1)).toMatchObject({ tools: [], tool_choice: 'none' });
+      modelBodies = []; // Original zero/one-call checks measure only Explain/replay.
+      return response;
+    } finally { preparingRun = false; }
+  };
   type FirstResponse = { suggested_actions: { id: string }[]; _agent: { session_id: string } };
   const explanation = (first: FirstResponse, extra: Record<string, unknown> = {}) => {
     const chip = first.suggested_actions.find((c: { id: string }) => isRunExplanationChip(c.id));
@@ -122,7 +136,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(runs).toBe(1);
     expect(runModelBodies).toHaveLength(1);
     expect(modelBodies).toHaveLength(0);
-    expect(first._diagnostic_trace.timing.provider_calls).toBe(1);
+    expect(first._diagnostic_trace.timing.provider_calls).toBe(2);
     expect(modelCallRunCounts).toEqual([0]);
     expect(first.blocks.filter((b: { type: string }) => b.type === 'analysis_result')).toEqual([savedReadback.analysis_result]);
     const chip = first.suggested_actions.find((c: { id: string }) => isRunExplanationChip(c.id));
@@ -241,7 +255,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(runs).toBe(1); expect(modelBodies).toHaveLength(0);
     expect(first.blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
     expect(first.analysis_state.run_state.kind).toBe('complete_current');
-    expect(first._diagnostic_trace.timing.provider_calls).toBe(1);
+    expect(first._diagnostic_trace.timing.provider_calls).toBe(2);
     expect(runModelBodies).toHaveLength(1);
     expect(first.narration).toEqual({ status: 'pending', run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
     const second = await explanation(first);
