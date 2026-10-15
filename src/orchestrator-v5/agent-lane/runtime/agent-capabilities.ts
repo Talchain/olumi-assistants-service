@@ -87,6 +87,7 @@ import { runExplanationKeyForRecord } from '../run-explanation.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { runOptionSetForCopy, readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
+import { readRunEvidence, type RunEvidence } from '../run-evidence.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, goalChanceChangesOf, rerunRecordForModel, type RunGoalChanceChange } from '../rerun-explanation.js';
@@ -1158,6 +1159,14 @@ function nextStepFactOf(read: { readonly raw: unknown; readonly analysis_state?:
   return step === null ? {} : { next_step_blocker: step };
 }
 
+/**
+ * §9 (Lane B BLOCKED-LEASE): `runFactsOf`'s state, plus the selected Run's own evidence as read-only `runEvidence` when the
+ * read carried it. Lane B's `runFactsOf` reads it; absent evidence is never filled from today's graph.
+ */
+function runFactsStateOf<S extends object>(read: { readonly run_evidence?: RunEvidence }, state: S): S & { readonly runEvidence?: RunEvidence } {
+  return read.run_evidence === undefined ? state : { ...state, runEvidence: read.run_evidence };
+}
+
 interface GraphRead {
   readonly scenario_revision?: number;
   readonly run_revision?: number | null;
@@ -1264,6 +1273,8 @@ interface GraphRead {
   readonly option_participation?: StoredOptionParticipation;
   /** SAME selected stored-fact projection; analysis_result does not transport input_snapshot. */
   readonly run_option_set?: RecordedRunOptionSet;
+  /** §9: the selected Run's own recorded evidence (`run-evidence.ts`), from the same read; absent = not recorded. */
+  readonly run_evidence?: RunEvidence;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -2688,6 +2699,7 @@ export function createAgentCapabilities(
       ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
       ...(r.json.analysis_run_option_set !== undefined
         ? { run_option_set: r.json.analysis_run_option_set as RecordedRunOptionSet } : {}),
+      ...((evidence) => evidence === undefined ? {} : { run_evidence: evidence })(readRunEvidence(r.json.analysis_run_evidence)),
     };
   };
 
@@ -5109,9 +5121,9 @@ export function createAgentCapabilities(
         // preceding Run exactly as this state gates it (the licensed `analysis.run_delta`, Olumi's `rerun_record`).
         ...(g.analysis_result === undefined || g.analysis_result === null ? {} : { run_facts: runFactsOf(g.analysis_result, g.raw,
           isPlainRecord(g.analysis_state) && isPlainRecord(g.analysis_state.run_state) && g.analysis_state.run_state.kind === 'complete_current',
-          { analysisState: g.analysis_state, analysisReady: g.analysis_ready, comparison: {
+          runFactsStateOf(g, { analysisState: g.analysis_state, analysisReady: g.analysis_ready, comparison: {
             prior_run_id: g.run_delta?.endpoints?.prior.run_id,
-            run_delta: isPlainRecord(modelContext.analysis) ? modelContext.analysis.run_delta : undefined, rerun_record: rerunRecord } }) }),
+            run_delta: isPlainRecord(modelContext.analysis) ? modelContext.analysis.run_delta : undefined, rerun_record: rerunRecord } })) }),
         // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
         // host contract tells the AI to end its reply with that step; no host line says it.
         ...nextStepFactOf(g),

@@ -108,6 +108,7 @@ import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { buildRunDelta } from '../orchestrator-v5/coaching/build-run-delta.js';
 import { selectTwoNewestRunAnalysisFacts } from '../orchestrator-v5/coaching/compare-runs.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { runEvidenceWireOf, type RunEvidenceWire } from '../orchestrator-v5/agent-lane/run-evidence.js';
 
 import {
   deriveDecisionContextGraphHash,
@@ -228,6 +229,8 @@ export interface ScenarioAnalysisRead {
   readonly analysis_option_participation?: StoredOptionParticipation;
   /** The SAME selected fact's complete option roster. The display block intentionally omits input_snapshot. */
   readonly analysis_run_option_set?: RecordedRunOptionSet;
+  /** §9: the SAME selected fact's own run_id, input_snapshot and row occurrence (`run-evidence.ts`); absent = not recorded. */
+  readonly analysis_run_evidence?: RunEvidenceWire;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
    * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
@@ -720,6 +723,11 @@ export async function readScenarioAnalysis(
                 ...(participation === undefined ? {} : { analysis_option_participation: participation }),
                 analysis_run_option_set: runOptionSetForCopy(fact.result, participation, params.graph),
               };
+            })(),
+            // §9 (Lane B BLOCKED-LEASE): what the selected Run itself recorded, for the AI's Run facts — same fact, same gate.
+            ...(() => {
+              const evidence = runEvidenceWireOf(fact);
+              return evidence === undefined ? {} : { analysis_run_evidence: evidence };
             })(),
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
