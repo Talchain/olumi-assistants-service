@@ -758,11 +758,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             type: 'string',
             enum: ['likely_range', 'min_max', 'at_most', 'at_least', 'other'],
             description:
-              'How the user meant that range. likely_range ONLY for a plain likely range (\u201clikely between 5 and 20 ' +
-              'days\u201d). The user has not said how likely the ends are: the card shows their range as stated, and Olumi\u2019s ' +
-              'assumption that about one in four falls below and one in four above, which they adopt by pressing. min_max for the ' +
-              'lowest and highest possible; at_most / at_least for a bound; other for anything else (e.g. a 95% confidence interval). ' +
-              'Only likely_range is recorded; for the rest, tell the user and ask for their likely range.',
+              // AIE 6183364243, exact.
+              'Keep the range\'s actual meaning, source and qualifications. A plain likely range does not by itself specify ' +
+              'quartiles or a probability law. likely_range uses the existing scenario carrier only for a separately grounded ' +
+              'Olumi approximation fully disclosed on the card and adopted by its press; the user\'s original range remains ' +
+              'theirs, and the approximation remains Olumi\'s. min_max means stated lowest/highest possible; at_most and ' +
+              'at_least are bounds; other preserves other meanings or unresolved interpretation. If the current writer cannot ' +
+              'represent the supplied meaning, retain that source and explain the exact limitation; do not require the user to ' +
+              'replace retained bounds with a likely range merely to make a calculation run.',
           },
           range_user_stated: {
             type: 'boolean',

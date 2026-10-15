@@ -59,11 +59,16 @@ describe('approval chips', () => {
         expect(chip?.label).not.toBe('Use this reading');
         expect(chip?.message).not.toBe('Yes, use this reading.');
       });
-    it('the words keep the range as stated, then the fit as Olumi\'s assumption; never "middle half"', () => {
+    it('the words keep the range as stated, then the fit as Olumi\'s proposed approximation (AIE 6183364243); never "middle half"', () => {
       const words = statedRangeAssumptionWords('5 days', '20 days');
-      expect(words).toBe(". Your range: 5 days to 20 days. Olumi's assumption: Olumi reads that range as about one chance in four below 5 days "
-        + "and one in four above 20 days, so the analysis can use it. You did not say that; if you meant the lowest and highest possible, say so");
+      expect(words).toBe(". Your stated range: 5 days to 20 days, with the qualification that it is likely, and no conditions recorded. "
+        + "For this scenario, Olumi proposes an equal-tail approximation: about one chance in four below 5 days and one in four above 20 days, "
+        + "based on Olumi's standard reading of a plain likely range, not on evidence about this case, with the limitation that how values "
+        + "spread between and beyond those ends is also Olumi's assumption. Your words did not specify those tail probabilities. "
+        + "Pressing records your original range as you stated it and adopts this approximation; you can instead change or reject it");
       expect(words).not.toMatch(/middle half/i);
+      // AIE 6183364243: convenience never grounds equal tails, and lowest/highest is not the only other meaning.
+      expect(words).not.toMatch(/so the analysis can use it|lowest and highest possible/i);
     });
   });
 

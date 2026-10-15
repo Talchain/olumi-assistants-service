@@ -141,7 +141,17 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(level).toEqual(input);
     expect(a.proposed.ranges_not_recorded).toHaveLength(1);
     expect(a.proposed.detail).toMatch(/likely range/i);
-    if (level.range_user_stated === true) expect(a.proposed.detail).toMatch(/ask the user/i);
+    if (level.range_user_stated === true) {
+      // AIE 6183364243: a range the user meant otherwise is never asked back as a likely range; only an unusable likely range is.
+      const meantOtherwise = typeof level.likely_low === 'number' && typeof level.likely_high === 'number'
+        && level.likely_low > 0 && level.likely_high > level.likely_low && level.range_meaning !== 'likely_range';
+      if (!meantOtherwise) expect(a.proposed.detail).toMatch(/ask the user to restate their likely range/i);
+      else if (level.range_meaning === undefined) expect(a.proposed.detail).toMatch(/ask the user how they meant that range/i);
+      else {
+        expect(a.proposed.detail).toContain('do not ask them to restate it as a likely range');
+        expect(a.proposed.detail).not.toMatch(/restate their likely range/i);
+      }
+    }
     const aCell = structuredClone(liftCell());
     expect(aCell.range).toEqual(((initial as { nodes: { id: string; interventions?: Record<string, Cell> }[] })
       .nodes.find(n => n.id === 'opt_lift')!.interventions!.fac_downtime!).range);
@@ -194,8 +204,10 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     // What the user approves names the range AND how it is read (AIQ 5909998288 / 5914439702).
-    // C2 (AIE 6180618773 row 2): the user's range as stated, then the quartile fit as Olumi's assumption; never their "middle half".
-    expect(String(proposed.public_label)).toContain("Your range: 5 days to 20 days. Olumi's assumption: Olumi reads that range as about one chance in four below 5 days and one in four above 20 days");
+    // C2 (AIE 6180618773 row 2; clause AIE 6183364243): the user's range as stated, then the equal-tail fit as Olumi's proposed approximation.
+    expect(String(proposed.public_label)).toContain("Your stated range: 5 days to 20 days, with the qualification that it is likely, and no conditions recorded. "
+      + 'For this scenario, Olumi proposes an equal-tail approximation: about one chance in four below 5 days and one in four above 20 days');
+    expect(String(proposed.public_label)).toContain('Your words did not specify those tail probabilities.');
     expect(String(proposed.public_label)).not.toMatch(/middle half/i);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
@@ -210,7 +222,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
       unmodelled_mechanisms: ['supplier learning'] });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(proposed.public_label).toContain('supplier learning');
-    expect(proposed.public_label).toContain('Your range: 5 days to 20 days.');
+    expect(proposed.public_label).toContain('Your stated range: 5 days to 20 days,');
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });

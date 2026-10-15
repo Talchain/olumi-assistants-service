@@ -1037,12 +1037,17 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  */
 /** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
 /**
- * ⭐ C2 (AIE 6180618773 row 2, DL ruling A): the user's range AS STATED, then the quartile fit as Olumi's disclosed assumption,
- * never as the user's own "middle half". The press adopts it ("Use this reading", AIE 6181498097).
+ * ⭐ C2 (AIE 6180618773 row 2, DL ruling A; card clause AIE 6183364243): the user's range AS STATED, then the equal-tail
+ * fit as Olumi's proposed approximation, never as the user's own calibration. Its basis is Olumi's standard reading of a
+ * plain likely range (not evidence), and the spread's shape is Olumi's too. Nothing is recorded before the press, which
+ * records the range and adopts the approximation ("Use this reading", AIE 6181498097).
  */
 export const statedRangeAssumptionWords = (low: string, high: string): string =>
-  `. Your range: ${low} to ${high}. Olumi's assumption: Olumi reads that range as about one chance in four below ${low} and one in four `
-  + `above ${high}, so the analysis can use it. You did not say that; if you meant the lowest and highest possible, say so`;
+  `. Your stated range: ${low} to ${high}, with the qualification that it is likely, and no conditions recorded. `
+  + `For this scenario, Olumi proposes an equal-tail approximation: about one chance in four below ${low} and one in four above ${high}, `
+  + `based on Olumi's standard reading of a plain likely range, not on evidence about this case, with the limitation that how values `
+  + `spread between and beyond those ends is also Olumi's assumption. Your words did not specify those tail probabilities. `
+  + `Pressing records your original range as you stated it and adopts this approximation; you can instead change or reject it`;
 
 function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
@@ -7335,14 +7340,21 @@ export function createAgentCapabilities(
             : !(Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low) ? 'a likely range needs a positive low end below its high end'
             : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
             : i?.range_meaning !== 'likely_range'
-              ? `Olumi records only a plain likely range; a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
+              ? `this writer records only a plain likely range; a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement, so the level is proposed without it`
             : !claimedByUser ? 'a likely range is recorded only beside a level the user gave (user_stated)'
             : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
             : null;
+          const meantOtherwise = hasLow && hasHigh && Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low
+            && i?.range_meaning !== 'likely_range';
           if (why !== null) {
             rangesNotRecorded.push({ option: option.label, factor: factor.label,
               reason: `No likely range was recorded: ${why}.`
-                + (i?.range_user_stated === true ? ' Ask the user to restate their likely range in their own words, then propose it again.' : '') });
+                // AIE 6183364243: a range the user meant otherwise keeps its meaning; never ask for a likely range instead.
+                + (i?.range_user_stated !== true ? ''
+                  : !meantOtherwise ? ' Ask the user to restate their likely range in their own words, then propose it again.'
+                  : i?.range_meaning === undefined
+                    ? ' Ask the user how they meant that range (a likely range, the lowest and highest possible, or a bound), then propose it again with that meaning.'
+                  : ' Tell the user that exact limitation, with their range in their words; do not ask them to restate it as a likely range just so a calculation can run.') });
           } else {
             likelyRange = { low, high };
           }
