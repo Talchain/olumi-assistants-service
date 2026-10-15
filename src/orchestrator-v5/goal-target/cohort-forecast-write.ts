@@ -25,6 +25,8 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
+import { holdsUserStatement, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
 type Rec = Record<string, unknown>;
@@ -45,6 +47,11 @@ export interface ApprovedCohortForecast {
   readonly statements: { readonly people: UserStatement; readonly conversion: UserStatement; readonly same_cohort: UserStatement };
   /** THIS proposal's own write already landed: only then is a node holding exactly the card's forecast a verified no-op. */
   readonly own_write_landed?: boolean;
+  /**
+   * ⭐ SYSTEM 1 (DL 14 Oct 23:09Z, ONE durable statement store): the user's verified statements a door press records on THIS
+   * option (`user_statements`), in the same commit as its forecast. Absent on the legacy card's press.
+   */
+  readonly user_statement?: { readonly subject: DoorSubject; readonly record: UserStatementRecord };
 }
 
 /** The stored goal-target rows of `graph` (`role: 'goal_target'`), in stored order. */
@@ -59,13 +66,20 @@ export function peopleFiguresIn(quote: string): { low: number; high: number }[] 
     .map((m) => Number(m[1]!.replace(/,/g, ''))).filter((n) => Number.isInteger(n) && n >= 1).map((n) => ({ low: n, high: n }));
 }
 
-/** Percentage ranges a quote states ("12–18%", "between 12 and 18 percent", "12% to 18%"), low below high. */
-export function percentRangesIn(quote: string): { low: number; high: number }[] {
+/** The ONE percentage-range pattern ("12–18%", "between 12 and 18 percent", "12% to 18%"). */
+const percentRangePattern = (): RegExp => {
   const n = '(\\d{1,2}(?:\\.\\d{1,2})?)';
   const pct = '\\s*(?:%|percent|per\\s*cent)';
-  const re = new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
-  return [...quote.matchAll(re)].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
+  return new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
+};
+
+/** Percentage ranges a quote states, low below high. */
+export function percentRangesIn(quote: string): { low: number; high: number }[] {
+  return [...quote.matchAll(percentRangePattern())].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
 }
+
+/** The quote with its percentage ranges' own words removed (so a range's lower figure is never read as something else). */
+export const withoutPercentRanges = (quote: string): string => quote.replace(percentRangePattern(), ' ');
 
 /** The goal's window as the forecast is read over it ("the first three months after launch"), or `undefined` without one goal. */
 export function cohortWindowOf(graph: unknown): string | undefined {
@@ -86,11 +100,23 @@ export const cohortQuartileQuestion = (optionLabel: string, window: string): str
 /** The meaning the question rests on, said beside it (AIE 6176433015): the chance per person, not the fraction that results. */
 export const UNDERLYING_RATE_MEANING = 'Here the underlying conversion rate is the chance that any one of those people converts.';
 
+/**
+ * ⭐ Science PR-4b, AIE 6176433015: ONE option's two forecast questions as Olumi says them (readiness's step, and the door's ask
+ * in the option's relation subject): the people it reaches, then the one-in-four question for that option, cohort and window,
+ * with the meaning of "underlying conversion rate" beside it.
+ */
+export const cohortForecastAskWords = (option: string, period: string, window: string): string =>
+  `For ‘${option}’: how many people would it reach ${period}? ${cohortQuartileQuestion(option, window)} ${UNDERLYING_RATE_MEANING}`;
+
+/** A question as compared: quote marks, spacing and case aside. */
+const questionWords = (t: string): string => t.replace(/[\u2018\u2019\u201C\u201D'"]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** The ask a range answered holds THIS option's one-in-four question for this window, in its exact words. */
+export const asksQuartileQuestion = (answering: string | undefined, question: string): boolean =>
+  answering !== undefined && questionWords(answering).includes(questionWords(question));
+
 /** The same question, whatever quote marks, spacing or case it was passed back in. */
-export const sameQuestion = (a: string | undefined, b: string): boolean => {
-  const norm = (t: string): string => t.replace(/[\u2018\u2019\u201C\u201D'"]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-  return a !== undefined && norm(a) === norm(b);
-};
+export const sameQuestion = (a: string | undefined, b: string): boolean => a !== undefined && questionWords(a) === questionWords(b);
 
 const sayPeople = (n: number): string => `${n.toLocaleString('en-GB')} ${n === 1 ? 'person' : 'people'}`;
 
@@ -151,7 +177,7 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
     || s.people.form !== 'point' || s.people.low !== f.people_reached || s.people.high !== f.people_reached
     || s.conversion.form !== 'range' || s.conversion.low !== f.conversion_middle_half_pct[0] || s.conversion.high !== f.conversion_middle_half_pct[1]
     || named === undefined || window === undefined
-    || !sameQuestion(s.conversion.answering, cohortQuartileQuestion(String(named.label ?? ''), window))
+    || !asksQuartileQuestion(s.conversion.answering, cohortQuartileQuestion(String(named.label ?? ''), window))
     || s.same_cohort.form !== 'holds_now') {
     return { kind: 'refused', reason: 'invalid_forecast' };
   }
@@ -162,12 +188,25 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
   }
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.option_id && n.kind === 'option');
   if (matches.length !== 1) return { kind: 'refused', reason: 'option_not_found' };
-  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], { ...approved.expected_node, cohort_forecast: approved.cohort_forecast })) {
+  // The user's words go with the forecast their reading sets, on THIS option, as the door recorded them.
+  const said = approved.user_statement;
+  if (said !== undefined && (said.subject.kind !== 'option' || said.subject.id !== approved.option_id
+    || said.record.subject_key !== subjectKey(said.subject) || userStatementRecordOf(said.record) === undefined)) {
+    return { kind: 'refused', reason: 'invalid_forecast' };
+  }
+  // The option as the write leaves it: the card's forecast, and the door's record of the words when there is one.
+  const landed = ((): unknown => {
+    const node = { ...approved.expected_node, cohort_forecast: approved.cohort_forecast };
+    return said === undefined ? node : withUserStatement({ nodes: [node] }, said.record, said.subject)?.nodes[0];
+  })();
+  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], landed)) {
     return { kind: 'unchanged' };
   }
   if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'option_changed' };
 
-  const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
+  const cloned = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
+  const graph = said === undefined ? cloned : withUserStatement(cloned, said.record, said.subject);
+  if (graph === undefined || (said !== undefined && !holdsUserStatement(graph, said.record, said.subject))) return { kind: 'refused', reason: 'option_not_found' };
   const option = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.option_id)!;
   option.cohort_forecast = structuredClone(approved.cohort_forecast);
   const label = String(option.label ?? approved.option_id).trim();

@@ -51,7 +51,10 @@ export type DoorVerdict = { readonly kind: 'read'; readonly reading: DoorReading
 const KEEP = 'Keep the user’s words exactly as they said them and do not ask them to repeat them.';
 
 /** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
-export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string): 'bound' | 'another' | 'unbound' {
+export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
+  alsoAnswers: readonly DoorSubject[] = []): 'bound' | 'another' | 'unbound' {
+  // The subjects an ask of which this statement may answer: its own, and the row's `answersFor` (one key each).
+  const answers = new Set([subject, ...alsoAnswers].map(subjectKey));
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   if (subject.kind === 'link') {
     const entities = nodes.flatMap((n) => (typeof n.id === 'string' && typeof n.label === 'string' ? [{ id: n.id, label: n.label }] : []));
@@ -68,10 +71,10 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
     if (nodes.some((n) => n.id === s.element_ids[0] && n.kind === subject.kind)) return 'another';
   }
   const answered = answeredAsk(answering, ctx.asks ?? []);
-  if (answered !== undefined) return subjectKey(answered.subject) === subjectKey(subject) ? 'bound' : 'another';
+  if (answered !== undefined) return answers.has(subjectKey(answered.subject)) ? 'bound' : 'another';
   if (typeof answering === 'string' && answering.trim() !== '') return 'unbound';
   const asked = askedSubjects(ctx.preceding_ask, ctx.asks ?? []);
-  if (asked.length === 1) return subjectKey(asked[0]!) === subjectKey(subject) ? 'bound' : 'another';
+  if (asked.length === 1) return answers.has(subjectKey(asked[0]!)) ? 'bound' : 'another';
   return 'unbound';
 }
 
@@ -91,7 +94,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words);
     if ('refused' in fig) return { kind: 'refused', refusal: 'not_this_field', detail: `${fig.refused} Nothing was prepared. ${KEEP}` };
     const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
-    if (!whole && statementBoundTo(graph, subject, quote, ctx, answering) !== 'bound') {
+    if (!whole && statementBoundTo(graph, subject, quote, ctx, answering, row.answersFor?.(subject, graph) ?? []) !== 'bound') {
       return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
