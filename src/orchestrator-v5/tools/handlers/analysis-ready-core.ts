@@ -46,7 +46,7 @@ import {
   type CanonicalReadinessRepairProposal,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
-import { draftedTeamPartOf, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
+import { draftedTeamPartOf, eventByDateRefusalOf, unsizedEventOptions } from '../../goal-target/event-by-date-model.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { limitSinkBranch } from '../../../graph/limit-sink-branch.js';
 import {
@@ -651,7 +651,10 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
       const excludedContext = nodes.some(n => n.id.startsWith('event_context_') && n.analysis_participation === 'retained_excluded');
       const limitIds = (graph.goal_constraints ?? []).map(c => c.node_id);
       const protectedIds = new Set([...limitIds, ...limitSinkBranch(nodes, graph.edges, limitIds)]);
-      if (excludedContext && !nodes.some(n => n.analysis_participation === 'retained_excluded' && protectedIds.has(n.id))) {
+      // DL ruling (A), 15 Oct: while an option is unsized (linked only to the sketch), readiness reads it on the model as
+      // saved, so it asks for the option's effect instead of calling the option unconnected; no Run is admitted either way.
+      if (excludedContext && unsizedEventOptions(rawGraph).length === 0
+        && !nodes.some(n => n.analysis_participation === 'retained_excluded' && protectedIds.has(n.id))) {
         const options = nodes.filter(n => n.kind === 'option');
         const participation = guardAnalysisParticipation(rawGraph, { goalNodeId: event.goal.id,
           submittedOptionIds: options.map(n => n.id), optionInterventionTargetIds: options.flatMap(n => Object.keys(n.interventions ?? {})) });

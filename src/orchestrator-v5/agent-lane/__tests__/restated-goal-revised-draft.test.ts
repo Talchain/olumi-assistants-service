@@ -355,9 +355,11 @@ describe('MA2 original 13:18Z evidence, kept separate from the scripted revised-
     // never zero. Only that root is named.
     const recorded = JSON.stringify(CAPTURE_1318.enrichment);
     expect(recorded).toContain("root ancestor(s) 'campaign_execution_risk' carry no observed value or ParameterUncertainty and defaulted to 0.0");
-    const refused = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318).then(() => null, (e: unknown) => e as Rec);
-    expect((refused?.verdict?.issues as Rec[] | undefined)?.filter((i) => i.code === 'MISSING_FACTOR_LEVEL').map((i) => i.factor_id))
-      .toEqual(['campaign_execution_risk']);
+    // AMENDED again (DL 15 Oct 23:19Z; AIE #94 6177505214; was: withheld on MISSING_FACTOR_LEVEL for that risk). The risk is
+    // Olumi's own suggestion by the drafter's label (`ai_inferred`), unsized, so it no longer holds the Run: the Run sends the
+    // model without it (never sampled, never defaulted to 0.0), and the host says what the calculation leaves out.
+    const unsized = await runFromStore(JSON.stringify(CAPTURE_1318.graph), true, CAPTURE_1318);
+    expect(((unsized.payload.graph as Rec).nodes as Rec[]).map((n) => n.id)).not.toContain('campaign_execution_risk');
     // MA2's own protections, unchanged, on the same capture once that risk states a level (T4's valued shape).
     const stated = { ...CAPTURE_1318.graph, nodes: (CAPTURE_1318.graph.nodes as Rec[]).map((n) => n.id === 'campaign_execution_risk'
       ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n) };

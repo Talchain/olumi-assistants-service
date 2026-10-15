@@ -211,10 +211,12 @@ describe('MA3: the served marketing turn 02 — the re-spelled budget row is car
     expect((stored.nodes as Rec[]).find((n) => n.id === RISK)).toEqual({ id: RISK, kind: 'risk', label: 'Campaign execution risk', provenance: 'ai_inferred' });
     expect((stored.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
     expect((stored.edges as Rec[]).filter((e) => e.from === RISK).map((e) => e.to)).toEqual(['conversion_rate']);
-    const issues = assessCanonicalAnalysisReadiness(stored).blockingIssues;
-    expect(issues.map((i) => [i.code, i.factor_id])).toEqual([['MISSING_FACTOR_LEVEL', RISK]]);
-    expect(issues[0]!.message).toContain('How likely or how large is "Campaign execution risk" today?');
-    await expect(plotBodyFromStore(stored)).rejects.toThrow(/MISSING_FACTOR_LEVEL/);
+    // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214; old expectation: withheld on MISSING_FACTOR_LEVEL for this risk). The risk
+    // is Olumi's own suggestion by the drafter's label (`ai_inferred`) and nobody has sized it, so it no longer holds the Run: it
+    // is kept in the saved model and left out of the calculation, never sampled at zero, and the host says so in the AIE's words.
+    expect(assessCanonicalAnalysisReadiness(stored).blockingIssues).toEqual([]);
+    const unsizedBody = await plotBodyFromStore(stored);
+    expect((unsizedBody.graph as Rec).nodes.map((n: Rec) => n.id)).not.toContain(RISK);
     // The Run's own body carries the budget as GBP/year once that risk has a level (the original assertion, unchanged).
     const valued = { ...stored, nodes: (stored.nodes as Rec[]).map((n) => (n.id === RISK ? { ...n, observed_state: { value: 0.35, source: 'brief_extraction' } } : n)) };
     const body = await plotBodyFromStore(valued);

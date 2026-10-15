@@ -35,7 +35,8 @@ import { goalChanceWithheldForAgent, RANGE_OPENING, withoutAskedQuestion } from 
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
-import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
+import { savedZeroRootIds, survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
+import { unsizedOlumiRiskIds, unsizedOlumiRiskLine, unsizedOlumiRisksUnnamedLine } from './unsized-risk.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
 import { readFactorEnrichments, factorReviewSensitivity } from './factor-review.js';
 
@@ -215,6 +216,18 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
   if (rootLine !== null && unnamedZeroCount(rootLine) === 0) lines.push(rootLine);
   if (unnamedZero > 0) lines.push(unnamedZeroLine(unnamedZero));
   lines.push(...zeroLines);
+
+  // F1b (DL 15 Oct; AIE 6177505214): an unsized Olumi risk is left out of the Run's calculation, so the review says so in the
+  // AIE's words (`unsizedOlumiRiskLine`), or counted in its label-free form.
+  // A saved Run that really treated the risk as zero keeps saying so (F1); the omission is said only of a Run that left it out.
+  let unnamedUnsized = 0;
+  const savedZero = savedZeroRootIds(graph, analysisReady, analysisResult);
+  for (const id of [...unsizedOlumiRiskIds(graph)].filter((riskId) => !savedZero.has(riskId))) {
+    const line = unsizedOlumiRiskLine(graph, id, false);
+    if (line !== null && survivesReplyEditors(line, graph, analysisReady)) lines.push(line);
+    else unnamedUnsized += 1;
+  }
+  if (unnamedUnsized > 0) lines.push(unsizedOlumiRisksUnnamedLine(unnamedUnsized));
 
   // F3/F4: the Run withheld goal figures, in the typed reason's own words when they reach the user whole; otherwise the
   // reader's own fail-closed opening (the withhold is still said, its label-bearing reason is not; Codex r2 P2).
