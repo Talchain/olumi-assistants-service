@@ -59,6 +59,18 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
     expect(carried).toBeGreaterThan(0);
   });
 
+  it('hiring post3000 (a third brief): the count of Olumi’s inputs is THIS Run’s licence census, and a stale Run carries none', () => {
+    const fx = JSON.parse(readFileSync('tests/fixtures/hiring-shortfall/served-hiring-post3000-run-turn17-20261014.json', 'utf8')) as Rec;
+    const result = { enrichment: { inference_warnings: [structuredClone(fx.served_licence)] } };
+    const l = fx.served_licence as Rec;
+    expect(runFactsOf(result, fx.graph, true).olumi_inputs).toEqual({ links: l.olumi_estimate_link_count,
+      values: l.olumi_estimate_value_count, settings_by_option: l.olumi_estimate_settings_by_option });
+    expect(l.olumi_estimate_link_count).toBeGreaterThan(0);
+    expect(runFactsOf(result, fx.graph, false).olumi_inputs).toBeUndefined();
+    // The licence's disclosures are said exactly, in order: the provisional label among them.
+    expect(runFactsOf(result, fx.graph, true).must_say).toEqual(l.notes);
+  });
+
   it('the user’s recorded statements ride in the packet, verbatim', () => {
     const [, body] = BRIEFS[0]!;
     const g = structuredClone(body.graph);
