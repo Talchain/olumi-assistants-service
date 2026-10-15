@@ -106,9 +106,56 @@ export const RERUN_NO_CHANGE_LINES = {
   unwithheld: 'Olumi can now compare the options.',
 } as const;
 
+/**
+ * ⭐ S9 (capacity e2e R2e, DL 06:39Z; blocking class: wrong claim): ONE option's goal chance in BOTH Runs, as each Run's own
+ * display licence showed it (`run_delta.goal_chances`: a point or a range on each side), with the two Run ids. Served: "Add one
+ * specialist" was between about 30% and 36%, then between about 54% and 59%, yet the interpret request said no option had
+ * figures in both Runs (only win shares were counted), and every answer denied the recorded change. A chance, never a win share.
+ */
+export interface RunGoalChanceChange {
+  readonly option_id: string;
+  readonly option_label: string;
+  /** The earlier Run's display ("between about 30% and 36%", "about 45%"), the screen's words. */
+  readonly prior: string;
+  readonly current: string;
+  readonly prior_run_id: string;
+  readonly current_run_id: string;
+}
+
+/** The screen's one edge-word rule for a displayed whole percentage (`sayDisplayedPct`; DGAI `goalChanceRangeLine`). */
+const sayPct = (p: number): string => (p === 0 ? 'less than 1%' : p === 100 ? 'more than 99%' : `about ${p}%`);
+const wholePct = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100;
+/** A `RunDeltaGoalChanceSide` as the screen says it; `undefined` for a withheld or unrecorded side. */
+export function sayGoalChanceSide(side: unknown): string | undefined {
+  const s = rec(side);
+  if (s?.kind === 'point' && wholePct(s.pct)) return sayPct(s.pct);
+  if (s?.kind === 'range' && wholePct(s.low_pct) && wholePct(s.high_pct) && s.low_pct <= s.high_pct) {
+    return `between ${sayPct(s.low_pct)} and ${sayPct(s.high_pct).replace(/^about /, '')}`;
+  }
+  return undefined;
+}
+
+/** Every option whose goal chance both Runs showed (point or range on each side), labelled; none without both Run ids. */
+export function goalChanceChangesOf(runDelta: unknown, labelOf: (id: string) => string | undefined): RunGoalChanceChange[] {
+  const d = rec(runDelta);
+  const ends = rec(d?.endpoints);
+  const priorRun = rec(ends?.prior)?.run_id; const currentRun = rec(ends?.current)?.run_id;
+  if (typeof priorRun !== 'string' || priorRun === '' || typeof currentRun !== 'string' || currentRun === '') return [];
+  return (Array.isArray(d?.goal_chances) ? d!.goal_chances : []).flatMap((row): RunGoalChanceChange[] => {
+    const r = rec(row);
+    const id = typeof r?.option_id === 'string' ? r.option_id : undefined;
+    const label = id === undefined ? undefined : labelOf(id);
+    const prior = sayGoalChanceSide(r?.prior); const current = sayGoalChanceSide(r?.current);
+    return id === undefined || label === undefined || label.trim() === '' || prior === undefined || current === undefined ? []
+      : [{ option_id: id, option_label: label, prior, current, prior_run_id: priorRun, current_run_id: currentRun }];
+  });
+}
+
 export interface RerunExplanationPlan {
   /** What RC's check judges the reply on. */
   readonly inputs: MethodInputs;
+  /** S9: each option's goal chance in both Runs (`goalChanceChangesOf`); empty when none was shown in both. */
+  readonly goalChanceChanges: readonly RunGoalChanceChange[];
   /** The change sentences, in the producer's order, at most `MAX_NAMED_CHANGES`. */
   readonly changes: readonly string[];
   /** Olumi's own line from the typed rows: what changed (or that nothing the user entered did, or that it can't say). */
@@ -336,7 +383,9 @@ export function rerunExplanationPlan(
     && (!rowRecordComplete || d.input_coverage !== 'complete' || d.attribution_case === 'C5_unattributed');
   const wireCase = coverageComplete ? d.attribution_case : 'coverage_incomplete';
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
-  const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
+  // ⭐ S9: a goal chance shown in both Runs IS a figure in both Runs; only with neither shares nor such chances is there none.
+  const goalChanceChanges = goalChanceChangesOf(d, labelOf);
+  const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0 && goalChanceChanges.length === 0;
   const noise = text(rec(d.leader)?.noise_verdict);
   // ⛔ SAYING WHAT CAUSED A MOVEMENT needs ONE change (Science d5, #87 6005682972 (1)): C1 proves the same draw, builds and
   // sample count, but it allows several edits (build-run-delta.ts checks only seed/draws/n/builds/hash), and with two edits no
@@ -374,6 +423,7 @@ export function rerunExplanationPlan(
   const instruction = [
     'Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.',
     `Run record: "${codeLine}"`,
+    ...(goalChanceChanges.length === 0 ? [] : [`${GOAL_CHANCE_CHANGES_LEAD} ${goalChanceChanges.map((c) => `‘${c.option_label}’: ${c.prior} → ${c.current}.`).join(' ')}`]),
     priorWithheld
       ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
       : noMatched
@@ -391,7 +441,7 @@ export function rerunExplanationPlan(
                 ? 'Olumi can’t confirm both Runs used the same draw, so never say the change caused the difference.'
                 : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
-  return { inputs, changes, codeLine, instruction, fallback: codeLine };
+  return { inputs, goalChanceChanges, changes, codeLine, instruction, fallback: codeLine };
 }
 
 /**
@@ -410,6 +460,8 @@ export function rerunExplanationPlan(
  */
 export interface RerunRecordForModel {
   readonly code_line: string;
+  /** S9: each option's goal chance in both Runs, typed (`goalChanceChangesOf`); absent when none was shown in both. */
+  readonly goal_chance_changes?: readonly RunGoalChanceChange[];
   readonly prior_withheld: boolean;
   readonly attribution_case: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
   readonly use: string;
@@ -426,6 +478,12 @@ export const TYPED_RERUN_RECORD_RULE =
   + 'If the latest Run still holds its comparison back, name every link in unsized_goal_path_links as what the comparison still needs, ranking none.';
 
 type NodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
+
+/**
+ * S9: the words that introduce the goal chances both Runs showed (interpret request). They are chances of meeting the goal as
+ * each Run displayed them, never win shares, and say nothing of cause beyond the case line.
+ */
+export const GOAL_CHANCE_CHANGES_LEAD = 'Each option’s chance of meeting the goal as each Run showed it, earlier Run → latest Run:';
 
 /** The chip's no-matched-figures guard, appended to the typed rule when it holds. */
 export const NO_MATCHED_FIGURES_RULE = ' No option has figures in both Runs, so never say anything rose, fell or moved.';
@@ -492,6 +550,7 @@ export function rerunRecordForModel(
     // reads C1 as licence to say WHICH change did it. With more than one named change, the record says C2_unpaired, so the
     // model may credit them together (the code line) and never single one out. One change keeps the plan's case.
     attribution_case: plan.changes.length > 1 ? 'C2_unpaired' : plan.inputs.attribution_case ?? 'C2_unpaired',
+    ...(plan.goalChanceChanges.length > 0 ? { goal_chance_changes: plan.goalChanceChanges } : {}),
     // The chip's own movement guard travels too (Codex buddy r1, P2): no option has figures in both Runs → no movement.
     use: plan.inputs.no_matched_figures === true ? `${TYPED_RERUN_RECORD_RULE}${NO_MATCHED_FIGURES_RULE}` : TYPED_RERUN_RECORD_RULE,
   };

@@ -9,6 +9,8 @@ import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-est
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import { ContextPackRunDeltaSchema } from '../../context/context-pack-schema.js';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
+import { applyStatementRecordEdit } from '../cohort-forecast-write.js';
+import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
 
 type Json = Record<string, any>;
 const capture = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/waveB-pilot-t1b-86ccaf3-turn003.json', import.meta.url), 'utf8')) as Json;
@@ -17,11 +19,22 @@ const GOAL = 'monthly_recurring_revenue';
 const A = 'launch_starter_tier';
 const B = 'raise_prices_by_10';
 const SQ = 'keep_pricing_as_it_is';
+/** C2 withhold (AIE 6184726873): a likely range's equal-tail approximation ADOPTED, as its card's press records it (`RANGE_LAW_ROW`). */
+const adoptRangeLaw = (g: Json, optionId: string, factorId: string): Json => {
+  const cell = g.nodes.find((n: Json) => n.id === optionId).interventions[factorId];
+  const { low, high, source_quote: quote } = cell.range;
+  const approved = rangeLawAdoption(g, optionId, factorId, [rangeLawStatementOf(optionId, factorId, quote, low, high, cell.unit)], low, high,
+    '2026-10-15T00:00:00.000Z')!;
+  const written = applyStatementRecordEdit(g, approved);
+  if (written.kind !== 'mutated') throw new Error(`the adoption was not written: ${written.kind}`);
+  return written.mutatedGraph as Json;
+};
 const graph = (): Json => {
   const g = clone(capture.draft_graph);
   // Constructed level-frame inputs only; production records the raw-samples delta frame.
   g.nodes.find((n: Json) => n.id === GOAL).goal_baseline = 120000;
-  return g;
+  // The brief's 80–250 for Starter, its approximation adopted: these rows are about the spread note, not the range law.
+  return adoptRangeLaw(g, A, 'starter_tier_subscribers');
 };
 const goal = (g: Json): Json => g.nodes.find((n: Json) => n.id === GOAL);
 const records = (): Json[] => clone(capture.blocks.find((b: Json) => b.type === 'analysis_result').enrichment.option_comparison);
