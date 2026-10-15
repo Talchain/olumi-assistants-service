@@ -4748,7 +4748,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         heldWaiting: liveHolds.length > 0 });
     if (doorArgs !== undefined) {
       const issued = await dispatchTool('propose_statement', JSON.stringify({ subject: doorArgs.subject,
-        statements: doorArgs.quotes.map((quote) => ({ quote })) }), toolCtx, capabilities, mode);
+        statements: doorArgs.quotes.map((q) => (typeof q === 'string' ? { quote: q } : q)) }), toolCtx, capabilities, mode);
       result = { ...result,
         tool_calls: [...result.tool_calls, { name: 'propose_statement', ok: issued.ok === true, mutated: false,
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],

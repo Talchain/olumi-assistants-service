@@ -10,7 +10,7 @@ import { isFactorNamedByUser, readStatedEventRiskWithBindingSpan, readStatedLike
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import {
   alreadyTrueQuoteOf, applyRiskOccurrenceEdit, approvedRiskOccurrenceOf, chanceAsStated, riskEffectBasisWords, riskHoldsNowRecordedWords, riskOccurrenceGoalHolds,
-  riskOccurrenceGoalLabel, riskOccurrencePostimageNode, riskOccurrenceSubject, RISK_OCCURRENCE_QUANTITY, statedWindowMonthsWords, riskOccurrenceWindowFromToday, riskStatedOccurrenceRecordedWords,
+  riskOccurrenceGoalLabel, riskOccurrencePostimageNode, riskOccurrenceSubject, RISK_OCCURRENCE_QUANTITY, statedWindowMonthsWords, riskOccurrenceWindowFromToday, riskStatedOccurrenceRecordedWords, riskWindowHoldsAskWords,
   userHoldsNowBlock, userOccurrenceBlock, type ApprovedRiskOccurrence,
 } from '../../agent-lane/risk-occurrence.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -30,6 +30,8 @@ export const NEGATED = /(?<![\p{L}])(?:(?:not|no)(?![ \t]+(?:later|earlier|soone
 export const CONDITIONAL = /(?<![\p{L}])(?:if|unless|assuming|provided|once)(?![\p{L}])/iu;
 const KEEP = 'Keep the user’s words exactly as they said them and do not ask them to repeat them.';
 const windowSaid = (months: number): string => (months === 1 ? 'a month' : `${months} months`);
+/** "the first {…} after the launch": the same words `riskWindowHoldsAskWords` says. */
+const firstPeriod = (months: number): string => (months === 1 ? 'month' : `${months} months`);
 const percent = (p: number): number => Number((p * 100).toFixed(6));
 const labelOf = (graph: unknown, id: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
   ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === id)?.label : undefined) ?? id).trim();
@@ -45,7 +47,8 @@ function notRecordable(subject: DoorSubject, graph: unknown, holdsNow: boolean):
     // AIE 6178729504: true now licenses "at least once within the window" only for a window counted from TODAY.
     return holdsNow && !riskOccurrenceWindowFromToday(graph) ? `‘${label}’ being true now is the user’s own statement: keep it as theirs, and `
       + 'never say it is not true or not current. It is not written into the model as a figure yet, because the goal’s period counts from the '
-      + 'launch, and being true now does not show it still holds then.' : undefined;
+      + `launch, and being true now does not show it still holds then. Ask them: “${riskWindowHoldsAskWords(label, e.window_months)}”`
+      : undefined;
   }
   const why = e.reason === 'holds_a_level' ? 'it already holds a likelihood or level'
     : e.reason === 'has_a_cause' ? 'another factor in the model drives it, so it cannot be set directly'
@@ -92,10 +95,35 @@ function readOccurrence(quote: string, subject: DoorSubject, graph: unknown): Do
   return { form: low === high ? 'point' : 'range', low: percent(low), high: percent(high), clause, ...(qualifier !== undefined ? { qualifier } : {}) };
 }
 
-/** A condition the user says holds now: a figure-free statement; a statement that gives a CHANCE is the occurrence reading. */
-function readHoldsNow(quote: string, subject: DoorSubject, graph: unknown): DoorFigure | { readonly refused: string } {
+/**
+ * ⭐ The question about a launch period (`riskWindowHoldsAskWords`), where this risk's brief sentence says it holds now and the goal's
+ * period counts from the launch: exactly the words readiness says (`analysis-ready-helper` levelGapAsk), or none.
+ */
+export function windowHoldsAskOf(graph: unknown, riskId: string): string | undefined {
+  const e = riskOccurrenceSubject(graph, riskId);
+  if (e.kind !== 'eligible' || riskOccurrenceWindowFromToday(graph) || alreadyTrueQuoteOf(e.node) === undefined) return undefined;
+  return riskWindowHoldsAskWords(labelOf(graph, riskId), e.window_months);
+}
+/** The answer opens with a yes (never a no); a hedge anywhere is not a forecast that it holds. */
+const ANSWER_YES = /^\s*(?:yes|yeah|yep|yup|correct|definitely|certainly|(?:i|we|it|that|they)(?:['’]ll| will) still|still)(?![\p{L}])/iu;
+const ANSWER_NO = /^\s*(?:no|nope|not|never|(?:i|we|it|that|they)(?:['’]ll| will) not|(?:i|we|it|that|they) won['’]t)(?![\p{L}])/iu;
+const HEDGED = /(?<![\p{L}])(?:probably|maybe|perhaps|possibly|likely|unlikely|hopefully|might|may|could|i think|i guess|i suppose|not sure|unsure|don['’]t know|no idea)(?![\p{L}])/iu;
+
+/**
+ * A condition the user says holds now: a figure-free statement; a statement that gives a CHANCE is the occurrence reading. Over a
+ * goal period counted from the LAUNCH, now is never read forward (AIE 6178729504): only the user's own answer to the question about
+ * that period (`answering` = its exact words) is their forecast that it holds then (`holds_in_window`), and only a plain yes. A no,
+ * a hedge or a condition keeps their words and writes nothing (DL 15 Oct).
+ */
+function readHoldsNow(quote: string, subject: DoorSubject, graph: unknown, _words?: string, answering?: string): DoorFigure | { readonly refused: string } {
   if (readStatedEventRiskWithBindingSpan(quote) !== undefined || readStatedLikelihoodWithoutWindow(quote)) {
     return { refused: `“${quote}” gives a chance of it happening, not a condition that holds now: record it as their chance (field occurrence).` };
+  }
+  const windowAsk = windowHoldsAskOf(graph, subject.id);
+  if (windowAsk !== undefined && typeof answering === 'string' && answering.trim() === windowAsk) {
+    if (ANSWER_YES.test(quote) && !ANSWER_NO.test(quote) && !HEDGED.test(quote) && !CONDITIONAL.test(quote)) return { form: 'holds_in_window' };
+    return { refused: `“${quote}” is the user’s own answer: keep it as theirs. It does not say plainly that ‘${labelOf(graph, subject.id)}’ will still `
+      + `be true during the goal’s period, so nothing is written as a figure. ${KEEP} Ask how likely it is to affect that period instead.` };
   }
   const blocked = notRecordable(subject, graph, true);
   return blocked !== undefined ? { refused: blocked } : { form: 'holds_now' };
@@ -162,7 +190,7 @@ export const RISK_OCCURRENCE_ROW: RoleRow = {
 
 /** AIE 6178729504: a condition the user says already holds now, kept as theirs; it licenses p = 1 only over a window from today. */
 export const RISK_HOLDS_NOW_ROW: RoleRow = {
-  field: 'holds_now', carrier: 'risk_occurrence', unit: '', forms: ['holds_now'], maxStatements: 1, signed_by: '6178729504',
+  field: 'holds_now', carrier: 'risk_occurrence', unit: '', forms: ['holds_now', 'holds_in_window'], maxStatements: 1, signed_by: '6178729504',
   quantity: 'risk_holds_now', applies: isRisk,
   // AIE 6181498097: its write adds Olumi's derivation (true now → at least once within a window from today), so "Use this reading".
   derives: true,
@@ -170,9 +198,15 @@ export const RISK_HOLDS_NOW_ROW: RoleRow = {
   // The brief's own sentence, which admission kept for this risk (`already_true_quote`): bound by it.
   sourceOf: (subject, graph) => alreadyTrueQuoteOf((isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [])
     .find((n) => isRec(n) && n.id === subject.id)),
-  readingWords: (_s, _subject, label) => `‘${label.trim()}’ already being true now`,
-  assumptions: (_s, subject, graph) => [effectAssumption(subject, graph)],
-  recordedWords: (_s, _subject, label) => riskHoldsNowRecordedWords(label),
+  readingWords: (s, subject, label, graph) => s[0]?.form === 'holds_in_window'
+    ? `your forecast that ‘${label.trim()}’ would still be true during your goal’s period, the first ${firstPeriod(windowOf(graph, subject))} after the launch`
+    : `‘${label.trim()}’ already being true now`,
+  assumptions: (s, subject, graph) => [...(s[0]?.form === 'holds_in_window' ? ['Olumi reads that as it happening at least once in that period.'] : []),
+    effectAssumption(subject, graph)],
+  recordedWords: (s, subject, label, graph) => s[0]?.form === 'holds_in_window'
+    ? `Recorded your forecast: ‘${label.trim()}’ would still be true during your goal’s period, the first ${firstPeriod(windowOf(graph, subject))} after the `
+      + 'launch. How strongly it affects the model is still Olumi’s placeholder on its link.'
+    : riskHoldsNowRecordedWords(label),
   writer: {
     approve: (r, graph) => {
       const approved = approvedFor(r.statements[0]!, r.subject, graph, userHoldsNowBlock(windowOf(graph, r.subject)), true);

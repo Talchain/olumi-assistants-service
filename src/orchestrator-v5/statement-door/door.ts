@@ -8,12 +8,12 @@ import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { riskOccurrenceAskWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP } from '../agent-lane/risk-occurrence.js';
 import type { StatementAsk } from './ask.js';
-import { readStatement, type DoorContext } from './read.js';
+import { readStatement, type DoorContext, type DoorQuote } from './read.js';
 import { ROLE_TABLE, rowKey, type RoleRow } from './role-table.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from './subject.js';
 import { RECORD_STATEMENT_OP, type DoorWriteMember } from './write.js';
 import type { ProposalOperation } from '../agent-lane/proposal.js';
-import { RISK_HOLDS_NOW_ROW } from './fields/risk.js';
+import { RISK_HOLDS_NOW_ROW, windowHoldsAskOf } from './fields/risk.js';
 import { timingAskOf } from './fields/goal-timing.js';
 import { cohortForecastAsks } from './fields/cohort-relation.js';
 import { SET_COHORT_FORECAST_OP, SET_GOAL_RELATION_OP } from '../goal-target/cohort-forecast-write.js';
@@ -89,7 +89,10 @@ export function doorAsks(graph: unknown): StatementAsk[] {
     if (n.kind !== 'risk' || typeof n.id !== 'string' || typeof n.label !== 'string') return [];
     const e = riskOccurrenceSubject(graph, n.id);
     if (e.kind !== 'eligible') return [];
+    // Over a launch period, the brief's "holds now" gets ONE question about that period (`windowHoldsAskOf`), the words readiness says.
+    const windowAsk = windowHoldsAskOf(graph, n.id);
     return [{ subject: { kind: 'risk' as const, id: n.id, field: 'holds_now' as const }, words: `Is ‘${n.label.trim()}’ already true now?` },
+      ...(windowAsk !== undefined ? [{ subject: { kind: 'risk' as const, id: n.id, field: 'holds_now' as const }, words: windowAsk }] : []),
       { subject: { kind: 'risk' as const, id: n.id, field: 'occurrence' as const }, words: riskOccurrenceAskWords(n.label, e.window_months) }];
   })];
 }
@@ -114,7 +117,25 @@ export function typedDoorStatement(graph: unknown, typed: string | null | undefi
 }
 
 export interface DoorIssueArgs { readonly subject: { readonly kind: SubjectKind; readonly id: string; readonly field: RoleRow['field'] };
-  readonly quotes: readonly string[] }
+  readonly quotes: readonly DoorQuote[] }
+
+/**
+ * THIS turn's typed words answer Olumi's question about a launch period (`windowHoldsAskOf`), which Olumi's preceding reply said
+ * exactly, with a plain yes the holds-now row reads (`holds_in_window`): ONE risk, else `undefined`. The whole typed message is the
+ * quote, bound by that question (`answering`).
+ */
+export function typedWindowAnswer(graph: unknown, typed: string | null | undefined, ctx: DoorContext): DoorIssueArgs | undefined {
+  if (typeof typed !== 'string' || typed.trim() === '' || typeof ctx.preceding_ask !== 'string') return undefined;
+  const quote = typed.trim();
+  const found = nodesOf(graph).filter((n) => n.kind === 'risk' && typeof n.id === 'string' && typeof n.label === 'string').flatMap((n) => {
+    const ask = windowHoldsAskOf(graph, String(n.id));
+    if (ask === undefined || !ctx.preceding_ask!.includes(ask)) return [];
+    const subject: DoorSubject = { kind: 'risk', id: String(n.id), field: 'holds_now' };
+    return readStatement(graph, subject, String(n.label), [{ quote, answering: ask }], { now: typed }, { ...ctx, asks: ctx.asks ?? doorAsks(graph) }).kind === 'read'
+      ? [{ subject, quotes: [{ quote, answering: ask }] }] : [];
+  });
+  return found.length === 1 ? found[0] : undefined;
+}
 
 /**
  * ⭐ THE ONE ROUTE ISSUER (the harness contract: its card's button is "Record what you said", quoting the turn). When the Agent
@@ -129,7 +150,7 @@ export function doorIssueArgs(graph: unknown, typed: string | null | undefined, 
   readonly toolCalls: readonly { readonly name: string }[]; readonly mutated: boolean; readonly proposalOffered: boolean; readonly heldWaiting: boolean;
 }): DoorIssueArgs | undefined {
   if (turn.proposalOffered || turn.heldWaiting || turn.toolCalls.some((c) => c.name === 'authorise_change')) return undefined;
-  const typedOne = turn.mutated ? undefined : typedDoorStatement(graph, typed, ctx);
+  const typedOne = turn.mutated ? undefined : typedDoorStatement(graph, typed, ctx) ?? typedWindowAnswer(graph, typed, ctx);
   if (typedOne !== undefined) return typedOne;
   if (turn.toolCalls.some((c) => c.name.startsWith('propose_'))) return undefined;
   const risks = nodesOf(graph).filter((n) => n.kind === 'risk' && typeof n.id === 'string' && typeof n.label === 'string');

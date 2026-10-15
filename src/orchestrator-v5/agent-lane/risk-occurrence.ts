@@ -267,6 +267,13 @@ const fill = (template: string, label: string, block: EventRiskV1T): string => t
 export const RISK_OCCURRENCE_ASK_TEMPLATE = 'How likely is ‘{label}’ to happen at least once within {window}?';
 export const riskOccurrenceAskWords = (label: string, windowMonths: number): string => RISK_OCCURRENCE_ASK_TEMPLATE
   .replace('{label}', () => label.trim()).replace('{window}', () => windowWords(windowMonths));
+/**
+ * ⭐ The question a condition true NOW gets when the goal's period counts from the LAUNCH (AIE 6178729504: now is never read
+ * forward): the user's own forecast for that period, asked once. Readiness says these words, and the door binds an answer to the
+ * period only when it answers exactly them (`answering`).
+ */
+export const riskWindowHoldsAskWords = (label: string, windowMonths: number): string =>
+  `Will ‘${label.trim()}’ still be true during your goal’s period, the first ${windowMonths === 1 ? 'month' : `${windowMonths} months`} after the launch?`;
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
 /** S2 "holds now": the receipt (the card is the ONE statement door's, `statement-door/card.ts`). */
@@ -318,7 +325,9 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   const block = EventRiskV1.safeParse(approved.event_risk);
   // Olumi's range, the user's "holds now", or the user's own stated chance, each with its verified statement: no other block
   // is ever written here, and one card never carries two statements.
-  const holdsNow = approved.holds_now !== undefined && approved.holds_now.form === 'holds_now';
+  // "Holds now" over a window from today, or the user's forecast that it holds during a launch period (`holds_in_window`): both
+  // the same "at least once within the window" block, each with its own statement.
+  const holdsNow = approved.holds_now !== undefined && (approved.holds_now.form === 'holds_now' || approved.holds_now.form === 'holds_in_window');
   const stated = approved.stated_occurrence;
   if (!block.success || (holdsNow && stated !== undefined)
     || (holdsNow ? !isHoldsNowBlock(block.data) : stated !== undefined ? !isStatedBlock(block.data, stated, approved.risk_id) : block.data.occurrence.basis !== 'olumi')
