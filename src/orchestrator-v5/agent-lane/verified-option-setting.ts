@@ -12,7 +12,9 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
-import { sourceMapOf, subjectKey } from './construction-source-map.js';
+import { correctionOf, sourceMapOf, subjectKey } from './construction-source-map.js';
+import { openReadingsOf } from './open-reading.js';
+import type { UserStatement } from './user-statements.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -848,6 +850,17 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
     return levelInContext(model, factor, brief, quote, (text) => (text === quote
       ? { start: stated.index, end: stated.index + stated.matchedText.length } : null));
   });
+}
+
+/** S5 amend (DL ruling (a)): what the draft's own statements on ONE link's effect say of its size (`correctionOf`, `openReadingsOf`). */
+export function linkEffectReadingOf(model: CandidateModel, from: string, to: string, figure: number, brief: string | undefined): {
+  readonly supersedes?: { readonly figure: number; readonly quote: string }; readonly open: readonly UserStatement[];
+} {
+  if (typeof brief !== 'string' || !carriesStatements(model)) return { open: [] };
+  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const key = subjectKey({ kind: 'link', label: from, to_label: to }, 'effect');
+  const supersedes = correctionOf(map, key, brief);
+  return { ...(supersedes !== undefined ? { supersedes } : {}), open: openReadingsOf(map.verified.get(key) ?? [], figure) };
 }
 
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */

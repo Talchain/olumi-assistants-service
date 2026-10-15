@@ -1,4 +1,6 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
+import { openReadingQuestion, openReadingsOf } from '../agent-lane/open-reading.js';
+import type { UserStatement } from '../agent-lane/user-statements.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
@@ -814,7 +816,34 @@ export function goalChanceLicenceOf(
   const notes = [...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
     ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
     ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
-  return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
+  // S5 (DL ruling (a), condition 1): a size that is the user's own but that they also qualified is flagged, not settled.
+  const open = openReadingNotes(graph);
+  const flagged = open.length === 0 ? worded : { ...worded, provisional: true as const };
+  const all = [...notes, ...open];
+  return all.length === 0 ? flagged : { ...flagged, notes: [...(flagged.notes ?? []), ...all] };
+}
+
+/**
+ * ⭐ S5 (AIE 6186002237; DL ruling (a), condition 1): a link sized by the USER (`magnitude: 'user_stated'`) whose subject also
+ * holds a statement of theirs that qualifies the size without a figure ("That's last year's figure, though.", recorded on the
+ * link's source at construction, `link|<from>|<to>||effect`) is noted on the licence with the ruled question, and the result is
+ * provisional while it stays open. Read by the link's identity, never by its label.
+ */
+function openReadingNotes(graph: unknown): string[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  return edges.flatMap((e) => {
+    const prov = isRec(e.provenance) ? e.provenance : undefined;
+    const effect = isRec(prov?.natural_effect) ? prov!.natural_effect : undefined;
+    if (prov?.magnitude !== 'user_stated' || !finite(effect?.amount) || typeof e.from !== 'string' || typeof e.to !== 'string') return [];
+    const source = nodes.find((n) => n.id === e.from);
+    const key = `link|${e.from}|${e.to}||effect`;
+    const said = (Array.isArray(source?.user_statements) ? source!.user_statements : []).filter(isRec)
+      .filter((r) => r.subject_key === key && Array.isArray(r.statements)).flatMap((r) => (r.statements as unknown[]).filter(isRec)) as unknown as UserStatement[];
+    const open = openReadingsOf(said, effect!.amount as number);
+    return open.length === 0 ? [] : [openReadingQuestion(open[0]!.quote, Math.abs(effect!.amount as number),
+      typeof effect!.per_source_change_unit === 'string' ? effect!.per_source_change_unit : undefined)];
+  });
 }
 
 /**

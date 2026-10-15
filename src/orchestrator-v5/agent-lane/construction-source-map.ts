@@ -127,6 +127,28 @@ export function statesLossBefore(quote: string, index: number): boolean {
   return LOSS_BEFORE.test(quote.slice(0, index));
 }
 
+/**
+ * ⭐ AIE 6186002237 (S5 amend of the DL's neighbour ruling; DL ruling (a)), read only from the statements the drafter filed on
+ * ONE subject and field (the shared contract, never a word list); a figure the user also qualifies is `open-reading.ts`.
+ * `correctionOf`: the user's correction in their own words. The LAST verified statement on the subject that writes a figure is a
+ * point, and an EARLIER statement the drafter filed on the same subject (verified, or retained unverified) gives another figure:
+ * "Actually, it is closer to 15 a week." after "about 20 …, between 10 and 30". The later figure is theirs; the earlier is
+ * superseded. Brief order is the order of the sentences in the brief.
+ */
+export function correctionOf(map: SourceMap, key: string, brief: string): { readonly figure: number; readonly quote: string } | undefined {
+  const at = (quote: string | undefined): number => (typeof quote === 'string' ? brief.indexOf(quote) : -1);
+  const figured = (map.verified.get(key) ?? []).filter((s) => s.low !== undefined || s.high !== undefined);
+  const last = figured.reduce<UserStatement | undefined>((a, s) => (a === undefined || at(s.quote) > at(a.quote) ? s : a), undefined);
+  if (last === undefined || last.form !== 'point' || last.low === undefined) return undefined;
+  const figure = last.low, start = at(last.quote);
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const earlier = [
+    ...figured.filter((s) => at(s.quote) < start).map((s) => [s.low, s.high]),
+    ...map.refused.filter((r) => r.key === key && at(r.quote) >= 0 && at(r.quote) < start).map((r) => [num(r.given['value']), num(r.given['low']), num(r.given['high'])]),
+  ];
+  return start >= 0 && earlier.some((xs) => xs.some((x) => x !== undefined && x !== figure)) ? { figure, quote: last.quote } : undefined;
+}
+
 /** The drafter's `statements`, each verified once against the brief. Anything malformed, unverified or unchecked is retained whole as unknown. */
 export function sourceMapOf(raw: unknown, brief: string): SourceMap {
   const verified = new Map<string, UserStatement[]>();

@@ -83,7 +83,8 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, levelQuotedByBrief, linkEffectReadingOf, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { openReadingQuestion } from './open-reading.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -4802,6 +4803,11 @@ function admitOnce(
   const signRefusedLinks = new Set([...signRefused.map((r) => resolvable[r.through.link]!), ...directSignRefused.map((r) => resolvable[r.link]!)]);
   const userSizeEarned = (l: CandidateLink): boolean => {
     if (l.provenance_source === 'user_specified') return true;
+    // S5 (DL ruling (a)): the user's own later correction on THIS link ("Actually, it is closer to 15 a week." after "about 20
+    // …") is their size; the earlier figure is superseded. Read only from the statements the draft files on the link.
+    const from = nodeOf.get(l.from), to = nodeOf.get(l.to);
+    if (from !== undefined && to !== undefined && typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
+      && linkEffectReadingOf(model, from.label, to.label, l.effect_amount, brief).supersedes?.figure === Math.abs(l.effect_amount)) return true;
     if (boundByLink.has(l)) return true;
     if (signRefusedLinks.has(l)) return false;
     // ⚠ The `sizeWritten` door is RETIRED by Science 6008581742, in its own PR: Fi does not yet bind every sentence it
@@ -4948,8 +4954,14 @@ function admitOnce(
     // (`definitionalLink`); every other link into it is sized exactly as before, on no frame.
     const unframed = l.to === normalisingFrameGoalId ? { ...target, scale_frame: undefined } : target;
     const framed = sizeLink(statement, source, target);
-    sizing.set(`${l.from}::${l.to}`, l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
-      ? framed : sizeLink(statement, source, unframed));
+    const chosen = l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
+      ? framed : sizeLink(statement, source, unframed);
+    // S5 (DL ruling (a)): the user's size stays theirs; a statement they filed on this link that qualifies it without a figure
+    // ("That's last year's figure, though.") is asked about, beside it, through the sizing's own question.
+    const open = chosen.outcome === 'user_stated' && chosen.question === undefined && typeof l.effect_amount === 'number'
+      ? linkEffectReadingOf(model, source.label, target.label, l.effect_amount, brief).open : [];
+    sizing.set(`${l.from}::${l.to}`, open.length === 0 ? chosen
+      : { ...chosen, question: openReadingQuestion(open[0]!.quote, Math.abs(l.effect_amount as number), chosen.natural_effect?.per_source_change_unit) });
   }
 
   const linkResult = admitCandidateLinks(resolvable, sizing, basisDroppedBySign);
