@@ -261,7 +261,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     const res = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, base_graph_hash: currentHash(), turn_id: 'c2-door-contrast',
       links: [], levels: [{ option_id: 'opt_lift', factor_id: 'fac_downtime', value: 0.25, raw_value: 10, cap: 40, unit: 'days',
         author: 'user_specified', likely_range: { low: 5, high: 25 } }],
-      range_laws: [rangeLawAdoption(persisted, 'opt_lift', 'fac_downtime', [statement], 5, 20, '2026-10-15T00:00:00.000Z')!] } as never, 'req-agent');
+      statement_record: [rangeLawAdoption(persisted, 'opt_lift', 'fac_downtime', [statement], 5, 20, '2026-10-15T00:00:00.000Z')!] } as never, 'req-agent');
     expect(res).toMatchObject({ status: 'refused', reason: 'range_law_without_its_level' });
     expect(rows.size).toBe(0);
     expect(persisted).toEqual(before);

@@ -3502,10 +3502,12 @@ export type CommitOptionLevelsInput = {
   readonly risk_occurrence?: ApprovedRiskOccurrence;
   /** ⭐ Science PR-4b: ONE approved card of the user's own cohort forecast — `expected_node` is the option the card showed. Alone. */
   readonly cohort_forecast?: ApprovedCohortForecast;
-  /** ⭐ M4-cohort (T8): ONE approved same-people answer, on the goal — `expected_goal` is the goal the card showed. Alone. */
-  readonly statement_record?: ApprovedStatementRecord;
-  /** ⭐ C2: the adoption of Olumi's equal-tail reading of each likely range a level of this commit writes (the level card's press). */
-  readonly range_laws?: readonly ApprovedStatementRecord[];
+  /**
+   * ⭐ M4-cohort (T8): ONE approved same-people answer, on the goal — `expected_goal` is the goal the card showed. Alone.
+   * ⭐ C2 (AIE 6184726873): or, beside the levels that write them, the level card's adoptions of Olumi's equal-tail reading, one
+   * per likely range a level of THIS commit writes (`rangeLaws`; never alone). The same record member and writer either way.
+   */
+  readonly statement_record?: ApprovedStatementRecord | readonly ApprovedStatementRecord[];
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
@@ -3578,7 +3580,6 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.risk_occurrence !== undefined ? { risk_occurrence: (({ own_write_landed: _own, ...card }) => card)(input.risk_occurrence) } : {}),
       ...(input.cohort_forecast !== undefined ? { cohort_forecast: (({ own_write_landed: _own, ...card }) => card)(input.cohort_forecast) } : {}),
       ...(input.statement_record !== undefined ? { statement_record: input.statement_record } : {}),
-      ...(input.range_laws !== undefined && input.range_laws.length > 0 ? { range_laws: input.range_laws } : {}),
       ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
@@ -3633,8 +3634,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.risk_occurrence.recorded_at !== undefined ? { recorded_at: input.risk_occurrence.recorded_at } : {}) } } : {}),
     ...(input.cohort_forecast !== undefined ? { cohortForecast: { ...input.cohort_forecast,
       own_write_landed: input.cohort_forecast.own_write_landed === true } } : {}),
-    ...(input.statement_record !== undefined ? { statementRecord: input.statement_record } : {}),
-    ...(input.range_laws !== undefined && input.range_laws.length > 0 ? { rangeLaws: input.range_laws } : {}),
+    ...(input.statement_record !== undefined && 'node_id' in input.statement_record ? { statementRecord: input.statement_record } : {}),
+    ...(input.statement_record !== undefined && !('node_id' in input.statement_record) && input.statement_record.length > 0
+      ? { rangeLaws: input.statement_record } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,

@@ -3215,7 +3215,7 @@ export function createAgentCapabilities(
         ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
         ...(values.length > 0 ? { values } : {}),
         ...(frames.length > 0 ? { frames } : {}),
-        ...(rangeLaws.length > 0 ? { range_laws: rangeLaws } : {}),
+        ...(rangeLaws.length > 0 ? { statement_record: rangeLaws } : {}),
       });
       if (res.status === 'unconfirmed') {
         // ⛔ The commit was attempted and could not be read back: neither saved nor refused (#1995's `not_confirmed`).
@@ -8544,7 +8544,7 @@ export function createAgentCapabilities(
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
           levels: levelInputs.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
-          ...((laws) => (laws.length > 0 ? { range_laws: laws } : {}))(rangeLawsOfCard(decision.proposal, (rebased ?? before).raw)),
+          ...((laws) => (laws.length > 0 ? { statement_record: laws } : {}))(rangeLawsOfCard(decision.proposal, (rebased ?? before).raw)),
         });
         } catch (error) {
           if (framedHere.length === 0) throw error;
