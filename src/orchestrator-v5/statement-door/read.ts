@@ -13,7 +13,7 @@ import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { verifyStatement, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 import { doorRowFor } from './role-table.js';
-import { subjectKey, type DoorSubject } from './subject.js';
+import { subjectNodeKey, type DoorSubject } from './subject.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -37,7 +37,7 @@ export interface DoorReading {
   readonly subject: DoorSubject;
   readonly label: string;
   readonly statements: readonly UserStatement[];
-  /** Olumi's reading, and every Olumi assumption it rests on, in the table's words. */
+  /** Olumi's reading (with the details the reading itself states), and every SEPARATE Olumi assumption, in the table's words. */
   readonly reading: string;
   readonly assumptions: readonly string[];
   /** The user's own words a figure-free reading rests on (`DoorFigure.words`). */
@@ -68,10 +68,11 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
     if (nodes.some((n) => n.id === s.element_ids[0] && n.kind === subject.kind)) return 'another';
   }
   const answered = answeredAsk(answering, ctx.asks ?? []);
-  if (answered !== undefined) return subjectKey(answered.subject) === subjectKey(subject) ? 'bound' : 'another';
+  // The ask names the NODE; the field is the row's reading of the words (one readiness line asks "true now?" and "how likely?").
+  if (answered !== undefined) return subjectNodeKey(answered.subject) === subjectNodeKey(subject) ? 'bound' : 'another';
   if (typeof answering === 'string' && answering.trim() !== '') return 'unbound';
-  const asked = askedSubjects(ctx.preceding_ask, ctx.asks ?? []);
-  if (asked.length === 1) return subjectKey(asked[0]!) === subjectKey(subject) ? 'bound' : 'another';
+  const asked = [...new Set(askedSubjects(ctx.preceding_ask, ctx.asks ?? []).map(subjectNodeKey))];
+  if (asked.length === 1) return asked[0] === subjectNodeKey(subject) ? 'bound' : 'another';
   return 'unbound';
 }
 
@@ -90,16 +91,20 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     const answering = typeof raw === 'string' ? undefined : raw.answering;
     const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words);
     if ('refused' in fig) return { kind: 'refused', refusal: 'not_this_field', detail: `${fig.refused} Nothing was prepared. ${KEEP}` };
+    // Bound by: the row's own whole-model scope (`bindsWhole`), the model's admitted source sentence for it (`sourceOf`), else the
+    // figure's clause (or the quote) by `statementBoundTo`.
     const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
-    if (!whole && statementBoundTo(graph, subject, quote, ctx, answering) !== 'bound') {
+    const source = row.sourceOf?.(subject, graph);
+    if (!whole && !(source !== undefined && source === quote) && statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering) !== 'bound') {
       return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
     const v = verifyStatement({ quote, form: fig.form, ...(fig.qualifier !== undefined ? { qualifier: fig.qualifier } : {}),
       ...(answering !== undefined ? { answering } : {}),
       ...(fig.form === 'range' ? { low: fig.low, high: fig.high } : { value: fig.form === 'upper_bound' ? fig.high : fig.low }) }, texts,
-    { subject: { quantity: subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
-      unit: row.unit, forms: row.forms, figuresIn: () => figures });
+    { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
+      unit: row.unit, forms: row.forms, figuresIn: () => figures, ...(row.allowsZero === true ? { allowsZero: true } : {}),
+      ...(row.periodOf?.(subject, graph) !== undefined ? { period: row.periodOf(subject, graph) } : {}) });
     if (v.kind === 'refused') {
       return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
     }

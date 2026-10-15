@@ -42,6 +42,8 @@ const NODE_KIND: Readonly<Record<Exclude<SubjectKind, 'link'>, readonly string[]
 
 /** One key per subject, for maps and the readiness ask that names it. */
 export const subjectKey = (s: DoorSubject): string => [s.kind, s.id, s.to_id ?? '', s.option_id ?? '', s.field].join('|');
+/** The subject's graph identity without its field: an ask about a node binds an answer to that node, whatever its field. */
+export const subjectNodeKey = (s: DoorSubject): string => [s.kind, s.id, s.to_id ?? '', s.option_id ?? ''].join('|');
 export const isStatementField = (v: unknown): v is StatementField => typeof v === 'string' && (STATEMENT_FIELDS as readonly string[]).includes(v);
 
 /** The subject by graph identity: an id that exists with that kind, else ONE node whose label is exactly the given one. */

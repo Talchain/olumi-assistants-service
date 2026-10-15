@@ -72,11 +72,56 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
  * out (PLoT refuses a dangling link end). Identity is read on the model as saved; this copy is never persisted.
  */
 export function withoutUnsizedOlumiRisks<T>(graph: T, identityGraph: unknown = graph): T {
+  return withoutUnsizedOlumiRisksRecorded(graph, identityGraph).graph;
+}
+
+/** One risk THIS Run left out of its calculation, as the Run recorded it: its id, its label then, and why. */
+export interface RunOmittedRisk {
+  readonly node_id: string;
+  readonly label?: string;
+  readonly reason: 'unsized_olumi_risk';
+}
+
+/** The same projection, with exactly the risks it removed from the copy it sends (present in it, then removed). */
+export function withoutUnsizedOlumiRisksRecorded<T>(graph: T, identityGraph: unknown = graph): { graph: T; omitted: RunOmittedRisk[] } {
   const leftOut = unsizedOlumiRiskIds(identityGraph);
-  if (leftOut.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  if (leftOut.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return { graph, omitted: [] };
+  const removed = graph.nodes.filter((n): n is Rec => isRec(n) && leftOut.has(n.id as string));
   const touches = (e: unknown): boolean => isRec(e) && (leftOut.has(e.from as string) || leftOut.has(e.to as string));
-  return { ...graph, nodes: graph.nodes.filter((n) => !(isRec(n) && leftOut.has(n.id as string))),
-    ...(Array.isArray(graph.edges) ? { edges: graph.edges.filter((e) => !touches(e)) } : {}) } as T;
+  return {
+    graph: { ...graph, nodes: graph.nodes.filter((n) => !(isRec(n) && leftOut.has(n.id as string))),
+      ...(Array.isArray(graph.edges) ? { edges: graph.edges.filter((e) => !touches(e)) } : {}) } as T,
+    omitted: removed.map((n) => ({ node_id: n.id as string,
+      ...(typeof n.label === 'string' && n.label.trim() !== '' && !/[\r\n]/.test(n.label) ? { label: n.label.trim() } : {}), reason: 'unsized_olumi_risk' as const })),
+  };
+}
+
+/**
+ * ⭐ #3167 fix-forward (PL 6135017311 @00:49Z; AIE 6180618773 T9): the risks THIS Run left out are recorded WITH the Run, in its
+ * persisted result (a CEE `inference_warnings` entry, the carrier every reader of a stored Run already reads), so the licence,
+ * the AI, the reply and a reopen say what that Run did, never what today's model would do. Not a goal-figure withhold.
+ */
+export const UNSIZED_OLUMI_RISK_OMITTED = 'UNSIZED_OLUMI_RISK_OMITTED';
+export const unsizedOlumiRiskOmissionWarning = (omitted: readonly RunOmittedRisk[]): Rec => ({
+  code: UNSIZED_OLUMI_RISK_OMITTED, severity: 'info', source: 'cee', message: '', scope: 'modelled_effects_only',
+  node_ids: omitted.map((r) => r.node_id), omitted: omitted.map((r) => ({ ...r })),
+});
+
+/**
+ * The risks THIS Run recorded as left out, read from its stored result (`enrichment.inference_warnings`, or a kept Run's own
+ * `inference_warnings`). `undefined` when the Run recorded none: a Run from before the record, or one that left nothing out.
+ * Never recomputed from today's model (an unknown historic projection stays unknown).
+ */
+export function runOmittedRisks(result: unknown): readonly RunOmittedRisk[] | undefined {
+  const r = isRec(result) ? result : undefined;
+  const warnings = [isRec(r?.enrichment) ? r.enrichment.inference_warnings : undefined, r?.inference_warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : [])).filter(isRec).filter((w) => w.code === UNSIZED_OLUMI_RISK_OMITTED);
+  const omitted = warnings.flatMap((w) => (Array.isArray(w.omitted) ? w.omitted : [])).filter(isRec)
+    .flatMap((o): RunOmittedRisk[] => typeof o.node_id === 'string' && o.node_id !== '' && o.reason === 'unsized_olumi_risk'
+      ? [{ node_id: o.node_id, ...(typeof o.label === 'string' && o.label.trim() !== '' && !/[\r\n]/.test(o.label) ? { label: o.label.trim() } : {}),
+        reason: 'unsized_olumi_risk' }] : []);
+  const unique = omitted.filter((o, i) => omitted.findIndex((x) => x.node_id === o.node_id) === i);
+  return unique.length === 0 ? undefined : unique;
 }
 
 /**
@@ -86,7 +131,12 @@ export function withoutUnsizedOlumiRisks<T>(graph: T, identityGraph: unknown = g
  */
 export function unsizedOlumiRiskLine(graph: unknown, riskId: string, besideChance: boolean): string | null {
   const node = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === riskId) : undefined;
-  const label = typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : null;
+  return unsizedOlumiRiskLineFor(typeof node?.label === 'string' ? node.label : undefined, besideChance);
+}
+
+/** The same line for a risk named as the Run recorded it (its label then), or `null` without a whole label. */
+export function unsizedOlumiRiskLineFor(rawLabel: string | undefined, besideChance: boolean): string | null {
+  const label = typeof rawLabel === 'string' && rawLabel.trim() !== '' ? rawLabel.trim() : null;
   if (label === null || /[\r\n]/.test(label)) return null;
   return `${besideChance ? 'These chances cover' : 'This calculation covers'} the modelled effects only. ‘${label}’ is Olumi’s `
     + 'unsized risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.';

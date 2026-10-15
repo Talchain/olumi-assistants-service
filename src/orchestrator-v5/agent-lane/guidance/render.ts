@@ -17,10 +17,12 @@ function pick(value: string | Readonly<Record<string, string>>, variant?: string
 }
 
 /**
- * ⭐ System 4 row 11 (served marketing 7f5659fd, turn 10: "…? The comparison turns on it." beside a Run that says sensitivity
- * was not measured): the clause claims this link's factor drives the comparison. It is said ONLY when THIS Run measured
- * decision sensitivity and ranks the link's source factor as its most sensitive driver; otherwise it is omitted.
+ * ⭐ Science table row T11 (AIE 6180618773; served marketing 7f5659fd, turn 10: "…? The comparison turns on it." beside a Run
+ * that says sensitivity was not measured). The S1 question for an unsized link is the AIE's exact words, ending on what THIS
+ * Run did not measure. Where THIS Run did measure decision sensitivity, that sentence would be false: it goes, and the
+ * comparison is said to turn on the link only when the Run ranks the link's source factor as its most sensitive driver.
  */
+export const S1_NOT_MEASURED = ' This Run did not measure its influence on the comparison.';
 export const S1_TURNS_ON_CLAUSE = ' The comparison turns on it.';
 
 /** No invented labels or raw-id fallback; unavailable copy fields are null. */
@@ -74,11 +76,11 @@ export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): Ren
   if (selected.policy_id === 'RC-PREMORTEM') question = pick(row.reasoning_question, fills.horizon ? 'dated' : 'undated');
   if (selected.policy_id === 'RC-WHAT-CHANGES') question = pick(row.reasoning_question,
     sensitive?.range === 'olumi_assumed' ? 'range_olumi_assumed' : 'range_yours_or_unknown');
-  if (selected.policy_id === 'RC-STRENGTHEN-ITEM' && selected.variant === 'S1' && question?.endsWith(S1_TURNS_ON_CLAUSE)) {
+  if (selected.policy_id === 'RC-STRENGTHEN-ITEM' && selected.variant === 'S1' && question?.endsWith(S1_NOT_MEASURED)
+    && signals['run.decision_sensitivity']?.status === 'measured') {
     const fromId = link === undefined ? undefined : link.link_id.slice(0, Math.max(0, link.link_id.indexOf('->')));
-    const measuredDriver = signals['run.decision_sensitivity']?.status === 'measured' && fromId !== undefined && fromId !== ''
-      && sensitive?.factor_id === fromId;
-    if (!measuredDriver) question = question.slice(0, -S1_TURNS_ON_CLAUSE.length);
+    const measuredDriver = fromId !== undefined && fromId !== '' && sensitive?.factor_id === fromId;
+    question = `${question.slice(0, -S1_NOT_MEASURED.length)}${measuredDriver ? S1_TURNS_ON_CLAUSE : ''}`;
   }
   return { title: fill(pick(row.short_copy, selected.variant)), why: fill(pick(row.why_now, selected.variant)), question: fill(question, true) };
 }

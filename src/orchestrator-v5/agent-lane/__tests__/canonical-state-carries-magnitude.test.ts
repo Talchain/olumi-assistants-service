@@ -97,9 +97,12 @@ describe('get_canonical_state — the Agent can see WHO said it', () => {
   it('carries value provenance, distinct from entity provenance', async () => {
     const [price] = await entitiesFor([PRICE]);
     // Who put THIS NUMBER here …
-    expect(price.value_provenance).toEqual({ source: 'user_stated', extraction_type: 'explicit', whose: 'brief' }); // `whose`: the authority's owner
+    // S10 fix 1: ONLY the authority's answer (`whose`), never the raw stamps it was read from.
+    expect(price.value_provenance).toEqual({ whose: 'brief', origin: 'user' });
     // … versus where the ENTITY came from.
-    expect(price.provenance).toEqual({ source: 'user_specified' });
+    // Who added the entity: the ONE authority's answer, never the raw node stamp.
+    expect(price.added_by).toBe('yours');
+    expect(price).not.toHaveProperty('provenance');
   });
 });
 

@@ -412,6 +412,13 @@ describe('ONE reply contract through the build route', () => {
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';
     const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
     currentRead.analysis_result.enrichment = withholdGoalFiguresForMissingCurrentLevel(currentRead.analysis_result.enrichment, currentRead.graph);
+    // #3167 fix-forward: the readers say only what THIS Run recorded leaving out. The stubbed Run carries the record the Run
+    // handler writes for this graph, made by the handler's own producer (never a hand-typed record).
+    const { withoutUnsizedOlumiRisksRecorded, unsizedOlumiRiskOmissionWarning } = await import('../unsized-risk.js');
+    const { omitted } = withoutUnsizedOlumiRisksRecorded(currentRead.graph, currentRead.graph);
+    expect(omitted.map(o => o.label), 'PRECONDITION: this Run leaves out the one unsized Olumi risk').toEqual(['Price-rise cancellation risk']);
+    const enrichmentB1 = currentRead.analysis_result.enrichment as Rec;
+    enrichmentB1.inference_warnings = [...(enrichmentB1.inference_warnings as Rec[] | undefined ?? []), { ...unsizedOlumiRiskOmissionWarning(omitted) }];
     const body = await buildTurn();
     expect((lastComposeInput as ReplyComposeInput).faceContract).toBe('draft');
     expect((lastComposeInput as ReplyComposeInput).chanceCells?.length).toBeGreaterThan(0);

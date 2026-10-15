@@ -109,8 +109,11 @@ describe("the user's cohort forecast: their words → one card → their press �
       `From your answer to the question about one chance in four below and one chance in four above: “${RANGE}”. Record your estimates as about `
         + 'one chance in four below 12% and one chance in four above 18% for ‘Hire marketing manager’, among the people it reaches, during the first '
         + 'three months after launch? These are your estimates, not a minimum and maximum.',
-      `From your messages: ‘${PEOPLE}’ · ‘${SAME}’. It reaches 500 people during the first three months after launch, and ‘New customers in first `
-        + '3 months’ counts the people who convert among those same people, as you said. The number reached is held fixed.',
+      `From your messages: ‘${PEOPLE}’ · ‘${SAME}’. Your forecast is that it reaches 500 people during the first three months after launch, and `
+        + '‘New customers in first 3 months’ counts the people who convert among those same people, as you said.',
+      // AIE 6180618773 C4: holding the reach fixed is Olumi's explicit conditional scenario, on the card the press adopts.
+      'Olumi’s scenario, not yours: the chance is worked out as if exactly 500 people are reached during the first three months after launch; '
+        + 'how many it actually reaches may differ, and that uncertainty is not included.',
       'Olumi’s approximation, not yours: the underlying ‘Conversion rate’ is treated as a smooth curve (a Beta distribution) through your two '
         + 'estimates, and each person converts or not at that same chance. If no such curve fits them, no chance is given for this option.',
     ]);
@@ -121,7 +124,7 @@ describe("the user's cohort forecast: their words → one card → their press �
     expect(JSON.stringify(w.graph())).toBe(before);
     const res = await press(w, card.proposal_id);
     expect(res).toMatchObject({ ok: true, applied: true });
-    expect(res.follow_up).toBe('Recorded from your words: ‘Hire marketing manager’ reaches 500 people, with about one chance in four that its '
+    expect(res.follow_up).toBe('Recorded from your words: your forecast that ‘Hire marketing manager’ reaches 500 people, with about one chance in four that its '
       + 'underlying conversion rate is below 12% and one in four that it is above 18%.');
     expect(option(w.graph()).cohort_forecast).toEqual({ people_reached: 500, conversion_middle_half_pct: [12, 18],
       same_cohort: { rate_target_node_id: 'conversion_rate', count_target_node_id: 'new_customers_in_first_3_months', stated_by: 'user' }, author: 'user' });

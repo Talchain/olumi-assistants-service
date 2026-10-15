@@ -82,13 +82,17 @@ describe('marketing: the chance of meeting both targets, from each option’s sa
     expect(notes).toContain(LIMITS_LEFT_OUT);
     expect(notes.filter((n) => n.startsWith('‘Annual marketing spend’ is at most'))).toHaveLength(1);
     const law = notes.find((n) => n.startsWith('These chances rest on a forecast, not on the model’s links'))!;
-    expect(law).toContain('‘Hire marketing manager’ reaches 500 people over the first three months after launch with your ‘Conversion rate’ estimates of 12% and 18%');
+    // AIE 6180618773 C4: the user's reach is their FORECAST, never a certainty.
+    expect(law).toContain('your forecast that ‘Hire marketing manager’ reaches 500 people over the first three months after launch, with your ‘Conversion rate’ estimates of 12% and 18%');
     // AIE 6176433015: the user's quartiles are theirs; the Beta curve through them is Olumi's approximation, said as such.
     expect(law).toContain('Each pair of conversion figures is your own estimate, with about one chance in four below the lower and one in four above the upper');
     expect(law).toContain('a smooth curve through them (a Beta distribution), with each person converting at that same chance, is Olumi’s approximation');
     expect(law).not.toMatch(/as likely to fall inside|middle half|even chance/);
     expect(law).not.toContain('read as');
-    expect(law).toContain('The number of people reached is held fixed, so its own uncertainty isn’t included');
+    // C4: holding the reach fixed is Olumi's explicit conditional scenario, and its uncertainty is said to be left out.
+    expect(law).toContain('Each chance is Olumi’s scenario in which exactly that many people are reached; how many are actually reached may differ, and that uncertainty isn’t included.');
+    expect(law).not.toContain('is held fixed');
+    expect(law).toContain('so with that many reached, meeting both is the same as meeting the harder of the two');
     expect(law).toContain('‘New customers in first 3 months’ counts the people who convert among those same people, as you said');
     // The model's reasons for the targets describe the links, not this figure: never said beside it.
     expect(notes.filter((n) => n.includes('has no level today') || n.startsWith('‘New customers in first 3 months’ being'))).toEqual([]);
@@ -98,6 +102,12 @@ describe('marketing: the chance of meeting both targets, from each option’s sa
     const l = licence(graphWith(OPTIONS, (id, f) => (id === 'hire_marketing_manager' ? { ...f, author: 'olumi' } : f)), enrichmentWith());
     expect(l.provisional).toBe(true);
     expect(l.targets.notes).toContain('The figures for ‘Hire marketing manager’ are Olumi’s estimates, not yours, so the chances that rest on them are provisional.');
+    // ⛔ The inputs say whose each forecast is (never "your" for Olumi's), and the pair of figures is not called the user's.
+    const law = (l.targets.notes as string[]).find((n) => n.startsWith('These chances rest on a forecast'))!;
+    expect(law).toContain('Olumi’s estimate that ‘Hire marketing manager’ reaches 500 people over the first three months after launch, with Olumi’s ‘Conversion rate’ estimates of 12% and 18%');
+    expect(law).toContain('your forecast that ‘Use AI and boost ads’ reaches');
+    expect(law).toContain('Each pair of conversion figures is an estimate, with');
+    expect(law).not.toContain('your forecast that ‘Hire marketing manager’');
     const users = licence(graphWith(), enrichmentWith());
     expect(users).not.toHaveProperty('provisional');
   });

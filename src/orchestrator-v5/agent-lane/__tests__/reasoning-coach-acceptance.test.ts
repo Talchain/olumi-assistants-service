@@ -45,10 +45,12 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     // Batch B (merge of staging after R, 12 Oct): R's bytes (354e8e0a) plus ONLY SYS2 G1's W4/W6 why_now corrections (dfc52dc8).
     // RC-OUTSIDE-VIEW (DL 14 Oct, old #1711 rebuilt): ONE appended row (P5, typed `has_range`, no keyword trigger), the slot_1
     // and tie_break lists naming it, and the outside_view catalogue / DSK-TR-002 entries saying it is built. No case changes.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('54bed6181acce51492eab8d0d74d46fb03a4b6bfe5bd0abfbd8e1d26d65ec0fb');
+    // Science T11 / C5 (AIE 6180618773, 15 Oct): ONLY RC-STRENGTHEN-ITEM S1's question, short_copy and why_now take the AIE's words.
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('30740dc01caa692a16a22e564eabbb84821a4f4909ab648d19312575fc892f78');
     // System 4 row 11 (SCIENCE, 15 Oct): ONLY the four not_measured S1 cases lose " The comparison turns on it." in their
     // expected rendered question (a sensitivity claim THIS Run never measured); the policy template bytes are unchanged.
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('39686a0d7fd7a3e06241eab00a2b97fcfaecd106a8ec5efb0697bd38ad5fec38');
+    // T11 / C5: ONLY those four S1 cases' expected title, why and question change (12 lines), rendered by the real renderer.
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('2fef0e34f336fc6879e26ecbf5775a197332079e9638ab222a6cda46e7e98d91');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });

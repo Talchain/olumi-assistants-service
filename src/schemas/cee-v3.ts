@@ -404,6 +404,11 @@ export const NodeV3 = z.object({
     lead: z.string().min(1).max(300),
     /** The drafter's comparator as read at construction; a comparator the user holds (`goal_direction`) speaks first. */
     bound: z.enum(['<=', '<', '>=', '>']).optional(),
+    /**
+     * SYSTEM 2 (AIE 6181498097): the level is DERIVED from the user's own figures by their own definition ("80 + 0"), not
+     * Olumi's reading of one figure and not an explicitly measured total. The reading keeps speaking while the level holds.
+     */
+    derived: z.literal(true).optional(),
   }).optional().catch(undefined),
   /**
    * ⭐ RECOVERY BATCH C — WHAT THE GOAL'S TARGET IS MEASURED AGAINST (goal nodes only; Batch 0 change-goal decision rulings
@@ -763,13 +768,6 @@ export const NodeV3 = z.object({
    * analysis hash. Malformed on read degrades to absence.
    */
   already_true_quote: z.string().min(1).optional().catch(undefined),
-  /**
-   * ⭐ S2 the user's own occurrence estimate for a RISK (AIE 6179240850): their complete verified statement (source, speaker,
-   * qualifier, the period it covers), kept beside the `event_risk` block their card press wrote, so reopen, read-back and the AI
-   * see what they said, not a bare figure. Written only by `applyRiskOccurrenceEdit`. CEE-owned; not in the analysis hash.
-   * Malformed on read degrades to absence.
-   */
-  occurrence_statement: z.record(z.string(), z.unknown()).optional().catch(undefined),
   /**
    * ⭐ SYSTEM 1 the user's recorded statements about this node (DL ruling 14 Oct 23:09Z; AIE 6180193788): each entry is the
    * subject and field a door card recorded, the user's complete verified words (quote, source, speaker) and when. Written ONLY by

@@ -253,12 +253,11 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
     // Paul #94 6166259456: the route's automatic Run after a committed change is a dispatch site on the SAME typed carrier.
     expect(route).toContain('autoRun = await capabilities.runAnalysis(toolCtx, ');
-    // S2 one-press cards the route issues after the Run (#3129, the user's own figure) and from the brief (#3134, holds now):
-    // two dispatch sites on the SAME typed carrier; their cards' door re-verifies the quote as the user's.
+    // S2 one-press card the route issues after the Run (#3129, the user's own figure): a dispatch site on the SAME typed carrier.
     expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(heldConfirm), toolCtx, capabilities, mode)");
-    expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(briefHoldsNow), toolCtx, capabilities, mode)");
-    // S2 (DL 21:15Z): the user's own chance for a risk, from THIS turn's typed words: a third route-issued card, same carrier.
-    expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(typedOccurrence), toolCtx, capabilities, mode)");
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance)').toBe(25);
+    // SYSTEM 1 M1: the ONE door issuer (a risk's chance from THIS turn's typed words, else the brief's holds-now sentence) replaces
+    // #3134's and #3139's two route issuers: ONE dispatch site on the same carrier; the door re-verifies the quote as the user's.
+    expect(route).toContain("statements: doorArgs.quotes.map((quote) => ({ quote })) }), toolCtx, capabilities, mode);");
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance)').toBe(24);
   });
 });

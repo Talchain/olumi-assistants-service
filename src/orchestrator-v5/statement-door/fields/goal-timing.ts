@@ -21,17 +21,18 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import { provenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { CONDITIONAL, NEGATED } from './risk.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { effectsBasisWords, goalTargetBasisOf, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
 import {
-  answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, type ApprovedGoalReading, type GoalReadingProjection,
+  answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, type ApprovedGoalReading, type GoalReadingProjection, type GoalReadingMembers,
 } from '../../goal-target/goal-reading-write.js';
 import type { StatementAsk } from '../ask.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { holdsUserStatement, userStatementOnNode, userStatementRecord, type UserStatementRecord } from '../statements.js';
+import { holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf, type UserStatementRecord } from '../statements.js';
 import { subjectKey, type DoorSubject } from '../subject.js';
 import type { FieldWriter } from '../write.js';
 
@@ -86,10 +87,13 @@ const canonical = (v: unknown): string => JSON.stringify(v, (_k, x: unknown) => 
 export function timingFingerprintOf(graph: unknown, goalId: string): string | undefined {
   const h = heldTiming(graph, goalId);
   if (h === undefined) return undefined;
-  const effects = h.effects.map((e) => [e.from, e.to, e.strength ?? null, e.exists_probability ?? null, e.effect_direction ?? null]);
+  // Each effect as the model holds it, its native statement and source included (a corrected source is a different effect).
+  const effects = h.effects.map((e) => [e.from, e.to, e.strength ?? null, e.exists_probability ?? null, e.effect_direction ?? null, e.provenance ?? null]);
   const options = effectOptions(graph).map((o) => [o.id, o.interventions ?? null]);
   const t = h.projection.target;
-  const target = [t?.raw ?? null, t?.unit ?? null, t?.frame ?? null, t?.comparator ?? null, h.basis.reference, h.basis.period_months];
+  // The target and the reading it is evaluated on: reference, period, what 100% is, the effect unit and every retained condition.
+  const target = [t?.raw ?? null, t?.unit ?? null, t?.frame ?? null, t?.comparator ?? null, h.basis.reference, h.basis.period_months,
+    h.basis.period_kind, h.basis.denominator ?? null, h.basis.effect_unit, h.basis.also_required ?? []];
   return createHash('sha256').update(canonical({ effects, options, target })).digest('hex').slice(0, 32);
 }
 
@@ -195,6 +199,10 @@ function readWords(quote: string, words: string | undefined): Omit<TimingReading
   if (month === undefined || w.length > 200 || !inQuote(w, quote)) {
     return { refused: `Give reading_words: the user’s own words for when the effects are fully in place, with its one month figure, copied from “${quote}”.` };
   }
+  // The statement's own semantics (the risk door's, shared): a negated or conditional statement never attests that the effects
+  // are in place. Its words are kept as said; only the missing affirmative is asked.
+  if (NEGATED.test(quote)) return { refused: `“${quote}” says when the effects would NOT be in place, which is not a forecast that they are. Ask only by when they would be fully in place.` };
+  if (CONDITIONAL.test(quote)) return { refused: `“${quote}” states the timing under a condition. Ask only whether it holds as the model stands, without that condition.` };
   return { month, reference: FROM_TODAY.test(w) ? 'today' : AFTER_LAUNCH.test(w) ? 'launch' : undefined, covers: UNIVERSAL.test(w) ? 'all' : 'yours' };
 }
 
@@ -205,7 +213,8 @@ function readingOf(statements: readonly UserStatement[], words: string | undefin
   const r = readWords(dated[0]!.quote, words);
   if ('refused' in r) return undefined;
   const ask = timingAskOf(graph, goalId)?.words;
-  return { ...r, answeredAsk: ask !== undefined && statements.some((s) => s.answering === ask) };
+  // An answer confirms the ask only when it affirms it: "No, …" or "Only if …" never confirms every effect and the end point.
+  return { ...r, answeredAsk: ask !== undefined && statements.some((s) => s.answering === ask && !NEGATED.test(s.quote) && !CONDITIONAL.test(s.quote)) };
 }
 
 export function timingAssumptions(statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string): string[] {
@@ -257,7 +266,9 @@ export const TIMING_ROW: RoleRow = {
   recordedWords: timingRecordedWords,
   bindsWhole: (quote, subject, graph, words) => {
     const goals = nodesOf(graph).filter((n) => n.kind === 'goal');
-    return goals.length === 1 && goals[0]!.id === subject.id && typeof words === 'string' && UNIVERSAL.test(words) && inQuote(words.trim().replace(/[.,;:!?]+$/, ''), quote);
+    // Only an AFFIRMED statement scoped to every effect binds by its own scope; a negated or conditional one never does.
+    return goals.length === 1 && goals[0]!.id === subject.id && typeof words === 'string' && UNIVERSAL.test(words)
+      && !NEGATED.test(quote) && !CONDITIONAL.test(quote) && inQuote(words.trim().replace(/[.,;:!?]+$/, ''), quote);
   },
   incomplete: (statements, subject, graph, words) => {
     const h = heldTiming(graph, subject.id);
@@ -270,13 +281,17 @@ export const TIMING_ROW: RoleRow = {
   },
 };
 
-/** The read-back: the reading the card showed with the flag it set, and the user's words recorded (JSON payload only). */
-export function timingHolds(payload: ApprovedGoalReading, after: unknown): boolean {
-  const node = nodesOf(after).find((n) => n.id === payload.goal_id);
-  const said = payload.user_statement;
-  return node !== undefined && isRec(payload.expected_basis) && said !== undefined
-    && isDeepStrictEqual(node.goal_target_basis, answeredBasisOf(payload.expected_basis, payload.members))
-    && holdsUserStatement(after, said.record, said.subject);
+/** The read-back: the reading the card showed with the flag it set, and the user's words recorded (the stored JSON payload only). */
+export function timingHolds(payload: unknown, after: unknown): boolean {
+  if (!isRec(payload) || typeof payload.goal_id !== 'string' || !isRec(payload.expected_basis) || !isRec(payload.user_statement)) return false;
+  const record = userStatementRecordOf(payload.user_statement.record);
+  const s = isRec(payload.user_statement.subject) ? payload.user_statement.subject : undefined;
+  if (record === undefined || s === undefined || typeof s.id !== 'string' || s.field !== 'lead') return false;
+  const goalId = payload.goal_id;
+  const node = nodesOf(after).find((n) => n.id === goalId);
+  const members = isRec(payload.members) ? (payload.members as GoalReadingMembers) : undefined;
+  return node !== undefined && isDeepStrictEqual(node.goal_target_basis, answeredBasisOf(payload.expected_basis, members))
+    && holdsUserStatement(after, record, { kind: 'goal', id: s.id, field: 'lead' });
 }
 
 export const TIMING_WRITER: FieldWriter = {
@@ -294,6 +309,8 @@ export const TIMING_WRITER: FieldWriter = {
       user_statement: { subject: reading.subject, record } };
     const written = applyGoalReadingEdit(graph, payload);
     if (written.kind === 'refused') return { refused: written.reason };
-    return { member: 'goal_reading', payload, holds: (after: unknown) => timingHolds(payload, after) };
+    return { member: 'goal_reading', payload: JSON.parse(JSON.stringify(payload)) as unknown };
   },
+  // SYSTEM 1 M1: the read-back reads the STORED write (a proposal is saved, then pressed), never a closure.
+  holds: (write, after) => timingHolds(write.payload, after),
 };

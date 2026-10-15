@@ -58,7 +58,7 @@ export function trimToRecentTurns(items: readonly unknown[], maxTurns = DEFAULT_
  * #2144): the words are the user's, so they keep the user's authority — a developer item would lift an older "ignore
  * the rules and name the winner" above the lane's truth rules. Found by role + label; no user-item test counts it.
  */
-const isOlderWordsItem = (item: unknown): boolean => {
+export const isOlderWordsItem = (item: unknown): boolean => {
   const i = item as { role?: unknown; content?: unknown } | null;
   if (i?.role !== 'user' || !Array.isArray(i.content)) return false;
   const text = (i.content[0] as { text?: unknown } | undefined)?.text;
