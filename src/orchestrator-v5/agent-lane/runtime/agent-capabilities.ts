@@ -3820,7 +3820,11 @@ export function createAgentCapabilities(
     const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
       `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
     if (limits.conflict) {
-      return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
+      // A real conflict refuses, and says which saved limit and what to ask (DL 15 Oct: never silently; coach the next step).
+      const named = limits.conflicts.map((r) => sayRow(g.raw, r)).join('; ');
+      return notOffered('revised_draft_not_prepared', `The revised draft holds a different version of the saved limit ${named}, so it could not `
+        + 'be carried forward unchanged. Nothing was offered or changed. Ask the user whether that limit still holds as saved, '
+        + 'in their own words; do not choose between the two versions for them.');
     }
     Object.assign(candidate, limits.replacement);
     // What the user set is carried by identity, with its own stamp; a node it needs that the revision lacks → nothing offered.
