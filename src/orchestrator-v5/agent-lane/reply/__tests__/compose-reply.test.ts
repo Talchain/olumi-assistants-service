@@ -32,7 +32,7 @@ import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
 import { openQuestionsSegment, textAtRest, untestedHorizonLine } from '../../decision-input-ask.js';
 import { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE } from '../../runtime/widen-draft.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../../goal-target/zero-spread-horizon-line.js';
-import { goalHorizonSteadyWhyLine, goalHorizonWithholdDetail } from '../../../goal-target/goal-horizon-detail.js';
+import { goalHorizonNextStep, goalHorizonReplyLead, goalHorizonSteadyWhyLine, goalHorizonWithholdDetail } from '../../../goal-target/goal-horizon-detail.js';
 
 const face = (c: ReplyComposition): string[] => (c.shape === null ? [] : [c.shape.headline, ...c.shape.bullets]);
 /** Every sentence of `original` is in `shipped`, verbatim (bullet markers aside). */
@@ -1832,6 +1832,36 @@ describe('Science §(ad) time-bound goal reply details', () => {
     expect(c.text).not.toContain("This model doesn't yet say");
     expect(c.text).not.toContain('%');
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  // ⭐ S7 B2 (hiring e2e c1e944a4/2c43f563 turn 18; DL 06:1xZ, AIE 6178106849 option A): the lead said once, then the ONE next
+  // step straight after it (the goal's own timing question, `timingAskOf`), before the estimates line. Served turn 18 had none.
+  // Above, a goal with no timing question (no option effects) keeps the lead alone: the contrast.
+  it.each([
+    ['hiring e2e turn 18 (today reference)', 'tests/fixtures/deadline-origin/served-hiring-c1e944a4-turn18-state.json',
+      'Would all of these effects be fully in place by month three from today (15 January 2027): ‘Developer hires from today’ on ‘Code quality deterioration’, ‘Developer hires from today’ on ‘Productivity’, ‘Tech Lead hires from today’ on ‘Code quality deterioration’ and ‘Tech Lead hires from today’ on ‘Leadership gap’?'],
+    ['hiring 42d10ecf (launch reference)', 'src/orchestrator-v5/agent-lane/__tests__/fixtures/hiring-42d10ecf-read-before-effects.json',
+      'Would all of these effects be fully in place by month three after launch: ‘Hiring spend’ on ‘Budget pressure’, ‘Mid-weight developers’ on ‘Code quality’, ‘Mid-weight developers’ on ‘Productivity’, ‘Tech leads’ on ‘Code quality’ and ‘Tech leads’ on ‘Productivity’?'],
+  ])('%s: the horizon lead is followed at once by the one timing question, then the estimates', (_brief, file, ask) => {
+    const read = JSON.parse(readFileSync(file, 'utf8'));
+    const g = read.body?.graph ?? read.graph;
+    const why = goalHorizonWithholdDetail(g)!;
+    const lead = goalHorizonReplyLead(g)!;
+    expect(goalHorizonNextStep(g)).toBe(ask);
+    const c = composeReplyShape({ faceContract: 'run', graph: g, text: `Your results are ready.\n\n${why}\n\n${context}`,
+      chanceCells: [{ kind: 'withheld', face: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, why, reasons: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: why }] }],
+      estimatesLine: "Olumi's estimates: 2, see Check estimates." });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(`${lead} ${ask}`);
+    // Said once: the reason once, the question once, and the question before the estimates.
+    expect(c.text.split('this Run has not evaluated it')).toHaveLength(2);
+    expect(c.text.split(ask)).toHaveLength(2);
+    expect(c.text.indexOf(ask)).toBeLessThan(c.text.indexOf("Olumi's estimates: 2"));
+    expect(c.text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    expect(c.text).not.toMatch(/after launch after launch/);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    // The durable replay recovers the same shape from the stored text (agent-v1-turn's replay match).
+    expect(shapeFromDerivedAnswerText(c.text, `${lead} ${ask}`)).toEqual(c.shape);
   });
 
   it('CONTRAST: a card that does NOT carry the horizon marker keeps the ruled shape: the marker leads, its why once in detail', () => {

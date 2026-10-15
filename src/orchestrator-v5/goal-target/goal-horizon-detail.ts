@@ -9,6 +9,7 @@ import { sayDate } from './deadline-date.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/projector.js';
 import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { timeClassOf, unsupportedTimeSentence } from './time-class.js';
+import { timingAskOf } from '../statement-door/fields/goal-timing.js';
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
@@ -36,6 +37,17 @@ export function goalHorizonReplyLead(graph: unknown): string | null {
   if (held === undefined || label === '') return null;
   const point = held.month !== undefined ? `at month ${held.month}` : `on ${sayDate(held.deadline!)}`;
   return `Your goal is ${label} ${point}; this Run has not evaluated it at that point.`;
+}
+
+/**
+ * ⭐ S7 B2 (hiring e2e c1e944a4/2c43f563 turn 18; DL 06:1xZ, AIE 6178106849): the ONE useful next step after the horizon lead,
+ * said straight after it: the goal's own timing question (`timingAskOf`, M3b's words), whose answer the statement door binds
+ * by `answering`. Served: the lead was followed by the estimates and relies-on lines and no step. `null` when the model holds
+ * no timing question for this goal (the why's own missing inputs stay in More detail).
+ */
+export function goalHorizonNextStep(graph: unknown): string | null {
+  const held = horizonGoal(graph);
+  return held === undefined || typeof held.goal.id !== 'string' ? null : timingAskOf(graph, held.goal.id)?.words ?? null;
 }
 
 /**
