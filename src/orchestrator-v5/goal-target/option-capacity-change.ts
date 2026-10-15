@@ -13,6 +13,7 @@
  * Pure: the capability does the I/O (`agent-capabilities.ts` `proposeOptionCapacityChange` / `applyOptionCapacityChange`).
  */
 import { isDeepStrictEqual } from 'node:util';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { unresolvedEventOptionIds, withCompiledCapacityRatios } from './event-by-date-model.js';
 import { deliverableOf, shareByDateGoalForChanceOf } from './share-by-date-run.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
@@ -58,9 +59,13 @@ export type OptionCapacityTarget =
 function shareToday(factor: Rec | undefined): { readonly value: number; readonly unit: string; readonly total: number } | undefined {
   const os = factor?.observed_state, raw = num(os?.raw_value), unit = typeof os?.unit === 'string' ? os.unit.trim() : '';
   const total = num(os?.cap) ?? 100;
-  // The freed-time reading is about the team's TIME: a plain "%" or a "% of" a whole of time ("% of developer time"), never
-  // "% of budget" (PL 14 Oct: the share's population is bound, not assumed).
-  const ofTime = unit === '%' || /^%\s*of\b.*\b(?:time|hours?|capacity|effort|working week|days?)\b/i.test(unit);
+  // The freed-time reading is about the team's TIME: a plain percentage or a percentage "of" a whole of time ("% of developer
+  // time"), never "% of budget" (PL 14 Oct: the share's population is bound, not assumed). The percent family is the unit
+  // authority's (`classifyUnitScaleClass`), never a bare spelling here; its prefix layer reads "percentage points" as percent, and
+  // a change in points is not a share of time, so points stay out.
+  const percent = classifyUnitScaleClass(unit) === 'percent' && !/\bpoints?\b/i.test(unit);
+  const ofTime = percent && (/^(?:%|percent|per cent|pct|percentage)$/i.test(unit)
+    || /^(?:%|percent|per cent)\s*of\b.*\b(?:time|hours?|capacity|effort|working week|days?)\b/i.test(unit));
   return raw !== undefined && ofTime && total === 100 && raw > 0 && raw < total ? { value: raw, unit, total } : undefined;
 }
 

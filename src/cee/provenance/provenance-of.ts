@@ -811,7 +811,10 @@ export function authorshipOf(subject: AuthorshipSubject): Provenance {
     // The brief's words, by the node's stamp alone: the person's for every gate, labelled where a chance rests on it.
     if (t === 'from_brief') return P('human', { stampOnly: true });
     if (t === 'unverified_brief') return P('human', { role: 'unverified' });
-    return t === 'ai_inferred' ? P('ai') : P('unknown');
+    if (t === 'ai_inferred') return P('ai');
+    // The object form a node also carries (`{ source }`): its stamp's class, as a link's drawing stamp is read (never `ai` wholesale).
+    const stamp = classifyValueSource(rec(t)?.source);
+    return stamp === 'user_stated' ? P('human') : stamp === 'ai_drafted' || stamp === 'system_repaired' ? P('ai') : P('unknown');
   }
   if ('card' in subject) {
     const a = subject.card?.authored_by;
@@ -969,6 +972,33 @@ export function inputOriginOf(observed: unknown): InputOrigin {
 
 /** Whose figure the model holds, in the receipts' owners (`write-outcome.ts` `NotSavedValue.still.owner`). */
 export type HeldFigureOwner = 'yours' | 'brief' | 'olumi' | 'olumi_accepted' | 'unverified_brief';
+
+/**
+ * ⭐ S10 FIX 1 (arch12/SYNTHESIS, DL 15 Oct): WHOSE, in the words the AI's model view says it, from the ONE answer. The AI read
+ * the raw stamp beside the answer (`user_assumption` next to `olumi_accepted`) and told Paul "proposed values become yours
+ * when you approve them". It now reads this answer alone: the person's (`yours`), their brief's by stamp (`brief`), words whose
+ * origin is not verified (`unverified_brief`), Olumi's (`olumi`, `olumi_accepted` once the person accepted it), or `unknown`.
+ */
+export type Whose = HeldFigureOwner | 'unknown';
+export function whoseOf(p: Provenance): Whose {
+  if (p.origin === 'human') return p.role === 'unverified' ? 'unverified_brief' : p.stampOnly === true ? 'brief' : 'yours';
+  if (p.origin === 'ai') return p.accepted ? 'olumi_accepted' : 'olumi';
+  return 'unknown';
+}
+
+/**
+ * WHO DREW A LINK, as the ONE answer (S10 fix 1; PL 15 Oct 00:49Z on #3177): the person's stamp is theirs, their brief's stamp
+ * is theirs by its stamp, a structural, AI or repair link is Olumi's, and an unrecognised stamp, or none, is UNKNOWN. Never the
+ * display's `unverified_brief`, which for a link means nothing was established, not a human source with an unverified role.
+ */
+export function linkDrawnByOf(edge: unknown, context: LinkContext = {}): Provenance {
+  const src = isRec(edge) && isRec(edge.provenance) ? edge.provenance.source : undefined;
+  if (src === 'brief_extraction') return P('human', { stampOnly: true });
+  if (src === 'user_specified') return P('human');
+  if (context.validatedDefinition === true || context.fromKind === 'option' || context.fromKind === 'decision') return P('ai', { structural: true });
+  const drawnBy = classifyValueSource(src);
+  return drawnBy === 'user_stated' ? P('human') : drawnBy === 'ai_drafted' || drawnBy === 'system_repaired' ? P('ai') : P('unknown');
+}
 
 export function heldFigureOwnerOf(observed: unknown): HeldFigureOwner | undefined {
   const reading = readValue(observed);

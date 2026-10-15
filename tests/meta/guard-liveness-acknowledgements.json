@@ -24,6 +24,13 @@
       "why": "Reachable only from the manually-installed pre-push hook (scripts/install-hooks.sh). A developer who never ran the installer never runs it, and no CI job does."
     },
     {
+      "path": "scripts/ci/architecture-counts.sh",
+      "via": [
+        "NONREQUIRED_WORKFLOW"
+      ],
+      "why": "Reachable only from ci.yml::Architecture counts (advisory), which is deliberately not required: Paul's lean-deploy rule (CLAUDE.md §7, 14 Oct) keeps census/ratchet guards advisory. It is a proliferation WARNING the DL reads on each PR (#3162), never a merge gate."
+    },
+    {
       "path": "scripts/ci/assert-graph-evaluator-observed.mjs",
       "via": [
         "NONREQUIRED_WORKFLOW"

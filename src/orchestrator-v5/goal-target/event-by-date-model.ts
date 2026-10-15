@@ -291,6 +291,38 @@ export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliv
   return teams.length === 1 ? { goal, team: teams[0], deliverable } : null;
 }
 
+/** One option of a drafted deadline forecast that the forecast cannot size yet, and the sketch factors it says it changes. */
+export interface UnsizedEventOption {
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly baseline: boolean;
+  readonly factors: readonly { readonly id: string; readonly label: string }[];
+}
+
+/**
+ * ⭐ DL ruling (A), 15 Oct (served 7f5659fd, Paul's legacy brief, turn 06): an option whose only links go to the drafter's
+ * sketch, which admission keeps beside the forecast (`retained_excluded`), and which switches on no forecast part, is UNSIZED:
+ * the forecast is missing how much it changes the work (an input to ask for), never unconnected (a structure to repair). That
+ * happens only while no option is sized (`admitEventByDate` links every option to every carrier). An option with no link to any
+ * factor at all is not here: it really is unconnected, and keeps the structural message. Pure; by graph identity.
+ */
+export function unsizedEventOptions(graph: unknown): UnsizedEventOption[] {
+  if (draftedTeamPartOf(graph) === null) return [];
+  const g = graph as Rec;
+  const nodes: Rec[] = Array.isArray(g.nodes) ? g.nodes.filter(rec) : [];
+  const edges: Rec[] = Array.isArray(g.edges) ? g.edges.filter(rec) : [];
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const sketch = new Set(nodes.filter(n => typeof n.id === 'string' && n.id.startsWith('event_context_')
+    && n.analysis_participation === 'retained_excluded').map(n => n.id as string));
+  return nodes.filter(n => n.kind === 'option').flatMap((o): UnsizedEventOption[] => {
+    const targets = edges.filter(e => e.from === o.id && e.edge_type !== 'bidirected' && byId.get(e.to)?.kind === 'factor').map(e => String(e.to));
+    const settings = rec(o.interventions) ? Object.keys(o.interventions) : [];
+    if (targets.length === 0 || !targets.every(t => sketch.has(t)) || !settings.every(t => sketch.has(t))) return [];
+    return [{ option_id: String(o.id), option_label: String(o.label ?? o.id), baseline: o.is_baseline === true,
+      factors: [...new Set(targets)].map(id => ({ id, label: String(byId.get(id)?.label ?? id) })) }];
+  });
+}
+
 export function teamTimeAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
   if (part === null || goalDeadlineFromRecord(graph, part.goal.id) === undefined || part.team.observed_state?.value !== undefined) return null;

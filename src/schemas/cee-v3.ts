@@ -769,13 +769,6 @@ export const NodeV3 = z.object({
    */
   already_true_quote: z.string().min(1).optional().catch(undefined),
   /**
-   * ⭐ S2 the user's own occurrence estimate for a RISK (AIE 6179240850): their complete verified statement (source, speaker,
-   * qualifier, the period it covers), kept beside the `event_risk` block their card press wrote, so reopen, read-back and the AI
-   * see what they said, not a bare figure. Written only by `applyRiskOccurrenceEdit`. CEE-owned; not in the analysis hash.
-   * Malformed on read degrades to absence.
-   */
-  occurrence_statement: z.record(z.string(), z.unknown()).optional().catch(undefined),
-  /**
    * ⭐ SYSTEM 1 the user's recorded statements about this node (DL ruling 14 Oct 23:09Z; AIE 6180193788): each entry is the
    * subject and field a door card recorded, the user's complete verified words (quote, source, speaker) and when. Written ONLY by
    * the statement door's writer in the same commit as the member its reading sets; read through `userStatementFor`. CEE-owned; not

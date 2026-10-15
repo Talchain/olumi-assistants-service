@@ -716,9 +716,9 @@
       "policy_id": "RC-STRENGTHEN-ITEM",
       "variant": "S1",
       "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
-      "title": "The comparison rests on a link nobody has sized yet.",
-      "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability?"
+      "title": "A link on the path to your goal has no size yet.",
+      "why": "This link connects sprint capacity for AI reporting to AI reporting module availability on the model's path to quarterly revenue; its effect remains a provisional assumption.",
+      "question": "How much does sprint capacity for AI reporting change AI reporting module availability? Olumi has not yet established a size for this link. This Run did not measure its influence on the comparison."
      }
     ]
    }
@@ -956,9 +956,9 @@
       "policy_id": "RC-STRENGTHEN-ITEM",
       "variant": "S1",
       "item": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
-      "title": "The comparison rests on a link nobody has sized yet.",
-      "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for integration fix really change integration-step bug resolution?"
+      "title": "A link on the path to your goal has no size yet.",
+      "why": "This link connects sprint capacity for integration fix to integration-step bug resolution on the model's path to quarterly revenue; its effect remains a provisional assumption.",
+      "question": "How much does sprint capacity for integration fix change integration-step bug resolution? Olumi has not yet established a size for this link. This Run did not measure its influence on the comparison."
      }
     ]
    }
@@ -1197,9 +1197,9 @@
       "policy_id": "RC-STRENGTHEN-ITEM",
       "variant": "S1",
       "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
-      "title": "The comparison rests on a link nobody has sized yet.",
-      "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability?"
+      "title": "A link on the path to your goal has no size yet.",
+      "why": "This link connects sprint capacity for AI reporting to AI reporting module availability on the model's path to quarterly revenue; its effect remains a provisional assumption.",
+      "question": "How much does sprint capacity for AI reporting change AI reporting module availability? Olumi has not yet established a size for this link. This Run did not measure its influence on the comparison."
      }
     ]
    }
@@ -5884,9 +5884,9 @@
       "policy_id": "RC-STRENGTHEN-ITEM",
       "variant": "S1",
       "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
-      "title": "The comparison rests on a link nobody has sized yet.",
-      "why": "Until it is sized, Olumi can't compare the options on your goal.",
-      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability?"
+      "title": "A link on the path to your goal has no size yet.",
+      "why": "This link connects sprint capacity for AI reporting to AI reporting module availability on the model's path to quarterly revenue; its effect remains a provisional assumption.",
+      "question": "How much does sprint capacity for AI reporting change AI reporting module availability? Olumi has not yet established a size for this link. This Run did not measure its influence on the comparison."
      }
     ]
    }

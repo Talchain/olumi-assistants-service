@@ -33,10 +33,11 @@ const S1_ROW = {
   primary_action: { label: 'Give your estimate', action_kind: 'edit_inline', target: `${AI.from}->${AI.to}` },
   state_key_hash: expect.stringMatching(/^[0-9a-f]{12}$/),
   copy: {
-    title: 'The comparison rests on a link nobody has sized yet.',
-    why: "Until it is sized, Olumi can't compare the options on your goal.",
-    // System 4 row 11: served D1's Run does not rank this link's factor as its most sensitive driver, so no "turns on it" claim.
-    question: 'How much does sprint capacity for AI reporting really change AI reporting module availability?',
+    // Science T11 (AIE 6180618773): an unsized link on the goal's path, beside a Run that did not measure sensitivity.
+    title: 'A link on the path to your goal has no size yet.',
+    why: "This link connects sprint capacity for AI reporting to AI reporting module availability on the model's path to quarterly revenue; its effect remains a provisional assumption.",
+    question: 'How much does sprint capacity for AI reporting change AI reporting module availability? Olumi has not yet established a size for this link. '
+      + 'This Run did not measure its influence on the comparison.',
   },
   item_ref: { kind: 'link', from_id: AI.from, to_id: AI.to },
 };

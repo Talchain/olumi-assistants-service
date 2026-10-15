@@ -79,6 +79,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
   let runDelta: unknown;
   /** The interpreting call's words (tool-less, `tool_choice: 'none'`); null → the default answer below. */
   let interpretation: string | null = null;
+  /** The Run's own `inference_warnings`, on its block and on the read after it; null → none (the synthetic result). */
+  let runWarnings: unknown[] | null = null;
+  const withRunWarnings = (): Record<string, unknown> => (runWarnings === null ? {} : { enrichment: { inference_warnings: runWarnings } });
   /** A route instance on FRESH modules: an empty process cache and an empty proposal store. */
   async function buildRouteApp(): Promise<FastifyInstance> {
     vi.resetModules();
@@ -93,7 +96,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
         brief_text: BRIEF,
         analysis_ready: readiness,
         analysis_state: runs > 0 ? { ...analysisState, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } } : analysisState,
-        ...(runs > 0 ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } } } : {}),
+        ...(runs > 0 ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' }, ...withRunWarnings() } } : {}),
         ...(runs > 0 && runDelta !== undefined ? { current_read: { run_delta: runDelta } } : {}),
       };
     });
@@ -102,7 +105,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
       if (b.chip?.action_type === 'run_analysis') runs += 1;
       if (b.chip?.action_type === 'run_analysis' && runStampedAt !== null) {
-        return { assistant_text: 'ok', blocks: [{ type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: {} }], analysis_ready: readiness,
+        return { assistant_text: 'ok', blocks: [{ type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: {}, ...withRunWarnings() }], analysis_ready: readiness,
           analysis_state: { run_state: { kind: 'complete_current', computed_at: runStampedAt } }, ...(runDelta !== undefined ? { run_delta: runDelta } : {}) };
       }
       return { assistant_text: 'ok', blocks: b.chip?.action_type === 'run_analysis' ? [{ type: 'analysis_result', data: {} }] : [], analysis_ready: readiness };
@@ -135,7 +138,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; ledger = null; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; runStampedAt = null; runDelta = undefined; interpretation = null; runWarnings = null; ledger = null; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -507,6 +510,88 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       const b = await press();
       expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
       expect(b.assistant_text).not.toContain(COACHING);
+    });
+  });
+
+  /**
+   * ⭐ SAY-SHOWN FOR THE CALL THAT INTERPRETS A RUN (legacy e2e 7f5659fd turn 08: the withholding said twice). The Run's own
+   * output promised the AI its `say` is shown, and the route showed it; the one call that interprets that Run read the SAME
+   * `say` from the canonical state with no promise, explained it in its own words, and the user read the cause twice.
+   * The Runs below carry served warnings, verbatim: legacy turn 08 (approve → the automatic Run) and marketing 7f5659fd's
+   * reopen read (a Run pressed after a change). The contrast is pricing e7f95dc6's `say` that asks: no Run promises it.
+   */
+  describe('SAY-SHOWN: the call that interprets a Run is told what that Run promised', () => {
+    const RUN_AT = '2026-10-01T12:00:00.000Z';
+    const COACHING = 'This Run reads the model as you just saved it.';
+    const LEGACY_0708 = [
+      { code: 'GOAL_FIGURES_SHARE_APPROXIMATION', message: "No chance is shown for this option yet: it changes ‘Development velocity’, which this deadline forecast doesn't use yet. Worth discussing: how much it would speed up the work, and from when.", severity: 'warning', option_ids: ['event_option_3'], withheld_claims: ['goal_probability', 'joint_probability', 'downside'] },
+      { code: 'GOAL_FIGURES_SHARE_APPROXIMATION', message: 'No chance is shown for this option: on your own soonest estimate it can’t reach 100% of next feature launch by 14 April 2027. Even at 7 months, it gets about 97% done by then (7 months of work at 113% of today’s capacity is still about 6.2 months, past the 6 months to the deadline).', severity: 'warning', option_ids: ['event_option_2'], withheld_claims: ['goal_probability', 'joint_probability', 'downside'] },
+    ];
+    const MARKETING_7F5659FD = [
+      { code: 'GOAL_FIGURES_RETAINED_LIMIT_UNRESOLVED', source: 'cee', message: 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded.', severity: 'warning', constraint_ids: ['agent-lane:annual_campaign_marketing_spend:<=', 'agent-lane:your_time_on_the_campaign:<='], win_shares_withheld: true },
+      { code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', detail: { reason: 'missing_goal_baseline' }, message: 'Not shown. Conversion rate is measured over the first three months after launch, so it has no level today, and the model has no forecast for that period yet.', node_ids: ['conversion_rate'], severity: 'warning', option_ids: ['hire_marketing_manager', 'ai_tool_and_more_advertising', 'continue_without_either'], constraint_ids: ['agent-lane:conversion_rate:>='], withheld_claims: ['goal_probability', 'joint_probability', 'downside'] },
+    ];
+    const PRICING_ASKS = [
+      { say: 'Does “£20k MRR” mean Pro plan MRR only or MRR across all plans?', code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', detail: { reason: 'target_reading_open' }, message: 'Not shown. Your target can be read more than one way. Does “£20k MRR” mean Pro plan MRR only or MRR across all plans?', node_ids: ['mrr'], severity: 'warning', option_ids: ['keep_current_pro_price', 'raise_pro_price_to_59'], withheld_claims: ['goal_probability', 'joint_probability', 'downside'] },
+    ];
+    type Sent = { canonical_state?: { analysis?: { goal_chance?: { say?: string; say_shown?: string } } } };
+    const interpreterGoalChance = () => {
+      const calls = modelBodies.filter(isInterpretingCall);
+      expect(calls, 'one interpreting call over this Run').toHaveLength(1);
+      const chance = (interpretingRequestOf(calls[0]!) as Sent).canonical_state?.analysis?.goal_chance;
+      expect(chance?.say, 'the control: the interpreting call reads this Run\'s withheld say').toEqual(expect.any(String));
+      return chance!;
+    };
+    const times = (text: string, part: string): number => text.split(part).length - 1;
+    const approveAndRun = async () => {
+      readiness = { status: 'ready', may_run: true };
+      interpretation = COACHING;
+      runStampedAt = RUN_AT;
+      const b = await proposeThenApprove() as unknown as { assistant_text: string };
+      expect(runs, 'the automatic Run ran once').toBe(1);
+      return b;
+    };
+    const pressAfterChange = async () => {
+      readiness = { status: 'ready', may_run: true };
+      interpretation = COACHING;
+      runStampedAt = RUN_AT;
+      runDelta = { attribution_case: 'C1_attributable', input_coverage: 'complete', win_probabilities: [], goal_chances: [], flip_thresholds: [],
+        leader: { changed: false, noise_verdict: 'not_noise_qualified' },
+        input_changes: [{ entity_kind: 'link', field: 'presence', link: { from: 'f1', to: 'o1' }, before: null, after: { raw: true } }] };
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message: 'Run analysis', source: 'chip_click',
+        chip: { action_type: 'run_analysis' } } });
+      expect(r.statusCode).toBe(200);
+      const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
+      expect(b._diagnostic_trace.fast_path, 'the Run press fast path').toBe('run');
+      return b;
+    };
+
+    it('RED (legacy 7f5659fd turn 08, approve → the automatic Run): the interpreting call is told the say is shown; the reply says it once', async () => {
+      runWarnings = LEGACY_0708;
+      const b = await approveAndRun();
+      const { SAY_SHOWN_NOTE } = await import('../goal-chance-withheld.js');
+      const chance = interpreterGoalChance();
+      expect(chance.say_shown, 'the promise the Run itself made').toBe(SAY_SHOWN_NOTE);
+      expect(times(b.assistant_text, chance.say!), 'the host shows that same say, once').toBe(1);
+      expect(b.assistant_text).toContain(COACHING);
+    });
+
+    it('RED (second brief: marketing 7f5659fd, a Run pressed after a change): the same promise reaches the interpreting call', async () => {
+      runWarnings = MARKETING_7F5659FD;
+      const b = await pressAfterChange();
+      const { SAY_SHOWN_NOTE } = await import('../goal-chance-withheld.js');
+      const chance = interpreterGoalChance();
+      expect(chance.say_shown).toBe(SAY_SHOWN_NOTE);
+      expect(times(b.assistant_text, chance.say!)).toBe(1);
+    });
+
+    it('CONTRAST (pricing e7f95dc6, a say that asks): the Run promises nothing, so the interpreting call is told nothing', async () => {
+      runWarnings = PRICING_ASKS;
+      await approveAndRun();
+      const chance = interpreterGoalChance();
+      expect(chance.say, 'the control: this say asks').toContain('?');
+      expect(chance.say_shown).toBeUndefined();
     });
   });
 

@@ -7,6 +7,7 @@
  * remains exported only for compatibility tests and per-option diagnostics.
  */
 
+import type { DoorSubject } from '../../orchestrator-v5/statement-door/subject.js';
 import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
@@ -37,8 +38,9 @@ import {
 // admission predicate this estate keeps paying for.
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
-import { draftedTeamPartOf, eventModelAsk } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
-import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceIsCurrent, riskOccurrenceSubject } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
+import { draftedTeamPartOf, eventModelAsk, unsizedEventOptions } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
+import { unsizedOlumiRiskIds } from "../../orchestrator-v5/agent-lane/unsized-risk.js";
+import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, riskOccurrenceIsCurrent, riskOccurrenceSubject, riskOccurrenceWindowFromToday } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -137,6 +139,12 @@ export interface CanonicalReadinessIssue {
    * reason it is carried per-blocker rather than as one response-level boolean.
    */
   readonly waived_by_exclusion?: boolean;
+  /**
+   * ⭐ SYSTEM 1: the ONE subject a statement answering this ask is about (`statement-door/subject.ts`), so the answer reaches
+   * the door's card by construction. Set where the ask names its subject (an unsized deadline-forecast option's effect, DL
+   * ruling (A) 15 Oct); other asks gain it as they move onto the door.
+   */
+  readonly statement_subject?: DoorSubject;
 }
 
 export interface CanonicalReadinessRepairChange {
@@ -1260,7 +1268,8 @@ function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReady
     ...options.flatMap((option) => (isPlainObject(option.interventions) ? Object.keys(option.interventions) : [])),
   ]);
   const excluded = graph.nodes.filter(isRetainedExcluded).map((node) => node.id);
-  return excluded.some((id) => refusing.has(id)) ? new Set() : new Set(excluded);
+  // An unsized Olumi risk is left out by the Run's own compute projection (`withoutUnsizedOlumiRisks`), whatever the guard does.
+  return new Set([...(excluded.some((id) => refusing.has(id)) ? [] : excluded), ...unsizedOlumiRiskIds(rawGraph)]);
 }
 
 function goalRootsWithoutStatusQuoLevel(
@@ -1377,12 +1386,27 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   // one current goal period, `riskOccurrenceSubject`, the card's own eligibility), the question is its occurrence within that
   // window, never a level "today". Every other risk keeps its ask, byte for byte.
   const eventPath = gap.kind === 'risk' ? riskOccurrenceSubject(rawGraph, gap.id) : undefined;
-  // ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd): the brief already says it holds, so its own sentence is
-  // quoted for the user to confirm, never asked again as an occurrence; its card records it (`brief-holds-now` issuer).
-  const said = eventPath?.kind === 'eligible' ? alreadyTrueQuoteOf(eventPath.node) : undefined;
+  /**
+   * ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd; AIE 6178729504, exact): the brief already says it holds, so its
+   * own sentence is quoted and kept as a current condition, never asked again as an occurrence. The card is named only where the
+   * route offers it (`briefHoldsNowArgs`: the event path, over a window from today); otherwise the reading stays and the ACTUAL
+   * remaining blocker is said once. No "can’t run the numbers" promise: recording it can leave its effect unresolved.
+   */
+  const riskNode = gap.kind === 'risk' && rawGraph !== null && typeof rawGraph === 'object' && Array.isArray((rawGraph as { nodes?: unknown }).nodes)
+    ? ((rawGraph as { nodes: unknown[] }).nodes).find((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === gap.id) : undefined;
+  const said = alreadyTrueQuoteOf(riskNode);
   if (said !== undefined) {
-    return `Your brief says: “${said}” Olumi reads this as ‘${gap.label.trim()}’ already being true now; confirm it to record it from your words. `
-      + 'Olumi can’t run the numbers until this risk has a figure.';
+    const reading = `Your brief says: “${said}”${/[.!?…]$/.test(said) ? '' : '.'} Olumi reads this as ‘${gap.label.trim()}’ already being true now.`;
+    if (eventPath?.kind === 'eligible' && riskOccurrenceWindowFromToday(rawGraph)) {
+      return `${reading} Confirm or change that reading on the card; how strongly it affects ‘${riskOccurrenceGoalLabel(rawGraph, eventPath.goal_id).trim()}’ is a separate assumption.`;
+    }
+    if (eventPath?.kind === 'eligible') {
+      return `${reading} Whether it still holds during your goal’s period, which counts from the launch, is a separate question. `
+        + 'Ask Olumi to suggest a starting estimate for you to review.';
+    }
+    if (eventPath?.kind === 'ineligible' && eventPath.reason === 'no_window') {
+      return `${reading} To use it in the analysis, your goal needs one clear time period first.`;
+    }
   }
   // S2 (SCIENCE item (2), AIE #94 6173489813): on the event path a risk may be a condition that already holds ("I'm not that
   // experienced with marketing"), so the ask offers that reading first and never assumes it is an event still to happen.
@@ -1638,6 +1662,35 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
+    // ⭐ DL ruling (A), 15 Oct (served 7f5659fd, turn 06): a deadline-forecast option linked only to the kept-aside sketch is
+    // UNSIZED (the structural validator no longer calls it unconnected). Its ask is the option-effect question, said in the
+    // door's subject {option, factor, level}; the producer's own pair-scoped sentence is kept where it already asks it.
+    for (const option of unsizedEventOptions(parsed.data)) {
+      if (option.baseline) continue;
+      // The same missing input said as an effect-scale encoding ("Choose how … should be represented on the effect scale") is
+      // this ask in internal words, so it is said once, as the question below.
+      for (let i = blockingIssues.length - 1; i >= 0; i--) {
+        const issue = blockingIssues[i]!;
+        if (issue.option_id === option.option_id && (issue.code === 'OPTION_NEEDS_ENCODING' || issue.code === 'OPTION_NEEDS_MAPPING')) blockingIssues.splice(i, 1);
+      }
+      for (const factor of option.factors) {
+        const statement_subject: DoorSubject = { kind: 'factor', id: factor.id, option_id: option.option_id, field: 'level' };
+        const at = blockingIssues.findIndex((i) => i.code === 'MISSING_OPTION_VALUE' && i.option_id === option.option_id && i.factor_id === factor.id);
+        if (at >= 0) { blockingIssues[at] = { ...blockingIssues[at]!, statement_subject }; continue; }
+        blockingIssues.push({
+          issue_id: `unsized_${blockingIssues.length + 1}`,
+          code: 'MISSING_OPTION_VALUE',
+          category: 'option_values',
+          message: `What would option "${option.option_label}" set "${factor.label}" to?`,
+          repairability: 'human_input_required',
+          option_id: option.option_id,
+          option_label: option.option_label,
+          factor_id: factor.id,
+          factor_label: factor.label,
+          statement_subject,
+        });
+      }
+    }
     // T4 R4/R5: preserve these limitations as context, without blocking a Run.
     // Missing root levels and structural/numeric defects below remain independent.
     const policyIssues = blockingIssues.filter((issue) =>

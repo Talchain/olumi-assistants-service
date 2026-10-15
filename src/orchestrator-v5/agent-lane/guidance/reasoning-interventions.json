@@ -586,19 +586,19 @@
       ],
       "priority": "per variant (S1 = P1, S2 = P2, S3L/S3V = P5; S3L before S3V)",
       "reasoning_question": {
-        "S1": "How much does {from_label} really change {to_label}? The comparison turns on it.",
+        "S1": "How much does {from_label} change {to_label}? Olumi has not yet established a size for this link. This Run did not measure its influence on the comparison.",
         "S2": "Do you know {factor_label} more precisely? It's Olumi's estimate and the comparison is sensitive to it.",
         "S3L": "Does {from_label} really move {to_label} as much as Olumi assumed?",
         "S3V": "What figure would you use for {factor_label}?"
       },
       "short_copy": {
-        "S1": "The comparison rests on a link nobody has sized yet.",
+        "S1": "A link on the path to your goal has no size yet.",
         "S2": "This model's result turns on {factor_label}, Olumi's estimate.",
         "S3L": "The effect of {from_label} is Olumi's guess.",
         "S3V": "{factor_label} is Olumi's estimate, not yours."
       },
       "why_now": {
-        "S1": "Until it is sized, Olumi can't compare the options on your goal.",
+        "S1": "This link connects {from_label} to {to_label} on the model's path to {goal_label}; its effect remains a provisional assumption.",
         "S2": "The analysis found this figure matters to the choice.",
         "S3L": "It sits on the path to your goal.",
         "S3V": "It feeds your goal."

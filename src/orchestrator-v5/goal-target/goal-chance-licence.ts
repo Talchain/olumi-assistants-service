@@ -1,4 +1,5 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
+import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -40,6 +41,7 @@ import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { midSentence } from '../agent-lane/guidance/render.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
 import { recordedMeasureOf } from '../statement-door/fields/measure.js';
+import { goalTargetBasisIn, humanEffectsTimingOf, laterTimingWords, timingBasisNote } from '../statement-door/fields/goal-timing.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
@@ -243,7 +245,7 @@ export interface GoalChanceLicence {
   readonly period_end_assumption?: { readonly origin: 'olumi'; readonly period_months: number; readonly reference: 'today' | 'launch' };
   /** G2: the AI reading belongs to CEE's conditional licence, never the provider envelope. */
   readonly effects_timing?: EffectsTiming;
-  readonly effects_timing_origin?: 'olumi';
+  readonly effects_timing_origin?: 'olumi' | 'user';
   /**
    * ⭐ OLUMI'S READING OF THE GOAL, TYPED (DL 13:55Z 14 Oct; old DGAI #2668): present iff a chance is licensed AND it rests on
    * one of Olumi's own readings of the goal — its direction, today's level, or an inferred product this Run evaluated
@@ -480,7 +482,8 @@ export function goalChanceLicenceOf(
   // a reading refused for its conditions, or a cap that could not be resolved); a target that is the goal's own limit row is
   // sent as that row (checked where the Run's request is known).
   if (goal === undefined || !targetSent(graph as Rec, goal, constraints)) return null;
-  const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisOf(goal);
+  // M3b: a recorded human forecast that is stale or puts the effects later never leaves `effects_at_period_end` true here.
+  const basis: GoalTargetBasis | undefined = goal === undefined ? undefined : goalTargetBasisIn(graph, goal);
   // ⛔ Ruling 12 / amendment 2: a change's "at three months" needs its effects stated at that month; never steady state.
   // D3: where the basis holds they are NOT stated, the Run says why (`withholdForPeriodEndEffects`), never a silent gap.
   // ⭐ G (AIE #94 6128697025; amendments 6131950992): except the CONDITIONAL reading on a static model — this very Run scored the
@@ -729,6 +732,9 @@ export function goalChanceLicenceOf(
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
     ...(conditional !== undefined ? { period_end_assumption: { origin: 'olumi' as const, period_months: conditional.basis.period_months,
       reference: conditional.basis.reference }, effects_timing: conditional.effects_timing, effects_timing_origin: 'olumi' as const } : {}),
+    // ⭐ M3b (AIE 6180193788 §2): THIS Run's reading used the user's own current forecast that every effect is in place by the end.
+    ...(conditional === undefined && basis?.effects_at_period_end === true && typeof goalId === 'string'
+      && humanEffectsTimingOf(graph, goalId)?.kind === 'in_place' ? { effects_timing: 'in_place_by_period' as const, effects_timing_origin: 'user' as const } : {}),
   };
   const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
@@ -851,6 +857,9 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   notes.push(...projection);
   // Amendment 2 / DL hiring decision: the effects' timing basis and the additive reading — or, G, the conditional reading's
   // own note in the same place (never both: the stored basis says the effects are NOT stated at the period's end).
+  // ⭐ M3b (AIE 6180193788 §2): the user's own forecast, cited where THIS reading used it; the additive reading stays Olumi's.
+  const told = basis === undefined || typeof c.goal?.id !== 'string' ? undefined : timingBasisNote(c.graph, c.goal.id, basis);
+  if (told !== undefined) notes.push(told);
   const effects = basis === undefined ? undefined : effectsBasisWords(basis) ?? c.periodEndNote;
   if (effects !== undefined) notes.push(effects);
   // Amendment 4 (see `covers`): every limit the Run did not include and every retained condition.
@@ -1376,8 +1385,12 @@ export function withGoalChanceLicence<E>(
   // Only a licensed chance rests on a reading; the readings are the ones THIS Run evaluated (its own identity_evaluations).
   const readings = Object.keys(licence.pct_by_option).length === 0 ? []
     : goalReadingsOf(graph, goalId, Array.isArray(checked.identity_evaluations) ? checked.identity_evaluations : undefined);
+  // #3167 fix-forward (AIE 6180618773 T9): the canonical licence carries what THIS Run recorded leaving out and the narrower
+  // scope its chances cover (typed; the reply says it once in the AIE's words). A Run that recorded none carries nothing.
+  const omitted = runOmittedRisks({ inference_warnings: warnings });
   return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked),
-    ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}) }] } as E;
+    ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}),
+    ...(omitted !== undefined ? { omitted_from_calculation: { scope: 'modelled_effects_only' as const, risks: omitted } } : {}) }] } as E;
 }
 
 /**
@@ -1697,7 +1710,7 @@ export function periodEndEffectsUnstatedOf(graph: unknown, goalId: unknown): { r
   if (record === null || record.target?.raw === undefined || (frame !== 'change_abs' && frame !== 'change_rel')) return undefined;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
-  const basis = goal === undefined ? undefined : goalTargetBasisOf(goal);
+  const basis = goal === undefined ? undefined : goalTargetBasisIn(graph, goal);
   return basis !== undefined && basis.effects_at_period_end === false && basis.open_question === undefined ? { record, basis } : undefined;
 }
 
@@ -1722,6 +1735,8 @@ export function periodEndConditionalOf(
 ): { readonly record: GoalRecord; readonly basis: GoalTargetBasis; readonly note: string; readonly effects_timing: 'not_stated' | 'in_place_by_period' } | undefined {
   const held = periodEndEffectsUnstatedOf(graph, goalId);
   if (held === undefined) return undefined;
+  // ⭐ M3b (AIE 6180193788 §2): the user said the effects arrive AFTER the end: never read as "not stated" by Olumi's assumption.
+  if (typeof goalId === 'string' && humanEffectsTimingOf(graph, goalId)?.kind === 'later') return undefined;
   // Ordinary timing (`ordinaryTimingOf`): no held month (a held month without an at-period basis is the horizon gate's
   // 'withhold'), no deadline, no accumulation carrier — so no forecast either; and not a deadline-share event.
   if (!ordinaryTimingOf(graph, envelope).ordinary || shareByDateGoalForChanceOf(graph) !== null || isEventShareForecast(graph)) return undefined;
@@ -1789,7 +1804,9 @@ export function withholdForPeriodEndEffects<E>(
   const effectsTiming = effectsTimingOf(inputs.effects_timing);
   // `detail.reason` is CEE-local (as `target_reading_open`); the UI renders `message` for this code.
   return withholdOptionGoalFigures(envelope, new Set(scored), {
-    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: periodEndEffectsWords(held.record, held.basis),
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning',
+    message: [periodEndEffectsWords(held.record, held.basis), typeof goalId === 'string' ? laterTimingWords(graph, goalId, held.basis) : undefined]
+      .filter((x) => x !== undefined).join(' '),
     node_ids: [String(goalId)], option_ids: scored, detail: { reason: PERIOD_END_EFFECTS_UNSTATED,
       effects_timing: effectsTiming ?? null, effects_timing_origin: effectsTiming === undefined ? null : 'olumi' },
   }, { keepOutcome: true, keepOrdering: true });

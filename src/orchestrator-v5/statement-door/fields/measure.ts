@@ -22,7 +22,7 @@ import {
 } from '../../goal-target/goal-reading-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { holdsUserStatement, userStatementOnNode, userStatementRecord } from '../statements.js';
+import { holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf } from '../statements.js';
 import { subjectKey, type DoorSubject } from '../subject.js';
 import type { FieldWriter } from '../write.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -120,6 +120,8 @@ export const MEASURE_ROW: RoleRow = {
   },
   readingWords: (_s, subject, label, graph, words) => `‘${heldGoal(graph, subject.id)?.projection.label ?? label}’ measured in ${words ?? ''}`,
   assumptions: (_s, subject, graph, words) => measureAssumptions(subject, graph, words),
+  // The combined target reading is Olumi's interpretation carrier (AIE 6180193788), so its button is "Use this reading".
+  derives: true,
   recordedWords: measureRecordedWords,
 };
 
@@ -139,12 +141,24 @@ export const MEASURE_WRITER: FieldWriter = {
     const written = applyGoalReadingEdit(graph, payload);
     if (written.kind === 'refused') return { refused: written.reason };
     const projected = written.kind === 'mutated' ? goalReadingProjectionOf(written.mutatedGraph, reading.subject.id) : h.projection;
-    const holds = (after: unknown): boolean => {
-      const node = isRec(after) && Array.isArray(after.nodes) ? after.nodes.find((n): n is Rec => isRec(n) && n.id === reading.subject.id) : undefined;
-      return node !== undefined && isDeepStrictEqual(node.goal_target_basis, answeredBasisOf(expected, members)) && holdsUserStatement(after, record, reading.subject)
-        && isDeepStrictEqual(goalReadingProjectionOf(after, reading.subject.id), projected);
-    };
-    return { member: 'goal_reading', payload, holds };
+    return { member: 'goal_reading', payload: JSON.parse(JSON.stringify(payload)) as unknown, expected: JSON.parse(JSON.stringify(projected ?? null)) as unknown };
+  },
+  /**
+   * The read-back, from the stored write alone (a press reads it after the card was saved): the goal holds the answered reading,
+   * the user's record exactly, and the projection the writer computed for it (`expected`).
+   */
+  holds: (write, after): boolean => {
+    const payload = write.payload;
+    if (!isRec(payload) || typeof payload.goal_id !== 'string' || !isRec(payload.expected_basis) || !isRec(payload.user_statement)
+      || !isRec(payload.expected_goal)) return false;
+    const record = userStatementRecordOf(payload.user_statement.record);
+    const s = isRec(payload.user_statement.subject) ? payload.user_statement.subject : undefined;
+    if (record === undefined || s === undefined || typeof s.id !== 'string' || s.field !== 'measure') return false;
+    const subject: DoorSubject = { kind: 'goal', id: s.id, field: 'measure' };
+    const basis = answeredBasisOf(payload.expected_basis, (isRec(payload.members) ? payload.members : undefined) as GoalReadingMembers | undefined);
+    const node = isRec(after) && Array.isArray(after.nodes) ? after.nodes.find((n): n is Rec => isRec(n) && n.id === payload.goal_id) : undefined;
+    return node !== undefined && isDeepStrictEqual(node.goal_target_basis, basis) && holdsUserStatement(after, record, subject)
+      && isDeepStrictEqual(goalReadingProjectionOf(after, payload.goal_id), write.expected);
   },
 };
 

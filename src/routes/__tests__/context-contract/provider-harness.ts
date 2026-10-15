@@ -39,6 +39,8 @@ export const seedOf = (name: 'run1' | 'run2'): Seed => JSON.parse(readFileSync(n
 /** Opt-in evidence directory for exact provider bodies; unset in CI. */
 export const captureDir: string | undefined = process.env.S8_CAPTURE_DIR;
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex');
+/** The one server instant every capture is taken at (14 Oct 2026, 12:00 UTC = 13:00 in London). */
+export const CAPTURE_INSTANT = Date.parse('2026-10-14T12:00:00Z');
 
 /** Decode only strings from the exact provider body, including tool-result JSON. */
 function payloadsOf(body: Obj): unknown[] {
@@ -240,6 +242,9 @@ export async function capture(turn: Turn, variant: Variant, options: {
   if (turn === 'widen-risks') { payload.chip = { id: 'ask:risks' }; payload.message = 'What risks should we consider?'; }
   if (turn === 'Run-explanation') { payload.chip = { id: seed.captured_run_reference }; payload.message = 'Explain this result'; }
   Object.assign(payload, options.payload);
+  // ⭐ ONE FIXED INSTANT (#3163): every turn now carries the server's London day, so the sent bytes would move every day.
+  // Only Date is faked; timers stay real. Every capture is taken at the same server instant.
+  vi.useFakeTimers({ toFake: ['Date'], now: CAPTURE_INSTANT });
   try {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(res.statusCode, res.body).toBe(200);
@@ -255,5 +260,5 @@ export async function capture(turn: Turn, variant: Variant, options: {
     if (dir !== undefined) writeFileSync(`${dir}/route-response.json`, res.body);
     const state = findState(calls.flatMap(c => c.payloads));
     return { calls, state, response, seed, variant };
-  } finally { await app.close(); vi.unstubAllGlobals(); }
+  } finally { vi.useRealTimers(); await app.close(); vi.unstubAllGlobals(); }
 }

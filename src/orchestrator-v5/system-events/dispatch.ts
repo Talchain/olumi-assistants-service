@@ -3615,7 +3615,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       // (`applyRiskOccurrenceEdit`: invalid_block), so the holds-now card could never land on the real route.
       ...(input.risk_occurrence.holds_now !== undefined ? { holds_now: input.risk_occurrence.holds_now } : {}),
       // S2: likewise the user's own stated chance (`stated_occurrence`), with its block.
-      ...(input.risk_occurrence.stated_occurrence !== undefined ? { stated_occurrence: input.risk_occurrence.stated_occurrence } : {}) } } : {}),
+      ...(input.risk_occurrence.stated_occurrence !== undefined ? { stated_occurrence: input.risk_occurrence.stated_occurrence } : {}),
+      // SYSTEM 1 M1: when the statement is recorded (`user_statements[]`): the writer refuses a user's words without it.
+      ...(input.risk_occurrence.recorded_at !== undefined ? { recorded_at: input.risk_occurrence.recorded_at } : {}) } } : {}),
     ...(input.cohort_forecast !== undefined ? { cohortForecast: { ...input.cohort_forecast,
       own_write_landed: input.cohort_forecast.own_write_landed === true } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),

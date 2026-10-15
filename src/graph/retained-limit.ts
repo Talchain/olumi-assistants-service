@@ -5,6 +5,8 @@ const records = (v: unknown): Rec[] => Array.isArray(v) ? v.filter((x): x is Rec
 const record = (v: unknown): Rec => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : {};
 // Lossless limit rows: the S5 scalar goal record does not expose these or their pending-question metadata.
 const limitRows = (graph: unknown): Rec[] => records(record(graph).goal_constraints);
+/** The nodes the graph's limits name, as stored. */
+export const limitNodeIds = (graph: unknown): string[] => limitRows(graph).flatMap((row) => (typeof row.node_id === 'string' ? [row.node_id] : []));
 
 export const RETAINED_LIMIT_QUESTION = 'Do these describe the same limit?';
 export const RETAINED_LIMIT_WITHHELD = 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity. Both limits remain recorded.';

@@ -412,6 +412,13 @@ describe('ONE reply contract through the build route', () => {
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';
     const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
     currentRead.analysis_result.enrichment = withholdGoalFiguresForMissingCurrentLevel(currentRead.analysis_result.enrichment, currentRead.graph);
+    // #3167 fix-forward: the readers say only what THIS Run recorded leaving out. The stubbed Run carries the record the Run
+    // handler writes for this graph, made by the handler's own producer (never a hand-typed record).
+    const { withoutUnsizedOlumiRisksRecorded, unsizedOlumiRiskOmissionWarning } = await import('../unsized-risk.js');
+    const { omitted } = withoutUnsizedOlumiRisksRecorded(currentRead.graph, currentRead.graph);
+    expect(omitted.map(o => o.label), 'PRECONDITION: this Run leaves out the one unsized Olumi risk').toEqual(['Price-rise cancellation risk']);
+    const enrichmentB1 = currentRead.analysis_result.enrichment as Rec;
+    enrichmentB1.inference_warnings = [...(enrichmentB1.inference_warnings as Rec[] | undefined ?? []), { ...unsizedOlumiRiskOmissionWarning(omitted) }];
     const body = await buildTurn();
     expect((lastComposeInput as ReplyComposeInput).faceContract).toBe('draft');
     expect((lastComposeInput as ReplyComposeInput).chanceCells?.length).toBeGreaterThan(0);
@@ -419,9 +426,13 @@ describe('ONE reply contract through the build route', () => {
     expect(body._answer_shape).toBeDefined();
     const shown = face(body._answer_shape!);
     expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual(['Not shown yet; why is under More detail']);
-    // AIE packet 6e52e896 `event_risk.readiness_copy`: the risk root's event path asks its occurrence within the goal's period.
-    expect(shown).toContain('How likely is ‘Price-rise cancellation risk’ to happen at least once within 12 months?');
+    // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214; was: the face asks its occurrence within the goal's period). The brief never
+    // states this risk: it is Olumi's own unsized suggestion (`ai_inferred`), so it no longer blocks or is asked as a readiness
+    // gap. The Run leaves it out and the reply says so once, in the AIE's words.
+    expect(shown).not.toContain('How likely is ‘Price-rise cancellation risk’');
     expect(shown).not.toContain('How likely or how large is it today?');
+    expect(count(body.assistant_text, 'This calculation covers the modelled effects only. ‘Price-rise cancellation risk’ is Olumi’s unsized risk '
+      + 'suggestion and is not included in this calculation; its likelihood and impact remain unresolved.')).toBe(1);
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     // Q-c (DL 87114): one horizon-limit statement per surface.
     expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);

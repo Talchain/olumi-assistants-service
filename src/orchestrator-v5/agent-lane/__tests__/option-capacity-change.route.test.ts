@@ -26,6 +26,7 @@ import { withoutAgentDirections } from '../write-outcome.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
+import { resolveRunAdmission, NO_COMPARISON_NEXT_STEP } from '../../tools/handlers/analysis-ready-core.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-de659cfd-served-graph-20261014.json', import.meta.url), 'utf8')) as {
@@ -265,6 +266,14 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
   });
 
+  it('the share\'s percent family is the unit authority\'s (`classifyUnitScaleClass`): "percent of developer time" is a share; points never are', async () => {
+    const spelled = (unit: string): Rec => { const g = JSON.parse(FX.graph_text) as Rec; node(g, LEGACY_TIME).observed_state.unit = unit; return g; };
+    expect(await offer(world(spelled('percent of developer time')))).toMatchObject({ ok: true });
+    expect(await offer(world(spelled('percent')))).toMatchObject({ ok: true });
+    // CONTRAST: the authority's prefix layer reads "percentage points" as percent; a change in points is not a share of time.
+    expect(await offer(world(spelled('percentage points')))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
+  });
+
   it.each([
     ['words the user never typed', { ...ARGS, statements: [{ quote: 'it would cut legacy work to 10%', form: 'point', value: 10 }] }, PAUL, 'statement_not_found'],
     ['a higher share (frees no time)', { ...ARGS, statements: [{ quote: 'legacy work would go up to 30%', form: 'point', value: 30 }] }, 'legacy work would go up to 30%', 'not_lower'],
@@ -274,5 +283,64 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const w = world();
     expect(await offer(w, args, text)).toMatchObject({ ok: false, refusal });
     expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+  });
+});
+
+/**
+ * ⭐ DL ruling (A), 15 Oct: the served legacy model after the team-time card (capture 2026-10-14T224350Z, CEE 7f5659fd, turn 06)
+ * refused the Run with "An option has no factor connections and cannot be analysed. Connect it to at least one factor." on all
+ * three options, because no option was sized and their only links went to the kept-aside sketch. Such an option is UNSIZED:
+ * the ONE readiness authority asks for its effect, in the door's subject, and the answer → card → write admits the Run.
+ */
+const UNSIZED = JSON.parse(readFileSync(new URL('./fixtures/paul-legacy-7f5659fd-unsized-options-graph-20261014.json', import.meta.url), 'utf8')) as {
+  graph_text: string; graph_sha256: string };
+const STRUCTURAL = /no factor connections|cannot reach the goal|Connect it to at least one factor/;
+const issuesOf = (g: unknown): Rec[] => resolveRunAdmission(g).assessment.issues as unknown as Rec[];
+
+describe('an unsized deadline-forecast option is asked for its effect, never called unconnected (served 7f5659fd turn 06)', () => {
+  it('PRECONDITION: the served graph after team time, byte-pinned; no option is sized and every option links only to the sketch', () => {
+    expect(createHash('sha256').update(UNSIZED.graph_text, 'utf8').digest('hex')).toBe(UNSIZED.graph_sha256);
+    const g = JSON.parse(UNSIZED.graph_text) as Rec;
+    expect(g.nodes.some((n: Rec) => n.observed_state?.extra_share_by_date !== undefined)).toBe(false);
+    expect(node(g, 'event_team').observed_state.stated_time).toMatchObject({ low: 7, high: 8 });
+  });
+
+  it('⭐ RED→GREEN: one ask per unsized option in the door subject → his answer → ONE card → the press → the Run is admitted', async () => {
+    const g = JSON.parse(UNSIZED.graph_text) as Rec;
+    const before = resolveRunAdmission(g);
+    expect(before.willProceed).toBe(false);
+    expect(before.blockedNextStep).not.toBe(NO_COMPARISON_NEXT_STEP); // identical only because unsized: never "fewer than two"
+    const issues = issuesOf(g);
+    expect(issues.map(i => i.message).join(' ')).not.toMatch(STRUCTURAL);
+    expect(issues.map(i => [i.code, i.message, i.statement_subject])).toEqual([
+      ['MISSING_OPTION_VALUE', 'Factor "Legacy-code time share" is currently 25%. What should option "Reduce legacy-fix time" set it to?',
+        { kind: 'factor', id: LEGACY_TIME, option_id: LEGACY, field: 'level' }],
+      ['MISSING_OPTION_VALUE', 'What would option "Increase development velocity" set "Development velocity" to?',
+        { kind: 'factor', id: 'event_context_8', option_id: 'event_option_3', field: 'level' }],
+    ]);
+    // Carrying on as now is the reference, never asked for an effect.
+    expect(issues.some(i => i.option_id === 'event_option_1')).toBe(false);
+
+    // His answer to the ask, bound to the ask's own subject → ONE card → the press → ONE write → the Run is admitted.
+    const w = world(g);
+    const subject = issues[0]!.statement_subject as Rec;
+    const r = await offer(w, { option_id: subject.option_id, factor_id: subject.id, statements: ARGS.statements });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    expect(String(r.public_label)).toContain(`You said “${PAUL}”`);
+    expect(await press(w, String(r.proposal_id))).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(w.registers).toHaveLength(1);
+    const after = resolveRunAdmission(w.graph());
+    expect(after.willProceed, JSON.stringify(after.assessment.issues)).toBe(true);
+  });
+
+  it('⛔ CONTRAST: an option with no link to any factor really is unconnected and keeps the structural message', () => {
+    const g = JSON.parse(UNSIZED.graph_text) as Rec;
+    g.edges = g.edges.filter((e: Rec) => !(e.from === 'event_option_3' && e.to === 'event_context_8'));
+    const issues = issuesOf(g);
+    expect(issues.find(i => i.option_id === 'event_option_3' && i.code === 'OPTION_NO_FACTOR_EDGES')?.message)
+      .toBe('An option has no factor connections and cannot be analysed. Connect it to at least one factor.');
+    expect(resolveRunAdmission(g).willProceed).toBe(false);
+    // The unsized option beside it is still asked for its effect.
+    expect(issues.find(i => i.option_id === LEGACY)?.statement_subject).toEqual({ kind: 'factor', id: LEGACY_TIME, option_id: LEGACY, field: 'level' });
   });
 });
