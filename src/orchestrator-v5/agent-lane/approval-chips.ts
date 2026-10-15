@@ -173,6 +173,7 @@ export const OPTION_RENAME_APPROVE = { label: 'Rename it', message: 'Yes, rename
 const CHANGE_APPROVE: Readonly<Record<string, { readonly label: string; readonly message: string }>> = {
   remove_node: { label: 'Remove it', message: 'Yes, remove it.' },
   remove_edge: { label: 'Remove it', message: 'Yes, remove it.' },
+  rename_option: OPTION_RENAME_APPROVE,
 };
 const changeApproveOf = (tool: string, proposal: { readonly operations: readonly { readonly op: string }[] } | undefined)
   : { readonly label: string; readonly message: string } | undefined =>

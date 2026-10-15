@@ -47,7 +47,7 @@ import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-ana
 import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
 import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
-import { findScaleIncoherentBaselineFactorIds } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
+import { buildFactorScaleMap, decideAnalysisScaleBlock, findScaleIncoherentBaselineFactorIds, projectRequestInterventionsToWireScale } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -1546,26 +1546,30 @@ function appendSemanticIssues(
  * Both the wire projection and Run admission are adapters over this record.
  */
 /**
- * The Run's BASELINE scale gate (`findScaleIncoherentBaselineFactorIds`, run-analysis.ts §3.1) on the options the Run SUBMITS (`runSubmission`,
+ * The Run's scale verdict (`decideAnalysisScaleBlock`, run-analysis.ts §3–3.1) on the options the Run SUBMITS (`runSubmission`,
  * the Run's own chain: the user's exclusions, the analysable gate and its scaffold, Olumi's filter), with the gate's scaffolded
- * values marked CEE-supplied as the Run marks them.
+ * values marked CEE-supplied as the Run marks them: the request projection over `buildFactorScaleMap`, then the baseline gate.
  */
 function runScaleGaps(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload):
-  { reason: 'baseline_scale_unresolved'; gaps: Array<{ id: string; label: string; value: number; unit?: string }> } | null {
+  { reason: 'mixed_scale_unresolved' | 'baseline_scale_unresolved'; gaps: Array<{ id: string; label: string; value: number; unit?: string; levelHasNoScale: boolean }> } | null {
   const { options, held } = runSubmission(graph, rawGraph, payload);
   const raw = options.map((o) => (isPlainObject(o.interventions) ? o.interventions as Record<string, unknown> : {}));
   const heldBy = new Map(held.map((r) => [r.option_id, new Set(r.factor_ids)] as const));
   const synthesised = options.map((o) => heldBy.get(String(o.option_id ?? o.id)) ?? new Set<string>());
-  // The BASELINE half (DL 15 Oct, option 2): the Run's baseline gate on the submitted options. The mixed-scale half
-  // (`projectRequestInterventionsToWireScale`) follows with its own fixture pass.
-  const ids = findScaleIncoherentBaselineFactorIds(graph.nodes, raw, synthesised);
+  const baseline = findScaleIncoherentBaselineFactorIds(graph.nodes, raw, synthesised);
+  const verdict = decideAnalysisScaleBlock(projectRequestInterventionsToWireScale(raw, buildFactorScaleMap(graph.nodes), synthesised), baseline);
+  if (!verdict.blocked) return null;
+  // One question per factor: a factor an option sets as a CATEGORY is the encoding check's (`needs_encoding`), never a scale ask.
+  const categorical = new Set(raw.flatMap((ivs) => Object.entries(ivs)
+    .filter(([, v]) => isPlainObject(v) && (v as { value_type?: unknown }).value_type === 'categorical').map(([id]) => id)));
+  const ids = verdict.unresolvedFactorIds.filter((id) => !categorical.has(id));
   if (ids.length === 0) return null;
-  const verdict = { reason_code: 'baseline_scale_unresolved' as const, unresolvedFactorIds: ids };
-  return { reason: verdict.reason_code, gaps: verdict.unresolvedFactorIds.map((id) => {
+  return { reason: verdict.reason_code, gaps: ids.map((id) => {
     const node = graph.nodes.find((n) => n.id === id) as { label?: unknown; observed_state?: { value?: unknown; raw_value?: unknown; unit?: unknown } } | undefined;
     const v = node?.observed_state?.raw_value ?? node?.observed_state?.value;
     const unit = typeof node?.observed_state?.unit === 'string' && node.observed_state.unit.trim() !== '' ? node.observed_state.unit.trim() : undefined;
-    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(v), ...(unit !== undefined ? { unit } : {}) };
+    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(v), ...(unit !== undefined ? { unit } : {}),
+      levelHasNoScale: baseline.includes(id) };
   }) };
 }
 
@@ -1757,8 +1761,13 @@ export function assessCanonicalAnalysisReadiness(
         issue_id: `level_scale_${index + 1}`,
         code: 'FACTOR_LEVEL_SCALE_UNRESOLVED',
         category: 'numeric_integrity',
-        // Said as it is held: a level with a unit lacks only its range; a bare number lacks both.
-        message: gap.unit !== undefined
+        // Said per factor, as it is held: a level with no scale is asked for it (with a unit, only its range; a bare number,
+        // both), which is that factor's repair; a factor whose level is readable but whose options' levels are on another
+        // scale is asked for their one unit.
+        message: !gap.levelHasNoScale
+          ? `What unit are "${gap.label}" and the levels your options set for it in? Its recorded value (${gap.value}`
+            + `${gap.unit !== undefined ? ` ${gap.unit}` : ''}) and those levels cannot be read on one scale yet, so the analysis cannot use them.`
+          : gap.unit !== undefined
           ? `What range could "${gap.label}" be in, in ${gap.unit}? It is recorded as ${gap.value} ${gap.unit} with no range, so the `
             + 'analysis cannot use it yet. A rough upper end is fine if you are not sure.'
           : `What is "${gap.label}" today, in its own unit (for example £ per year, %, or a count)? It is recorded as ${gap.value} `

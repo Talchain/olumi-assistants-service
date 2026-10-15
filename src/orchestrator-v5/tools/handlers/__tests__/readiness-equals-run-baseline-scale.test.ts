@@ -131,20 +131,21 @@ describe('readiness ≡ Run on a level recorded with no scale (the Run\'s baseli
         const { g, id } = variant(load(), v);
         const asked = assessCanonicalAnalysisReadiness(g).blockingIssues.filter((i) => i.code === CODE);
         const own = await runOwn(load(), g);
-        // Baseline half: readiness asks for X ⇒ the Run's own gates refuse for scale, naming X (the Run reports the mixed reason
-        // first when both hold); readiness silent ⇒ the Run's own refusal is never the baseline gate's. Mixed-only: the follow-up.
-        if (asked.length > 0) {
-          expect(own.refusal ?? '', 'the Run refuses for scale').toMatch(/(?:baseline|mixed)_scale_unresolved/);
-          for (const i of asked) expect(own.refusal ?? '').toContain(i.factor_label!);
-        } else {
-          expect(own.refusal ?? '').not.toMatch(/baseline_scale_unresolved/);
-        }
+        // The WHOLE scale verdict, both halves: readiness asks ⇔ the Run's own gates refuse for scale, naming the same factors.
+        const ownScale = /(?:baseline|mixed)_scale_unresolved/.test(own.refusal ?? '');
+        expect(asked.length > 0, `readiness ${JSON.stringify(asked.map((i) => i.factor_id))} vs Run ${own.refusal ?? 'ran'}`).toBe(ownScale);
+        for (const i of asked) expect(own.refusal ?? '').toContain(i.factor_label!);
         if (v === 'bare') expect(asked.map((i) => i.factor_id)).toContain(id);
-        // Said as it is held: the factor's own unit when it has one (only the range is missing), else both are asked for.
+        // Said as it is held. The bare level has no scale: it is asked for its range in its own unit (or a unit and range). The
+        // stated range HAS one, so it is never told it lacks one; only its options' levels on another scale are asked about.
         const unit = (g.nodes as Rec[]).find((n) => n.id === id)?.observed_state?.unit as string | undefined;
         for (const i of asked.filter((x) => x.factor_id === id)) {
-          if (unit) expect(i.message).toContain(`It is recorded as 250 ${unit} with no range`);
-          else expect(i.message).toContain('It is recorded as 250 with no unit or range');
+          if (v === 'stated_range') {
+            expect(i.message).toMatch(/^What unit are .* and the levels your options set for it in\?/);
+            expect(i.message).not.toMatch(/no range|no unit/);
+          } else if (v === 'bare') {
+            expect(i.message).toContain(unit ? `It is recorded as 250 ${unit} with no range` : 'It is recorded as 250 with no unit or range');
+          }
         }
         if (asked.length > 0) {
           expect(asked.every((i) => i.repairability === 'human_input_required')).toBe(true);
@@ -228,4 +229,15 @@ describe('the answer to the ask lands as the user\'s level and the Run proceeds 
     expect(out.ran, out.refusal).toBe(true);
   });
 
+  it('readiness ≡ Run on the OTHER half of the scale verdict: an answer off its factor\'s frame (300 on a 0–3 frame) leaves the options\' levels on another scale — readiness asks it ⇔ the Run refuses mixed_scale_unresolved', async () => {
+    const { graph, id } = await answered(300);
+    const asked = assessCanonicalAnalysisReadiness(graph).blockingIssues.filter((i) => i.code === CODE);
+    const own = await runOwn(MARKETING(), graph);
+    expect(own.refusal ?? '', 'the Run\'s own gate refuses').toContain('mixed_scale_unresolved');
+    const out = await run(graph);
+    expect(out.ran).toBe(false);
+    expect(asked.map((i) => i.factor_id)).toContain(id);
+    expect(asked.find((i) => i.factor_id === id)!.message).toMatch(/^What unit are .* and the levels your options set for it in\?/);
+    expect(out.refusal ?? '').toContain(asked.find((i) => i.factor_id === id)!.factor_label!);
+  });
 });
