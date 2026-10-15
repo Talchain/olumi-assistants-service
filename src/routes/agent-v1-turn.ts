@@ -118,7 +118,7 @@ import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-senten
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures, withoutDisclosure } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceSayPromisedThisTurn, goalChanceWithheldOptionsFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceSayPromisedThisTurn, goalChanceWithheldOptionsFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion, withRunsSayShownPromise } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
@@ -3492,7 +3492,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const goalChanceRead = selectedRun?.goal_chance as { say: string } | undefined;
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
         : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], historyReader, scenarioId, undefined));
-      const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
+      const goalChanceAsked = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
+      // SAY-SHOWN: the Run this call interprets promised its `say` is shown, and the route keeps that promise; so is this call.
+      const goalChanceNow = goalChanceAsked === undefined ? undefined : withRunsSayShownPromise(goalChanceAsked, result?.tool_results ?? []);
       // ⭐ NEVER RE-ASK: the scoped section's question-bearing text is asked once too; its finding stays.
       const section = canonicalAfterRun.run_explanation as Record<string, unknown> | undefined;
       const target = section?.target_testability as Record<string, unknown> | undefined;
