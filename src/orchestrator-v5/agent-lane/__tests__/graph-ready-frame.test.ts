@@ -46,7 +46,7 @@ const hashOf = (s: Scenario) => `rev-${s.revision}`;
  * ONE ordered record of what happened on the turn: every conversation call, the construction call, the first
  * analysis's dispatch, and every stage frame. Order in this array is order in time (all in one process).
  */
-type Step = { at: 'model' } | { at: 'construction' } | { at: 'run' } | { at: 'frame'; kind: PipelineStageEvent['kind'] };
+type Step = { at: 'model' } | { at: 'construction' } | { at: 'widen' } | { at: 'run' } | { at: 'frame'; kind: PipelineStageEvent['kind'] };
 let steps: Step[] = [];
 
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
@@ -115,6 +115,12 @@ const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ 
 function installFetch() {
   vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
+    // S3: the draft-time widening calls (risks, options), told apart by their own instruction words (widen-draft.test.ts).
+    const instructions = typeof body.instructions === 'string' ? body.instructions : '';
+    if (instructions.includes('suggest risks they have not considered') || instructions.includes('METHOD TURN:')) {
+      steps.push({ at: 'widen' });
+      return new Response(JSON.stringify(say('{}')), { status: 200 });
+    }
     if (body.text?.format?.type === 'json_schema') {
       steps.push({ at: 'construction' });
       const out = constructionReturns === 'oversized' ? oversized() : candidate;
@@ -248,18 +254,35 @@ describe('C6-1: the agent lane streams GRAPH_READY when the first model is regis
     return streamed({ message: BRIEF, ...extra });
   };
 
-  it('RED: a first brief that commits a model → exactly ONE GRAPH_READY, schema v3, carrying the committed graph', async () => {
+  it('RED: a first brief that commits a model → TWO GRAPH_READY frames (the admitted draft, then the committed graph), schema v3', async () => {
     const { body, graphReady } = await firstBrief();
     expect(body._agent.tool_calls, 'control: the build committed on this turn').toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
     expect(body.draft_graph?.nodes.length, 'control: COMPLETE carries the model').toBeGreaterThan(0);
-    expect(graphReady, 'exactly one frame').toHaveLength(1);
-    expect(graphReady[0]!.schema_version).toBe('v3');
-    expect(typeof graphReady[0]!.elapsed_ms).toBe('number');
+    expect(graphReady, 'the draft before widening, then the committed model').toHaveLength(2);
+    for (const f of graphReady) {
+      expect(f.schema_version).toBe('v3');
+      expect(typeof f.elapsed_ms).toBe('number');
+    }
+  });
+
+  it('⭐ S3 RED→GREEN: on the first turn the model reaches the canvas BEFORE any widening provider call starts', async () => {
+    const { graphReady } = await firstBrief();
+    const at = (p: (s: Step) => boolean) => steps.findIndex(p);
+    const firstFrame = at((s) => s.at === 'frame' && s.kind === 'GRAPH_READY');
+    const firstWiden = at((s) => s.at === 'widen');
+    expect(at((s) => s.at === 'construction'), 'control: construction ran').toBeGreaterThan(-1);
+    expect(firstWiden, `control: widening called its provider on this turn ${JSON.stringify(steps)}`).toBeGreaterThan(-1);
+    expect(firstFrame, JSON.stringify(steps)).toBeGreaterThan(-1);
+    expect(firstFrame, 'the model is drawn before widening starts').toBeLessThan(firstWiden);
+    // The early frame is the user's draft: nothing in it is a widening addition.
+    expect(deepKeys(graphReady[0]), 'control: the scan sees the graph').toContain('nodes');
+    expect(deepKeys(graphReady[0])).not.toContain('draft_widening');
   });
 
   it('RED: its node and edge identities are EXACTLY COMPLETE’s draft_graph (zero drift) and the stored model’s', async () => {
     const { body, graphReady } = await firstBrief();
-    const g = graphReady[0]?.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+    // The LAST frame is the committed model; the first is the draft before widening (S3 row above).
+    const g = graphReady.at(-1)?.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
     expect([...nodeIds(g)].sort()).toEqual([...nodeIds(body.draft_graph)].sort());
     expect([...edgeIds(g)].sort()).toEqual([...edgeIds(body.draft_graph)].sort());
     // Bound by identity to what the product stored — not merely "equal to COMPLETE".
@@ -287,12 +310,14 @@ describe('C6-1: the agent lane streams GRAPH_READY when the first model is regis
 
   it('RED: the frame carries structure only — no analysis, leader, claim or run field at any depth', async () => {
     const { graphReady } = await firstBrief();
-    expect(graphReady, 'control: there is a frame to scan').toHaveLength(1);
-    expect(Object.keys(graphReady[0]!).sort()).toEqual(['elapsed_ms', 'graph', 'kind', 'schema_version']);
-    const keys = deepKeys(graphReady[0]);
-    const forbidden = keys.filter((k) => /^(analysis_ready|analysis_result|analysis_state|claim_permissions|run_turn_id|blocks|first_analysis)$/.test(k) || /^leader/i.test(k));
-    expect(forbidden).toEqual([]);
-    expect(keys, 'control: the scan sees the graph').toContain('nodes');
+    expect(graphReady, 'control: there are frames to scan').toHaveLength(2);
+    for (const frame of graphReady) {
+      expect(Object.keys(frame).sort()).toEqual(['elapsed_ms', 'graph', 'kind', 'schema_version']);
+      const keys = deepKeys(frame);
+      const forbidden = keys.filter((k) => /^(analysis_ready|analysis_result|analysis_state|claim_permissions|run_turn_id|blocks|first_analysis)$/.test(k) || /^leader/i.test(k));
+      expect(forbidden).toEqual([]);
+      expect(keys, 'control: the scan sees the graph').toContain('nodes');
+    }
   });
 
   it('RED: a build refused as too large → ZERO frames', async () => {
@@ -326,7 +351,7 @@ describe('C6-1: the agent lane streams GRAPH_READY when the first model is regis
   it('RED: a retry of the SAME turn_id (the route’s replay) → ZERO frames', async () => {
     const T = '0f1e2d3c-4b5a-4968-8776-6554433221c6';
     const first = await firstBrief({ turn_id: T });
-    expect(first.graphReady, 'control: the original turn streamed its frame').toHaveLength(1);
+    expect(first.graphReady, 'control: the original turn streamed its frames').toHaveLength(2);
     script = [];
     const again = await streamed({ message: BRIEF, turn_id: T });
     expect(again.body._agent.replayed, 'control: the real replay path').toBe(true);
@@ -345,7 +370,7 @@ describe('C6-1: the agent lane streams GRAPH_READY when the first model is regis
 
   it('CONTRAST: the buffered turn (no stream context) is the same COMPLETE body — no key added or removed', async () => {
     const s = await firstBrief();
-    expect(s.graphReady, 'control: the streamed turn emitted').toHaveLength(1);
+    expect(s.graphReady, 'control: the streamed turn emitted').toHaveLength(2);
     nextScenario();
     script = [callTool('build_model_from_brief', { brief: BRIEF })];
     const b = await buffered({ message: BRIEF });

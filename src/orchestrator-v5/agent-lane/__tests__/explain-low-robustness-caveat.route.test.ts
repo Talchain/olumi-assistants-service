@@ -468,6 +468,15 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
     assertShapedCaveat(b, sentence);
   });
+  it('B1: the AI caveat survives once, with no repeated host prose or proposal IDs', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    narrator = `${NARRATOR} ${sentence}\n\n${sentence}\nCompare with prop_abcdefabcdefabcdefabcdefabcdefab.`;
+    const b = await press(await run());
+    expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(1);
+    expect(b.assistant_text).toContain(NARRATOR);
+    expect(b.assistant_text).not.toMatch(/prop_[0-9a-f]{6,}/);
+  });
+
   // One class row: seven narrator variants crossed with both host-obligation states.
   it.each(['plain', 'bulleted', 'questions tail', 'exact copy', 'spaced copy', 'caveat bullet', 'two copies']
     .flatMap(variant => [false, true].map(basisUnavailable => ({ variant, basisUnavailable }))))(

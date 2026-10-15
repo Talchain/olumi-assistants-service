@@ -61,11 +61,19 @@ describe('S7 B2: the AI is told a deadline it approved is Olumi’s reading of t
   // ⭐ Hiring e2e 62e94f27 turn 05 (DL 08:03Z): the fact reached the AI (above) and the reply still put "a 15 January deadline"
   // under "What you supplied". The instructions the AI reads now say what the fact means, naming the SAME keys the state carries.
   it('the instructions say an approved Olumi reading is never a date the user supplied, by the same keys the state carries', async () => {
-    const rule = 'A goal\u2019s deadline_set_by olumi_reading means Olumi read that date from the user\u2019s words (from_words) and the user approved it: say it that way, never as a date the user supplied.';
+    // AIE 6187794071 AMEND: the AIE's exact words replace the sentence first proposed; the state keeps from_words + counted_from.
+    const rule = 'For a goal deadline, distinguish the complete verified words the user supplied from any calendar date Olumi interpreted from them. '
+      + 'An approved Olumi reading remains an Olumi reading: say \u201cYou said \u2018{actual words}\u2019. Olumi interpreted that as {date}, using {actual reference and date convention}; you approved that reading.\u201d '
+      + 'Do not list the interpreted date under \u201cWhat you supplied\u201d merely because it was approved. '
+      + 'If an applicable verified human statement independently supplies the calendar date itself, preserve that human source too. '
+      + 'Where the source, reference, interpretation or approval cannot be verified, state that exact limitation rather than inventing one.';
     expect(HOST_TOOL_CONTRACT.split(rule)).toHaveLength(2);
     const goal = (await goalsSeen(HIRING)).find((g) => g.id === 'productivity')!;
     expect(Object.keys(goal)).toContain('deadline_set_by');
     expect(goal.deadline_set_by.origin).toBe('olumi_reading');
     expect(goal.deadline_set_by).toHaveProperty('from_words', 'three months');
+    // The reference the reading counted from travels too ("using {actual reference …}").
+    expect(typeof goal.deadline_set_by.counted_from).toBe('string');
+    expect(goal.deadline_set_by.counted_from).not.toBe('');
   });
 });

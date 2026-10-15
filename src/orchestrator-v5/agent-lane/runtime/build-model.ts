@@ -1826,6 +1826,11 @@ export async function buildModelFromBrief(
   attestedDeliverable?: string,
   /** A revised draft (`prepareRevisedDraft`): a prepare-only card the user accepts before anything changes. */
   revisedDraft?: boolean,
+  /**
+   * S3 (DL 15 Oct): told once with the admitted draft as it would be saved, BEFORE the widening calls start, so the canvas
+   * draws the model without waiting for them. Only when widening will run; an observer, so a throw never costs the build.
+   */
+  onDraftAdmitted?: (graph: unknown) => void,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = {
@@ -2718,6 +2723,12 @@ export async function buildModelFromBrief(
   // ⭐ RESTORED (Paul, #94 6166259456): both arms run on the served seam: non-obvious options through a different mechanism,
   // and risks against the options. Every added item is Olumi's (`markOlumiOptions`, `draft_widening`, `proposed_by`), the
   // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
+  if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
+    const draft = finalFor(admitted).graph;
+    if (GraphV3.safeParse(draft).success) {
+      try { onDraftAdmitted(draft); } catch { /* an observer never costs the build */ }
+    }
+  }
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
     admit: admitWidened, optionsArm: true, risksArm: true });

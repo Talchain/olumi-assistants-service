@@ -1272,3 +1272,176 @@ describe('a revised draft over the link limit only is admitted as drafted (L20 s
     expect(s.commits).toHaveLength(0);
   });
 });
+
+/**
+ * ⭐ DEMO (Paul, 19 Oct; AIE #94 6192426755): a correction in chat → ONE revised-model card through the SAME prepare/approve/save
+ * path → the press saves it, so the corrected framing is OPERATIVE (the rejected mechanism is gone from the saved model the Run
+ * and a reopen read). Before this, a correction had no route to that path (only a typed goal target or deadline did).
+ */
+describe('a correction to the model as a whole becomes an approved, saved revised model (propose_change op revise_model)', () => {
+  const CORRECTION = 'Ad production costs are not a real risk for us. We have no budget for paid production, so take that out of the model.';
+  const corrTurn = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-corr', turn_id: 'corr-turn-0001',
+    user_turn_text: CORRECTION, user_text: `${FX.l1.message}\n${CORRECTION}` };
+  const dispatchChange = async (caps: ReturnType<typeof lane>['caps'], ctx: Rec, quote: string) => {
+    const { dispatchTool } = await import('../runtime/agent-tools.js');
+    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote }] }),
+      ctx as never, caps) as Promise<Rec>;
+  };
+  const labels = (g: Rec): string[] => (g.nodes as Rec[]).map((n) => String(n.label));
+
+  it('RED: the correction → ONE card from the brief + the correction; the press saves it; the rejected risk is gone on reopen', async () => {
+    const s = server();
+    const seen: string[] = [];
+    const proposals = new ProposalStore();
+    const call = (async (req: unknown) => { seen.push(JSON.stringify(req)); return { text: JSON.stringify(candidate()) }; }) as unknown as CallStructuredModel;
+    const caps = createAgentCapabilities(s.dispatch, proposals, call, 'full', undefined, { readCommittedTurnLedger: s.readCommittedTurnLedger, readStatedObjections: async () => [] });
+    expect(labels(s.graph())).toContain('Ad production costs erode budget');
+    const offer = await dispatchChange(caps, corrTurn, CORRECTION);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true, mutated: false, revised_draft: { correction: true } });
+    expect(String(offer.public_label)).toMatch(/^Replace the early draft with a revised one built from your brief and the correction you just gave: /);
+    // The construction read the brief AND this correction (revisedDraftBrief), and nothing is written before the press.
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toContain(JSON.stringify(revisedDraftBrief(FX.brief_text, CORRECTION)).slice(1, 80));
+    expect(seen[0]).toContain(CORRECTION);
+    expect(s.commits).toHaveLength(0);
+    // The card is card-only: its chip is the revised-draft button, naming exactly this stored proposal.
+    const chips = approvalChipsFor([{ name: 'propose_change', ok: true, mutated: false, proposal_id: String(offer.proposal_id) }],
+      () => ({ proposal: proposals.get(String(offer.proposal_id))!, result: offer as never }));
+    expect(chips[0]).toMatchObject({ label: 'Use the revised draft', message: 'Yes, use the revised draft.', detail: offer.public_label });
+    s.said(corrTurn.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    // OPERATIVE: the saved model (what the Run and a reopen read) is the revision; the rejected mechanism is not in it.
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    expect(labels(reopened.graph)).not.toContain('Ad production costs erode budget');
+    expect(labels(reopened.graph)).toContain('New customers');
+    const { payload } = await runFromStore(s.bytes());
+    expect(((payload.graph as Rec).nodes as Rec[]).map((n) => String(n.label))).not.toContain('Ad production costs erode budget');
+  });
+
+  it('CONTRAST: words not in this message → nothing drafted or offered; a typed yes without the press saves nothing', async () => {
+    const s = server();
+    const { caps, drafts } = lane(s);
+    expect(await dispatchChange(caps, { ...corrTurn, user_turn_text: 'What does the Run say?' }, CORRECTION))
+      .toMatchObject({ ok: false, refusal: 'not_asked' });
+    expect(drafts()).toBe(0);
+    const offer = await dispatchChange(caps, corrTurn, CORRECTION);
+    s.said(corrTurn.turn_id);
+    const { typed_approval_of: _pressed, ...typedOnly } = pressed(String(offer.proposal_id));
+    const out = await caps.authoriseChange({ ...typedOnly, user_turn_text: 'Yes, use the revised draft.' } as never, { proposal_id: offer.proposal_id } as never);
+    expect(out.ok).toBe(false);
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('CONTRAST (the gates stay): a saved history that cannot be read → no card, nothing drafted', async () => {
+    const s = server({ ledgerFails: true });
+    const { caps, drafts } = lane(s);
+    const out = await dispatchChange(caps, corrTurn, CORRECTION);
+    expect(out).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
+    expect(drafts()).toBe(0);
+  });
+
+  it('RED: a known fact whose origin cannot be verified is never re-asked: the refusal tells the AI not to ask again', async () => {
+    const { UNKNOWN_ORIGIN_DETAIL } = await import('../runtime/statement-origin.js');
+    expect(UNKNOWN_ORIGIN_DETAIL).not.toMatch(/ask for its source/i);
+    // AIE #94 6194613256's exact text.
+    expect(UNKNOWN_ORIGIN_DETAIL).toBe('The proposed figure could not be verified for this model field, so it was not recorded. Retain the '
+      + 'original words and any known speaker and source; an unverified field binding does not make that known origin unknown. Do not ask '
+      + 'the user to repeat or confirm supplied facts. Explain only genuinely missing or conflicting meaning. If this changes the model as '
+      + 'a whole, offer propose_change op revise_model.');
+  });
+});
+
+/**
+ * ⭐ DEMO fix (served 34a4a4cb, Paul's founder brief: six revise_model calls refused `revised_draft_has_no_target`): the goal is
+ * QUALITATIVE ("Larger fund secured": no threshold, no target row). A correction to such a model is no target loss, so it is
+ * offered and saved, and no target is invented. A correction that DROPS a target the saved model holds still refuses.
+ */
+describe('a correction to a model whose goal has NO numeric target (the founder brief\'s shape)', () => {
+  const CORRECTION = 'We have no funding to lose, so take the funding-loss risk out and model 60 founder hours a week, not 40.';
+  const turn = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-q', turn_id: 'corr-q-0001',
+    user_turn_text: CORRECTION, user_text: `${FX.l1.message}\n${CORRECTION}` };
+  const qualitative = (): Rec => {
+    const c = candidate();
+    c.goal = { ...c.goal, metric: 'Larger fund secured', operator: null, target_stated: false, value: null, unit: null,
+      baseline_known: false, baseline_value: null, basis: null };
+    c.constraints = c.constraints.filter((k: Rec) => k.role === 'limit');
+    c.links = c.links.map((l: Rec) => (l.to === 'New customers' ? { ...l, to: 'Larger fund secured' } : l));
+    return c;
+  };
+  const change = async (caps: ReturnType<typeof lane>['caps']) => {
+    const { dispatchTool } = await import('../runtime/agent-tools.js');
+    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote: CORRECTION }] }),
+      turn as never, caps) as Promise<Rec>;
+  };
+
+  it('RED: correction → ONE card saying the goal has no numeric target → press → saved → reopen holds it; no target invented', async () => {
+    const s = server();
+    const { caps } = lane(s, new ProposalStore(), qualitative);
+    const offer = await change(caps);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true, mutated: false });
+    expect(String(offer.public_label)).toMatch(/^Replace the early draft with a revised one built from your brief and the correction you just gave\. Its goal, ‘Larger fund secured’, has no numeric target, as before\. /);
+    s.said(turn.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.label).toBe('Larger fund secured');
+    expect(goal.goal_threshold ?? null).toBeNull();
+    expect(((reopened.graph.goal_constraints ?? []) as Rec[]).filter((r) => r.role === 'goal_target')).toEqual([]);
+    expect((reopened.graph.nodes as Rec[]).map((n) => n.label)).not.toContain('Ad production costs erode budget');
+  });
+
+  // ⭐ The verifier's shape (served 34a4a4cb): "a larger fund of at least 1.3 million" is held on the goal as goal_threshold_raw 1.3
+  // with goal_threshold null and no target row. It is the user's stated target: kept, or the correction is refused, never dropped.
+  const withRawTarget = (): Rec => {
+    const base = structuredClone(FX.graph);
+    const goal = (base.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    Object.assign(goal, { goal_threshold_raw: 1.3, goal_threshold_unit: 'million (currency unspecified)', goal_threshold_frame: 'level' });
+    delete goal.goal_threshold; delete goal.goal_threshold_cap;
+    return base;
+  };
+  const keepsRaw = (): Rec => { const c = qualitative(); c.goal = { ...c.goal, operator: '>=', target_stated: true, value: 1.3, unit: 'million (currency unspecified)' }; return c; };
+
+  it('RED (raw target, normalised null): the revision keeps the stated 1.3 million → the card says so → saved → reopen holds it', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), keepsRaw);
+    const offer = await change(caps);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true });
+    expect(String(offer.public_label)).toContain('Its goal, ‘Larger fund secured’, keeps the target you stated: ');
+    expect(String(offer.public_label)).toContain('1.3 million (currency unspecified), as before. ');
+    s.said(turn.turn_id);
+    expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.goal_threshold_raw).toBe(1.3);
+    expect(goal.goal_threshold_unit).toBe('million (currency unspecified)');
+  });
+
+  it('CONTRAST (raw target, normalised null): a revision that drops the stated 1.3 million → refused, never silently; nothing written', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), qualitative);
+    const out = await change(caps);
+    expect(out).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    expect(String(out.detail)).toContain('(1.3 million (currency unspecified))');
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('CONTRAST: a qualitative saved goal and a revision that brings a figure of its own → refused; the card never claims "as before"', async () => {
+    const s = server();
+    const { caps } = lane(s, new ProposalStore(), keepsRaw);
+    expect(await change(caps)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
+    const base = structuredClone(FX.graph);
+    base.goal_constraints = [...(base.goal_constraints ?? []), { constraint_id: 'agent-lane:product_feature_launch:>=', node_id: 'product_feature_launch',
+      operator: '>=', value: 100, unit: '% complete', label: 'product feature launch', provenance: 'explicit', value_frame: 'level', role: 'goal_target' }];
+    const s = server({ graph: base });
+    const { caps } = lane(s, new ProposalStore(), qualitative);
+    expect(await change(caps)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.commits).toHaveLength(0);
+  });
+});

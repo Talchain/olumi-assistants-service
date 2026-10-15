@@ -30,6 +30,7 @@ import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -417,7 +418,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       expect(proposal?.public_label).toContain(`Your words: “${words}” in “Our deadline is ${words}”.`);
     } else {
       expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
-        detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });
+        detail: UNKNOWN_ORIGIN_DETAIL });
       expect(await heldOnLatestRow()).toEqual([]);
       expect(approveChipOf(result)).toBeUndefined();
     }
@@ -506,7 +507,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const result = await turn({ message: 'Use those hiring times.', agent_session_id: randomUUID() });
     const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
     expect(call, JSON.stringify(output)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
-    expect(JSON.stringify(output)).toContain('origin stays unknown');
+    expect(JSON.stringify(output)).toContain(UNKNOWN_ORIGIN_DETAIL);
   });
 
   it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {

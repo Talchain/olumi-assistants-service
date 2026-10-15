@@ -126,16 +126,18 @@ export function isLicensedChanceLine(sentence: string, chances: LicensedChances 
   // The from→to words sit between the earlier display and this Run's (the slice is empty when the order is reversed).
   const comparison = priorAt >= 0 && Number.isFinite(ownAt)
     && FROM_TO.test(key(rest).slice(Math.max(0, priorAt - 12), ownAt));
-  const allowedFigures = [...named[0]!.figures, ...(comparison ? named[0]!.prior!.figures : [])];
-  if (figures.length === 0 || !figures.every((f) => allowedFigures.includes(f))) return false;
+  // ⭐ PL 07:50Z: ONLY the bound earlier endpoint is exempt — its display, at its place in the pair — never its figures anywhere
+  // else in the sentence. The rest is checked against THIS Run's display alone.
+  const others = comparison ? `${key(rest).slice(0, priorAt)} ${key(rest).slice(priorAt + key(priorDisplay!).length)}` : rest;
+  const otherFigures = figuresIn(others);
+  if (figures.length === 0 || !otherFigures.every((f) => named[0]!.figures.includes(f))) return false;
   // Point vs range: the sentence states one of THIS option's licensed displays whole.
   if (!Number.isFinite(ownAt)) return false;
   // The event and target: the goal itself, or the licence's own chance words; any other number is another target.
   if (!ownWords && !GOAL_EVENT.test(sentence)) return false;
   const allowed = new Set([...named[0]!.displays.flatMap(numbersIn), ...numbersIn(chances.chanceWords ?? ''),
-    ...(comparison ? numbersIn(priorDisplay!) : []),
     ...(chances.periodMonths !== undefined ? [chances.periodMonths] : [])]);
-  if (!numbersIn(rest).every((n) => allowed.has(n))) return false;
+  if (!numbersIn(others).every((n) => allowed.has(n))) return false;
   if (!CHANCE.test(sentence) || SHARE.test(sentence)) return false;
   if (DATE.test(sentence)) return false;
   for (const m of MONTH_WINDOWS.flatMap((re) => [...sentence.matchAll(re)])) {

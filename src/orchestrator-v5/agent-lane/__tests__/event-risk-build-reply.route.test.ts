@@ -157,5 +157,9 @@ describe('event-risk disclosure through the served build reply', () => {
     const objectiveAsk = 'I used "Delivery" as a provisional objective. What should this model help you explore?';
     expect(buildOutput?.next_step_blocker).toMatchObject({ kind: 'missing_input', cause: 'objective_provisional', ask: objectiveAsk });
     expect(body.assistant_text).not.toContain(objectiveAsk);
+    // S6 (#3237): the AI wrote this reply, so the host adds no build questions line; the server's own facts stay.
+    expect(body.assistant_text).not.toContain('Questions this model does not answer yet:');
+    expect(body.assistant_text).toContain('Without a current level the analysis would treat it as zero.');
+    expect(body.assistant_text).toContain('Olumi can’t run the numbers until this risk has a figure.');
   });
 });

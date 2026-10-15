@@ -646,17 +646,27 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'matters" or "could go either way", this is NOT set_zero: keep the link, and ask only which they mean where that is unclear. '
       + 'Never remove an option (use propose_option_status) or the goal. '
       + 'op rename: the user gives a new name for ONE option, factor or risk ("call it Hire three developers"): new_label is that name, '
-      + 'copied exactly from their words. Never a part the user did not ask to change, and never a name of your own.',
+      + 'copied exactly from their words. '
+      + 'op option_timing: when ONE option\u2019s effect would be fully in place, as the user said it ("live about two months after we '
+      + 'commit; full effect in about 4 months"): kind option, quote their complete statement, reading_words their own words that state '
+      + 'the month(s). It goes through the same card as propose_statement\u2019s lead. '
+      + 'op revise_model: the user corrects or reframes the model AS A WHOLE (a different question, a mechanism they reject, a changed '
+      + 'working assumption such as "60 hours a week, not 40", or a fact such as "we have no funding"): quote their correction from THIS '
+      + 'message (kind and label: the goal). Olumi prepares ONE revised model from their brief and everything they have said since, on '
+      + 'ONE card; only their press replaces the saved model. Never for one part\u2019s figure, and never ask them to repeat what they said. '
+      + 'Never a part the user did not ask to change, and never a name or figure of your own.',
     parameters: obj({
       ops: { type: 'array', minItems: 1, maxItems: 1, items: obj({
-        op: { type: 'string', enum: ['remove', 'set_zero', 'rename'] },
-        kind: { type: 'string', enum: ['option', 'factor', 'risk', 'link'] },
+        op: { type: 'string', enum: ['remove', 'set_zero', 'rename', 'option_timing', 'revise_model'] },
+        kind: { type: 'string', enum: ['goal', 'option', 'factor', 'risk', 'link'] },
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
         to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
         id: { type: 'string', description: 'The part\u2019s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.' },
         to_id: { type: 'string', description: 'Only for a link: the id of the part it points to.' },
         quote: { type: 'string', description: 'The user\u2019s complete statement asking for the change, copied exactly from THIS message.' },
         new_label: { type: 'string', description: 'Only for op rename: the new name, copied exactly from the user\u2019s words in quote.' },
+        reading_words: { type: 'string', description: 'Only for op option_timing: the user\u2019s own words that state the month(s), copied from quote.' },
+        answering: { type: 'string', description: 'Only for op option_timing, when the statement answers a question you asked: that question, copied exactly from your reply.' },
       }, ['op', 'kind', 'label', 'quote']) },
     }, ['ops']),
   },
@@ -1066,6 +1076,8 @@ export interface AgentCapabilities {
     /** op set_zero: the card shows that "zero" is read as removing the direct link (AIE 6188873084). */
     zero?: boolean;
   }): Promise<ToolResult>;
+  /** Optional: propose_change's revise_model op (demo): ONE revised-draft card from the user's correction to the model as a whole. */
+  proposeRevision?(ctx: AgentToolContext, args: { quote: string }): Promise<ToolResult>;
   /** Optional: propose_change's rename op (S5): the user's own new name for ONE option, factor or risk. */
   proposeRename?(ctx: AgentToolContext, args: { kind: 'option' | 'factor' | 'risk'; label: string; id?: string; new_label: string; quote: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
@@ -1254,11 +1266,21 @@ async function dispatchToolUnbounded(
         return caps.proposeRemoval(ctx, { kind: op.kind, label: op.label, to_label: op.to_label, id: op.id, to_id: op.to_id, quote: op.quote,
           ...(op.op === 'set_zero' ? { zero: true } : {}) } as never);
       }
+      // ⭐ S5 op option_timing: the door's existing option-lead row (M3c), the same card and press as propose_statement's lead.
+      if (op?.op === 'option_timing' && op.kind === 'option' && caps.proposeStatement !== undefined) {
+        return caps.proposeStatement(ctx, { subject: { kind: 'option', label: op.label, ...(op.id !== undefined ? { id: op.id } : {}), field: 'lead' },
+          statements: [{ quote: op.quote, ...(op.reading_words !== undefined ? { reading_words: op.reading_words } : {}),
+            ...(op.answering !== undefined ? { answering: op.answering } : {}) }] } as never);
+      }
+      // ⭐ DEMO op revise_model: the existing revised-draft prepare/approve/save path (`proposeRevision`).
+      if (op?.op === 'revise_model' && caps.proposeRevision !== undefined) {
+        return caps.proposeRevision(ctx, { quote: op.quote } as never);
+      }
       if (op?.op === 'rename' && caps.proposeRename !== undefined) {
         return caps.proposeRename(ctx, { kind: op.kind, label: op.label, id: op.id, new_label: op.new_label, quote: op.quote } as never);
       }
       return { ok: false, mutated: false, refusal: 'unsupported_change',
-        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link; rename). Nothing was prepared.' };
+        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link; rename; option_timing for an option; revise_model). Nothing was prepared.' };
     }
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined

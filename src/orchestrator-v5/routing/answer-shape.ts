@@ -361,6 +361,19 @@ export function synthBulletLineText(line: string): string | null {
   return m === null ? null : m[1];
 }
 
+/** Keep the narrator's first copy in place; remove later copies without adding host prose. */
+export function withSentenceSaidOnce(text: string, sentence: string): string {
+  const trimmed = sentence.trim();
+  if (trimmed === '') return text;
+  const pattern = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[^\\S\\n]+');
+  const first = new RegExp(pattern).exec(text);
+  if (first === null) return text;
+  const end = first.index + first[0].length;
+  const suffix = text.slice(end);
+  const remaining = withoutSentenceCopies(suffix, sentence);
+  return text.slice(0, end) + (remaining === '' ? '' : (/^\s+/.exec(suffix)?.[0] ?? ' ') + remaining);
+}
+
 /** A narrator copy in any spacing must not survive beside the host's one copy. */
 export function withoutSentenceCopies(text: string, sentence: string): string {
   const trimmed = sentence.trim();

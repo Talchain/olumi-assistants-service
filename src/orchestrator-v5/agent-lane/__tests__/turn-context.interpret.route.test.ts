@@ -81,11 +81,18 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
   beforeEach(() => { rows.clear(); bodies.length = 0; });
 
   /** Press Run, then the Explain control it offers; return the interpret call's request (the tool-less one). */
-  const explainRequest = async (read: Json): Promise<Json> => {
+  const explainRequest = async (read: Json, prior: readonly string[] = []): Promise<Json> => {
     READ = read;
     const scenario = read.scenario_id as string;
+    const session = randomUUID();
+    for (const message of prior) {
+      const correction = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: scenario, agent_session_id: session, turn_id: randomUUID(), message,
+      } });
+      expect(correction.statusCode, correction.body).toBe(200);
+    }
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', agent_session_id: randomUUID(), scenario_id: scenario, message: 'Run analysis.',
+      kind: 'message', agent_session_id: session, scenario_id: scenario, message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: randomUUID(),
     } });
     expect(r.statusCode, r.body).toBe(200);
@@ -102,6 +109,23 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     expect(interpret, 'exactly one interpreting call').toHaveLength(1);
     return interpret[0]!;
   };
+
+  it('B1: one coaching instruction and retained corrections, with unsaved changes still distinguished', async () => {
+    const corrections = [
+      'My working assumption is 60 hours. The 80% estimate is conditional on an investor meeting.',
+      'I have asked to replace the 40-hour options; those changes are still awaiting save.',
+    ];
+    const request = await explainRequest(BRIEFS.capacity!, corrections);
+    const sent = JSON.stringify(request);
+    for (const correction of corrections) expect(sent).toContain(correction);
+    const { RUN_FACTS_USE } = await import('../run-facts.js');
+    expect(request.instructions.split(RUN_FACTS_USE)).toHaveLength(2);
+    expect(JSON.stringify(request.input)).not.toContain(RUN_FACTS_USE);
+    expect(request.instructions).toContain('A proposed change is still awaiting approval or save until the actual readback confirms it');
+    expect(request.instructions).toContain('A missing saved field does not justify asking again');
+    expect(request.tool_choice).toBe('none');
+    expect(request.tools).toEqual([]);
+  }, 60_000);
 
   it.each(Object.keys(BRIEFS))('%s (served read): the interpret request opens with today, then the brief verbatim as the USER’s words', async (name) => {
     const read = BRIEFS[name]!;

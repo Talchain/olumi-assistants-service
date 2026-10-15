@@ -2490,6 +2490,8 @@ export function createAgentCapabilities(
      * An observer only — a throw here is swallowed and never costs the build. Absent ⇒ nothing is told.
      */
     readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+    /** S3: the admitted draft, before the widening calls start (`buildModelFromBrief`'s `onDraftAdmitted`); an observer only. */
+    readonly onDraftAdmitted?: (graph: unknown) => void;
     /** X5 (DESIGN Q3): why the one construction retry ran and its outcome — for `_diagnostic_trace`, never the model. */
     readonly onConstructionTrace?: (t: ConstructionTrace) => void;
     /**
@@ -3858,6 +3860,8 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
     /** GEN #5: the user's deliverable, verified verbatim in this message; attests the event and binds it by identity. */
     deliverable?: string,
+    /** ⭐ DEMO: a correction to the model as a whole (propose_change op revise_model), not a goal: the card says so. */
+    correction = false,
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
     const gate = await unreviewedDraftGate(ctx, g, 'offer');
@@ -3915,7 +3919,34 @@ export function createAgentCapabilities(
     // call holds no deliverable, so an event alone never answers it either.
     const drafted = draftedTeamPartOf(candidate);
     const event = drafted !== null && deliverableWrittenIn(drafted.deliverable, deliverable) ? drafted : null;
-    if (held.length === 0 && event === null) {
+    // ⛔ The target gate guards a real loss: a goal the user STATED with a target, or (a correction) targets the saved model
+    // holds, that the revision drops. ⭐ DEMO (served 34a4a4cb, Paul's founder brief): a goal with NO numeric target ("Larger fund
+    // secured") is no loss to a correction: the revision keeps it qualitative, and no target is ever invented for it.
+    // ⛔ AIE #94 6194613256 / DL: a target can be held two ways, as a target ROW or as the goal's own stated figure
+    // (the one goal record's `target.raw`, e.g. a stated "at least 1.3" whose unit the analysis cannot yet use). Both count; neither is dropped.
+    const goalIn = (raw: unknown): Record<string, unknown> | undefined =>
+      (((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? []).find((n) => n?.kind === 'goal');
+    const savedGoalNode = goalIn(g.raw);
+    const draftGoalNode = goalIn(candidate);
+    // Through the ONE goal record (S5 census): its stated figure, unit and held comparator.
+    const statedOf = (raw: unknown, node: Record<string, unknown> | undefined): { value: number; unit?: string; held?: string } | null => {
+      const t = node === undefined || typeof node.id !== 'string' ? null : readGoalRecord(raw, node.id)?.target ?? null;
+      return t === null || typeof t.raw !== 'number' || !Number.isFinite(t.raw) ? null
+        : { value: t.raw, ...(typeof t.unit === 'string' ? { unit: t.unit } : {}), ...(typeof t.comparator === 'string' ? { held: t.comparator } : {}) };
+    };
+    const savedStated = statedOf(g.raw, savedGoalNode);
+    const draftStated = statedOf(candidate, draftGoalNode);
+    const stillStated = savedStated !== null && draftStated !== null && draftStated.value === savedStated.value
+      && (draftStated.unit ?? '') === (savedStated.unit ?? '');
+    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated) {
+      // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
+      return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
+        + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `
+        + 'Tell the user plainly, and ask only whether their correction replaces that target.');
+    }
+    /** A correction with no target ROW: the goal stays qualitative, or keeps its own stated figure exactly. */
+    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0 && (savedStated === null ? draftStated === null : stillStated);
+    if (held.length === 0 && event === null && !qualitativeKept) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
     }
@@ -3947,10 +3978,17 @@ export function createAgentCapabilities(
     // The AIE's card clause (packet B card_without_date, 14 Oct), with construction's own deliverable, never the tool's short
     // trigger. A construction never holds a deadline date (only an approved deadline write does: `goal-horizon-write.ts`,
     // `hiring-times.ts`), so the date is always still to be confirmed, and this card never implies it saves one.
-    const card = (held.length > 0
-      ? `Replace the early draft with a revised one built from your brief and the goal you just gave: `
+    const goalNow = nodesOf(candidate).find((n) => n?.kind === 'goal');
+    const goalWords = `\u2018${typeof goalNow?.label === 'string' ? goalNow.label : goal.label}\u2019`;
+    const card = (qualitativeKept
+      ? `Replace the early draft with a revised one built from your brief and the correction you just gave. Its goal, ${goalWords}, `
+        + (draftStated === null ? 'has no numeric target, as before. '
+          : `keeps the target you stated: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
+            + `${draftStated.value}${draftStated.unit !== undefined ? ` ${draftStated.unit}` : ''}, as before. `)
+      : held.length > 0
+      ? `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave: `
         + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
-      : `Replace the early draft with a revised one built from your brief and the goal you just gave (the draft modelled \u2018${goal.label}\u2019): `
+      : `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave (the draft modelled \u2018${goal.label}\u2019): `
         + `\u2018${event!.deliverable}\u2019, with the deadline date still to be confirmed. `)
       + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
       + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
@@ -6080,6 +6118,44 @@ export function createAgentCapabilities(
      * message, which holds that name exactly. Olumi proposes; the user authors: ONE card, and only its press renames, through the
      * existing label writer (`structural_rename`, its base hash and the name the card showed). A name another part has is refused.
      */
+    /**
+     * ⭐ DEMO (Paul, 19 Oct; AIE #94 6192426755): a correction to the model AS A WHOLE ("it's 60 hours a week, not 40"; "drop the
+     * funding mechanisms, we have no funding") becomes ONE revised-draft card through the EXISTING prepare/approve/save path
+     * (`prepareRevisedDraft`: the brief plus this message, the saved model, every later message and objection as context; its
+     * three gates; human items carried by identity). Only the card's press replaces the saved model. Nothing new is written here.
+     */
+    async proposeRevision(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
+      if (quote === '' || !wholeStatementIn(ctx.user_turn_text ?? '', quote)) {
+        return { ok: false, mutated: false, refusal: 'not_asked',
+          detail: 'A revised model is prepared only from the user\u2019s own correction in this message, quoted exactly. Nothing was prepared.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (goals.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'revised_draft_unavailable', detail: 'The model has no single goal to revise against, so nothing was prepared.' };
+      }
+      const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}\u0000revise`;
+      let pending = revisedDrafts.get(key);
+      if (pending === undefined) {
+        pending = prepareRevisedDraft(ctx, g, goals[0]!, undefined, true);
+        revisedDrafts.set(key, pending);
+      }
+      const draft = await pending;
+      if ('refused' in draft) {
+        return draft.found === undefined ? draft.refused
+          : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', []) };
+      }
+      if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
+      return { ok: true, mutated: false, proposal_id: draft.proposal.proposal_id, public_label: draft.proposal.public_label, base_revision: g.graph_hash,
+        revised_draft: { replaces_goal: goals[0]!.label, correction: true },
+        note: 'Nothing has changed yet. Offer this revised-model card and explain briefly what it changes against the current model, in your own '
+          + 'words, never its id. It reads everything the user has said since their brief, so never ask them to repeat a fact they already '
+          + 'stated. Only the user pressing that card replaces the model: never call authorise_change for it yourself.' };
+    },
+
     async proposeRename(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const kind = args?.kind;
@@ -9937,7 +10013,8 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured));
+        built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured,
+          undefined, undefined, undefined, undefined, opts.onDraftAdmitted));
         if (built.ok !== true) return built;
       }
 

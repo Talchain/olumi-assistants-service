@@ -19,7 +19,7 @@ import { executeOptionInterventionBatch } from '../../system-events/option-inter
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { optionTimingAtPeriodEnd } from '../fields/goal-timing.js';
-import { AGENT_TOOLS } from '../../agent-lane/runtime/agent-tools.js';
+import { AGENT_TOOLS, dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
 
 type Rec = Record<string, any>;
 const SID = 'c3c0c3c0-0000-4000-8000-00000000c3c0';
@@ -140,3 +140,24 @@ describe('the option is named by its id when a copied label differs from the sto
   });
 });
 
+
+// ⭐ S5 propose_change op option_timing (Paul's ≤¼ PoC ruling): the generic change tool reaches the SAME lead row and card.
+describe('propose_change op option_timing → the door\'s option-lead card', () => {
+  const change = (w: ReturnType<typeof world>, op: Rec) => dispatchTool('propose_change', JSON.stringify({ ops: [op] }), ctx(SAID) as never, w.caps) as Promise<Rec>;
+  it('RED: the option\'s timing, through propose_change, is the same ONE card propose_statement prepares (by id, a copied label)', async () => {
+    const w = world();
+    const viaChange = await change(w, { op: 'option_timing', kind: 'option', label: 'Hire a Tech-lead', id: 'hire_a_tech_lead', quote: SAID,
+      reading_words: 'lift productivity from month 2' });
+    expect(viaChange, JSON.stringify(viaChange)).toMatchObject({ ok: true, statement: { subject: 'Hire a Tech lead', field: 'lead', quotes: [SAID] } });
+    const w2 = world();
+    const viaDoor = await w2.caps.proposeStatement!(ctx(SAID) as never, { subject: { kind: 'option', label: 'Hire a Tech lead', field: 'lead' },
+      statements: [{ quote: SAID, reading_words: 'lift productivity from month 2' }] } as never) as Rec;
+    expect(viaChange.public_label).toBe(viaDoor.public_label);
+  });
+  it('CONTRAST: option_timing on a part that is not an option → nothing prepared', async () => {
+    const w = world();
+    expect(await change(w, { op: 'option_timing', kind: 'factor', label: 'Hire a Tech lead', quote: SAID, reading_words: 'from month 2' }))
+      .toMatchObject({ ok: false, refusal: 'unsupported_change' });
+    expect(w.proposals.outstanding(SID, null)).toEqual([]);
+  });
+});

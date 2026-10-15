@@ -165,4 +165,17 @@ describe('S9: a from→to comparison of one option’s licensed chances survives
       expect(gateR2e(bad, delta ?? R2E.current_read.run_delta), bad).not.toContain(bad);
     }
   });
+  // ⭐ PL 07:50Z (AIE amend): ONLY the bound earlier endpoint is exempt. The same earlier figures said ANYWHERE ELSE in the
+  // sentence are equal values with a different identity (not the pair's endpoint), so they are still unlicensed.
+  it('EQUAL VALUE, DIFFERENT IDENTITY: the earlier figures outside the bound endpoint are dropped; the bound pair alone is kept', () => {
+    expect(gateR2e(SAID), 'positive control: the bound pair').toContain(SAID);
+    for (const bad of [
+      SAID.replace('chance of meeting your goal.', 'chance of meeting your goal, 36% above before.'),
+      `At 30% cost, ${SAID}`,
+      SAID.replace('went from', 'with 30 more hours went from'),
+      SAID.replace('went from', ', between about 30% and 36% before, went from'),
+    ]) {
+      expect(gateR2e(bad), bad).not.toContain(bad);
+    }
+  });
 });

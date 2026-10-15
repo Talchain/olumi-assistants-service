@@ -185,12 +185,13 @@ describe('on the wire: the inspect turn says the ask at rest, once, and a replay
     scenario_id: `8b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d${String(n).padStart(2, '0')}`, message,
   } })).json() as { assistant_text: string };
 
-  it('RED: the served model words → the ask at rest, once, last before nothing else asks; a replay of the turn is word-for-word', async () => {
+  // ⭐ S6 (#3237, Paul ≤¼ 15 Oct): on a reply the AI wrote, the AI decides what to ask; the host adds no link-size ask.
+  // `linkSizeAsk` itself is unchanged (rows above) and still serves host-written replies.
+  it('S6: the served model words (AI-written, no question of its own) → no host ask; a replay of the turn is word-for-word', async () => {
     const turnId = '6d1e8f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a';
     const text = (await turn(FX.message, turnId)).assistant_text;
-    expect(text.split(ASK).length - 1).toBe(1);
-    expect(textAtRest(text)).toContain(ASK);
-    expect(text.match(/\?/g) ?? []).toHaveLength(1);
+    expect(text).not.toContain(ASK);
+    expect(textAtRest(text)).not.toMatch(/\?/);
     expect((await turn(FX.message, turnId)).assistant_text).toBe(text);
   });
 

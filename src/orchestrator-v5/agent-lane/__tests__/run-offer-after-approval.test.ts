@@ -414,6 +414,23 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       return b;
     };
 
+    it('B1: the existing automatic Run after Undo is interpreted once; forwarding Undo starts no extra Run', async () => {
+      const undone = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'undo', scenario_id: SCENARIO, turn_id: crypto.randomUUID(),
+      } });
+      expect(undone.statusCode, undone.body).toBe(200);
+      expect(undone.json()._diagnostic_trace.exit_path).toBe('agent_lane_forwarded');
+      expect(runs).toBe(0);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(0);
+      runStampedAt = RUN_AT;
+      runDelta = LINK_ENTERED;
+      const b = await press();
+      expect(runs).toBe(1);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(b.narration?.status).toBe('pending');
+    });
+
     it('RED: a re-run after a change → ONE interpreting call over THIS Run; its coaching replaces the ready line', async () => {
       runStampedAt = RUN_AT;
       runDelta = LINK_ENTERED;

@@ -1,3 +1,4 @@
+import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { postResponses } from '../adapters/llm/openai.js';
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
 import { projectStatedObjections, STATED_OBJECTIONS_CAP } from '../orchestrator-v5/context/stated-objections.js';
@@ -125,7 +126,7 @@ import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizing
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed, checkScreenLineClaims } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -152,7 +153,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-targe
 import { goalHorizonNextStep, goalHorizonReplyLead } from '../orchestrator-v5/goal-target/goal-horizon-detail.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDerivedAnswerText, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
-import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
+import { withoutDriverAbsenceClaimsAtEgress, removeDriverAbsenceClaims, screenNamesADriver } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { AI_WRITES_RUN_TURN } from '../orchestrator-v5/agent-lane/ai-writes-run-turn.js';
 import { runToolOutputLicensesLeader } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -219,7 +220,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
+import { withoutSentenceCopies, withSentenceSaidOnce } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -1159,7 +1160,8 @@ export function leavesProposalAwaitingApproval(
 }
 
 /** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
-function placeExplainCaveat(text: string, caveat: string): string {
+function placeExplainCaveat(text: string, caveat: string, add = true): string {
+  if (!add) return withSentenceSaidOnce(text, caveat);
   return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
 }
 
@@ -1236,7 +1238,8 @@ export const INTERPRET_ONLY_CONSTRAINT =
   + 'so never promise one or describe one as made. If the analysis did not run, say in plain words what it still '
   + 'needs; the user can ask you to suggest it.';
 
-export const INTERPRETER_V02_BANKED: string = "Explain what THIS saved model and licensed Run mean for the user's actual purpose. Remain read-only: no tools, writes, new Run or promised proposal. Use the supplied output format and current canonical identities, permissions and precomputed comparison.\n\nStart with the useful model-relative finding. Where licensed, state each relevant option's chance of the actual target and which is most likely to meet it; preserve uncertainty, conditions and exclusions. If a chance is withheld, explain the actual named blocker and what can still be learned. A target-only chance is not the full goal when a mandatory condition or limit is unscored. A share of simulations is not goal chance, an effect size is not a probability, and a narrow central range is not certainty.\n\nExplain WHY in the user's context: connect the actual option change to its supplied causal mechanism and outcome, and name the human estimate, Olumi assumption, evidence gap or disagreement the finding rests on. Distinguish a conditional model implication from verified evidence about the world. Avoid a generic warning when the supplied facts permit a concrete explanation. Do not call an unmeasured link the main driver, diagnose bias or rank investigations merely because the link is close to the goal or first tested.\n\nFor a compatible supplied before/after comparison, say what actually changed and what the recorded delta implies. Use only precomputed deltas; preserve quantities, units, strict comparators, options and reference/window. No new arithmetic, annualisation or invented attribution. Missing preceding Run removes comparison only. Explain a restored revision from its own Run; historical coaching remains historical. A failed, stale, unreadable or unverified current result cannot borrow an older success.\n\nGive at most one useful next reasoning step when justified by the actual limitation, uncertainty or disagreement. It can check evidence, clarify a missing binding or compare interpretations; it need not demand another number. Reuse retained answers and full qualifications. Do not ask the user to repeat a supplied point, range, timing or definition, erase uncertainty, or perform an unavailable action. If the next step concerns an engine capability gap, state that gap rather than imply an input will unlock the calculation. If no priority is established, explain why the proposed step could help without claiming it matters most.\n\nKeep human, external, Olumi and unknown origins distinct; approval does not change authorship. Keep latent probability versus realised rate/count, sampling precision versus assumption uncertainty, perturbation/sensitivity versus causal effect and marginal comparison versus paired/joint claims distinct. One tested flip establishes only that tested flip, not general stability or validation priority; repeated identical inputs do not add evidence. Scope all conclusions to included options and actual measured/licensed facts.\n\nWrite compact plain British English: finding, its concrete basis and limitations, then the one next step if useful. Say material guidance once. Never choose for the user or use best, winner, go with, recommend or recommendation. Do not invent exercise horizons, ranges, thresholds, uncertainty laws, missing business dimensions or method applicability. Olumi helps the team understand and improve its reasoning; the team owns conclusions and action.";
+/** Compatibility export: coaching has one owner, RUN_FACTS_USE. */
+export const INTERPRETER_V02_BANKED: string = RUN_FACTS_USE;
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
 /**
@@ -3020,6 +3023,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let lastRun: CapturedAnalysis | undefined;
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
+    /** The streamed GRAPH_READY frame for a model graph (nothing outside a streamed turn); through COMPLETE's own projection. */
+    const emitGraphReady = (raw: Record<string, unknown>): void => {
+      const emitStage = currentStageEmitter();
+      if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
+      // The same single cast COMPLETE's readback makes (`after.json.graph`).
+      const g = raw as GraphV3T;
+      emitStage({
+        kind: 'GRAPH_READY',
+        graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
+        schema_version: 'v3',
+        elapsed_ms: Date.now() - startedAt,
+      });
+    };
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
@@ -3042,18 +3058,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          */
         // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
         onConstructionTrace: (t) => { constructionTrace = t; },
-        onModelRegistered: (raw) => {
-          const emitStage = currentStageEmitter();
-          if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
-          // The persisted graph as read back — the same single cast COMPLETE's readback makes (`after.json.graph`).
-          const g = raw as GraphV3T;
-          emitStage({
-            kind: 'GRAPH_READY',
-            graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
-            schema_version: 'v3',
-            elapsed_ms: Date.now() - startedAt,
-          });
-        },
+        onModelRegistered: (raw) => emitGraphReady(raw),
+        // S3 (DL 15 Oct): the admitted draft, before the widening calls start, so the canvas draws it without waiting for
+        // them. The UI draws the first GRAPH_READY on arrival; COMPLETE then applies the saved model, Olumi's additions included.
+        onDraftAdmitted: (raw) => emitGraphReady(raw as Record<string, unknown>),
         // S8 durable human reasoning: the scenario-wide `finding_dissent` read (NOT a conversation-history read, no turn
         // window: a dissent older than the window still reaches the model) + the existing projector. A store WITHOUT the
         // read cannot say whether the user stated an objection: that is UNKNOWN, not a successful empty read, so it takes
@@ -3556,6 +3564,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
       const runForInterpreter = { canonical_state: {
         ...canonicalAfterRun,
+        // The interpreter receives the instruction once, in instructions; ordinary Agent calls retain packet.use.
+        ...((canonicalAfterRun.run_facts !== null && typeof canonicalAfterRun.run_facts === 'object') ? { run_facts: { ...canonicalAfterRun.run_facts, use: undefined } } : {}),
         ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
         ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
       } };
@@ -3589,7 +3599,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -5236,9 +5246,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
       tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
     // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
-    const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null;
-    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null || aiRunTurn ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
+    const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
+      && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, !aiRunTurn));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
@@ -5525,7 +5536,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** The screen's chance lines this turn owes (required evidence: the reply composer keeps them on the face). */
     const selectedRunCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
     let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
-    if (!aiRunTurn && (ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
+    if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
       // Recovery Batch C: the run-wide disclosures and each target's own chance, said once after the lines.
       // BYPASS1 keeps the chance face on every Run/Explain reply (the screen's lines are the headline, K-pinned).
@@ -5547,7 +5558,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Only a line the card displays IN FULL goes (Codex r1 on #3027): a face without the line's shortfall sentence
       // leaves the whole line said, so nothing the card does not show disappears.
       const onCard = new Set(screenLines.filter((l) => cardFaces.get(l.option_id) === l.chance).map((l) => l.option_id));
-      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
+      const suppliedChance = screenLines.some(l => String(wireBody.assistant_text).includes(l.chance)
+        || ownWordsLeadTexts(String(wireBody.assistant_text), l, sentencesOf).length > 0);
+      const ranged = aiRunTurn && (suppliedChance || cardBound) ? { text: checkScreenLineClaims(wireBody.assistant_text, screenLines), added: 0 }
+        : withScreenLinesOwed(wireBody.assistant_text, screenLines,
         goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent, cardDetail)
           .filter((note) => cardDetail === null || !cardDetail.has(note)), { onCard });
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
@@ -5662,11 +5676,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
      */
     {
+      if (aiRunTurn && typeof wireBody.assistant_text === 'string' && screenNamesADriver(analysisResult, readbackGraph)) {
+        const checked = removeDriverAbsenceClaims(wireBody.assistant_text, screenLines.map(l => l.label));
+        if (checked.removed > 0 && checked.text.trim() === '') {
+          wireBody = { ...wireBody, assistant_text: withScreenLinesOwed('', screenLines).text };
+        }
+      }
       const driverEdited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const edited = aiRunTurn ? driverEdited : withLeftOutOptionCorrectionAtEgress(driverEdited, {
+      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
         runOptionSet, optionParticipation, graph: readbackGraph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });
@@ -5732,7 +5752,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const runOrExplainTurn = ranAnalysisThisTurn || fastPath === 'explain';
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
-      const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
+      const runWidenWords = runOrExplainTurn || firstAnalysisExists
         ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult)) : {};
       const widenNote = chanceShownFor(chanceCells) && runWidenWords.saidByOwnLines !== true
         ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
@@ -5883,7 +5903,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // a Run/Explain its chance face (the horizon marker stays beside a chance).
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
           // A Draft build keeps its receipt face (S4's estimates/widened receipt); a Run/Explain reply is the AI's answer.
-          : aiRunTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const }
+          : aiRunTurn && faceContract !== 'draft' ? { keepWhole: 'ai_run_answer' as const }
           : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const }
             : profile === 'coaching' && !runOrExplainTurn && faceContract !== 'draft' ? { keepWhole: 'ai_answer' as const } : {}),
       });

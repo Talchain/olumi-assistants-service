@@ -342,12 +342,8 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
   return { text: base.text.trim() === '' ? said : `${base.text.trimEnd()}\n\n${said}`, added: base.added + missing.length };
 }
 
-/**
- * `onCard`: the options whose chance this reply's bound result card displays (the route decides, by the Run's identity).
- * Their chance is not said in the chat (their `depends` sentence still is); every line still feeds RC4's narrator guard
- * and the shortfall units below.
- */
-function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenLine[], onCard?: ReadonlySet<string>): { text: string; added: number } {
+/** Check narrator counts without appending any screen sentence. */
+export function checkScreenLineClaims(text: string, lines: readonly GoalChanceScreenLine[]): string {
   // Narration never supplies k, even when it guessed correctly. Complete producer-bound sentences are already authorised;
   // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
   const authorised: string[] = [];
@@ -369,6 +365,16 @@ function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenL
     body = narratorCountGuard(body, null).text;
     for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000`).join(chance);
   }
+  return body;
+}
+
+/**
+ * `onCard`: the options whose chance this reply's bound result card displays (the route decides, by the Run's identity).
+ * Their chance is not said in the chat (their `depends` sentence still is); every line still feeds RC4's narrator guard
+ * and the shortfall units below.
+ */
+function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenLine[], onCard?: ReadonlySet<string>): { text: string; added: number } {
+  let body = checkScreenLineClaims(text, lines);
   const hasShortfall = lines.some(l => l.shortfall_note !== undefined);
   const spreadBody = (value: string): string => {
     let masked = value;
