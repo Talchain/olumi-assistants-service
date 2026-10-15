@@ -8,4 +8,11 @@ export function statementOrigin(verified: boolean, unknown: boolean, sourceCompl
   return authorshipOf({ words: { verified, unknown, sourceComplete, ownEstimate } }).origin;
 }
 
-export const UNKNOWN_ORIGIN_DETAIL = 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.';
+/**
+ * ⛔ DEMO (Paul's founder-hours transcript, AIE #94 6192426755): "we have no funding" was refused here, then re-asked. An unknown
+ * origin records nothing as the user's figure, but the words stay in the conversation: never ask the user to say or confirm them
+ * again. A correction to the model as a whole goes through propose_change op revise_model, which reads them as context.
+ */
+export const UNKNOWN_ORIGIN_DETAIL = 'The retained source is not verified, so nothing was recorded as the user\u2019s own figure and its origin stays unknown. '
+  + 'Do not ask the user to repeat or confirm it: it stays in the conversation as context. If it changes the model as a whole, '
+  + 'offer propose_change op revise_model.';

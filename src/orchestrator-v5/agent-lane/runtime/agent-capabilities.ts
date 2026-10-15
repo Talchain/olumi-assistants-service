@@ -3859,6 +3859,8 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
     /** GEN #5: the user's deliverable, verified verbatim in this message; attests the event and binds it by identity. */
     deliverable?: string,
+    /** ⭐ DEMO: a correction to the model as a whole (propose_change op revise_model), not a goal: the card says so. */
+    correction = false,
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
     const gate = await unreviewedDraftGate(ctx, g, 'offer');
@@ -3949,9 +3951,9 @@ export function createAgentCapabilities(
     // trigger. A construction never holds a deadline date (only an approved deadline write does: `goal-horizon-write.ts`,
     // `hiring-times.ts`), so the date is always still to be confirmed, and this card never implies it saves one.
     const card = (held.length > 0
-      ? `Replace the early draft with a revised one built from your brief and the goal you just gave: `
+      ? `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave: `
         + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
-      : `Replace the early draft with a revised one built from your brief and the goal you just gave (the draft modelled \u2018${goal.label}\u2019): `
+      : `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave (the draft modelled \u2018${goal.label}\u2019): `
         + `\u2018${event!.deliverable}\u2019, with the deadline date still to be confirmed. `)
       + (limits.limits.length > 0 ? `Limits in the revised draft: ${limits.limits.map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
       + limits.carried.map((r) => `Carried forward unchanged because the draft omitted it: ${sayRow(g.raw, r)}. `).join('')
@@ -6081,6 +6083,44 @@ export function createAgentCapabilities(
      * message, which holds that name exactly. Olumi proposes; the user authors: ONE card, and only its press renames, through the
      * existing label writer (`structural_rename`, its base hash and the name the card showed). A name another part has is refused.
      */
+    /**
+     * ⭐ DEMO (Paul, 19 Oct; AIE #94 6192426755): a correction to the model AS A WHOLE ("it's 60 hours a week, not 40"; "drop the
+     * funding mechanisms, we have no funding") becomes ONE revised-draft card through the EXISTING prepare/approve/save path
+     * (`prepareRevisedDraft`: the brief plus this message, the saved model, every later message and objection as context; its
+     * three gates; human items carried by identity). Only the card's press replaces the saved model. Nothing new is written here.
+     */
+    async proposeRevision(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
+      if (quote === '' || !wholeStatementIn(ctx.user_turn_text ?? '', quote)) {
+        return { ok: false, mutated: false, refusal: 'not_asked',
+          detail: 'A revised model is prepared only from the user\u2019s own correction in this message, quoted exactly. Nothing was prepared.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (goals.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'revised_draft_unavailable', detail: 'The model has no single goal to revise against, so nothing was prepared.' };
+      }
+      const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}\u0000revise`;
+      let pending = revisedDrafts.get(key);
+      if (pending === undefined) {
+        pending = prepareRevisedDraft(ctx, g, goals[0]!, undefined, true);
+        revisedDrafts.set(key, pending);
+      }
+      const draft = await pending;
+      if ('refused' in draft) {
+        return draft.found === undefined ? draft.refused
+          : { ...draft.refused, detail: draftGateDetail(draft.found, 'offered', []) };
+      }
+      if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
+      return { ok: true, mutated: false, proposal_id: draft.proposal.proposal_id, public_label: draft.proposal.public_label, base_revision: g.graph_hash,
+        revised_draft: { replaces_goal: goals[0]!.label, correction: true },
+        note: 'Nothing has changed yet. Offer this revised-model card and explain briefly what it changes against the current model, in your own '
+          + 'words, never its id. It reads everything the user has said since their brief, so never ask them to repeat a fact they already '
+          + 'stated. Only the user pressing that card replaces the model: never call authorise_change for it yourself.' };
+    },
+
     async proposeRename(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const kind = args?.kind;
