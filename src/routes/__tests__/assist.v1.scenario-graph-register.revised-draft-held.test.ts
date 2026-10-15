@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ AIE B34 (6119577581) — THE REAL REGISTER ROUTE STORES THE WHOLE APPROVED REVISED DRAFT.
@@ -67,7 +68,7 @@ async function register() {
   const app = Fastify();
   await registerRoute(app);
   await app.ready();
-  const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${FX.scenario_id}/graph/register`, payload: {
+  const r = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${FX.scenario_id}/graph/register`, payload: {
     graph: clone(DRAFT.candidate), expected_graph_hash: computeAnalysisAffectingGraphHash(FX.graph as never),
     expected_graph_identity_hash: computeGraphIdentityHash(FX.graph as never)?.value, operation_id: DRAFT.operation_id } });
   await app.close();

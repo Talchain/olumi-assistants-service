@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from "../../../tests/utils/inject-as-cee-writer.js";
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * STABLE ENTITY REFS on the register route (`graph/entity-refs.ts`; lease 5909544405). The route assigns refs to the
@@ -114,7 +115,7 @@ async function post(
   scenarioId: string,
   body: Record<string, unknown>,
 ) {
-  return await app.inject({
+  return await injectAsCeeWriter(app, {
     method: "POST",
     url: `/assist/v1/scenarios/${scenarioId}/graph/register`,
     payload: body,

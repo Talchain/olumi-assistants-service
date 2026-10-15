@@ -4,6 +4,7 @@
  * Provider/remote database and route-dispatch ports are fake; direct dispatch,
  * commit, floor, route reload/finaliser and the public store are real.
  */
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWithTurnFence } from '../session/turn-fence.js';
 import type { SessionTurnWrite } from '../session/store.js';
@@ -362,7 +363,7 @@ describe.each([true, false])('graph writer rollback flag-OFF contract (model ver
     const app = Fastify();
     await registerRoute(app);
     try {
-      const result = await app.inject({ method: 'POST',
+      const result = await injectAsCeeWriter(app, { method: 'POST',
         url: `/assist/v1/scenarios/${SCENARIO}/graph/register`,
         payload: { graph: imported, operation_id: TURN } });
       expect(result.statusCode, result.body).toBe(200);
@@ -543,7 +544,7 @@ describe.each([true, false])('graph writer rollback flag-OFF contract (model ver
       const app = Fastify();
       await ceeOrchestratorRouteV2(app);
       try {
-        const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: { ...message('Add opportunity cost of founder time as a risk'), turn_class: 'propose' } });
+        const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: { ...message('Add opportunity cost of founder time as a risk'), turn_class: 'propose' } });
         expect(result.statusCode, result.body).toBe(200);
         expect(ports.routeDispatch).toHaveBeenCalledTimes(failRead ? 0 : 1);
         if (failRead) expect(h.graphReadFailures).toBe(1);

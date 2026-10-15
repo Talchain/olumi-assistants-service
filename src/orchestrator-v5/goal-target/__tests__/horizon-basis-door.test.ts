@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../../tests/utils/inject-as-cee-writer.js';
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { goalHorizonVerdict, GOAL_HORIZON_STEADY_ATTESTED, withReadTimeHorizonGate } from '../goal-horizon-verdict.js';
@@ -153,7 +154,7 @@ async function register(g: Rec, w: ReturnType<typeof world>) {
   const app = Fastify();
   await registerRoute(app);
   try {
-    const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph: g } });
+    const res = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph: g } });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.body).not.toContain('"proof"');
     expect(w.writes).toHaveLength(1);
@@ -1019,7 +1020,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     const app = Fastify();
     try {
       await versionsRoute(app);
-      const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
+      const response = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
         payload: { version_id: versionId, mutation_id: mutationId,
           expected_graph_identity_hash: computeGraphIdentityHash(w.read() as never)!.value } });
       expect(response.statusCode, response.body).toBe(200);
@@ -1119,7 +1120,7 @@ async function runBasisFreePath(path: ParityPath, state: ParityState) {
       const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
       const app = Fastify(); await ceeOrchestratorRouteV2(app);
       try {
-        const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
+        const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn',
           payload: { ...payload('Add a risk for supplier delays affecting the launch'), turn_class: 'decide', graph_state: g,
             analysis_state: { analysis_status: 'completed', meta: { graph_hash_at_run: realHash(g as never) } } } });
         const body = result.json();
@@ -1248,7 +1249,7 @@ describe('R5 unavailable read drops basis without nulling hash candidates', () =
         const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
         const app = Fastify(); await ceeOrchestratorRouteV2(app);
         try {
-          await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+          await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
             ...payload('Add a risk for supplier delays affecting the launch'), turn_class: 'decide', graph_state: g,
             analysis_state: { analysis_status: 'completed', meta: { graph_hash_at_run: realHash(seed() as never) } },
           } });
@@ -1412,7 +1413,7 @@ describe('S5 r8 server proof', () => {
     w.store.readExistingScenario = vi.fn(async () => ({ graph: w.read(), briefText: null, revision: 31, owner: null } as never));
     const app = Fastify(); await readRoute(app);
     try {
-      const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+      const res = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
       expect(res.statusCode, res.body).toBe(200);
       expect(res.body).not.toContain('"proof"');
       expect(goalOf(res.json().graph).horizon_basis).toEqual(publicBasis(goalOf(g).horizon_basis));

@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from "../../../tests/utils/inject-as-cee-writer.js";
 import { beforeEach as beforeEachRevisionScope } from 'vitest';
 import { __setUseAppendV6ForTest } from '../../orchestrator-v5/append-v6-flag.js';
 
@@ -144,7 +145,7 @@ async function post(
   scenarioId: string,
   body: Record<string, unknown>,
 ) {
-  return await app.inject({
+  return await injectAsCeeWriter(app, {
     method: "POST",
     url: `/assist/v1/scenarios/${scenarioId}/graph/register`,
     payload: body,

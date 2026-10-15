@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * `/graph/register` THREADS LIVE CONSENT HOLDS THROUGH ITS WRITE.
@@ -109,7 +110,7 @@ async function buildApp(): Promise<FastifyInstance> {
   return app;
 }
 async function register(app: FastifyInstance, graph: unknown) {
-  return await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
+  return await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
 }
 const written = () => append.mock.calls[0]![0] as Rec;
 const writtenPendings = () => written().pending_actions as PendingAction[] | undefined;

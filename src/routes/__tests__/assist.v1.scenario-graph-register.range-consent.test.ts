@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * An ABSENT `goal_constraints` on a register is "no statement": the stored limits
@@ -77,7 +78,7 @@ async function buildApp(): Promise<FastifyInstance> {
 }
 async function register(graph: unknown) {
   const app = await buildApp();
-  const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
+  const res = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
   await app.close();
   return res;
 }

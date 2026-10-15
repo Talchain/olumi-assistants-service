@@ -64,59 +64,60 @@ const BRIEFS = [
 const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
 const question = (g: Rec): string | null => untestableTargetParts(g, targetTestabilityOf(g))?.question ?? null;
 
-describe.each(BRIEFS)('the cohort ask chain, walked: $name', (b) => {
-  /** Walks the chain; returns the final graph and every question readiness asked, in order. */
-  function walk(): { g: Rec; asked: string[] } {
-    let g = b.graph();
-    const asked: string[] = [];
-    const said: string[] = [];
-    const basis = goalTargetBasisOf(goalOf(g))!;
-    const window = cohortWindowOf(g)!;
-    const sameQ = launchWindowQuestion(b.rate, basis, b.count);
-    // 1. The same-people question, answered once, recorded on the GOAL.
-    let q = question(g);
+/** Walks the chain for one brief; returns the final graph and every question readiness asked, in order. */
+function walk(b: (typeof BRIEFS)[number]): { g: Rec; asked: string[] } {
+  let g = b.graph();
+  const asked: string[] = [];
+  const said: string[] = [];
+  const basis = goalTargetBasisOf(goalOf(g))!;
+  const window = cohortWindowOf(g)!;
+  const sameQ = launchWindowQuestion(b.rate, basis, b.count);
+  // 1. The same-people question, answered once, recorded on the GOAL.
+  let q = question(g);
+  asked.push(q!);
+  expect(q, 'readiness asks the same-people question first').toBe(sameQ);
+  said.push(b.same);
+  const goalSubject = { kind: 'goal' as const, id: goalOf(g).id, field: 'relation' as const };
+  const v0 = readStatement(g, goalSubject, goalOf(g).label, [{ quote: b.same, answering: q! }], { now: b.same } as never, { asks: cohortForecastAsks(g) });
+  if (v0.kind !== 'read') throw new Error(JSON.stringify(v0));
+  const w0 = doorRowFor(goalSubject, g)!.writer.approve(v0.reading, g) as Rec;
+  expect(w0.member).toBe('goal_relation');
+  const g0 = applyGoalRelationEdit(g, w0.payload) as Rec;
+  expect(g0.kind).toBe('mutated');
+  g = persisted(g0.mutatedGraph);
+  expect(doorRowFor(goalSubject, g)!.writer.holds(w0 as never, g), 'the read-back holds the words after the persistence projection').toBe(true);
+  expect(sameCohortStatementOf(g)?.quote).toBe(b.same);
+  // 2. Each option's forecast ask, in readiness's order, answered with the people and the one-in-four range.
+  for (let guard = 0; guard < 10; guard += 1) {
+    q = question(g);
+    const waiting = g.nodes.filter((n: Rec) => n.kind === 'option' && readCohortForecast(n) === undefined);
+    if (waiting.length === 0) break;
+    const option = waiting[0];
     asked.push(q!);
-    expect(q, 'readiness asks the same-people question first').toBe(sameQ);
-    said.push(b.same);
-    const goalSubject = { kind: 'goal' as const, id: goalOf(g).id, field: 'relation' as const };
-    const v0 = readStatement(g, goalSubject, goalOf(g).label, [{ quote: b.same, answering: q! }], { now: b.same } as never, { asks: cohortForecastAsks(g) });
-    if (v0.kind !== 'read') throw new Error(JSON.stringify(v0));
-    const w0 = doorRowFor(goalSubject, g)!.writer.approve(v0.reading, g) as Rec;
-    expect(w0.member).toBe('goal_relation');
-    const g0 = applyGoalRelationEdit(g, w0.payload) as Rec;
-    expect(g0.kind).toBe('mutated');
-    g = persisted(g0.mutatedGraph);
-    expect(doorRowFor(goalSubject, g)!.writer.holds(w0 as never, g), 'the read-back holds the words after the persistence projection').toBe(true);
-    expect(sameCohortStatementOf(g)?.quote).toBe(b.same);
-    // 2. Each option's forecast ask, in readiness's order, answered with the people and the one-in-four range.
-    for (let guard = 0; guard < 10; guard += 1) {
-      q = question(g);
-      const waiting = g.nodes.filter((n: Rec) => n.kind === 'option' && readCohortForecast(n) === undefined);
-      if (waiting.length === 0) break;
-      const option = waiting[0];
-      asked.push(q!);
-      expect(q, 'never the same-people question again').not.toBe(sameQ);
-      expect(q).toBe(cohortForecastAskWords(option.label, periodWords(basis), window));
-      const f = b.figures[option.id]!;
-      const people = `I think it would reach about ${f.people_reached} people.`;
-      const range = `Between ${f.conversion_middle_half_pct[0]} and ${f.conversion_middle_half_pct[1]}%.`;
-      said.push(people, range);
-      const subject = { kind: 'option' as const, id: option.id, field: 'relation' as const };
-      const v = readStatement(g, subject, option.label, [{ quote: people, answering: q! }, { quote: range, answering: q! }],
-        { conversation: said.slice(0, -2).join('\n\n'), now: `${people} ${range}` } as never, { asks: cohortForecastAsks(g) });
-      if (v.kind !== 'read') throw new Error(`${option.id}: ${JSON.stringify(v)}`);
-      const w = doorRowFor(subject, g)!.writer.approve(v.reading, g) as Rec;
-      expect(w.member, JSON.stringify(w)).toBe('cohort_forecast');
-      const written = applyCohortForecastEdit(g, w.payload) as Rec;
-      expect(written.kind).toBe('mutated');
-      g = persisted(written.mutatedGraph);
-      expect(doorRowFor(subject, g)!.writer.holds(w as never, g)).toBe(true);
-    }
-    return { g, asked };
+    expect(q, 'never the same-people question again').not.toBe(sameQ);
+    expect(q).toBe(cohortForecastAskWords(option.label, periodWords(basis), window));
+    const f = b.figures[option.id]!;
+    const people = `I think it would reach about ${f.people_reached} people.`;
+    const range = `Between ${f.conversion_middle_half_pct[0]} and ${f.conversion_middle_half_pct[1]}%.`;
+    said.push(people, range);
+    const subject = { kind: 'option' as const, id: option.id, field: 'relation' as const };
+    const v = readStatement(g, subject, option.label, [{ quote: people, answering: q! }, { quote: range, answering: q! }],
+      { conversation: said.slice(0, -2).join('\n\n'), now: `${people} ${range}` } as never, { asks: cohortForecastAsks(g) });
+    if (v.kind !== 'read') throw new Error(`${option.id}: ${JSON.stringify(v)}`);
+    const w = doorRowFor(subject, g)!.writer.approve(v.reading, g) as Rec;
+    expect(w.member, JSON.stringify(w)).toBe('cohort_forecast');
+    const written = applyCohortForecastEdit(g, w.payload) as Rec;
+    expect(written.kind).toBe('mutated');
+    g = persisted(written.mutatedGraph);
+    expect(doorRowFor(subject, g)!.writer.holds(w as never, g)).toBe(true);
   }
+  return { g, asked };
+}
+
+describe.each(BRIEFS)('the cohort ask chain, walked: $name', (b) => {
 
   it('RED (the break): after the same-people answer, readiness asks each option\'s forecast once, in turn, then no cohort question', () => {
-    const { g, asked } = walk();
+    const { g, asked } = walk(b);
     const options = g.nodes.filter((n: Rec) => n.kind === 'option');
     expect(asked).toHaveLength(1 + options.length);
     expect(new Set(asked).size, 'no question asked twice').toBe(asked.length);
@@ -131,8 +132,17 @@ describe.each(BRIEFS)('the cohort ask chain, walked: $name', (b) => {
     }
   });
 
-  it.runIf(b.name.startsWith('marketing'))('RED (the end of the chain): the Run\'s licence gives the joint of both targets per option, the limits named as left out', () => {
-    const { g } = walk();
+  it('CONTRAST: before the same-people answer is recorded, readiness keeps asking it (nothing is assumed from silence)', () => {
+    const g = b.graph();
+    expect(sameCohortStatementOf(g)).toBeUndefined();
+    expect(question(g)).toBe(launchWindowQuestion(b.rate, goalTargetBasisOf(goalOf(g))!, b.count));
+  });
+});
+
+// The end of the chain on marketing's served Run (its recorded per-option forecasts): the brief the AIE's joint was checked on.
+describe('the cohort ask chain ends in the licensed joint: marketing (served run-08)', () => {
+  it('RED (the end of the chain): the Run\'s licence gives the joint of both targets per option, the limits named as left out', () => {
+    const { g } = walk(BRIEFS[0]!);
     const pre = JSON.parse(JSON.stringify({ ...F.enrichment, inference_warnings: (F.enrichment.inference_warnings as Rec[])
       .filter((w) => w.code !== 'GOAL_FIGURES_MISSING_CURRENT_LEVEL' && w.code !== 'GOAL_CHANCE_LICENSED') }));
     for (const r of pre.option_comparison as Rec[]) r.target_forecast = JSON.parse(JSON.stringify(E.target_forecast_by_option[r.option_id]));
@@ -145,11 +155,5 @@ describe.each(BRIEFS)('the cohort ask chain, walked: $name', (b) => {
     expect(l.targets.joint).toMatchObject({ status: 'licensed' });
     expect(l.targets.joint.pct_by_option).toEqual({ carry_on_as_now: 7, hire_marketing_manager: 51, use_ai_and_boost_ads: 31, ai_pilot_with_moderate_ads: 27 });
     expect((l.targets.notes as string[]).some((n) => n.startsWith('This covers your two targets only.'))).toBe(true);
-  });
-
-  it('CONTRAST: before the same-people answer is recorded, readiness keeps asking it (nothing is assumed from silence)', () => {
-    const g = b.graph();
-    expect(sameCohortStatementOf(g)).toBeUndefined();
-    expect(question(g)).toBe(launchWindowQuestion(b.rate, goalTargetBasisOf(goalOf(g))!, b.count));
   });
 });

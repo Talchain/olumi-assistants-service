@@ -1,4 +1,5 @@
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
+import { runLeaderOf, type RunLeader } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
 import { goalTargetGapOf } from '../orchestrator-v5/goal-target/goal-target-gap.js';
@@ -105,6 +106,8 @@ export interface CanonicalAnalysisView {
       | 'No analysis hash was available; only the scenario revision was compared.';
   };
   readonly leader_licence: LeaderLicence;
+  /** ⭐ S7 / UI Q3: who leads, from the SAME builder the AI's Run facts use (`runLeaderOf`); the UI computes no leader. */
+  readonly leader: RunLeader;
   readonly options: readonly {
     readonly option_id: string;
     readonly cell: CanonicalAnalysisCell;
@@ -260,6 +263,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
         : 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),
+    leader: runLeaderOf(result, input.analysisState, input.analysisReady, current),
     options: cells.map(({ option_id, cell }) => {
       const driver = cell.kind === 'figure' ? drivers.get(option_id) : undefined;
       const status = driverStatus.get(option_id);
