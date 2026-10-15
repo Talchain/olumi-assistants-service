@@ -120,6 +120,13 @@ export const GOAL_FIGURES_SHARE_APPROXIMATION = 'GOAL_FIGURES_SHARE_APPROXIMATIO
  */
 export const GOAL_FIGURES_CHANCE_AS_GOAL = 'GOAL_FIGURES_CHANCE_AS_GOAL';
 
+/**
+ * ⭐ M3c (AIE 6181933060): an option whose own effect, on the user's recorded forecast, is not fully in place by the target's month
+ * (or may or may not be: a lead that straddles it). The option stays visible; its chance at that month is not part of the scored
+ * set, and every share and the leader go too, because the comparison would set an effect that is not yet there against the others.
+ */
+export const GOAL_FIGURES_OPTION_NOT_IN_PLACE = 'GOAL_FIGURES_OPTION_NOT_IN_PLACE';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   RETAINED_LIMIT_WITHHOLD_CODE,
@@ -134,6 +141,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
   GOAL_FIGURES_SHARE_APPROXIMATION,
   GOAL_FIGURES_CHANCE_AS_GOAL,
+  GOAL_FIGURES_OPTION_NOT_IN_PLACE,
 ]);
 
 /**
