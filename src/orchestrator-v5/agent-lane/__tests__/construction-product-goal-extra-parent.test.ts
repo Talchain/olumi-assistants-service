@@ -280,7 +280,7 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     // The introduction stamp (DL 14 Oct, `recovery/prompt/INTRODUCTION-STAMP-DRAFT.txt`): the drafter claimed this risk as its
     // own addition (`ai_proposed`) and the brief does not name it, so the Agent is told it is Olumi's. The user's "Monthly
     // churn", named in the brief, carries no mark.
-    expect(churnLimitRisk().risks.find((r: Json) => r.label === 'Pro churn exceeds 4%').provenance, 'precondition: the drafter\'s own').toBe('ai_proposed');
+    expect(churnLimitRisk().risks.find((r) => r.label === 'Pro churn exceeds 4%')?.provenance, 'precondition: the drafter\'s own').toBe('ai_proposed');
     expect(projectEntity(risk as never)).toMatchObject({ proposed_by: 'olumi' });
     expect(projectEntity(churn as never)).not.toHaveProperty('proposed_by');
     expect(churn.analysis_participation, 'contrast: an included factor').toBeUndefined();
