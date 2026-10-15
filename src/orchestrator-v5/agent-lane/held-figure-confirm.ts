@@ -10,7 +10,7 @@ import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edi
 import { proposeProductIdentity } from './identity-proposal.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { sentenceAround } from './unplaced-goal-level.js';
-import { alreadyTrueQuoteOf, riskOccurrenceSubject } from './risk-occurrence.js';
+import { alreadyTrueQuoteOf, riskOccurrenceSubject, riskOccurrenceWindowFromToday } from './risk-occurrence.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -76,7 +76,8 @@ export function briefHoldsNowArgs(graph: unknown): { readonly assumptions: reado
   for (const node of graph.nodes.filter(isRec)) {
     const quote = alreadyTrueQuoteOf(node);
     if (quote === undefined || typeof node.id !== 'string' || typeof node.label !== 'string') continue;
-    if (riskOccurrenceSubject(graph, node.id).kind !== 'eligible') continue;
+    // AIE 6178729504: its card writes "at least once within the window", which being true now licenses only from TODAY.
+    if (riskOccurrenceSubject(graph, node.id).kind !== 'eligible' || !riskOccurrenceWindowFromToday(graph)) continue;
     return { assumptions: [{ factor_label: node.label, value: 0, unit: '', basis: '', user_stated: true, holds_now: { quote } }] };
   }
   return undefined;

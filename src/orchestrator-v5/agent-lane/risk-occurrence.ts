@@ -183,7 +183,11 @@ export function alreadyTrueQuoteOf(node: unknown): string | undefined {
   return typeof q === 'string' && q.trim() !== '' && !/[\r\n]/.test(q) ? q.trim() : undefined;
 }
 
-/** The user's "holds now" as a validated block: certain over the window, the user's own (`ApprovedRiskOccurrence.holds_now`). */
+/**
+ * The user's "holds now" as a validated block (`ApprovedRiskOccurrence.holds_now`): it is true at the start of a window that
+ * counts from TODAY, so it happens at least once within it. That is all it says: not that it persists through the window, nor its
+ * intensity or effect (AIE 6178729504). A window counted from a launch is never licensed by it (`riskOccurrenceWindowFromToday`).
+ */
 export function userHoldsNowBlock(windowMonths: number): EventRiskV1T | undefined {
   const parsed = EventRiskV1.safeParse({ version: 1,
     occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: windowMonths } });
