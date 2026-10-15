@@ -43,7 +43,7 @@ describe('S4: a stated net loss is the user\'s own figure, read as its negative'
 
   it('GYM: "losing a net 15 members a month" is the user\'s −15, recorded on its factor', async () => {
     const n = node(await registered(GYM), 'Net monthly member change');
-    expect(n.observed_state).toMatchObject({ value: -15, source: 'brief_extraction', extractionType: 'explicit' });
+    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'brief_extraction', extractionType: 'explicit' });
     expect(n.observed_state.user_material_unverified).toBeUndefined();
     expect(levels(n)).toEqual([[LOSS, -15]]);
   });
@@ -58,7 +58,7 @@ describe('S4: a stated net loss is the user\'s own figure, read as its negative'
     const edit = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: gaining } : s)) });
     const n = node(await registered(GYM, edit, GYM.brief.replace(LOSS, gaining)), 'Net monthly member change');
     expect(levels(n)).toEqual([]);
-    expect(n.observed_state).toMatchObject({ value: -15, source: 'cee_inference', user_material_unverified: true });
+    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'cee_inference', user_material_unverified: true });
   });
 
   it('CONTROL: a count of losses keeps its magnitude: "Members lost per month" at 15 is still the user\'s 15', async () => {

@@ -12,7 +12,7 @@ import { resolveExistingRawValue } from '../../tools/handlers/d1-shared/evaluate
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { probeRows } from './fixtures/r5-verified-cases.js';
-import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
+import { buildFactorScaleMap, findScaleIncoherentBaselineFactorIds, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 
 const NET = 'Once new registrations are counted we work off a net 35 people a month.';
 const GOAL = 'Our goal is to get the waiting list under 500 within nine months.';
@@ -45,12 +45,14 @@ describe('B5 signed current rate through the existing authority', () => {
   it('credits the original negative rate beside a differently framed stock goal', () => {
     const m = model(); const brief = `${NET} ${GOAL}`;
     expect(verifiedFactorLevel(m, m.factors[0]!, brief)).toBe(true);
-    const { n, native, canonical, display } = readBack(m, brief, m.factors[0]!.label);
-    expect(n.observed_state).toMatchObject({ value: -35, unit: 'people/month', source: 'brief_extraction', extractionType: 'explicit' });
-    expect(n.observed_state?.raw_value).toBeUndefined();
+    const { n, native, canonical, display, reloaded } = readBack(m, brief, m.factors[0]!.label);
+    // S4 (DL ruling 15 Oct): the signed rate is the edit writer's framed pair beside scale_frame (was an unframed raw).
+    expect(n.observed_state).toMatchObject({ value: -35 / 500, raw_value: -35, unit: 'people/month', source: 'brief_extraction', extractionType: 'explicit' });
     expect(n.observed_state?.cap).toBeUndefined();
     expect(native).toEqual({ kind: 'resolved', raw: -35 });
-    expect(canonical).toMatchObject({ value: -35, inputValue: -35, inconsistent: false });
+    // S4 (DL ruling 15 Oct): a framed negative is read by the Run's own gate (stored scale_frame), never as an intervention.
+    expect(canonical.value).toBe(-35);
+    expect(findScaleIncoherentBaselineFactorIds(reloaded.nodes, [])).not.toContain(n.id);
     expect(valueAuthorshipOf(n.observed_state)).toBe('yours');
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('from_brief');
     expect(display.display_value).toContain('-35');
@@ -62,11 +64,12 @@ describe('B5 signed current rate through the existing authority', () => {
     const full = { ...m, goal, factors: [{ ...m.factors[0]!, label: 'Net borrower change per month' }] };
     const brief = `${quote} The county wants at least 20,000 borrowers by the end of the next financial year, twelve months away.`;
     expect(verifiedFactorLevel(full, full.factors[0]!, brief)).toBe(true);
-    const { n, native, canonical, display } = readBack(full, brief, full.factors[0]!.label);
+    const { n, native, canonical, display, reloaded } = readBack(full, brief, full.factors[0]!.label);
     expect(native).toEqual({ kind: 'resolved', raw: -120 });
-    expect(canonical).toMatchObject({ value: -120, inputValue: -120, inconsistent: false });
-    expect(n.observed_state).toMatchObject({ value: -120, unit: 'borrowers/month', source: 'brief_extraction', extractionType: 'explicit' });
-    expect(n.observed_state?.raw_value).toBeUndefined();
+    // S4 (DL ruling 15 Oct): a framed negative is read by the Run's own gate (stored scale_frame), never as an intervention.
+    expect(canonical.value).toBe(-120);
+    expect(findScaleIncoherentBaselineFactorIds(reloaded.nodes, [])).not.toContain(n.id);
+    expect(n.observed_state).toMatchObject({ value: -120 / 500, raw_value: -120, unit: 'borrowers/month', source: 'brief_extraction', extractionType: 'explicit' });
     expect(valueAuthorshipOf(n.observed_state)).toBe('yours');
     expect(nodeProvenanceDisplay(n.observed_state?.extractionType, n.observed_state)).toBe('from_brief');
     expect(display.display_value).toContain('-120');
