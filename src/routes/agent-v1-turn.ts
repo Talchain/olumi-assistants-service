@@ -3019,6 +3019,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let lastRun: CapturedAnalysis | undefined;
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
+    /** The streamed GRAPH_READY frame for a model graph (nothing outside a streamed turn); through COMPLETE's own projection. */
+    const emitGraphReady = (raw: Record<string, unknown>): void => {
+      const emitStage = currentStageEmitter();
+      if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
+      // The same single cast COMPLETE's readback makes (`after.json.graph`).
+      const g = raw as GraphV3T;
+      emitStage({
+        kind: 'GRAPH_READY',
+        graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
+        schema_version: 'v3',
+        elapsed_ms: Date.now() - startedAt,
+      });
+    };
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
@@ -3041,18 +3054,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          */
         // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
         onConstructionTrace: (t) => { constructionTrace = t; },
-        onModelRegistered: (raw) => {
-          const emitStage = currentStageEmitter();
-          if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
-          // The persisted graph as read back — the same single cast COMPLETE's readback makes (`after.json.graph`).
-          const g = raw as GraphV3T;
-          emitStage({
-            kind: 'GRAPH_READY',
-            graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
-            schema_version: 'v3',
-            elapsed_ms: Date.now() - startedAt,
-          });
-        },
+        onModelRegistered: (raw) => emitGraphReady(raw),
+        // S3 (DL 15 Oct): the admitted draft, before the widening calls start, so the canvas draws it without waiting for
+        // them. The UI draws the first GRAPH_READY on arrival; COMPLETE then applies the saved model, Olumi's additions included.
+        onDraftAdmitted: (raw) => emitGraphReady(raw as Record<string, unknown>),
         // S8 durable human reasoning: the scenario-wide `finding_dissent` read (NOT a conversation-history read, no turn
         // window: a dissent older than the window still reaches the model) + the existing projector. A store WITHOUT the
         // read cannot say whether the user stated an objection: that is UNKNOWN, not a successful empty read, so it takes
