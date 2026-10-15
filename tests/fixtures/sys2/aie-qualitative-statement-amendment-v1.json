@@ -1,0 +1,22 @@
+{
+  "source_ref": "93b84bf5dcb78856780e2fabe9b25e65f87ff630",
+  "source_blob": "3933102f8ac88f758e340c35c4ce13cbbcb5ba78",
+  "path": "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+  "constant": "STATEMENTS_INSTRUCTION",
+  "status": "UNMEASURED source/producer amendment; existing owners apply, not a new benchmark arm",
+  "changes": [
+    {
+      "id": "H0",
+      "old": "holds_now (a claim about a condition being true now)",
+      "replacement": "holds_now (an affirmative claim that the actual speaker's condition currently holds, including a qualitative limitation with no number; use field holds_now and form holds_now, with value, low, high and unit null; any separately stated quantity gets its own applicable statement field. Retain the whole sentence, its actual subject, qualifications and conditions. Negating a positive property can affirm a current limitation; interpret the clause's meaning rather than rejecting every sentence containing no or not. A future possibility, past-only state, another subject's condition, denial, correction or unresolved conflict is not an active holds_now claim. Preserve such words with their actual status rather than invent a current condition. This records current source meaning only, never future persistence, event probability, intensity or causal effect)"
+    },
+    {
+      "id": "H1",
+      "old": "Where no safe item binding or numeric interpretation exists, retain the complete reasoning or unresolved question without inventing a statement, figure or resolved answer.",
+      "replacement": "A safely bound qualitative statement does not need a numeric interpretation: retain its complete source in statements with the applicable holds_now or describes form and null numeric fields. Keep actual speaker, source, qualifications, conditions, denials and unresolved disagreement visible through admission. Where item binding itself is unsupported, retain the complete reasoning and the exact unresolved binding without inventing a statement subject, figure or resolved answer."
+    }
+  ],
+  "scope": "Common corrected producer foundation in both baseline and candidate before next paired G3/GR1 comparison. G0-G2 remain held. No schema/store/engine/parser, provider call or product edit by AIE.",
+  "evidence": "PROMPT02:37 reports zero genuineholds_now in31statement-era raws but no freshmarketing/hiring positive-opportunityraw since3152. This is absenceofnewproducerwitness/riskofloss, not proof thatall31positivecasesfailed. Current instruction's no-numeric-interpretation escape can suppress safelyboundqualitative statements.",
+  "proof": "Reuse planned existing originalmarketing/hiring positiveandnegative controls/raw capture. Preserve question/quote/speaker/conditions and observe raw→admission→saved/currentconsumer separately. No historicalfixture rewriting or auto futurep1; no provider calls outside existingoperatorbudget."
+}

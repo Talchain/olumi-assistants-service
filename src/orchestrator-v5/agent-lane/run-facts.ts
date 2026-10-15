@@ -24,8 +24,6 @@ export interface RunWithheld {
   readonly code: string;
   readonly option_ids: readonly string[];
   readonly reason?: string;
-  /** The record's own words for it (the AI says what it means, in its own words, once). */
-  readonly words?: string;
   /** The claims it holds back (`goal_probability`, `downside` …), as recorded. */
   readonly withheld_claims?: readonly string[];
 }
@@ -73,7 +71,27 @@ export interface RunComparison {
   readonly rerun_record?: unknown;
 }
 
+/**
+ * ⭐ S7 PR-B: how the AI uses the packet, said once beside it (the `rerun_record.use` convention). Model-facing prompt text:
+ * the AIE's EXACT words (#94 6183364243, replacing the FYI'd draft 6183014787).
+ */
+export const RUN_FACTS_USE = 'These are the selected Run\'s own facts, bound to its revision and Run identity. Give goal chances only where chances '
+  + 'licenses them, preserving the actual option, target, unit/reference/window, conditions and uncertainty. Do not relabel '
+  + 'a win share, input, effect or sampling precision as goal chance. Explain each applicable withheld reason once and '
+  + 'retain every required scope, exclusion and assumption disclosure. Use the supplied must_say wording once where it '
+  + 'applies; do not repeat the same reason elsewhere. Name the option most likely to meet the goal only when '
+  + 'leader.goal_chance_leader positively licenses that meaning and identity; where leader.similar_option_ids applies, '
+  + 'describe the licensed similarity without implying exact equality. Never call an option best, a winner or recommended, '
+  + 'or choose for the user. Where comparison is given, explain the actual change and recorded result from it alone, '
+  + 'including an unchanged result when supplied. State the actual measured mechanism or sensitivity only where licensed; '
+  + 'graph proximity is not a driver. Reuse retained human statements with their source, qualifications and unresolved '
+  + 'binding, and give at most one justified next reasoning step. Do not invent figures, dates, laws or missing facts. If '
+  + 'required grounding or a valid reply cannot be retained, coaching is incomplete; do not borrow another Run or treat a '
+  + 'surviving card as completed coaching.';
+
 export interface RunFacts {
+  /** How the AI uses these facts (`RUN_FACTS_USE`), present only with a current Run's facts. */
+  readonly use?: string;
   /** Whether these facts are the selected CURRENT Run's (a stale Run's facts are never read as current). */
   readonly current: boolean;
   /** Who leads, as the UI shows it too (`runLeaderOf`). */
@@ -115,7 +133,9 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     .map((w) => {
       const detail = isRec(w.detail) ? w.detail : undefined;
       const claims = strs(w.withheld_claims);
-      return { code: String(w.code), option_ids: strs(w.option_ids), ...(typeof w.message === 'string' && w.message !== '' ? { words: w.message } : {}),
+      // Typed facts only, never the record's message: its words reach the AI through `goal_chance.say`, already scoped and
+      // asked once (never-reask-closed; target-not-testable-beside-ranges). A copy here would bypass both.
+      return { code: String(w.code), option_ids: strs(w.option_ids),
         ...(typeof detail?.reason === 'string' ? { reason: detail.reason } : {}), ...(claims.length > 0 ? { withheld_claims: claims } : {}) };
     }) : [];
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
@@ -127,6 +147,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     ? { links: licence.olumi_estimate_link_count ?? 0, values: licence.olumi_estimate_value_count ?? 0,
       settings_by_option: licence.olumi_estimate_settings_by_option ?? {} } : undefined;
   return {
+    ...(current ? { use: RUN_FACTS_USE } : {}),
     current,
     leader: runLeaderOf(analysisResult, state.analysisState, state.analysisReady, current),
     chances,
@@ -142,3 +163,4 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     must_say: [...(chances.goal_chance_notes ?? [])],
   };
 }
+

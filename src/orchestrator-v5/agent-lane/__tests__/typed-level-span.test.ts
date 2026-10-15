@@ -274,17 +274,20 @@ describe('typed current-level sentence authority', () => {
     const net = model(cases[0]!); const gross = 'We work off 250 gross jobs a month.'; net.factors[0]!.baseline_evidence = { quote: gross };
     expect(verify(net, gross)).toBe(false);
   });
-  it('keeps evidence optional for replay and mandatory only at the strict provider boundary', () => {
+  it('keeps evidence optional for replay (recordings) and NEVER sends it: SYSTEM 2 retired it at the strict provider boundary', () => {
     const instruction = 'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.';
-    expect(BUILD_INSTRUCTIONS.split(instruction)).toHaveLength(2);
+    expect(BUILD_INSTRUCTIONS.split(instruction)).toHaveLength(1);
     const schema = buildCandidateSchema() as any;
     const properties = schema.properties.factors.items.properties;
     expect(properties.baseline_evidence).toEqual({ anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, properties: { quote: { type: 'string' } }, required: ['quote'] }], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' });
-    for (const [providerBoundary, required] of [[false, false], [true, true]] as const) {
-      const strict = strictForTheDrafter(schema, { providerBoundary }) as any;
-      expect(strict.properties.factors.items.required.includes('baseline_evidence')).toBe(required);
-      expect(strict.properties.options.items.properties.interventions.items.required.includes('stated_evidence')).toBe(required);
-    }
+    const replay = strictForTheDrafter(schema, { providerBoundary: false }) as any;
+    expect(replay.properties.factors.items.required.includes('baseline_evidence')).toBe(false);
+    expect(replay.properties.options.items.properties.interventions.items.required.includes('stated_evidence')).toBe(false);
+    const sent = strictForTheDrafter(schema, { providerBoundary: true }) as any;
+    expect([sent.properties.factors.items.properties.baseline_evidence, sent.properties.factors.items.required.includes('baseline_evidence')]).toEqual([undefined, false]);
+    expect(sent.properties.options.items.properties.interventions.items.properties.stated_evidence).toBeUndefined();
+    // Contrast: a sibling the boundary still requires.
+    expect(sent.properties.factors.items.required.includes('baseline_value')).toBe(true);
     const old = model(); delete old.factors[0]!.baseline_evidence;
     const validate = new Ajv({ strict: false }).compile((strictForTheDrafter(schema, { providerBoundary: false }) as any).properties.factors.items);
     expect(validate(old.factors[0]), JSON.stringify(validate.errors)).toBe(true);

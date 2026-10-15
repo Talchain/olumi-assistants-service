@@ -29,6 +29,7 @@ import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
 import { goalChanceEstimateCounts, goalChanceEstimateLinkCount, olumiEstimateWords, type GoalChanceEstimateCounts } from './goal-chance-estimate-attribution.js';
 import { sentencesOf } from './reply/compose-reply.js';
+import { figuresIn, isLicensedChanceLine } from './licensed-chance-lines.js';
 import { sayDisplayedPct } from '../goal-target/goal-targets-joint.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
@@ -428,6 +429,20 @@ function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenL
       }
     }
     if (alreadySaid(spreadBody(body), l)) continue;
+    // ⭐ S7 B1 (DL 15 Oct): the leader gate now keeps the AI's own sentence for this option's licensed figure. Where it lacks
+    // the line's disclosures, it BECOMES the canonical line in place (one copy, every disclosure), never a second figure.
+    // By the gate's own rule (`isLicensedChanceLine`), for THIS option and its own licensed figure only.
+    const mine = { options: [{ label: l.label, figures: figuresIn(l.figure) }] };
+    const own = l.shortfall_note !== undefined ? undefined : body.split('\n')
+      .map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '')).flatMap((row) => sentencesOf(row))
+      .find((sentence) => !l.chance.includes(sentence) && (chanceInOwnWords(sentence, l)
+        || isLicensedChanceLine(sentence, mine, lines.map((x) => x.label))));
+    if (own !== undefined) {
+      const depends = l.depends !== '' && !sameWordsIn(body, l.depends) ? ` ${l.depends}` : '';
+      body = body.replace(own, `${l.chance}${depends}`);
+      added += 1;
+      continue;
+    }
     // Move any existing note behind its own chance, including when the Agent gave only the figure.
     if (l.spread_note !== undefined) {
       body = removeSpread(body, l.spread_note);

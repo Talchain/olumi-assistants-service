@@ -40,7 +40,7 @@ import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analys
 // ⭐ EBD E1: the deadline model's own question for its team part (never a "current level").
 import { draftedTeamPartOf, eventModelAsk, unsizedEventOptions } from "../../orchestrator-v5/goal-target/event-by-date-model.js";
 import { unsizedOlumiRiskIds } from "../../orchestrator-v5/agent-lane/unsized-risk.js";
-import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, riskOccurrenceIsCurrent, riskOccurrenceSubject, riskOccurrenceWindowFromToday } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
+import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, riskOccurrenceIsCurrent, riskOccurrenceSubject, riskOccurrenceWindowFromToday, riskWindowHoldsAskWords } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -1401,8 +1401,9 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
       return `${reading} Confirm or change that reading on the card; how strongly it affects ‘${riskOccurrenceGoalLabel(rawGraph, eventPath.goal_id).trim()}’ is a separate assumption.`;
     }
     if (eventPath?.kind === 'eligible') {
-      return `${reading} Whether it still holds during your goal’s period, which counts from the launch, is a separate question. `
-        + 'Ask Olumi to suggest a starting estimate for you to review.';
+      // Now is never read forward (AIE 6178729504): the user is asked ONE question about the launch period, and only their own
+      // answer to it is their forecast for that period (the holds-now row's `holds_in_window`, DL 15 Oct).
+      return `${reading} ${riskWindowHoldsAskWords(gap.label, eventPath.window_months)} Or ask Olumi to suggest a starting estimate for you to review.`;
     }
     if (eventPath?.kind === 'ineligible' && eventPath.reason === 'no_window') {
       return `${reading} To use it in the analysis, your goal needs one clear time period first.`;

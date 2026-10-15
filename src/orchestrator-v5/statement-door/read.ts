@@ -93,7 +93,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
   for (const raw of quotes) {
     const quote = (typeof raw === 'string' ? raw : raw.quote).trim();
     const answering = typeof raw === 'string' ? undefined : raw.answering;
-    const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words);
+    const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words, answering);
     if ('refused' in fig) return { kind: 'refused', refusal: 'not_this_field', detail: `${fig.refused} Nothing was prepared. ${KEEP}` };
     // Bound by: the row's own whole-model scope (`bindsWhole`), the model's admitted source sentence for it (`sourceOf`), else the
     // figure's clause (or the quote) by `statementBoundTo`.

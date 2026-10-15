@@ -11,7 +11,10 @@ import { sourceMapOf, subjectKey } from '../construction-source-map.js';
 
 type Rec = Record<string, any>;
 /** The AIE's exact paragraph (#94 6180604131), copied from the comment: the text is bound by identity, never retyped. */
-const AIE_TEXT = readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8');
+/** The AIE's text (#94 6180604131) with its exact H0/H1 replacements applied (AIE 6183352754; the packet copied byte-identical). */
+const AIE_TEXT = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'utf8')) as { changes: { old: string; replacement: string }[] })
+  .changes.reduce((text, c) => { if (text.split(c.old).length !== 2) throw new Error(`AIE old text not found once: ${c.old.slice(0, 60)}`); return text.replace(c.old, c.replacement); },
+    readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8'));
 /** The served capacity brief (`_source`): "between 10 and 30" is a stated range only a clause check can attest. */
 const CAPACITY = JSON.parse(readFileSync('tests/fixtures/drafter-text-3/served-capacity-brief.json', 'utf8')) as { brief: string };
 const SERVED = JSON.parse(readFileSync('tests/fixtures/drafter-capacity-chain/served-c1494f4d.json', 'utf8')) as { brief: string; draft: Rec };

@@ -187,11 +187,13 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     const candidateSchema: any = strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false });
     assert.ok(!candidateSchema.properties.options.items.properties.interventions.items.required.includes('stated_evidence'));
     const sent: any = strictForTheDrafter(buildCandidateSchema()); const intervention = sent.properties.options.items.properties.interventions.items;
-    assert.ok(intervention.required.includes('stated_evidence')); assert.ok(intervention.properties.stated_evidence.anyOf.some((s: any) => s.type === 'null'));
+    // SYSTEM 2 retirement: the sent schema no longer has the carrier at all; a cell carrying it is rejected as sent.
+    assert.ok(!intervention.required.includes('stated_evidence')); assert.equal(intervention.properties.stated_evidence, undefined);
+    assert.ok(intervention.required.includes('factor_label')); // contrast: a sibling the boundary still requires
     const sentIntervention = new Ajv({ strict: false }).compile(intervention);
     const oldCell = raw.options.find(o => (o.interventions?.length ?? 0) > 0)!.interventions![0]!;
-    assert.equal(sentIntervention(oldCell), false);
-    assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), true);
+    assert.equal(sentIntervention(oldCell), true);
+    assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), false);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
     assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
