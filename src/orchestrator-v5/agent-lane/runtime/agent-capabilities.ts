@@ -3981,6 +3981,14 @@ export function createAgentCapabilities(
         : NO_TARGET_DETAIL);
     }
     const nodesOf = (raw: unknown) => ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []);
+    // ⭐ Lane A A1 (founder verify df243cbc turn 07): the drafter wrote saved ids as labels ('carry_on_as_now'), so the card added and
+    // removed the same options and the save would have shown raw ids. A drafted label that IS a saved part's id takes that part's
+    // saved label (by identity, never a guess at similar words).
+    const savedLabelOf = new Map(nodesOf(g.raw).flatMap((n) => (typeof n?.id === 'string' && typeof n.label === 'string' ? [[n.id, n.label] as const] : [])));
+    for (const n of nodesOf(candidate)) {
+      const saved = typeof n?.label === 'string' ? savedLabelOf.get(n.label) : undefined;
+      if (saved !== undefined) n.label = saved;
+    }
     const basis = goalTargetBasisOf(nodesOf(candidate).find((n) => n?.kind === 'goal'));
     const period = basis === undefined ? '' : basis.period_kind === 'over_period'
       ? ` over the first ${basis.period_months} month${basis.period_months === 1 ? '' : 's'}${basis.reference === 'launch' ? ' after launch' : ''}`

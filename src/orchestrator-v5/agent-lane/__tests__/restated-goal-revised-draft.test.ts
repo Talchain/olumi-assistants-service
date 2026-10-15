@@ -1496,6 +1496,23 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(s.commits).toHaveLength(0);
   });
 
+  it('⭐ A1 RED (turn 07 card): a draft that labels parts with their saved ids keeps the saved labels: nothing is added and removed at once', async () => {
+    const s = server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'typed-60'], later_user_messages: [{ turn_id: 'typed-60', text: TYPED_60 }] } });
+    // The two drafted options, labelled with the saved options' ids (as drafter row #3 of the founder capture did).
+    const idLabelled = (): Rec => { const c = qualitative(); c.options = c.options.map((o: Rec, i: number) => ({ ...o, label: ['hire_marketing_manager', 'ai_planning_advertising'][i] ?? o.label })); return c; };
+    expect(idLabelled().options.map((o: Rec) => o.label), 'precondition: the drafter wrote saved ids as labels').toEqual(['hire_marketing_manager', 'ai_planning_advertising']);
+    const { caps, proposals, inputs } = laneWith(s, { draft: idLabelled });
+    const out = await changeAs(caps, typedTurn([TYPED_60]));
+    expect(out, JSON.stringify(out).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(inputs).toHaveLength(1);
+    const card = cardOf(proposals, out);
+    expect(card, 'no raw id is shown').not.toMatch(/\u2018[a-z]+(_[a-z]+)+\u2019/);
+    expect(card.split('Would remove from the current model:')[1] ?? '', 'a kept option is never also removed').not.toMatch(/Hire marketing manager|AI planning \+ advertising/);
+    const labels = (candidateOf(proposals, out).nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => n.label);
+    expect(labels).toEqual(expect.arrayContaining(['Hire marketing manager', 'AI planning + advertising']));
+    expect(labels).not.toContain('hire_marketing_manager');
+  });
+
   it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
     const base = structuredClone(FX.graph);
     base.goal_constraints = [...(base.goal_constraints ?? []), { constraint_id: 'agent-lane:product_feature_launch:>=', node_id: 'product_feature_launch',
