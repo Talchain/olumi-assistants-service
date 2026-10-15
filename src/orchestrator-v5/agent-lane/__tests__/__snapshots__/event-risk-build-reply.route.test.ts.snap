@@ -2,13 +2,29 @@
 
 exports[`event-risk disclosure through the served build reply > ER-2-control: no likelihood keeps the current reply and shape byte-identical 1`] = `
 {
-  "shape": undefined,
+  "shape": {
+    "bullets": [
+      "How likely or how large is "Key developer leaves" today?",
+    ],
+    "detail": "- Check the delivery assumptions.
+- Discuss the staffing choices.
+
+The first analysis could not run yet: Review all 2 readiness issues together before analysis.
+
+The analysis can't run yet. What is "Delivery capacity" today, before any option changes it? Without a current level the analysis would treat it as zero.
+Olumi can’t run the numbers until this risk has a figure.",
+    "headline": "The shared model is ready to explore.",
+  },
   "text": "The shared model is ready to explore.
+
+• How likely or how large is "Key developer leaves" today?
+
 - Check the delivery assumptions.
 - Discuss the staffing choices.
 
 The first analysis could not run yet: Review all 2 readiness issues together before analysis.
 
-Questions this model does not answer yet: Is "in the next 6 months" the period by which "Delivery" should be achieved? Your brief does not say, so the model holds no deadline for it. The analysis can't run yet. What is "Delivery capacity" today, before any option changes it? Without a current level the analysis would treat it as zero. How likely or how large is "Key developer leaves" today? Olumi can’t run the numbers until this risk has a figure.",
+The analysis can't run yet. What is "Delivery capacity" today, before any option changes it? Without a current level the analysis would treat it as zero.
+Olumi can’t run the numbers until this risk has a figure.",
 }
 `;
