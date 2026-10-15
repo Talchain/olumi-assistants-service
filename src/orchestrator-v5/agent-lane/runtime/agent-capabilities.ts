@@ -25,6 +25,8 @@ import { readStatement, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
 import { resolveSubject } from '../../statement-door/subject.js';
 import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
+import type { UserStatement } from '../user-statements.js';
+import { GOAL_LAUNCH_QUANTITY, launchAssumptionWords, launchClauseOf, launchReadingOf, launchReadingWords, launchRecord } from '../../statement-door/fields/goal-launch.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
 /** What binds a user's statement to one subject beside their words: their canvas selection, Olumi's preceding question, its asks. */
 const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => ({ ...(ctx.grounded_selection !== undefined ? { selection: ctx.grounded_selection } : {}),
@@ -6326,21 +6328,6 @@ export function createAgentCapabilities(
       const datedNow = named !== null && weekdayDatedIn(typed) === named;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      // ⭐ SCIENCE (AIE MA3; marketing e2e 0dac5dcc turn 04, "6 months to launch … that's when the 3-month sales cycle starts"):
-      // a goal measured over the window from launch is judged over that window, so the launch date OPENS it. It is never the
-      // goal's deadline (a wrong horizon), and it is not a new deliverable to redraft around (`revised_draft_has_no_target`).
-      // The model has no carrier for a launch date yet (`goal_target_basis` is strict on the shared DB: reader-first, with
-      // the window forecasts), so nothing is prepared and the AI says so plainly.
-      const launchGoals = g.nodes.filter((n) => n.kind === 'goal');
-      const launch = launchGoals.length === 1 ? launchWindowOf(launchGoals[0]) : undefined;
-      if (launch !== undefined) {
-        const label = String(launchGoals[0]!.label ?? 'the goal');
-        return { ok: false, mutated: false, refusal: 'launch_opens_window',
-          detail: `‘${label}’ is measured ${periodWords(launch)}, so the launch date the user gave (“${words}”) is when that window `
-            + 'starts, not the goal\'s deadline. Olumi cannot hold a launch date in the model yet, so nothing was prepared. Tell the user '
-            + `plainly, in one sentence: their targets stay measured ${periodWords(launch)}, and their launch timing is noted in this `
-            + 'conversation but does not change the calculation yet. Do not ask them to restate the date, and do not offer a deadline card.' };
-      }
       const heldHumanWords = proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id).some(held => {
         const proposal = proposals.get(held.proposal_id);
         return proposal?.provenance.authored_by === 'user_stated' && proposal.operations.some(op =>
@@ -6349,6 +6336,65 @@ export function createAgentCapabilities(
       const origin = statementOrigin(writes(typed) || writes(plainOf(ctx.user_text ?? '')) || heldHumanWords,
         writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')), ctx.user_text_complete);
       if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+      // ⭐ SCIENCE (AIE MA3; marketing e2e 0dac5dcc turn 04, "6 months to launch … that's when the 3-month sales cycle starts"):
+      // a goal measured over the window from launch is judged over that window, so the launch date OPENS it. It is never the
+      // goal's deadline (a wrong horizon, and a held horizon beside a launch reading is a conflict: `riskOccurrenceWindowMonths`).
+      // ⭐ DL 15 Oct (marketing widen3, S6 LOST; AIE #94 6187235962 option A): the user's launch words are RECORDED on the goal
+      // through the statement door (`goal-launch.ts`), with Olumi's reading of the date they give (the ONE calendar, counting
+      // from the day the user dated) attested beside them. No Run input moves; the card says the calculation is unchanged.
+      const launchGoals = g.nodes.filter((n) => n.kind === 'goal');
+      const launch = launchGoals.length === 1 ? launchWindowOf(launchGoals[0]) : undefined;
+      if (launch !== undefined) {
+        const goal = launchGoals[0]!;
+        const label = String(goal.label ?? 'the goal');
+        const today = todayInLondon((opts.now ?? (() => new Date()))());
+        const messages = [ctx.user_turn_text ?? '', ...[...(ctx.verified_user_messages ?? (ctx.user_text ?? '').split('\n'))].reverse()].filter((m) => m.trim() !== '');
+        const launchMessage = messages.find((m) => writes(plainOf(m)));
+        // Read from the user's own clause the words open, never the shorter quote alone (a named start day is kept).
+        const clause = launchMessage === undefined ? undefined : launchClauseOf(words, launchMessage);
+        // The user's own dating of the clause's "last <weekday>" ("Last Friday was the 9th of October."), in its own sentence.
+        const clauseWeekday = clause === undefined ? null : lastWeekdayNamedIn(clause);
+        const datingSentence = clauseWeekday === null ? undefined : messages.flatMap((m) => m.split(/(?<=[.!?])\s+/))
+          .find((sentence) => readStatedWeekdayDate(sentence, today)?.weekday === clauseWeekday);
+        const dating = datingSentence === undefined ? undefined : readStatedWeekdayDate(datingSentence, today) ?? undefined;
+        const reading = origin === 'human' && clause !== undefined
+          ? launchReadingOf(clause, launch, today, dating !== undefined ? { lastWeekday: dating } : {}) : undefined;
+        const quote = launchMessage === undefined ? undefined : sentenceHolding(words, launchMessage);
+        if (reading === undefined || quote === undefined) {
+          return { ok: false, mutated: false, refusal: 'launch_opens_window',
+            detail: `‘${label}’ is measured ${periodWords(launch)}, so the launch date the user gave (“${words}”) is when that window `
+              + 'starts, not the goal\'s deadline. Olumi could not place that launch date from the user\'s own words, so nothing was prepared. '
+              + `Tell the user plainly, in one sentence, that their targets stay measured ${periodWords(launch)}, and ask once for the launch `
+              + 'date (for example the date of the day it counts from). Do not offer a deadline card.' };
+        }
+        const subject = { kind: 'goal' as const, id: String(goal.id), field: 'lead' as const };
+        const statements: UserStatement[] = [
+          { speaker: 'user', quote, source: launchMessage!, form: 'point', reading: 'olumi', reference: reading.launch_date,
+            subject: { quantity: GOAL_LAUNCH_QUANTITY, node_id: subject.id } },
+          ...(reading.counted_from !== undefined && datingSentence !== undefined
+            ? [{ speaker: 'user' as const, quote: datingSentence.trim(), source: messages.find((m) => m.includes(datingSentence))!, form: 'describes' as const,
+              reading: 'olumi' as const, reference: reading.counted_from, subject: { quantity: `${GOAL_LAUNCH_QUANTITY}_reference`, node_id: subject.id } }]
+            : []),
+        ];
+        const approved = launchRecord(g.raw, subject.id, statements, reading, new Date().toISOString());
+        const dry = approved === undefined ? undefined : applyStatementRecordEdit(g.raw, approved);
+        if (approved === undefined || dry === undefined || dry.kind !== 'mutated') {
+          return { ok: false, mutated: false, refusal: dry?.kind === 'unchanged' ? 'already_held' : 'not_recordable',
+            detail: dry?.kind === 'unchanged' ? `This launch date is already recorded for ‘${label}’.` : 'Nothing was prepared.' };
+        }
+        const doorReading = { subject, label, statements, reading: launchReadingWords(label, launch, reading),
+          assumptions: launchAssumptionWords(clause!, reading) };
+        const card: DoorCard = { subject, label, field: 'lead', carrier: 'statement_record', statements, member: 'statement_record',
+          payload: JSON.parse(JSON.stringify(approved)) as Record<string, unknown>, derives: true };
+        const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+          operations: [doorOperation(card)], provenance: { authored_by: 'model_proposed', basis: launchMessage! },
+          validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: doorCardWords(doorReading) });
+        proposals.put(proposal);
+        return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+          launch: { date: reading.launch_date, window_end: reading.window_end, ...(reading.counted_from !== undefined ? { counted_from: reading.counted_from } : {}) },
+          note: `${DOOR_PROPOSED_NOTE} This records the user's launch date with their words; it is not the goal's deadline and does not `
+            + 'change the calculation yet, so do not say it does.' };
+      }
       /**
        * ⭐ GEN #5 (Paul's funding test, 13 Oct: "how these options change our ability to deliver a high-quality MVP within 6
        * months" on a draft of "Development speed"): a deadline for a deliverable that is not the model's goal cannot land on that

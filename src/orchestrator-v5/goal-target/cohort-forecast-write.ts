@@ -258,6 +258,11 @@ export type StatementRecordEditResult =
 /** The subjects this member records, each with the statements it holds: never a figure-bearing record in place of its own carrier. */
 function recordable(subject: DoorSubject, record: UserStatementRecord): boolean {
   if (subject.kind === 'goal' && subject.field === 'relation') return record.statements.length === 1 && record.statements[0]!.form === 'holds_now';
+  // DL 15 Oct (marketing widen3): a launch-window goal's launch date, the user's words with Olumi's reading of the date attested.
+  if (subject.kind === 'goal' && subject.field === 'lead') {
+    return record.statements.length >= 1 && record.statements.length <= 2 && record.attest?.quantity === 'launch_date'
+      && typeof record.attest.launch_date === 'string' && typeof record.attest.window_end === 'string';
+  }
   if (subject.kind === 'option' && subject.field === 'lead') {
     return record.statements.length >= 1 && record.statements.length <= 2 && record.attest !== undefined && typeof record.attest.fingerprint === 'string';
   }
@@ -283,7 +288,8 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   const graph = withUserStatement(structuredClone(persistedGraph) as Rec & { nodes: unknown[] }, said.record, said.subject);
   if (graph === undefined) return { kind: 'refused', reason: 'node_not_found' };
   const label = String(matches[0]!.label ?? approved.node_id).trim();
-  const lead = said.subject.field === 'lead';
+  const launch = said.subject.kind === 'goal' && said.subject.field === 'lead';
+  const lead = said.subject.field === 'lead' && !launch;
   const rangeLaw = said.subject.kind === 'factor';
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph', fact_version: 1, noop: false,
@@ -291,12 +297,14 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       affected_entities: [{ kind: said.subject.kind, label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place'
+      safe_summary: launch ? 'Recorded your launch date from your words, with Olumi’s reading of it'
+        : lead ? 'Recorded from your words when an option’s effect is fully in place'
         : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted' : 'Recorded from your words that both targets count the same people',
       impact: 'low', rerun_recommended: lead || rangeLaw },
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
-    confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.`
+    confirmation: launch ? `Recorded your launch date for ‘${label}’ from your words, with Olumi’s reading of the date kept distinct.`
+      : lead ? `Recorded from your words when ‘${label}’ is fully in place.`
       : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.` : sameCohortRecordedWords(graph) };
 }
 
