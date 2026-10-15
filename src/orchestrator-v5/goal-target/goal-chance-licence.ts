@@ -1,6 +1,5 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { openReadingQuestion, openReadingsOf } from '../agent-lane/open-reading.js';
-import type { UserStatement } from '../agent-lane/user-statements.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
@@ -839,7 +838,9 @@ function openReadingNotes(graph: unknown): string[] {
     const source = nodes.find((n) => n.id === e.from);
     const key = `link|${e.from}|${e.to}||effect`;
     const said = (Array.isArray(source?.user_statements) ? source!.user_statements : []).filter(isRec)
-      .filter((r) => r.subject_key === key && Array.isArray(r.statements)).flatMap((r) => (r.statements as unknown[]).filter(isRec)) as unknown as UserStatement[];
+      .filter((r) => r.subject_key === key && Array.isArray(r.statements)).flatMap((r) => (r.statements as unknown[]).filter(isRec))
+      .flatMap((x) => (typeof x.quote === 'string' ? [{ quote: x.quote, ...(typeof x.form === 'string' ? { form: x.form } : {}),
+        ...(finite(x.low) ? { low: x.low } : {}), ...(finite(x.high) ? { high: x.high } : {}) }] : []));
     const open = openReadingsOf(said, effect!.amount as number);
     return open.length === 0 ? [] : [openReadingQuestion(open[0]!.quote, Math.abs(effect!.amount as number),
       typeof effect!.per_source_change_unit === 'string' ? effect!.per_source_change_unit : undefined)];

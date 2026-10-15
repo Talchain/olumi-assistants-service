@@ -6,7 +6,6 @@
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { singular } from './same-unit.js';
-import type { UserStatement } from './user-statements.js';
 
 /** Figure-free forms that state a condition, never a qualification of a figure. */
 const CONDITION_FORMS = new Set<string>(['holds_now']);
@@ -22,8 +21,11 @@ function writesFigure(quote: string, figure: number): boolean {
  * statement with no figure, in a sentence that does not write the figure. The figure stays the user's, flagged as not settled.
  * A sentence writing the same figure again is no conflict; a condition that holds now is not a qualification.
  */
-export function openReadingsOf(statements: readonly UserStatement[], figure: number): readonly UserStatement[] {
-  return statements.filter((s) => s.low === undefined && s.high === undefined && !CONDITION_FORMS.has(s.form) && !writesFigure(s.quote, figure));
+/** What a reading needs of a statement: a verified one, or one recorded on the subject. */
+export interface ReadingStatement { readonly quote: string; readonly form?: string; readonly low?: number; readonly high?: number }
+
+export function openReadingsOf<S extends ReadingStatement>(statements: readonly S[], figure: number): readonly S[] {
+  return statements.filter((s) => s.low === undefined && s.high === undefined && !CONDITION_FORMS.has(s.form ?? '') && !writesFigure(s.quote, figure));
 }
 
 /** The DL's ruled words (ruling (a)) for such a figure: asked on the build, and noted on the Run's licence. */
