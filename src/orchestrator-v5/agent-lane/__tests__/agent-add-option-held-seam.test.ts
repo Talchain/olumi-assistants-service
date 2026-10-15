@@ -1611,12 +1611,15 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const answer = await originAnswer(opt!.label, graphNow());
     expect(answer ?? '', String(answer)).not.toMatch(/not because I suggested it/);
     expect(answer ?? '', String(answer)).not.toMatch(/you set it yourself/);
-    expect((await agentView(opt))['provenance'], 'the Agent\'s state view').not.toBe('user_set');
+    // S10 fix 1 (#3177): the Agent's view carries the ONE authority's answer (`added_by`), never the raw stamp.
+    expect((await agentView(opt))['provenance'], 'no raw stamp in the Agent\'s view').toBeUndefined();
+    expect((await agentView(opt))['added_by'], 'the Agent\'s state view').not.toBe('yours');
     // POSITIVE CONTROL, same run, same graph, same question: the probe DOES resolve this option — stamped user_set, the
     // answer is the user-authorship sentence. So the absence above is the provenance, not a probe that sees nothing.
     const stamped = structuredClone(graphNow());
     (stamped.nodes.find((x) => x.id === opt!.id) as { provenance?: unknown }).provenance = 'user_set';
     expect(await originAnswer(opt!.label, stamped)).toMatch(/you set it yourself, not because I suggested it/);
+    expect((await agentView(stamped.nodes.find((x) => x.id === opt!.id)))['added_by'], 'the view DOES resolve a user_set option').toBe('yours');
   }, 120_000);
 
   it('[A6b-2] RED: an option the user NAMED in their own typed words ("Add an option: test £54 at release."), APPROVED → user_set; the answer says they set it; the Agent sees it as theirs', async () => {
@@ -1634,7 +1637,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(opt.id).toBe(optId);
     expect((opt as { provenance?: unknown }).provenance).toBe('user_set');
     expect(await originAnswer(opt.label, graphNow())).toMatch(/you set it yourself/);
-    expect((await agentView(opt))['provenance']).toBe('user_set');
+    expect((await agentView(opt))['provenance'], 'no raw stamp in the Agent\'s view').toBeUndefined();
+    expect((await agentView(opt))['added_by']).toBe('yours');
     // NEGATIVE CONTROL, by identity: the options already there are untouched.
     expect((graphNow().nodes.find((x) => x.id === 'opt_a') as { provenance?: unknown }).provenance).toBeUndefined();
   }, 120_000);

@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { projectEntity, projectModelContext } from '../runtime/agent-capabilities.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 
 type Rec = Record<string, any>;
 const WHOSE = ['yours', 'brief', 'unverified_brief', 'olumi', 'olumi_accepted', 'unknown'];
@@ -74,5 +75,17 @@ describe('S10 fix 1: the Agent reads whose it is from the ONE authority, never t
         { from: 'a', to: 'b', id: 'e2', strength: { mean: 0.4, std: 0.1 }, provenance: { source: 'user_specified' } }] };
     const links = projectModelContext({ nodes: g.nodes, edges: g.edges, raw: g, analysis_state: undefined, analysis_ready: false } as never).links as Rec[];
     expect(links.map((l) => l.whose)).toEqual(['unknown', 'yours']);
+  });
+
+  it('the AI is told what each link `whose` means in the AIE’s EXACT words (#94 6181933060), said once', () => {
+    // Copied from the AIE's comment, character for character.
+    const AIE = 'Each item in links states its recorded authorship and assumed strength. whose:yours means a positively verified user-authored link; brief means it came from retained brief material and keeps that material\'s actual speaker and source; unverified_brief means verification of the retained material or its binding is unresolved\u2014say what remains unverified, and do not erase a known human origin merely because its quantity role is unverified; olumi means a proposal or assumption Olumi made; unknown means authorship is not established. Approval does not change authorship.';
+    expect(HOST_TOOL_CONTRACT.split(AIE)).toHaveLength(2);
+    // Every value the producer gives a link is one the sentence defines.
+    const g = { nodes: [{ id: 'd', kind: 'decision' }, { id: 'o', kind: 'option' }, { id: 'a', kind: 'factor' }, { id: 'b', kind: 'factor' }],
+      edges: [{ from: 'a', to: 'b', id: 'e1', provenance: { source: 'brief_extraction' } }, { from: 'a', to: 'b', id: 'e2', provenance: { source: 'user_specified' } },
+        { from: 'a', to: 'b', id: 'e3', provenance: { source: 'cee_hypothesis' } }, { from: 'a', to: 'b', id: 'e4' }] };
+    const links = projectModelContext({ nodes: g.nodes, edges: g.edges, raw: g, analysis_state: undefined, analysis_ready: false } as never).links as Rec[];
+    expect(links.map((l) => l.whose)).toEqual(['brief', 'yours', 'olumi', 'unknown']);
   });
 });
