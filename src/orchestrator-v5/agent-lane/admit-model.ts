@@ -2864,6 +2864,8 @@ export function admitStatedGoalLevel(args: {
   readonly heldComparator?: unknown;
   /** The target's unit: a `<=` level is admitted beside a held ceiling only where it may be a level (AIQ 5872082179). */
   readonly targetUnit?: unknown;
+  /** S4 2b: the level is negative and `cap` is its own magnitude (F = |level|); the floor reading admits it at −1. */
+  readonly signedLevel?: true;
 }): StatedGoalLevelVerdict {
   const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator } = args;
   const heldCeiling = heldComparatorSense(heldComparator) === 'minimise';
@@ -2922,7 +2924,7 @@ export function admitStatedGoalLevel(args: {
         'else; no chance of meeting the goal will be shown.',
     };
   }
-  const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap });
+  const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap, ...(args.signedLevel ? { signedLevel: true as const } : {}) });
   if (admission.admitted) return { admitted: true, normalised: admission.normalised };
   if (admission.reason === 'baseline_off_cap_scale') return { admitted: false, reason: offCapScaleSentence(metric, baselineRaw, raw, cap) };
   return {
@@ -4020,9 +4022,16 @@ function admitOnce(
           }
           return change.node;
         }
-        const resolved = resolveGoalThresholdCapWithProvenance(
-          undefined, raw, model.goal.unit, undefined,
-        );
+        // ⭐ S4 2b (AIE 6187351293, scoped approval on the existing frame path): a NEGATIVE current level stated beside a
+        // target at or above it ("losing a net £2,000 a month … break even") has no target-derived scale (a 0 target has no
+        // magnitude), so the goal lost its level and its target's scale. Its own level's magnitude is the one positive,
+        // zero-preserving scale F = |level|: today −1, the target 0 (or −0.25 for −£500). Never abs() of the figure, never a
+        // shift or clip; a zero level has no scale and stays as before. F is computational, not a bound on outcomes.
+        const signedLevel = model.goal.baseline_value;
+        const signedScale = typeof signedLevel === 'number' && Number.isFinite(signedLevel) && signedLevel < 0 && raw >= signedLevel
+          && (model.goal.operator === '>=' || model.goal.operator === '>') ? -signedLevel : undefined;
+        const resolved = resolveGoalThresholdCapWithProvenance(undefined, raw, model.goal.unit, undefined)
+          ?? (signedScale !== undefined ? { cap: signedScale, provenance: 'level_frame' as const } : null);
         /**
          * ⛔ A LEVEL FRAME WITH NO BASELINE HAS NO GOAL FIT. ISL reads the level
          * frame against `observed_state.baseline` and refuses without it
@@ -4085,7 +4094,7 @@ function admitOnce(
           // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
           const verdict = admitStatedGoalLevel({
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
-            targetUnit: model.goal.unit,
+            targetUnit: model.goal.unit, ...(signedScale !== undefined && resolved.provenance === 'level_frame' ? { signedLevel: true as const } : {}),
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
