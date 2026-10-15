@@ -297,14 +297,15 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toContain('‘Code quality deterioration’ is Olumi’s unsized risk suggestion');
     const card = await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
     expect(card).toMatchObject({ ok: true, statement: { subject: 'Code quality deterioration', field: 'holds_now', quotes: [SAID] } });
-    expect(card.public_label).toBe(`From your words: “${SAID}” Olumi reads this as ‘Code quality deterioration’ already being true now. Record this `
-      + 'reading? How strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized.');
+    expect(card.public_label).toBe(`From your message: “${SAID}” Olumi proposes this reading: ‘Code quality deterioration’ already being true now. How `
+      + 'strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized. Record this reading?');
     expect(card.public_label).not.toMatch(/chance|likely|Olumi’s starting assumption/);
     // Card-only: the Agent's reading of a yes never applies it.
     expect(await w.caps.authoriseChange(ctx('Yes') as never, { proposal_id: String(card.proposal_id) })).toMatchObject({ ok: false, refusal: 'approval_required' });
     expect(w.commits()).toBe(0);
-    const res = await w.caps.authoriseChange({ ...ctx('Yes, record what I said.'), typed_approval_of: String(card.proposal_id),
-      typed_approval_words: 'Yes, record what I said.' } as never, { proposal_id: String(card.proposal_id) }) as Rec;
+    // AIE 6181498097: its write adds Olumi's derivation (p = 1 within a window from today), so its button is "Use this reading".
+    const res = await w.caps.authoriseChange({ ...ctx('Yes, use this reading.'), typed_approval_of: String(card.proposal_id),
+      typed_approval_words: 'Yes, use this reading.' } as never, { proposal_id: String(card.proposal_id) }) as Rec;
     expect(res).toMatchObject({ ok: true, applied: true, follow_up: 'Recorded from your words: ‘Code quality deterioration’ is already true now. '
       + 'How strongly it affects the model is still Olumi’s placeholder on its link.' });
     expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });

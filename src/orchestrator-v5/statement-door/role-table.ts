@@ -48,9 +48,7 @@ export interface RoleRow {
   readonly sourceOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
   /** Olumi's reading of the statement, as the card says it ("your estimate of about 30% that ‘X’ happens …"). */
   readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
-  /** The card's ONE question, where the AIE's delivered card for this field words it otherwise ("Use this measurement reading?"). */
-  readonly question?: string;
-  /** Every SEPARATE Olumi assumption the reading rests on, each said once after the question (a convention, a part not given). */
+  /** Every derived interpretation or separate Olumi assumption the reading rests on, each said once, before the card's question. */
   readonly assumptions: (statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string) => readonly string[];
   /** The receipt after a confirmed write and read-back ("Recorded your estimate: …"). */
   readonly recordedWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
@@ -69,6 +67,8 @@ export interface RoleRow {
   readonly quantity?: string;
   /** The period a statement of this subject is stated over, kept on it ("3 months"), where the field has one. */
   readonly periodOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
+  /** True where the written postimage adds an Olumi derivation (its button is "Use this reading", AIE 6181498097). */
+  readonly derives?: boolean;
   /** A stated 0 is a figure of this field, recorded as 0 (a chance of 0%, a level of none), never refused as missing. */
   readonly allowsZero?: boolean;
   /** At most this many statements make one reading (a lead's start and its settling-in: 2). */

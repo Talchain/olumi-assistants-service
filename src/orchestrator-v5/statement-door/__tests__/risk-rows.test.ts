@@ -34,8 +34,8 @@ const withAttrition = (): Rec => {
   return g;
 };
 const EFFECT = 'its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized';
-const CARD = `From your words: “${SAID}” Olumi reads this as your estimate of about 30% that ‘${LABEL}’ happens at least once within the next 3 months `
-  + `from today. Record this reading? How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}.`;
+const CARD = `From your message: “${SAID}” Olumi proposes this reading: your estimate of about 30% that ‘${LABEL}’ happens at least once within the next 3 months `
+  + `from today. How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}. Record this reading?`;
 const RECEIPT = `Recorded your estimate: about 30% that ‘${LABEL}’ happens at least once within the next 3 months from today. `
   + 'Its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized.';
 const USERS = { version: 1, occurrence: { p_low: 0.3, p_high: 0.3, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } };
@@ -127,12 +127,12 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     expect(r.detail).toContain('gives a chance of it happening, not a condition that holds now');
     const card = await w.caps.proposeStatement!(ctx(t1h) as never, door(t1h)) as Rec;
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true, statement: { field: 'occurrence' } });
-    expect(String(card.public_label)).toContain(`From your words: “${t1h}” Olumi reads this as your estimate of about 30%`);
+    expect(String(card.public_label)).toContain(`From your message: “${t1h}” Olumi proposes this reading: your estimate of about 30%`);
     const now = 'Honestly, our code quality is already slipping.';
     const held = await world().caps.proposeStatement!(ctx(now) as never, door(now, 'holds_now')) as Rec;
     expect(held).toMatchObject({ ok: true, statement: { field: 'holds_now', quotes: [now] } });
-    expect(held.public_label).toBe(`From your words: “${now}” Olumi reads this as ‘${LABEL}’ already being true now. Record this reading? `
-      + `How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}.`);
+    expect(held.public_label).toBe(`From your message: “${now}” Olumi proposes this reading: ‘${LABEL}’ already being true now. `
+      + `How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}. Record this reading?`);
   });
 
   it('CONTRAST: a figure about ANOTHER risk is refused for this one, even after Olumi asked about this one; the route gives it to the risk it names', async () => {
@@ -162,7 +162,7 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     const w = world();
     const card = await w.caps.proposeStatement!(ctx(zero) as never, door(zero)) as Rec;
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true });
-    expect(card.public_label).toContain('Olumi reads this as your estimate of 0% that ‘Code quality deterioration’ happens');
+    expect(card.public_label).toContain('Olumi proposes this reading: your estimate of 0% that ‘Code quality deterioration’ happens');
     expect(await press(w, card)).toMatchObject({ ok: true, applied: true });
     expect(riskOf(w.graph()).event_risk).toEqual({ ...USERS, occurrence: { ...USERS.occurrence, p_low: 0, p_high: 0 } });
     const v = world(), before = JSON.stringify(v.graph());
@@ -211,7 +211,7 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     const card = await w.caps.proposeStatement!(ctx(said, { preceding_assistant_text: asked }) as never,
       door(said, 'occurrence', 'Limited marketing experience')) as Rec;
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true, statement: { field: 'occurrence' } });
-    expect(card.public_label).toContain('Olumi reads this as your estimate of about 40% that ‘Limited marketing experience’ happens at least once within the next 3 months from today.');
+    expect(card.public_label).toContain('Olumi proposes this reading: your estimate of about 40% that ‘Limited marketing experience’ happens at least once within the next 3 months from today.');
     expect(await press(w, card)).toMatchObject({ ok: true, applied: true });
     expect(riskOf(w.graph(), 'limited_marketing_experience').event_risk.occurrence).toMatchObject({ p_low: 0.4, p_high: 0.4, basis: 'user' });
     // Served: its window counts from the LAUNCH, so the same words are refused with the reason, never written over that window.

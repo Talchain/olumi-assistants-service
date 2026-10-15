@@ -528,17 +528,17 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
-    // ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (M1). Tool text AIE_TEXT_PENDING (#94, SESSION4 → AIE).
+    // ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (M1). Tool text: AIE 6181498097, exact.
     type: 'function',
     name: 'propose_statement',
-    description: 'Record the user\u2019s OWN statement about one part of the model, quoted exactly, as ONE card they approve with '
-      + '\u201cRecord what you said\u201d. Use it when the user stated it in any of their messages, this one or an earlier one. Name the '
-      + 'subject: its kind, its exact label as get_canonical_state returned it, and the field the statement is about. On the door now: a '
-      + 'RISK\u2019s occurrence (how likely it is to happen, with the time span the user gave), a RISK\u2019s holds_now (a condition the '
-      + 'user says is already true now), a GOAL\u2019s measure (what it is measured in) and a GOAL\u2019s lead (when its effects are fully in '
-      + 'place). Give each statement as the user\u2019s complete words; Olumi reads the figure, its form and its '
-      + 'window from those words itself, and refuses with the reason when it cannot. Never put your own estimate or a number the user did '
-      + 'not state here. This does NOT change anything: it prepares ONE card, and only the user\u2019s press records it.',
+    description: 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
+      + 'field, and the complete statement with its actual speaker/source, qualifications, negation, conditions, reference and window; reuse '
+      + 'a retained applicable statement rather than asking for it again. This door currently supports a risk\u2019s occurrence estimate and '
+      + 'its current-condition reading. Olumi proposes the interpretation; a complete quote or matching label alone does not verify it. Do not '
+      + 'supply an Olumi estimate here or substitute a different event, quantity or time window. If the meaning or current carrier is '
+      + 'unsupported, retain the original statement and explain that exact gap. This tool prepares one card and changes nothing. Only the '
+      + 'bound approval records its complete shown postimage; a successful committed change then follows the existing automatic analysis '
+      + 'and contextual SAME-Run coaching flow, with no duplicate Run.',
     parameters: obj({
       subject: obj({
         kind: { type: 'string', enum: ['goal', 'factor', 'option', 'risk', 'link'] },

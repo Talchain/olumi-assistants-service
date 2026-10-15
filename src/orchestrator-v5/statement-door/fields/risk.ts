@@ -159,6 +159,8 @@ export const RISK_OCCURRENCE_ROW: RoleRow = {
 export const RISK_HOLDS_NOW_ROW: RoleRow = {
   field: 'holds_now', carrier: 'risk_occurrence', unit: '', forms: ['holds_now'], maxStatements: 1, signed_by: '6178729504',
   quantity: 'risk_holds_now', applies: isRisk,
+  // AIE 6181498097: its write adds Olumi's derivation (true now → at least once within a window from today), so "Use this reading".
+  derives: true,
   read: readHoldsNow,
   // The brief's own sentence, which admission kept for this risk (`already_true_quote`): bound by it.
   sourceOf: (subject, graph) => alreadyTrueQuoteOf((isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [])

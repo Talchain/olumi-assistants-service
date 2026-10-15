@@ -29,7 +29,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStatementOf, verifyStatements, type UserStatement } from '../user-statements.js';
+import { userStatementOf, verifyStatements } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -73,7 +73,7 @@ import { useAppendV6 } from '../../append-v6-flag.js';
 import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
 import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
-import { isFactorNamedByUser, readStatedEventRisk, readStatedEventRiskWithBindingSpan, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { chatRiskPreconditionFor } from '../../routing/chat-risk-precondition.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, SAY_SHOWN_NOTE, type GoalChanceWithheld } from '../goal-chance-withheld.js';
@@ -6103,7 +6103,8 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'not_recordable', detail: write !== undefined && 'refused' in write ? write.refused : 'Nothing was prepared.' };
       }
       const card: DoorCard = { subject: resolved.subject, label: resolved.label, field: row.field, carrier: row.carrier,
-        statements: v.reading.statements, member: write.member, payload: write.payload, ...(write.expected !== undefined ? { expected: write.expected } : {}) };
+        statements: v.reading.statements, member: write.member, payload: write.payload, ...(write.expected !== undefined ? { expected: write.expected } : {}),
+        ...(row.derives === true ? { derives: true } : {}) };
       const operations: ProposalOperation[] = [doorOperation(card)];
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
         operations, provenance: { authored_by: 'model_proposed', basis: v.reading.statements[0]!.source },

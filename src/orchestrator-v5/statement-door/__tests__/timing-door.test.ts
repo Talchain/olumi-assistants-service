@@ -73,10 +73,10 @@ describe('M3b r4: a volunteered "All of these effects…" is never refused; only
     const v = read(R10, [volunteered(), answered(R10)], texts);
     expect(v.kind).toBe('read');
     if (v.kind !== 'read') return;
-    // AIE 6180193788's timing card, in its own order: the reading, when it is evaluated, its question, then what it does not say.
-    expect(doorCardWords(v.reading)).toBe(`From your words: “${SAID}” and “${YES}” Olumi reads this as your forecast that ${EFFECTS_R10} would be fully `
-      + 'in place by month 3 from today. This target is evaluated at month three from today (14 January 2027). Record this timing reading? It describes '
-      + 'the effects at that point; it does not say they operate throughout the preceding window or that their arrival has been simulated.');
+    // AIE 6181498097's ONE template: the reading, every assumption on the shown card, then the question.
+    expect(doorCardWords(v.reading)).toBe(`From your message: “${SAID}” and “${YES}” Olumi proposes this reading: your forecast that ${EFFECTS_R10} would be fully `
+      + 'in place by month 3 from today. This target is evaluated at month three from today (14 January 2027). It describes the effects at that point; it '
+      + 'does not say they operate throughout the preceding window or that their arrival has been simulated. Record this reading?');
     const before = goalOf(R10).goal_target_basis as Rec;
     expect(before.effects_at_period_end).toBe(false);
     const { w, after } = write(R10, [volunteered(), answered(R10)], texts);

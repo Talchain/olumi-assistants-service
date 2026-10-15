@@ -57,12 +57,12 @@ describe('M3a: the measure statement is read on the door, against the HELD targe
     expect(v.reading.words).toBe(MEASURE);
     expect(v.reading.statements).toHaveLength(1);
     expect(v.reading.statements[0]).toMatchObject({ speaker: 'user', quote: SAID, form: 'describes' });
-    // The AIE's measurement card (6180193788 §1) in the ONE template: the reading with each line once, then its own question.
-    expect(doorCardWords(v.reading)).toBe(`From your words: “${TURN}” Olumi reads this as ‘Productivity’ measured in story points completed per `
+    // The AIE's measurement card (6180193788 §1) in the ONE template (6181498097): the reading, each line once, then the question.
+    expect(doorCardWords(v.reading)).toBe(`From your message: “${TURN}” Olumi proposes this reading: ‘Productivity’ measured in story points completed per `
       + 'sprint. Your target remains up at least 10% from today, relative to today’s level, at three months. Under this target reading, 100% means '
       + 'today\'s story points completed per sprint; each option’s change is expressed in % of today\'s story points completed per sprint. '
       + 'Other stated requirements: maintaining code quality. Still open: Is the 10% productivity increase required by the launch date, and how '
-      + 'should productivity be measured? Use this measurement reading?');
+      + 'should productivity be measured? Record this reading?');
   });
 
   it('refusals keep the words: not the user’s words for the measure, unverified origin, a level target, another kind of subject', () => {

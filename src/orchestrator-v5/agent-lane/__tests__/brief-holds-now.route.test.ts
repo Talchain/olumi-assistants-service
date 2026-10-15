@@ -26,7 +26,6 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { doorIssueArgs } from '../../statement-door/door.js';
-import { unsizedOlumiRiskIds, unsizedOlumiRiskLine } from '../unsized-risk.js';
 import { readStatement } from '../../statement-door/read.js';
 import { approvedOf, RISK_HOLDS_NOW_ROW } from '../../statement-door/fields/risk.js';
 import { applyRiskOccurrenceEdit } from '../risk-occurrence.js';
@@ -81,25 +80,26 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
     expect(admittedRisk(null)).not.toHaveProperty('already_true_quote');
   });
 
-  it('S12 (DL 00:41Z): his unconfirmed reading never blocks the first Run: left out with its disclosure, while its card is offered', () => {
-    const DISCLOSED = `‘${LABEL}’ from your brief is not in this calculation until you confirm how it applies.`;
+  it('readiness quotes his sentence as a current condition, never the occurrence question; the card is named only where it is offered', () => {
+    // AIE 6178729504, exact, where the card is offered: a window from today.
+    expect(asks(fromToday(withQuote(SERVED)).graph)).toEqual([`${READING} Confirm or change that reading on the card; how strongly it affects `
+      + '‘New customers’ is a separate assumption.']);
+    // Served: his goal's 3 months count from the LAUNCH. True now does not show it holds then; no card is named, the real next step is.
+    expect(asks(withQuote(SERVED).graph)).toEqual([`${READING} Whether it still holds during your goal’s period, which counts from the launch, `
+      + 'is a separate question. Ask Olumi to suggest a starting estimate for you to review.']);
     const noPeriod = withQuote(SERVED); delete goalOf(noPeriod.graph).goal_target_basis;
-    for (const b of [fromToday(withQuote(SERVED)), withQuote(SERVED), noPeriod]) {
-      expect(asks(b.graph), 'no readiness ask holds the Run on it').toEqual([]);
-      expect(unsizedOlumiRiskIds(b.graph).has(RISK)).toBe(true);
-      expect(unsizedOlumiRiskLine(b.graph, RISK, false)).toBe(DISCLOSED);
-    }
-    // CONTRAST: the same brief risk with no reading of the brief is not left out: it still asks (a human risk keeps its path).
-    expect(unsizedOlumiRiskIds(SERVED.graph).has(RISK)).toBe(false);
+    expect(asks(noPeriod.graph)).toEqual([`${READING} To use it in the analysis, your goal needs one clear time period first.`]);
+    for (const b of [fromToday(withQuote(SERVED)), withQuote(SERVED), noPeriod]) expect(asks(b.graph).join(' ')).not.toMatch(/How likely|can’t run the numbers/);
     expect(asks(SERVED.graph).join(' ')).toContain(OCCURRENCE);
   });
 
-  it('S12 on marketing 0dac5dcc (its ONE blocker was this risk): the first Run may run before the press; pressed, it is in the Run', () => {
+  it('marketing 0dac5dcc (its ONE blocker is this risk): the holds-now card comes first, and its press lets the Run go (DL AMEND, AIE 6181498097)', () => {
     const at = (JSON.parse(readFileSync(new URL('./fixtures/marketing-e2e-0dac5dcc-read02-after-approve.json', import.meta.url), 'utf8')) as Rec).body as Rec;
-    expect((buildCanonicalAnalysisReadyFromGraph(at.graph) as Rec).may_run, 'as served: held by this risk alone').toBe(false);
     const g = fromToday(withQuote(at)).graph;
-    expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(true);
-    expect(unsizedOlumiRiskIds(g).has(RISK)).toBe(true);
+    // Never silently left out: his reading holds the Run until he confirms it, and its card is the route's first offer.
+    expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(false);
+    expect(doorIssueArgs(g, null, {}, { toolCalls: [], mutated: false, proposalOffered: false, heldWaiting: false }))
+      .toEqual({ subject: { kind: 'risk', id: RISK, field: 'holds_now' }, quotes: [SENTENCE] });
     const subject = { kind: 'risk' as const, id: RISK, field: 'holds_now' as const };
     const v = readStatement(g, subject, LABEL, [SENTENCE], { now: String(at.brief_text) });
     expect(v.kind, JSON.stringify(v)).toBe('read');
@@ -108,20 +108,8 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
     if ('refused' in w) throw new Error(w.refused);
     const written = applyRiskOccurrenceEdit(g, approvedOf(w.payload)!);
     if (written.kind !== 'mutated') throw new Error(JSON.stringify(written));
-    expect(unsizedOlumiRiskIds(written.mutatedGraph).has(RISK)).toBe(false);
     expect(riskOf(written.mutatedGraph).event_risk.occurrence).toMatchObject({ p_low: 1, p_high: 1, basis: 'user' });
     expect((buildCanonicalAnalysisReadyFromGraph(written.mutatedGraph) as Rec).may_run).toBe(true);
-  });
-
-  it('TWO-BRIEF: on hiring, a brief risk with its own holds-now sentence is left out the same way; without it, it still asks', () => {
-    const HIRING = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-hiring-post3007-read01-20261014.json', 'utf8')) as Rec).body.graph as Rec;
-    const human = structuredClone(HIRING);
-    const risk = (human.nodes as Rec[]).find((n) => n.id === 'code_quality_deterioration')!;
-    risk.provenance = 'from_brief';
-    expect(unsizedOlumiRiskIds(human).has(risk.id)).toBe(false);
-    risk.already_true_quote = 'Honestly, our code quality is already slipping.';
-    expect(unsizedOlumiRiskIds(human).has(risk.id)).toBe(true);
-    expect(unsizedOlumiRiskLine(human, risk.id, false)).toBe('‘Code quality deterioration’ from your brief is not in this calculation until you confirm how it applies.');
   });
 
   it('the route issues the holds-now card only over a window from today (its own gate, before the capability’s)', () => {
@@ -196,12 +184,14 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     const said = await turn({ message: SERVED.brief_text, source: 'composer' });
     const cards = approvals(said);
     expect(cards, JSON.stringify(said.suggested_actions)).toHaveLength(1);
-    // The ONE door's card (AIE 6179240850's shape, 6178729504's reading), quoting the message that holds his sentence.
-    expect(cards[0]).toMatchObject({ label: 'Record what you said', message: 'Yes, record what I said.' });
+    // The ONE door's card (AIE 6181498097's template, 6178729504's reading), quoting the message that holds his sentence. Its write
+    // adds Olumi's derivation (true now → at least once within a window from today), so its button is "Use this reading".
+    expect(cards[0]).toMatchObject({ label: 'Use this reading', message: 'Yes, use this reading.' });
     const card = String(cards[0]!.detail);
-    expect(card.startsWith('From your words: “')).toBe(true);
+    expect(card.startsWith('From your message: “')).toBe(true);
     expect(card).toContain(SENTENCE);
-    expect(card).toContain(`Olumi reads this as ‘${LABEL}’ already being true now. Record this reading? How strongly it affects ‘New customers’ is a separate assumption:`);
+    expect(card).toContain(`Olumi proposes this reading: ‘${LABEL}’ already being true now. How strongly it affects ‘New customers’ is a separate assumption:`);
+    expect(card.endsWith('Record this reading?')).toBe(true);
     expect(graphWrites(w), 'nothing before the press').toBe(0);
     const pressed = await turn({ message: cards[0]!.message, source: 'chip_click', chip: { id: cards[0]!.id } });
     expect((pressed._agent?.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change'), JSON.stringify(pressed._agent?.tool_calls))
@@ -209,8 +199,6 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     expect(graphWrites(w)).toBe(1);
     expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
     expect(asks(w.graph())).toEqual([]);
-    // S12: before the press it was left out (never blocking); pressed, it is IN the calculation as his.
-    expect(unsizedOlumiRiskIds(w.graph()).has(RISK)).toBe(false);
   }, ROUTE_MS);
 
   it('AIE 6178729504: over a window counted from the LAUNCH (served), no card and no p = 1 write; his reading is still quoted', async () => {
@@ -219,9 +207,7 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     expect(approvals(await turn({ message: SERVED.brief_text, source: 'composer' }))).toEqual([]);
     expect(graphWrites(w)).toBe(0);
     expect(riskOf(w.graph())).not.toHaveProperty('event_risk');
-    // S12: his reading is still not blocking: left out with its disclosure (it cannot be written over a launch window).
-    expect(asks(w.graph())).toEqual([]);
-    expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toBe(`‘${LABEL}’ from your brief is not in this calculation until you confirm how it applies.`);
+    expect(asks(w.graph()).join(' ')).toContain(`${READING} Whether it still holds during your goal’s period, which counts from the launch`);
   }, ROUTE_MS);
 
   it('CONTRAST: the same risk with no reading from the brief gets no card, and keeps the occurrence ask', async () => {

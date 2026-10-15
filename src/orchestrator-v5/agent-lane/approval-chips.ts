@@ -1,4 +1,4 @@
-import { DOOR_APPROVE } from '../statement-door/card.js';
+import { DOOR_APPROVE, DOOR_DERIVED_APPROVE } from '../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../statement-door/write.js';
 import type { NewLimitValue } from './stated-limit.js';
 /**
@@ -50,8 +50,13 @@ export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', me
 
 /** AIE packet 6e52e896 `event_risk.Q3`: the button on the card of Olumi's range for a risk root (`risk-occurrence.ts`). */
 const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message: 'Yes, use that.' } as const;
-/** SYSTEM 1: a card through the ONE statement door records the USER'S OWN statement, so its ONE button says record (`DOOR_APPROVE`). */
+/**
+ * SYSTEM 1: a card through the ONE statement door. AIE 6181498097: "Record what you said" only for a FAITHFUL write of the user's
+ * statement; where its postimage adds an Olumi derivation (`DoorCard.derives`), "Use this reading".
+ */
 const recordsUsersStatement = (op: { readonly op: string }): boolean => op.op === RECORD_STATEMENT_OP;
+const doorButtonOf = (op: { readonly value?: unknown }): { readonly label: string; readonly message: string } =>
+  (op.value !== null && typeof op.value === 'object' && (op.value as { derives?: unknown }).derives === true ? DOOR_DERIVED_APPROVE : DOOR_APPROVE);
 /** The user's own cohort forecast (science PR-4b): recorded from their words, so the button says record, never "use Olumi's". */
 const COHORT_FORECAST_APPROVE = { label: 'Record this forecast', message: 'Yes, record that forecast.' } as const;
 
@@ -240,10 +245,10 @@ export function approvalChipsFor(
       || held.public_label !== stored!.public_label) return [];
     const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
     const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
-    const usersStatement = stored!.operations.some(recordsUsersStatement);
+    const usersStatement = stored!.operations.find(recordsUsersStatement);
     const cohortForecast = stored!.operations.some((op) => op.op === 'set_cohort_forecast');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
-      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : usersStatement ? DOOR_APPROVE.message
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : usersStatement !== undefined ? doorButtonOf(usersStatement).message
         : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message
         : cohortForecast ? COHORT_FORECAST_APPROVE.message : approve.message,
       detail: stored!.public_label }, AMEND_CHIP];
@@ -670,7 +675,7 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
   if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
   // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
-  if (ops.length === 1 && recordsUsersStatement(ops[0]!)) return DOOR_APPROVE.label;
+  if (ops.length === 1 && recordsUsersStatement(ops[0]!)) return doorButtonOf(ops[0]!).label;
   if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;
   if (ops.length === 1 && ops[0]!.op === 'set_cohort_forecast') return COHORT_FORECAST_APPROVE.label;
   /**

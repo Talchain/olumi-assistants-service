@@ -118,11 +118,10 @@ export const MEASURE_ROW: RoleRow = {
     }
     return { form: 'describes', words: w };
   },
-  // AIE 6180193788 §1: the measurement card's lines are the reading itself (the held target it restates), then its own question.
-  readingWords: (_s, subject, label, graph, words) => [`‘${heldGoal(graph, subject.id)?.projection.label ?? label}’ measured in ${words ?? ''}.`,
-    ...measureAssumptions(subject, graph, words)].join(' '),
-  assumptions: () => [],
-  question: 'Use this measurement reading?',
+  readingWords: (_s, subject, label, graph, words) => `‘${heldGoal(graph, subject.id)?.projection.label ?? label}’ measured in ${words ?? ''}`,
+  assumptions: (_s, subject, graph, words) => measureAssumptions(subject, graph, words),
+  // The combined target reading is Olumi's interpretation carrier (AIE 6180193788), so its button is "Use this reading".
+  derives: true,
   recordedWords: measureRecordedWords,
 };
 

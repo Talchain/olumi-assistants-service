@@ -26,12 +26,12 @@ import { sayDate } from '../../goal-target/deadline-date.js';
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { effectsBasisWords, goalTargetBasisOf, periodEndWords, type GoalTargetBasis } from '../../goal-target/goal-target-basis.js';
 import {
-  answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, type ApprovedGoalReading, type GoalReadingProjection,
+  answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, type ApprovedGoalReading, type GoalReadingProjection, type GoalReadingMembers,
 } from '../../goal-target/goal-reading-write.js';
 import type { StatementAsk } from '../ask.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { holdsUserStatement, userStatementOnNode, userStatementRecord, type UserStatementRecord } from '../statements.js';
+import { holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf, type UserStatementRecord } from '../statements.js';
 import { subjectKey, type DoorSubject } from '../subject.js';
 import type { FieldWriter } from '../write.js';
 
@@ -251,13 +251,9 @@ export const TIMING_ROW: RoleRow = {
     const h = heldTiming(graph, subject.id);
     const r = h === undefined ? undefined : readingOf(statements, words, graph, subject.id);
     if (h === undefined || r === undefined) return '';
-    // AIE 6180193788 timing card: the reading, then "This target is evaluated at …", then its own question, then the rest.
-    const evaluatedAt = timingAssumptions(statements, subject, graph, words)[0];
-    return `your forecast that ${listed(h.effects.map((e) => effectWords(graph, e)))} would be fully in place by month ${r.month} ${referenceWords(h.basis)}`
-      + (evaluatedAt !== undefined ? `. ${evaluatedAt}` : '');
+    return `your forecast that ${listed(h.effects.map((e) => effectWords(graph, e)))} would be fully in place by month ${r.month} ${referenceWords(h.basis)}`;
   },
-  assumptions: (statements, subject, graph, words) => timingAssumptions(statements, subject, graph, words).slice(1),
-  question: 'Record this timing reading?',
+  assumptions: timingAssumptions,
   recordedWords: timingRecordedWords,
   bindsWhole: (quote, subject, graph, words) => {
     const goals = nodesOf(graph).filter((n) => n.kind === 'goal');
@@ -274,13 +270,17 @@ export const TIMING_ROW: RoleRow = {
   },
 };
 
-/** The read-back: the reading the card showed with the flag it set, and the user's words recorded (JSON payload only). */
-export function timingHolds(payload: ApprovedGoalReading, after: unknown): boolean {
-  const node = nodesOf(after).find((n) => n.id === payload.goal_id);
-  const said = payload.user_statement;
-  return node !== undefined && isRec(payload.expected_basis) && said !== undefined
-    && isDeepStrictEqual(node.goal_target_basis, answeredBasisOf(payload.expected_basis, payload.members))
-    && holdsUserStatement(after, said.record, said.subject);
+/** The read-back: the reading the card showed with the flag it set, and the user's words recorded (the stored JSON payload only). */
+export function timingHolds(payload: unknown, after: unknown): boolean {
+  if (!isRec(payload) || typeof payload.goal_id !== 'string' || !isRec(payload.expected_basis) || !isRec(payload.user_statement)) return false;
+  const record = userStatementRecordOf(payload.user_statement.record);
+  const s = isRec(payload.user_statement.subject) ? payload.user_statement.subject : undefined;
+  if (record === undefined || s === undefined || typeof s.id !== 'string' || s.field !== 'lead') return false;
+  const goalId = payload.goal_id;
+  const node = nodesOf(after).find((n) => n.id === goalId);
+  const members = isRec(payload.members) ? (payload.members as GoalReadingMembers) : undefined;
+  return node !== undefined && isDeepStrictEqual(node.goal_target_basis, answeredBasisOf(payload.expected_basis, members))
+    && holdsUserStatement(after, record, { kind: 'goal', id: s.id, field: 'lead' });
 }
 
 export const TIMING_WRITER: FieldWriter = {
@@ -301,6 +301,5 @@ export const TIMING_WRITER: FieldWriter = {
     return { member: 'goal_reading', payload: JSON.parse(JSON.stringify(payload)) as unknown };
   },
   // SYSTEM 1 M1: the read-back reads the STORED write (a proposal is saved, then pressed), never a closure.
-  holds: (write, after) => isRec(write.payload) && typeof write.payload.goal_id === 'string'
-    && timingHolds(write.payload as Rec as ApprovedGoalReading, after),
+  holds: (write, after) => timingHolds(write.payload, after),
 };

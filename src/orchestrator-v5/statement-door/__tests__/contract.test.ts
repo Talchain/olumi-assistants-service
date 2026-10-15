@@ -104,8 +104,8 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
     const v = readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: SAID }, ctx);
     expect(v.kind).toBe('read');
     if (v.kind !== 'read') return;
-    expect(doorCardWords(v.reading)).toBe(`From your words: “${SAID}” Olumi reads this as your estimate of about 30% that ‘Code quality deterioration’ happens. `
-      + 'Record this reading? How strongly it affects the model is a separate assumption.');
+    expect(doorCardWords(v.reading)).toBe(`From your message: “${SAID}” Olumi proposes this reading: your estimate of about 30% that ‘Code quality deterioration’ happens. `
+      + 'How strongly it affects the model is a separate assumption. Record this reading?');
     expect(v.reading.statements[0]).toMatchObject({ subject: { quantity: 'relation', node_id: RISK.id }, qualifier: 'about', low: 30 });
     expect(DOOR_APPROVE).toEqual({ label: 'Record what you said', message: 'Yes, record what I said.' });
     // Refusals keep the words: not this field, not this subject, not their words.
