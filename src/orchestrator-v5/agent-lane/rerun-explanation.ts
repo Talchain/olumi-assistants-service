@@ -15,12 +15,13 @@
  *     changed."; anything else → "Olumi can't say what changed between these two runs.";
  *   · the `MethodInputs` RC's `checkMethodTurn('RERUN-EXPLANATION')` judges on;
  *   · an instruction handing the model that line, told never to restate whether inputs changed.
- * The sent text is the code line, then the model's sentences that pass RC's checker beside it (a hit drops that sentence
- * only: the line above already carries the fact, so a false positive costs a sentence and a false negative can't
- * contradict the record). No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
+ * Every model sentence passes RC's checker beside the code line. AIE-04 lets the current finding lead;
+ * any recorded sentence the AI omits is repaired after its prose, and a complete citation is not prefixed again. No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
  */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
 import { POLICY } from './guidance/policy.js';
+import { recordedSentenceIn } from './recorded-sentence.js';
+import { sentencesOf } from './reply/compose-reply.js';
 import { CANVAS_BAND_WORD, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 import { log } from '../../utils/telemetry.js';
@@ -415,6 +416,7 @@ export function rerunExplanationPlan(
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
     'Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.',
+    "Lead with the current supported finding, then explain the recorded change and its supplied before-and-after result once. Preserve each endpoint's identity, quantity, uncertainty and attribution limits; do not repeat a change already presented in this response.",
     `Run record: "${codeLine}"`,
     ...(goalChanceChanges.length === 0 ? [] : [`${GOAL_CHANCE_CHANGES_LEAD} ${goalChanceChanges.map((c) => `‘${c.option_label}’: ${c.prior} → ${c.current}.`).join(' ')}`]),
     priorWithheld && goalChanceChanges.length === 0
@@ -465,7 +467,7 @@ export interface RerunRecordForModel {
 export const TYPED_RERUN_RECORD_RULE =
   'Olumi\u2019s own record of what changed between the Run before the latest one and the latest Run. '
   + 'When the user asks what changed since the last run, or why the result is different, answer from it: '
-  + 'first say code_line exactly, as Olumi\u2019s record, then say what the latest Run shows. '
+  + "Lead with the current supported finding, then explain the recorded change and its supplied before-and-after result once. Preserve each endpoint's identity, quantity, uncertainty and attribution limits; do not repeat a change already presented in this response. "
   + '\u201cSince the last run\u201d means the latest Run against the one before it; say any edit made after the latest Run separately. '
   + 'Never say nothing changed when code_line names a change. '
   + 'If prior_withheld is true, never say anything rose, fell or moved, except a chance listed in goal_chance_changes, as recorded there. '
@@ -552,25 +554,29 @@ export function rerunRecordForModel(
 }
 
 const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
-const normal = (t: string) => t.replace(/[‘’]/gu, "'").replace(/\s+/gu, ' ').trim().toLowerCase();
 
 /**
- * The text as sent: Olumi's code line, then each model sentence that passes RC's ONE checker beside it (checked as
- * `code line + sentence`, so a hit is that sentence's own). A failing sentence is dropped, never the record; a sentence
- * that only repeats the code line is dropped too. Nothing left → the code line alone.
+ * Check every model sentence beside the unchanged record, then repair only record sentences the answer omitted.
+ * The current finding may lead; a complete quoted record is not prefixed a second time. Nothing left → the record alone.
  */
 export function composeRerunExplanation(reply: string, plan: RerunExplanationPlan): {
   readonly text: string; readonly dropped: readonly string[]; readonly failed: readonly string[];
 } {
   const dropped: string[] = [];
   const failed = new Set<string>();
-  const own = normal(plan.codeLine);
+  const recordSentences = sentencesOf(plan.codeLine);
+  const saidRecord = new Set<number>();
   let sentenceIndex = 0;
   const kept = reply.split(/\r?\n/u).map((line) => line.split(SENTENCE_BREAK).filter((sentence) => {
     const index = sentenceIndex++;
-    if (sentence.trim() === '' || own.includes(normal(sentence))) return false;
+    if (sentence.trim() === '') return false;
+    const recordIndex = recordSentences.findIndex(record => recordedSentenceIn(sentence, record));
+    if (recordIndex >= 0 && saidRecord.has(recordIndex)) return false;
     const verdict = checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${sentence}`, plan.inputs, true, sentence);
-    if (verdict.failed.length === 0) return true;
+    if (verdict.failed.length === 0) {
+      if (recordIndex >= 0) saidRecord.add(recordIndex);
+      return true;
+    }
     dropped.push(sentence);
     // Narrator/user text is protected decision content: log only the policy failure and its zero-based draft index.
     log.info({ event: 'agent_lane.rerun_sentence_dropped', policy_id: 'RERUN-EXPLANATION', sentence_index: index,
@@ -578,7 +584,10 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
     for (const id of verdict.failed) failed.add(id);
     return false;
   }).join(' ')).filter((line) => line.trim() !== '').join('\n').trim();
-  return { text: kept === '' ? plan.codeLine : `${plan.codeLine}\n\n${kept}`, dropped, failed: [...failed] };
+  // The AI may integrate the exact record beside its current finding. Repair only missing record sentences;
+  // formatting does not make a second obligation, while a changed number, unit, source or negative is still missing.
+  const missing = recordSentences.filter(sentence => !recordedSentenceIn(kept, sentence));
+  return { text: kept === '' ? plan.codeLine : [kept, missing.join(' ')].filter(Boolean).join('\n\n'), dropped, failed: [...failed] };
 }
 
 /**

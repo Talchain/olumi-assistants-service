@@ -749,3 +749,31 @@ describe('the typed provisional view is the model\'s words too (Codex pre-review
     expect(rerunViewFailures(view, p)).toEqual([]);
   });
 });
+
+
+describe('AIE-04: one integrated checked comparison', () => {
+  const p = plan({ ...UNWITHHELD, input_changes: [AI] })!;
+  const current = 'The model now shows a provisional comparison of the four options.';
+  it('keeps the current finding first and the quoted record once, without a host prefix', () => {
+    const answer = `${current}\n**What changed:** Olumi’s record says: “${SAID_AI}”\n${RERUN_FALLBACK_LINES.unwithheld}`;
+    const composed = composeRerunExplanation(answer, p);
+    expect(composed).toEqual({ text: answer, dropped: [], failed: [] });
+    expect(composed.text.split(SAID_AI)).toHaveLength(2);
+  });
+  it('a second complete record citation is said once, even beneath a different heading', () => {
+    const once = `${current}\n**What changed:** Olumi’s record says: “${SAID_AI}”\n${RERUN_FALLBACK_LINES.unwithheld}`;
+    const r = composeRerunExplanation(`${once}\n**What changed:** Olumi’s record says: “${SAID_AI}”`, p);
+    expect(r.text).toBe(once);
+    expect(r.text.split(SAID_AI)).toHaveLength(2);
+  });
+  it('repairs only the missing record sentence, keeping the recorded change once', () => {
+    const answer = `${current}\n${SAID_AI}`;
+    expect(composeRerunExplanation(answer, p).text).toBe(`${answer}\n\n${RERUN_FALLBACK_LINES.unwithheld}`);
+  });
+  it('still drops a fabricated movement and repairs the record beside the honest finding', () => {
+    const r = composeRerunExplanation(`${current} Its chance rose to 57%.`, p);
+    expect(r.failed).toContain('RX-NO-MOVEMENT-WITHOUT-PRIOR');
+    expect(r.text).not.toContain('57%');
+    expect(r.text).toBe(`${current}\n\n${p.codeLine}`);
+  });
+});

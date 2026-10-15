@@ -114,6 +114,19 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     return post({ turn_id: turnId, agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id } });
   };
 
+  it('AIE-04: current finding leads; a complete quoted change record is not prefixed again on wire/history/replay', async () => {
+    modelText = `${WHY}\n**What changed:** Olumi’s record says: “${SAID}”\n${RERUN_NO_CHANGE_LINES.unwithheld}`;
+    const first = (await runTurn(randomUUID())).json() as Body;
+    const id = randomUUID();
+    const explained = (await explainTurn(id, first)).json() as Body;
+    expect(explained.assistant_text.indexOf(WHY)).toBeLessThan(explained.assistant_text.indexOf(SAID));
+    expect(explained.assistant_text.split(SAID)).toHaveLength(2);
+    expect(explained.assistant_text).toContain(RERUN_NO_CHANGE_LINES.unwithheld);
+    expect(JSON.stringify(rows)).toContain(SAID);
+    expect((await explainTurn(id, first)).json().assistant_text).toBe(explained.assistant_text);
+    expect(modelCalls).toBe(2);
+  });
+
   it('Q4: Paul\'s two entering links are named by the real turn builder, stored and replayed', async () => {
     runDelta = { ...RUN_DELTA, input_coverage: 'partial', input_changes: [
       { entity_kind: 'link', entity_id: 'risk->mrr', field: 'presence', link: { from: 'risk', to: 'mrr' },

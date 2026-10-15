@@ -1,3 +1,4 @@
+import { withoutUnsizedLinkInvitation } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { postResponses } from '../adapters/llm/openai.js';
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
@@ -3635,7 +3636,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         else if (answer.trim().length > 0) {
           explanationReady = true;
           words = answer;
-          // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
+          // AIE-04: check the model's sentences and repair only missing record facts, without a second prefix.
           const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
           if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
           const said = composed?.text ?? answer;
@@ -5276,7 +5277,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const identityAskStillOwed = aiRunTurn ? identityAskLineOwed(result.tool_results, narrationText) : null;
     const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed
       : owed.filter((line) => !owedHeldByAi.has(line) || line === identityAskStillOwed);
-    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
+    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown, { missingSentencesOnly: aiRunTurn }), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       // #3167 fix-forward: the risks the Run on screen recorded leaving out, never today's predicate.
       omittedRisks: runOmittedRisks(analysisResult),
@@ -5315,7 +5316,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owedShown, ...decisionLines]), statusText),
+        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owedShown, ...decisionLines], { missingSentencesOnly: aiRunTurn }), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
       answerKind: 'substantive',
@@ -5496,7 +5497,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const goalLines = [goalChanceOwed];
       askEachOnce(goalLines, await repliesToCheckAsks(goalLines, historyReader, scenarioId, undefined));
       owed.push(...goalLines);
-      wireBody = { ...wireBody, assistant_text: withDisclosures(wireBody.assistant_text, goalLines) };
+      wireBody = { ...wireBody, assistant_text: withDisclosures(wireBody.assistant_text, goalLines, { missingSentencesOnly: aiRunTurn }) };
     }
     /**
      * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205;
@@ -5760,6 +5761,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
       });
+      if (aiRunTurn) wireBody = { ...wireBody,
+        assistant_text: withoutUnsizedLinkInvitation(String(wireBody.assistant_text ?? ''), analysisResult) };
       reply = String(wireBody.assistant_text ?? '');
       const horizonLine = faceContract === 'run' && chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
         ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;

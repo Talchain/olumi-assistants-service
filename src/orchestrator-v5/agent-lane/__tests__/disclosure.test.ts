@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { withoutUnsizedLinkInvitation, unsizedLinkSentence, UNSIZED_PATH_LEADER_CAUSE_KEY } from '../unsized-path-cause.js';
 import { disclosuresFor, withDisclosures, PLACEHOLDER_STRENGTH_DISCLOSURE } from '../disclosure.js';
 
 describe('Olumi discloses a placeholder, not the Agent', () => {
@@ -34,5 +35,38 @@ describe('Olumi discloses a placeholder, not the Agent', () => {
 
   it('returns the text untouched when nothing is owed', () => {
     expect(withDisclosures('hello', [])).toBe('hello');
+  });
+});
+
+
+describe('AIE-04: missing Run disclosures are repaired without repeated prose', () => {
+  const scope = 'Static model; not a forecast to a date.';
+  const risk = 'The chance leaves out hiring delay.';
+  it('repairs a composite disclosure one missing sentence at a time', () => {
+    const answer = `A current finding. **${scope}** A useful next step.`;
+    expect(withDisclosures(answer, [`${scope} ${risk}`], { missingSentencesOnly: true }))
+      .toBe(`${answer}\n\n${risk}`);
+  });
+  it.each([
+    `It is not true that ${scope}`, `If ${scope}`, 'Static model; a forecast to a date.',
+  ])('a negation, condition or changed negative cannot discharge the scope obligation: %s', answer => {
+    expect(withDisclosures(answer, [scope], { missingSentencesOnly: true })).toBe(`${answer}\n\n${scope}`);
+  });
+});
+
+
+describe('AIE-04: the recorded cause separates qualification from its stock task', () => {
+  const cause = { from: 'f', to: 'g', from_label: 'Ramp-up shortfall', to_label: 'Weekly support capacity' };
+  const full = unsizedLinkSentence([cause]);
+  const run = { enrichment: { [UNSIZED_PATH_LEADER_CAUSE_KEY]: cause } };
+  it('retains the exact cause and its negative, removing only the stock invitation', () => {
+    const step = 'Compare this assumption with the latest customer evidence.';
+    expect(withoutUnsizedLinkInvitation(`${full} ${step}`, run))
+      .toBe(`${full.replace(' Set it to see how much it matters.', '')} ${step}`);
+  });
+  it('missing recorded cause cannot authorise removing a task or condition', () => {
+    expect(withoutUnsizedLinkInvitation(full, {})).toBe(full);
+    const conditional = `Unless you set it, the link remains unsized. ${full}`;
+    expect(withoutUnsizedLinkInvitation(conditional, {})).toBe(conditional);
   });
 });
