@@ -205,6 +205,6 @@ it('at month 9 asks the proposed numeric count while a calendar-word deadline st
 
 it('AIE 6184383302: the same unmatched spans with NO target statement are asked in the brief\'s words; the drafter\'s count is never asked in their place', async () => {
   const numeric = await registeredGoal(withDeadline('at month 9'), 18,
-    'Your brief mentions "month 9". It does not say whether "MRR" should be achieved within that period, so the model holds no deadline for it.');
+    'Is "month 9" the period by which "MRR" should be achieved? Your brief does not say, so the model holds no deadline for it.');
   expect(Object.hasOwn(numeric, 'goal_deadline_as_stated')).toBe(false);
 });

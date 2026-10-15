@@ -40,7 +40,7 @@ const draft = (e: Episode, i = 0): Rec => JSON.parse(e.calls[i]!.text) as Rec;
 const SCENARIO = '74747474-7474-4747-8747-747474747474';
 const LEARNING = 'We have two months to learn, and are not choosing a final strategy today.';
 const D3_GOAL = 'We want monthly recurring revenue to rise by at least 15% within three months.';
-const UNBOUND = 'Your brief mentions "two months". It does not say whether "customer trust" should be achieved within that period, so the model holds no deadline for it.';
+const UNBOUND = 'Is "two months" the period by which "customer trust" should be achieved? Your brief does not say, so the model holds no deadline for it.';
 
 /** One build: the raw answers in the order the run received them, optionally rewritten; a request past them fails the row. */
 async function build(e: Episode, edit: (d: Rec) => Rec = (d) => d): Promise<{ goal: Rec; questions: string[] }> {
@@ -166,6 +166,6 @@ describe('brief 2 (D3): the goal\'s own achievement period is kept, wherever els
       goal: { ...(d.goal as Rec), horizon_months: null },
       statements: (d.statements as Rec[]).filter((st) => st.field !== 'target') }));
     expect(Object.hasOwn(goal, 'goal_deadline_as_stated'), JSON.stringify(goal.goal_deadline_as_stated)).toBe(false);
-    expect(questions).toContain('Your brief mentions "three months". It does not say whether "monthly recurring revenue" should be achieved within that period, so the model holds no deadline for it.');
+    expect(questions).toContain('Is "three months" the period by which "monthly recurring revenue" should be achieved? Your brief does not say, so the model holds no deadline for it.');
   });
 });

@@ -60,7 +60,7 @@ function withGoalTarget(c: CandidateModel, quote: string): CandidateModel {
   return { ...c, statements: [{ quote, subject: { kind: 'goal', label: 'ship the new platform', to_label: null, factor_label: null },
     field: 'target', form: 'describes', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }] } as unknown as CandidateModel;
 }
-const UNBOUND_BY_Q3 = 'Your brief mentions "by Q3". It does not say whether "ship the new platform" should be achieved within that period, so the model holds no deadline for it.';
+const UNBOUND_BY_Q3 = 'Is "by Q3" the period by which "ship the new platform" should be achieved? Your brief does not say, so the model holds no deadline for it.';
 
 /** The fixture must be one the real drafter schema would accept (the pattern `construction-goal-losses-are-said` uses). */
 function assertRealSchemaWouldAccept(payload: Rec): void {

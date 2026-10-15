@@ -187,7 +187,7 @@ describe('a deadline the model cannot hold is asked where the user always sees i
     const r = await build(NO_DEADLINE);
     expect((r.open_questions ?? []).filter((q) => /within \d+ months/.test(q))).toHaveLength(0);
     expect((r.open_questions ?? []).filter((q) => /no deadline/.test(q))).toEqual([
-      'Your brief mentions "eighteen months". It does not say whether "New ARR" should be achieved within that period, so the model holds no deadline for it.']);
+      'Is "eighteen months" the period by which "New ARR" should be achieved? Your brief does not say, so the model holds no deadline for it.']);
   });
 
   it('CONTROL (statement era): the goal\'s own target statement holds the period, so nothing is asked about it', async () => {

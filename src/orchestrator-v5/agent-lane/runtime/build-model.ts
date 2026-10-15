@@ -2615,7 +2615,7 @@ export async function buildModelFromBrief(
       // ⭐ AIE 6184383302: a period the brief writes outside the goal's target (a learning or measurement window, a start) keeps
       // its words and the exact missing reading; it is never written as the goal's deadline, and a month count the drafter guessed
       // for it is never asked in its place (the brief's words come first).
-      openQuestions.unshift(`Your brief mentions "${statedGoal.horizon.unbound}". It does not say whether "${goalMetric}" should be achieved within that period, so the model holds no deadline for it.`);
+      openQuestions.unshift(`Is "${statedGoal.horizon.unbound}" the period by which "${goalMetric}" should be achieved? Your brief does not say, so the model holds no deadline for it.`);
     } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
       openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
     } else if (statedGoal.horizon.status === 'absent' && calendarDeadline !== undefined) {
