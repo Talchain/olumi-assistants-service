@@ -1,3 +1,4 @@
+import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
@@ -3921,7 +3922,24 @@ export function createAgentCapabilities(
     // ⛔ The target gate guards a real loss: a goal the user STATED with a target, or (a correction) targets the saved model
     // holds, that the revision drops. ⭐ DEMO (served 34a4a4cb, Paul's founder brief): a goal with NO numeric target ("Larger fund
     // secured") is no loss to a correction: the revision keeps it qualitative, and no target is ever invented for it.
-    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0;
+    // ⛔ AIE #94 6194613256 / DL: a target can be held two ways, as a target ROW or as the goal's own stated figure
+    // (`goal_threshold_raw`, e.g. "at least 1.3 million" whose unit the analysis cannot yet use). Both count; neither is dropped.
+    const goalIn = (raw: unknown): Record<string, unknown> | undefined =>
+      (((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? []).find((n) => n?.kind === 'goal');
+    const savedGoalNode = goalIn(g.raw);
+    const draftGoalNode = goalIn(candidate);
+    const savedStated = savedGoalNode === undefined ? null : statedGoalTargetOf(g.raw as Record<string, unknown>, savedGoalNode);
+    const draftStated = draftGoalNode === undefined ? null : statedGoalTargetOf(candidate, draftGoalNode);
+    const stillStated = savedStated !== null && draftStated !== null && draftStated.value === savedStated.value
+      && (draftStated.unit ?? '') === (savedStated.unit ?? '');
+    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated) {
+      // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
+      return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
+        + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `
+        + 'Tell the user plainly, and ask only whether their correction replaces that target.');
+    }
+    /** A correction with no target ROW: the goal stays qualitative, or keeps its own stated figure exactly. */
+    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0 && (savedStated === null ? draftStated === null : stillStated);
     if (held.length === 0 && event === null && !qualitativeKept) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
@@ -3955,9 +3973,12 @@ export function createAgentCapabilities(
     // trigger. A construction never holds a deadline date (only an approved deadline write does: `goal-horizon-write.ts`,
     // `hiring-times.ts`), so the date is always still to be confirmed, and this card never implies it saves one.
     const goalNow = nodesOf(candidate).find((n) => n?.kind === 'goal');
+    const goalWords = `\u2018${typeof goalNow?.label === 'string' ? goalNow.label : goal.label}\u2019`;
     const card = (qualitativeKept
-      ? `Replace the early draft with a revised one built from your brief and the correction you just gave. Its goal, `
-        + `\u2018${typeof goalNow?.label === 'string' ? goalNow.label : goal.label}\u2019, has no numeric target, as before. `
+      ? `Replace the early draft with a revised one built from your brief and the correction you just gave. Its goal, ${goalWords}, `
+        + (draftStated === null ? 'has no numeric target, as before. '
+          : `keeps the target you stated: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
+            + `${draftStated.value}${draftStated.unit !== undefined ? ` ${draftStated.unit}` : ''}, as before. `)
       : held.length > 0
       ? `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave: `
         + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `

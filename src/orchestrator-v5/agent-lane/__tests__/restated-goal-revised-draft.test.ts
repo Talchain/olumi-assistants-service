@@ -1345,8 +1345,11 @@ describe('a correction to the model as a whole becomes an approved, saved revise
   it('RED: a known fact whose origin cannot be verified is never re-asked: the refusal tells the AI not to ask again', async () => {
     const { UNKNOWN_ORIGIN_DETAIL } = await import('../runtime/statement-origin.js');
     expect(UNKNOWN_ORIGIN_DETAIL).not.toMatch(/ask for its source/i);
-    expect(UNKNOWN_ORIGIN_DETAIL).toContain('Do not ask the user to repeat or confirm it');
-    expect(UNKNOWN_ORIGIN_DETAIL).toContain('nothing was recorded as the user’s own figure');
+    // AIE #94 6194613256's exact text.
+    expect(UNKNOWN_ORIGIN_DETAIL).toBe('The proposed figure could not be verified for this model field, so it was not recorded. Retain the '
+      + 'original words and any known speaker and source; an unverified field binding does not make that known origin unknown. Do not ask '
+      + 'the user to repeat or confirm supplied facts. Explain only genuinely missing or conflicting meaning. If this changes the model as '
+      + 'a whole, offer propose_change op revise_model.');
   });
 });
 
@@ -1388,6 +1391,41 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(goal.goal_threshold ?? null).toBeNull();
     expect(((reopened.graph.goal_constraints ?? []) as Rec[]).filter((r) => r.role === 'goal_target')).toEqual([]);
     expect((reopened.graph.nodes as Rec[]).map((n) => n.label)).not.toContain('Ad production costs erode budget');
+  });
+
+  // ⭐ The verifier's shape (served 34a4a4cb): "a larger fund of at least 1.3 million" is held on the goal as goal_threshold_raw 1.3
+  // with goal_threshold null and no target row. It is the user's stated target: kept, or the correction is refused, never dropped.
+  const withRawTarget = (): Rec => {
+    const base = structuredClone(FX.graph);
+    const goal = (base.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    Object.assign(goal, { goal_threshold_raw: 1.3, goal_threshold_unit: 'million (currency unspecified)', goal_threshold_frame: 'level' });
+    delete goal.goal_threshold; delete goal.goal_threshold_cap;
+    return base;
+  };
+  const keepsRaw = (): Rec => { const c = qualitative(); c.goal = { ...c.goal, operator: '>=', target_stated: true, value: 1.3, unit: 'million (currency unspecified)' }; return c; };
+
+  it('RED (raw target, normalised null): the revision keeps the stated 1.3 million → the card says so → saved → reopen holds it', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), keepsRaw);
+    const offer = await change(caps);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true });
+    expect(String(offer.public_label)).toContain('Its goal, ‘Larger fund secured’, keeps the target you stated: ');
+    expect(String(offer.public_label)).toContain('1.3 million (currency unspecified), as before. ');
+    s.said(turn.turn_id);
+    expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.goal_threshold_raw).toBe(1.3);
+    expect(goal.goal_threshold_unit).toBe('million (currency unspecified)');
+  });
+
+  it('CONTRAST (raw target, normalised null): a revision that drops the stated 1.3 million → refused, never silently; nothing written', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), qualitative);
+    const out = await change(caps);
+    expect(out).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    expect(String(out.detail)).toContain('(1.3 million (currency unspecified))');
+    expect(s.commits).toHaveLength(0);
   });
 
   it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
