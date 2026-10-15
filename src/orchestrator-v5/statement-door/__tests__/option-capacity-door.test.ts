@@ -72,7 +72,7 @@ describe('M5: an option\'s new share of time is a statement on the door (served 
     expect(w.registers).toEqual([]);
     const out = await w.caps.authoriseChange({ ...ctx('Use this reading'), typed_approval_of: r.proposal_id } as never, { proposal_id: String(r.proposal_id) }) as Rec;
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: true, applied: true,
-      follow_up: '‘Reduce legacy-fix time’ is saved: it now acts in the deadline forecast through the time it frees, with your figure and Olumi’s assumptions kept distinct.' });
+      follow_up: 'Saved ‘Reduce legacy-fix time’ with your stated share of time and the shown Olumi assumptions kept distinct.' });
     expect(w.registers).toHaveLength(1);
     const after = w.graph();
     expect(unresolvedEventOptionIds(after)).toEqual([]);
@@ -117,6 +117,28 @@ describe('M5: an option\'s new share of time is a statement on the door (served 
     const extra = w.graph().nodes.find((n: Rec) => n.id === CARRIER).observed_state.extra_share_by_date;
     expect(extra).toMatchObject({ lead_low: 3, lead_high: 3, lead_reading: { start: { low: 3, high: 3, role: 'stated' } } });
     expect(extra.capacity_ratio).toBeCloseTo(85 / 75, 12);
+  });
+
+  // ⛔ AIE 6182987896: the statement binds the option AND the share; a range, a bound or a condition stays honestly unsupported in
+  // this point-only row (never its low end), the words kept and nothing prepared.
+  it.each([
+    ['a range', 'it would cut legacy work to 10–15%', /range or a bound/],
+    ['a bound', 'it would cut legacy work to under 15%', /range or a bound/],
+    ['a share it does not name', 'it would cut the backlog from 25% to 15%', /does not name ‘Legacy-code fixing time’/],
+    ['a conditional statement', 'if we pair on it, legacy work would drop from 25% to 15%', /negated or conditional/],
+  ] as const)('REFUSES %s: nothing is prepared and no figure is taken from it', async (_n, quote, why) => {
+    const w = world();
+    const r = await offer(w, SUBJECT, quote, quote);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'not_this_field' });
+    expect(String(r.detail)).toMatch(why);
+    expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+  });
+
+  it('an "about" figure keeps its qualifier visible on the reading', async () => {
+    const quote = 'it would cut legacy work to about 15%';
+    const r = await offer(world(), SUBJECT, quote, quote);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    expect(String(r.public_label)).toContain('sets ‘Legacy-code fixing time’ to about 15% of developer time (25% of developer time today)');
   });
 });
 

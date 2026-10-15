@@ -7,10 +7,18 @@
  *
  * The row reads the figure with the share's own reader (`shareFiguresFor`, never a new matcher) and writes through the
  * `option_capacity` member: the existing registered revision (`withOptionCapacityChange`), read back by `optionCapacityChangeHeld`.
- * The words are the card's (`optionCapacityChangeCard`), said once in the ONE door template. Pure.
+ * ⛔ AIE 6182987896 (exact AMENDs): the statement binds the option (by the actual question it answers) AND the share (it names
+ * it), in the share's own population and unit, against today's held figure; a range, a bound, a negated or a conditional
+ * statement stays honestly unsupported in this point-only row (never its low end), its words kept. The assumption, missing
+ * timing and receipt are the AIE's words, with the real operands only. Pure.
  */
 import type { UserStatement } from '../../agent-lane/user-statements.js';
+import { factorTheUserNamed } from '../../agent-lane/stated-by-user.js';
+import { coordinateClausesOf } from '../../agent-lane/link-effect-option-statement.js';
 import { effectLeadFromStatements, effectLeadWords } from '../../goal-target/effect-lead.js';
+import { sayDate } from '../../goal-target/deadline-date.js';
+import { OPTION_TIMING_UNRESOLVED } from '../../goal-target/share-by-date-run.js';
+import { CONDITIONAL, NEGATED } from './risk.js';
 import {
   freedTimeRatio, optionCapacityChangeHeld, optionCapacityTarget, otherSharesOf, planOptionCapacityChange, shareFiguresFor,
   withOptionCapacityChange, type ApprovedOptionCapacityChange,
@@ -29,6 +37,12 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
  */
 export const OPTION_CAPACITY_SIGNED_BY = '6180618773';
 const TIMED = /\b(?:days?|weeks?|months?|years?)\b/i;
+const NUM = String.raw`\d{1,3}(?:\.\d+)?\s*(?:%|per ?cent\b)?`;
+/** A range ("between 10 and 15%", "10–15%") or a bound ("under 15%", "at most 15%") on the new share: not a point. */
+const RANGE = new RegExp(String.raw`\bbetween\s+${NUM}\s+and\s+\d|(?<!from\s)\b\d{1,3}(?:\.\d+)?\s*%?\s*(?:-|–|—)\s*\d{1,3}(?:\.\d+)?\s*(?:%|per ?cent\b)`, 'i');
+// "up to" is a bound ("up to 15%"), not where a share goes ("would go up to 30%").
+const BOUND = new RegExp(String.raw`\b(?:under|below|less than|at most|no more than|(?<!\b(?:go|goes|going|went|gone|come|comes|move|moves|rise|rises)\s)up to|at least|over|above|more than|no less than)\s+${NUM}`, 'i');
+const APPROX = /\b(?:about|around|roughly|approximately)\s+\d/i;
 
 const targetOf = (subject: DoorSubject, graph: unknown) => (subject.kind === 'factor' && subject.option_id !== undefined && subject.to_id === undefined
   ? optionCapacityTarget(graph, subject.option_id, subject.id) : undefined);
@@ -55,23 +69,31 @@ export function optionCapacityPlanOf(subject: DoorSubject, graph: unknown, state
 
 const unitOf = (a: ApprovedOptionCapacityChange): string => (a.unit.startsWith('%') ? a.unit : ` ${a.unit}`);
 
-/** Olumi's reading, as the card says it: the option sets the share to the user's figure (and today's, for comparison). */
+/** Olumi's reading, as the card says it: the option sets the share to the user's figure (and today's, for comparison), with the qualifier said. */
 export function optionCapacityReadingWords(a: ApprovedOptionCapacityChange): string {
-  return `‘${a.option_label}’ sets ‘${a.factor_label}’ to ${a.to}${unitOf(a)} (${a.today}${unitOf(a)} today)`;
+  const about = a.statements.some((st) => st.qualifier === 'about') ? 'about ' : '';
+  return `‘${a.option_label}’ sets ‘${a.factor_label}’ to ${about}${a.to}${unitOf(a)} (${a.today}${unitOf(a)} today)`;
 }
 
-/** Each separate Olumi assumption the reading rests on, said once: the freed-time relation, the timing, and the part the model gains. */
+/**
+ * Each separate Olumi assumption, said once (AIE 6182987896, exact, real operands only): the allocation-to-pace reading, the
+ * timing (the lead reader's words, else the AIE's unresolved sentence), and the numerical carrier with its window. No limitation
+ * is invented: the model holds none beyond these, so the AIE's "with {limitations}" clause has nothing to name and is not said.
+ */
 export function optionCapacityAssumptions(a: ApprovedOptionCapacityChange): string[] {
   const pct = Math.round(freedTimeRatio(a) * 100);
-  return [`Olumi assumes that all the rest of the team’s time (${a.total - a.today}% today) goes to ${a.deliverable}, so freeing `
-    + `${a.today - a.to} points raises the team’s capacity for it to about ${pct}% of today’s.`,
-  a.lead !== undefined ? effectLeadWords(a.lead) : 'Olumi assumes this takes effect from now; say if it would start later.',
-  `The model gains one part, ‘${a.carrier_label}’, linked to the goal.`];
+  const u = unitOf(a);
+  return [`Olumi proposes treating all team time outside ‘${a.factor_label}’ as time on ‘${a.deliverable}’. Under that assumption, this change `
+    + `increases allocated time for the same work from ${a.total - a.today}${u} to ${a.total - a.to}${u}, or about ${pct}% of its previous amount. `
+    + 'To model faster delivery, Olumi also assumes pace changes in proportion to that allocated time.',
+  a.lead !== undefined ? effectLeadWords(a.lead) : OPTION_TIMING_UNRESOLVED,
+  `The model gains one part, ‘${a.carrier_label}’: with this option, the team’s capacity for ‘${a.deliverable}’ is about ${pct}% of today’s, `
+    + `counted once in the deadline forecast to ${sayDate(a.deadline)}${a.lead === undefined ? ', and this option’s chance waits for that timing' : ''}.`];
 }
 
-/** The receipt, said only after the read-back holds the change (`applyOptionCapacityChange`'s own sentence). */
+/** The receipt (AIE 6182987896, exact), said only after the read-back holds the change; it promises no chance. */
 export const optionCapacityRecordedWords = (a: Pick<ApprovedOptionCapacityChange, 'option_label'>): string =>
-  `‘${a.option_label}’ is saved: it now acts in the deadline forecast through the time it frees, with your figure and Olumi’s assumptions kept distinct.`;
+  `Saved ‘${a.option_label}’ with your stated share of time and the shown Olumi assumptions kept distinct.`;
 
 const planned = (subject: DoorSubject, graph: unknown, statements: readonly UserStatement[]): ApprovedOptionCapacityChange | undefined => {
   const p = optionCapacityPlanOf(subject, graph, statements);
@@ -93,14 +115,25 @@ export const OPTION_CAPACITY_ROW: RoleRow = {
     const target = targetOf(subject, graph);
     if (target === undefined || target.kind !== 'target') return { refused: target?.detail ?? 'This is not an option’s share of time in the deadline forecast.' };
     // A timing-only statement ("from month 3") is the option's lead, read with the figure's statement by the lead reader.
+    const label = String(target.factor.label), others = otherSharesOf(graph as Rec, String(target.factor.id));
     const today = Number(target.factor.observed_state.raw_value);
-    const figures = shareFiguresFor(String(target.factor.label), String(target.factor.observed_state.unit), otherSharesOf(graph as Rec, String(target.factor.id)))(quote);
+    // ⛔ AIE 6182987896: bound to the SHARE by its own words (the option is bound by the question the statement answers).
+    const naming = coordinateClausesOf(quote).filter((c) => factorTheUserNamed(label, c, { options: [], others }));
+    if (naming.length === 0) return { refused: `“${quote}” does not name ‘${label}’, so it is not bound to that share. Ask only which share it is about.` };
+    const said = naming.join(' ');
+    if (NEGATED.test(said) || CONDITIONAL.test(said)) {
+      return { refused: `“${quote}” is negated or conditional, and this card records only a plain new figure for ‘${label}’, so it is kept as said, not recorded.` };
+    }
+    if (RANGE.test(said) || BOUND.test(said)) {
+      return { refused: `“${quote}” gives a range or a bound for ‘${label}’, and this card records only one new figure, so it is kept as said and stays unsupported here; no end of it is used as the figure.` };
+    }
+    const figures = shareFiguresFor(label, String(target.factor.observed_state.unit), others)(quote);
     const fresh = [...new Set(figures.map((f) => f.low))].filter((v) => v !== today);
     // "from 20% to 15%": the figure the words move the share TO is the new one; the other is checked against today's by the plan.
     const to = fresh.length > 1 ? [...quote.matchAll(/\bto\s+(\d{1,3}(?:\.\d+)?)\s*(?:%|per ?cent\b)/gi)].map((m) => Number(m[1])).filter((v) => fresh.includes(v)) : fresh;
     if (fresh.length === 0) return { refused: `“${quote}” gives no new figure for ‘${String(target.factor.label)}’.` };
     if (to.length !== 1) return { refused: `“${quote}” gives more than one new figure for ‘${String(target.factor.label)}’ (${fresh.join(' and ')}). Ask which one ‘${String(target.option.label)}’ would set it to.` };
-    return { form: 'point', low: to[0]!, high: to[0]! };
+    return { form: 'point', low: to[0]!, high: to[0]!, ...(APPROX.test(said) ? { qualifier: 'about' } : {}) };
   },
   readingWords: (statements, subject, _label, graph) => {
     const a = planned(subject, graph, statements);

@@ -19,6 +19,7 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP,
   riskOccurrencePostimageNode, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
+import { optionCapacityRecordedWords } from '../../statement-door/fields/option-capacity.js';
 import { readStatement, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
 import { resolveSubject } from '../../statement-door/subject.js';
@@ -3666,8 +3667,8 @@ export function createAgentCapabilities(
     // ⛔ `follow_up` IS WHAT THE USER READS (served 7f5659fd, legacy capture 22:50Z: the agent-facing sentence was shown verbatim,
     // and the user's sentence, which named "the user's figure", was dropped as agent-addressed). The user's sentence is addressed
     // to them; the direction for the Agent stays in `note`. The successful commit runs the analysis itself: never ask for a Run.
-    const done = `‘${a.option_label}’ is saved: it now acts in the deadline forecast through the time it frees, with your figure and `
-      + 'Olumi’s assumptions kept distinct.';
+    // AIE 6182987896 (exact receipt): it promises no admitted chance.
+    const done = optionCapacityRecordedWords(a);
     const note = 'The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
     if (optionCapacityChangeHeld(before.raw, a)) {
