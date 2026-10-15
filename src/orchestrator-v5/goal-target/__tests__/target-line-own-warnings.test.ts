@@ -14,6 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { ownTargetRowIds, wireGoalConstraints, withholdGoalFiguresForMissingCurrentLevel, withholdGoalFiguresForUntestableTarget } from '../../tools/handlers/run-analysis.js';
 import { withholdForOpenTargetQuestion } from '../goal-chance-gate.js';
 import { withGoalChanceLicence } from '../goal-chance-licence.js';
+import { goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { readGoalTargetsBlock } from '../goal-targets-joint.js';
 
 type Rec = Record<string, any>;
 const F = JSON.parse(readFileSync('tests/fixtures/marketing-widen5/run-08.json', 'utf8')) as Rec;
@@ -96,5 +98,25 @@ describe('S9: each target’s line uses only the warnings bound to its own targe
     const env = withholdForOpenTargetQuestion(pre, graph, 'conversion_rate', ownTargetRowIds(graph.goal_constraints, 'conversion_rate')) as Rec;
     expect(env.option_comparison.every((r: Rec) => !('probability_of_goal' in r))).toBe(true);
     expect((env.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!.message).toBe(READING);
+  });
+
+  // ⭐ Item 1 (said once): the served licence's group for the reading question had lost its `line`, so EVERY group was dropped and
+  // the reply said the two retained limits' one cause twice ("‘Annual campaign spend’…: The result… ‘Founder time…’: The result…").
+  it('SAID ONCE (served Run 08): one malformed group no longer drops the others; the limits’ shared cause is one reply line', () => {
+    const licence = served('GOAL_CHANCE_LICENSED');
+    const groups = licence.targets.note_groups as Rec[];
+    expect(groups.filter((g) => g.line === undefined)).toHaveLength(1);
+    const cause = 'The result for the full goal, including the joint chance with its limits, is withheld while the earlier and proposed limits have not been confirmed to describe the same quantity.';
+    const card = new Set<string>(F.canonical_analysis_view.goal_chance.notes);
+    const reply = goalChanceNotesForAgent({ type: 'analysis_result', enrichment: F.enrichment }, F.graph, true, card);
+    expect(reply.join(' ').split(cause)).toHaveLength(2);
+    expect(reply).toContain('‘Annual campaign spend’ is at most £100,000 / year and ‘Founder time on campaign’ is at most 25%: '
+      + `${cause} Both limits remain recorded.`);
+    // The reader keeps every well-formed group and drops only the malformed one.
+    const read = readGoalTargetsBlock(licence.targets, licence.option_ids)!;
+    expect(read.note_groups).toHaveLength(groups.length - 1);
+    // CONTRAST: a block whose groups are all well formed is returned as it is.
+    const whole = { ...licence.targets, note_groups: groups.filter((g) => g.line !== undefined) };
+    expect(readGoalTargetsBlock(whole, licence.option_ids)).toBe(whole);
   });
 });

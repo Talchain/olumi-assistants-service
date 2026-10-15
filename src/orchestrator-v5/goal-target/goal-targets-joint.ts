@@ -574,14 +574,17 @@ export function readGoalTargetsBlock(v: unknown, optionIds: readonly string[]): 
   // Optional display joins cannot change a numerical licence. An invalid/old join falls back to the original notes.
   const groups: unknown = v.note_groups;
   const joint = v.joint;
-  if (groups !== undefined && (!Array.isArray(groups) || !groups.every((g) => isRec(g)
+  if (groups === undefined) return v;
+  if (!Array.isArray(groups)) return { ...v, note_groups: undefined };
+  // ⭐ S9 (marketing widen5 bcdf70eb, judge item 2): each join is judged ON ITS OWN. Served, one group had lost its `line`, and
+  // dropping EVERY group put the two retained limits' shared cause in the reply twice. A malformed group falls back to its own
+  // original notes; the others stay joined (a note may belong to several causes' groups, as before).
+  const kept = groups.filter((g) => isRec(g)
     && Array.isArray(g.source_notes) && g.source_notes.length > 0
     && g.source_notes.every((note) => typeof note === 'string' && v.notes?.includes(note))
     && typeof g.line === 'string' && g.line.trim() !== '' && !/[\r\n]/.test(g.line)
-    && (g.joint_line === undefined || (joint.status === 'withheld' && g.joint_line === joint.line))))) {
-    return { ...v, note_groups: undefined };
-  }
-  return v;
+    && (g.joint_line === undefined || (joint.status === 'withheld' && g.joint_line === joint.line))) as NonNullable<GoalTargetsBlock['note_groups']>[number][];
+  return kept.length === groups.length ? v : { ...v, note_groups: kept.length > 0 ? kept : undefined };
 }
 
 /** Every member a reader relies on, checked; a type guard, so the stored record is never cast to the block. */
