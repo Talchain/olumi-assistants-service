@@ -84,6 +84,7 @@ import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-l
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
+import { armedRecoveryFault, interruptIfArmed, RecoveryFaultInterrupt } from '../orchestrator-v5/agent-lane/recovery-fault-seam.js';
 import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analysis-interpretation-identity.js';
@@ -2165,6 +2166,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const startedAt = Date.now();
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
+    // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
+    const recoveryFault = armedRecoveryFault(body, scenarioId);
+    if (recoveryFault !== undefined) log.warn({ event: 'v5.recovery_fault.armed', request_id: String(req.id), scenario_id: scenarioId, point: recoveryFault }, 'agent-lane: recovery fault seam armed for this turn');
     const message = typeof body.message === 'string' ? body.message : '';
     /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
     const guidedPress = parseGuidedSizingPress(body['chip']);
@@ -3445,6 +3449,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       }
       const target = edited?.ok ? edited.proposal.proposal_id : approvedProposal;
+      if (editsFailure === undefined) interruptIfArmed(recoveryFault, 'before_write');
       const applied = editsFailure !== undefined
         ? { ok: false, mutated: false, refusal: editsFailure === 'stale' ? 'edits_superseded' : editsFailure === 'not_held' ? 'unknown_proposal' : 'edits_refused' }
         : await dispatchTool('authorise_change', JSON.stringify({ proposal_id: target }),
@@ -4297,6 +4302,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let autoRun: Awaited<ReturnType<typeof capabilities.runAnalysis>> | undefined;
     const committedChange = result.tool_calls.some((c, i) => c.name !== 'build_model_from_brief'
       && result!.tool_results[i]?.ok === true && result!.tool_results[i]?.mutated === true);
+    if (committedChange) interruptIfArmed(recoveryFault, 'after_write');
     const analysedThisTurn = runPress || result.tool_results.some((r) => r?.ran === true)
       || result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')
       || firstAnalysis?.outcome.ran === true || firstAnalysis?.outcome.reason === 'already_ran_for_construction';
@@ -5985,6 +5991,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           : { outcome: 'omitted', reason: runDelivery.reason }),
       }, 'agent-lane: run_delivery');
     }
+    if (turnRunReceipts(fa, result.tool_results).some((r) => (r as { ran?: unknown } | null)?.ran === true)) interruptIfArmed(recoveryFault, 'after_run');
     // A recorded delivery is durable too: the same minted id as an offer, so an unnamed turn never drops the record.
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined || runDelivery.kind === 'recorded' ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
@@ -6386,7 +6393,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   };
   app.post('/agent/v1/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, (req: FastifyRequest, reply: FastifyReply) =>
     runWithProviderPolicy({ ...OPENAI_ONLY('agent_v1_turn'), request_id: String(req.id),
-      scenario_id: (req.body as { scenario_id?: string })?.scenario_id, turn_id: (req.body as { turn_id?: string })?.turn_id }, () => agentTurnHandler(req, reply)));
+      scenario_id: (req.body as { scenario_id?: string })?.scenario_id, turn_id: (req.body as { turn_id?: string })?.turn_id }, () => agentTurnHandler(req, reply))
+      // The recovery seam's interruption ends the turn like a crash: no answer row, nothing retried here.
+      .catch((err: unknown) => {
+        if (!(err instanceof RecoveryFaultInterrupt)) throw err;
+        log.warn({ event: 'v5.recovery_fault.interrupted', request_id: String(req.id), point: err.point }, 'agent-lane: turn interrupted by the recovery fault seam');
+        return reply.code(503).send({ error: 'RECOVERY_FAULT_INJECTED', point: err.point });
+      }));
 
   log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');
 }

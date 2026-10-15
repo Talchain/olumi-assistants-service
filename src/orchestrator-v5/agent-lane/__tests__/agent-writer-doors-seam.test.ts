@@ -670,4 +670,71 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     expect(written[0]).toEqual(expect.objectContaining({ constraint_id: 'gc-churn-1', value: 5, unit: '%', value_frame: 'level', provenance: 'explicit' }));
     expect(Object.keys(written[0]!).filter((k) => k.startsWith('provenance_unit_')), JSON.stringify(written[0])).toEqual([]);
   }, 120_000);
+  // ── ⭐ Lane A RECOVERY FAULT SEAM (`recovery-fault-seam.ts`; DL 20:10Z 15 Oct, Paul's A6 proof): the write windows on the real
+  // writer. Staging only, switch on, armed by the ONE press that names its own scenario; the retry is an ordinary press.
+  const seamPress = (approve: Chip, point?: string, turnId = randomUUID()) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: approve.message, source: 'chip', chip: { id: approve.id },
+    ...(point === undefined ? {} : { _recovery_fault: { scenario_id: SCENARIO, point } }) } });
+  const withSeam = async <T>(on: boolean, fn: () => Promise<T>): Promise<T> => {
+    const was = { env: process.env.OLUMI_ENV, seam: process.env.CEE_RECOVERY_FAULT_SEAM };
+    process.env.OLUMI_ENV = 'staging';
+    if (on) process.env.CEE_RECOVERY_FAULT_SEAM = 'on'; else delete process.env.CEE_RECOVERY_FAULT_SEAM;
+    try { return await fn(); } finally {
+      if (was.env === undefined) delete process.env.OLUMI_ENV; else process.env.OLUMI_ENV = was.env;
+      if (was.seam === undefined) delete process.env.CEE_RECOVERY_FAULT_SEAM; else process.env.CEE_RECOVERY_FAULT_SEAM = was.seam;
+    }
+  };
+  const risksNow = () => graphNow().nodes.filter((x) => x.kind === 'risk' && x.label === 'Competitive response');
+
+  it('⭐ SEAM before_write: the press reaches CEE and ends before its write: nothing written, the card still held; the next press applies it ONCE', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    const approve = approveChipOf(await proposeRisk())!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const cut = await withSeam(true, () => seamPress(approve, 'before_write'));
+    expect(cut.statusCode, cut.body.slice(0, 300)).toBe(503);
+    expect(cut.json()).toEqual({ error: 'RECOVERY_FAULT_INJECTED', point: 'before_write' });
+    expect(bytes(), 'nothing written').toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    expect((await heldOnLatestRow()).map((p) => p.chip_id), 'the card is still held').toEqual([ref]);
+    const again = await withSeam(true, () => seamPress(approve));
+    expect(again.statusCode, again.body.slice(0, 300)).toBe(200);
+    expect((again.json() as Body)._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: ref })]);
+    expect(risksNow()).toHaveLength(1);
+    expect(graphWrites.get(SCENARIO), 'applied ONCE').toBe(1);
+  }, 120_000);
+
+  it('⭐ SEAM after_write: the write commits and the turn ends before its answer row; pressing the same card again writes nothing twice', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeRisk())!;
+    const turnId = randomUUID();
+    const cut = await withSeam(true, () => seamPress(approve, 'after_write', turnId));
+    expect(cut.statusCode, cut.body.slice(0, 300)).toBe(503);
+    expect(cut.json()).toEqual({ error: 'RECOVERY_FAULT_INJECTED', point: 'after_write' });
+    expect(risksNow(), 'the write committed').toHaveLength(1);
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+    expect(rows.has(`${SCENARIO}:${turnId}`), 'no answer row for the interrupted turn').toBe(false);
+    const again = await withSeam(true, () => seamPress(approve));
+    expect(again.statusCode, again.body.slice(0, 300)).toBe(200);
+    expect((again.json() as Body)._agent.tool_calls.filter((c) => c.mutated === true), 'the re-press applies nothing new').toEqual([]);
+    expect(risksNow(), `no second risk (re-press ${again.statusCode}: ${again.body.slice(0, 200)})`).toHaveLength(1);
+    expect(graphWrites.get(SCENARIO), 'no second write').toBe(1);
+  }, 120_000);
+
+  it('SEAM CONTRAST: the same armed press with the switch off, or naming another scenario, writes once and answers as normal', async () => {
+    for (const variant of ['switch_off', 'other_scenario'] as const) {
+      nextScenario();
+      graphOf.set(SCENARIO, seedGraph());
+      const approve = approveChipOf(await proposeRisk())!;
+      const turnId = randomUUID();
+      const r = variant === 'switch_off'
+        ? await withSeam(false, () => seamPress(approve, 'after_write', turnId))
+        : await withSeam(true, () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO,
+          turn_id: turnId, message: approve.message, source: 'chip', chip: { id: approve.id },
+          _recovery_fault: { scenario_id: '6b1e2d3c-4b5a-4f6e-9d7c-8b9a0e1f3dff', point: 'after_write' } } }));
+      expect(r.statusCode, `${variant}: ${r.body.slice(0, 300)}`).toBe(200);
+      expect(risksNow()).toHaveLength(1);
+      expect(rows.has(`${SCENARIO}:${turnId}`), `${variant}: the answer row is written`).toBe(true);
+    }
+  }, 240_000);
 });
