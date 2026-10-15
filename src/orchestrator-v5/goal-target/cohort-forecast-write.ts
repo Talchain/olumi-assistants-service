@@ -292,7 +292,7 @@ export function sameCohortLabelsOf(graph: unknown): { readonly rate: string; rea
 export function sameCohortRecordedWords(graph: unknown): string {
   const l = sameCohortLabelsOf(graph);
   return l === undefined ? 'Recorded from your words that both targets count the same people.'
-    : `Recorded from your words: ‘${l.count}’ counts the people who convert among the same people your ‘${l.rate}’ is measured on.`;
+    : `Recorded from your words: your answer that your ‘${l.count}’ come from the same people your ‘${l.rate}’ is measured on.`;
 }
 
 /** The post-image holds exactly this write and nothing else (the dispatch's scope check, as for the forecast). */
