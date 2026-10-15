@@ -3853,8 +3853,18 @@ export function createAgentCapabilities(
    * ONE card whose words are the candidate's own: what replaces the goal, what is kept, and what is not carried.
    */
   /** The revised draft does not hold the deliverable the user asked about (GEN #5, by identity): nothing is offered. */
-  const noDeliverableDetail = (deliverable: string): string => `The revised draft does not hold \u2018${deliverable}\u2019 by its deadline, `
-    + 'so nothing was offered and the model is unchanged. Tell the user plainly that this goal is not yet in the model.';
+  // ⭐ AIE-06 (prompt/AIE-REVIEW-20261015.md): a rejected draft is a drafting limit, never missing information from the user.
+  // ⚠ The deliverable variant ADAPTS AIE-06's no-target words to the deliverable (the AIE named the variant, gave no exact text).
+  const noDeliverableDetail = (deliverable: string): string => `The generated draft did not contain \u2018${deliverable}\u2019 by its deadline in the `
+    + 'form this operation requires, so no proposal was offered and the saved model is unchanged. This does not mean the user failed to '
+    + 'supply it. Retain their stated goal, corrections, conditions and source; do not ask them to repeat a supplied answer. Do not repeat '
+    + 'an unchanged failed draft. Explain the specific revision limitation once and continue with a useful qualitative reasoning step '
+    + 'from the retained corrected brief.';
+  const NO_TARGET_DETAIL = 'The generated draft did not contain the goal-target representation this operation requires, so no proposal was '
+    + 'offered and the saved model is unchanged. This does not mean the user failed to supply a target. Retain their stated goal, '
+    + 'corrections, conditions and source; do not ask them to repeat a supplied answer or invent a numerical target for a qualitative aim. '
+    + 'Do not repeat an unchanged failed draft. Explain the specific revision limitation once and continue with a useful qualitative '
+    + 'reasoning step from the retained corrected brief.';
   const prepareRevisedDraft = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], g: GraphRead, goal: GraphRead['nodes'][number],
     /** GEN #5: the user's deliverable, verified verbatim in this message; attests the event and binds it by identity. */
@@ -3870,13 +3880,27 @@ export function createAgentCapabilities(
       return notOffered('revised_draft_unavailable', 'A revised draft cannot be prepared here, so nothing was offered and the model is unchanged. Tell the user plainly that their goal is not yet in the model.');
     }
     const sid = ctx.scenario_id;
-    const input = revisedDraftBrief(g.brief_text as string, typedGoal);
+    const storedBrief = g.brief_text as string;
+    /**
+     * ⭐ Lane A A1 (founder verify df243cbc: every redraft's drafter brief was the brief + ONLY that turn, hash-proven; 60 h, 80% and
+     * £250k reached later redrafts only as "never take a figure" context, and were re-asked). The user's words for a revision are
+     * the brief and every message the user TYPED after it, in order: TYPED by the route's request-level origin (`requestWasTyped`,
+     * bound as `verified_user_messages`), never by matching text, so a chip's or button's words ("Yes, use the revised draft.") and
+     * restored rows of unknown origin are never among them. With no typed history bound, this turn's message alone, as before.
+     */
+    const typedSince = ((): string[] => {
+      const typed = (ctx.verified_user_messages ?? [typedGoal]).map((m) => m.trim()).filter((m) => m !== '');
+      const since = typed[0] === storedBrief.trim() ? typed.slice(1) : typed;
+      return since[since.length - 1] === typedGoal ? since : [...since, typedGoal];
+    })();
+    const input = revisedDraftBrief(storedBrief, typedSince);
     let out: ToolResult;
     try {
-      // The current saved model (the agent's own view of it), the later messages and the objections, as CONTEXT only; an
-      // unedited draft is prepared exactly as before, byte for byte (its current model is the draft itself).
-      const context: ConstructionContext | undefined = gate.later ? { current_model: projectModelContext(g),
-        ...(gate.messages.length > 0 ? { messages: gate.messages } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : undefined;
+      // The user's typed words since the brief, named to the drafter as later than it; the current saved model (the agent's own
+      // view of it), the later messages of unknown origin and the objections, as CONTEXT only.
+      const unverified = gate.messages.filter((m) => !typedSince.includes(m.trim()));
+      const context: ConstructionContext = { since_brief: { brief: storedBrief, messages: typedSince }, ...(gate.later ? { current_model: projectModelContext(g),
+        ...(unverified.length > 0 ? { messages: unverified } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : {}) };
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
         // No widening for a revised draft (prepare-only card): it stays exactly as served before the arms were restored.
         (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context, deliverable, true)));
@@ -3937,17 +3961,24 @@ export function createAgentCapabilities(
     const draftStated = statedOf(candidate, draftGoalNode);
     const stillStated = savedStated !== null && draftStated !== null && draftStated.value === savedStated.value
       && (draftStated.unit ?? '') === (savedStated.unit ?? '');
-    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated) {
+    // ⭐ Lane A A1 (DL spec): the user's LATER statement supersedes the earlier one and stays the user's. A revision's new goal
+    // figure counts only when the user TYPED it after the brief (`typedSince`, by identity); a figure only the drafter holds never does.
+    const restatedByUser = correction && draftStated !== null && !stillStated
+      && typedSince.some((m) => figureTheUserWrote(draftStated.value, draftStated.unit, m));
+    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated && !restatedByUser) {
       // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
       return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
         + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `
-        + 'Tell the user plainly, and ask only whether their correction replaces that target.');
+        + 'Use the retained correction to determine whether this target is being replaced or remains a later objective. Do not ask '
+        + 'again if that relationship is already stated. Only if it remains genuinely unresolved, ask which target governs the current '
+        + 'question. Do not offer or save a candidate that contradicts the user\'s explicit correction.');
     }
     /** A correction with no target ROW: the goal stays qualitative, or keeps its own stated figure exactly. */
-    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0 && (savedStated === null ? draftStated === null : stillStated);
+    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0
+      && (restatedByUser || (savedStated === null ? draftStated === null : stillStated));
     if (held.length === 0 && event === null && !qualitativeKept) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
-        : 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
+        : NO_TARGET_DETAIL);
     }
     const nodesOf = (raw: unknown) => ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []);
     const basis = goalTargetBasisOf(nodesOf(candidate).find((n) => n?.kind === 'goal'));
@@ -3979,9 +4010,13 @@ export function createAgentCapabilities(
     // `hiring-times.ts`), so the date is always still to be confirmed, and this card never implies it saves one.
     const goalNow = nodesOf(candidate).find((n) => n?.kind === 'goal');
     const goalWords = `\u2018${typeof goalNow?.label === 'string' ? goalNow.label : goal.label}\u2019`;
+    const builtFrom = typedSince.length > 1 ? 'what you have said since' : 'the correction you just gave';
     const card = (qualitativeKept
-      ? `Replace the early draft with a revised one built from your brief and the correction you just gave. Its goal, ${goalWords}, `
+      ? `Replace the early draft with a revised one built from your brief and ${builtFrom}. Its goal, ${goalWords}, `
         + (draftStated === null ? 'has no numeric target, as before. '
+          : restatedByUser ? `takes the target you gave later: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
+            + `${targetFigure(draftStated.value, draftStated.unit ?? '')}`
+            + (savedStated === null ? '. ' : `, in place of ${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}. `)
           : `keeps the target you stated: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
             + `${draftStated.value}${draftStated.unit !== undefined ? ` ${draftStated.unit}` : ''}, as before. `)
       : held.length > 0

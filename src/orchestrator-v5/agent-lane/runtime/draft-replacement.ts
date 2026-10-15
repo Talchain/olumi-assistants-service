@@ -316,11 +316,12 @@ export function messagesBesidesTheBrief(
 }
 
 /**
- * The revised draft's input: the stored brief, then the goal the user typed, each verbatim and in that order. Nothing
- * else (no chip, assistant or unknown-origin text) is made part of what construction reads as the user's words.
+ * The revised draft's input: the stored brief, then each message the user TYPED after it (this turn's last), each verbatim
+ * and in that order. Nothing else (no chip, assistant or unknown-origin text) is made part of what construction reads as
+ * the user's words.
  */
-export function revisedDraftBrief(storedBrief: string, typedGoal: string): string {
-  return `${storedBrief.trim()}\n\n${typedGoal.trim()}`;
+export function revisedDraftBrief(storedBrief: string, typed: string | readonly string[]): string {
+  return [storedBrief, ...(typeof typed === 'string' ? [typed] : typed)].map((t) => t.trim()).join('\n\n');
 }
 
 export interface HeldRow { readonly node_id: string; readonly operator: string; readonly value: number; readonly unit: string }

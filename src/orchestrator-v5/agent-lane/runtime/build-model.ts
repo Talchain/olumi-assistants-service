@@ -1196,9 +1196,14 @@ function perOneRangeRule(written: string): string {
 export function firstConstructInput(brief: string, context?: ConstructionContext): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
-  const input = notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+  // ⭐ Lane A A1: a revision shows the drafter WHICH of the user's words came after the brief, in order (`since_brief`); `brief`
+  // (what every quote and figure check reads) is those same words, the brief then each later message.
+  const since = context?.since_brief;
+  const words = since === undefined || since.messages.length === 0 ? brief
+    : `${since.brief.trim()}\n\n${USER_MESSAGES_SINCE_BRIEF_LEAD} ${JSON.stringify(since.messages.map((m) => m.trim()))}`;
+  const input = notes.length === 0 ? words : `${words}\n\nConstruction notes: ${JSON.stringify(notes)}`;
   if (context === undefined) return input;
-  return `${input}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`
+  return input + (context.current_model === undefined ? '' : `\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`)
     + (context.messages !== undefined && context.messages.length > 0 ? `\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(context.messages)}` : '')
     + (context.objections !== undefined && context.objections.length > 0 ? `\n\n${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}` : '');
 }
@@ -1211,13 +1216,25 @@ export function firstConstructInput(brief: string, context?: ConstructionContext
  * stamp, never re-authored by this draft. (Drafter text: AIE pending.)
  */
 export interface ConstructionContext {
-  readonly current_model: Record<string, unknown>;
+  /** Absent when nothing was saved or said after the draft (an unedited draft): the draft itself is the current model. */
+  readonly current_model?: Record<string, unknown>;
+  /**
+   * ⭐ Lane A A1 (founder verify df243cbc, drafter rows hash-proven): the user's own messages after the brief, in order, each
+   * TYPED by the user (the route's request-level origin, `requestWasTyped`; never a chip's or a button's text, never a restored
+   * row). They are the user's words: in `brief` for every check, and named to the drafter as later than the brief.
+   */
+  readonly since_brief?: { readonly brief: string; readonly messages: readonly string[] };
   /** The conversation's later messages (PL #94 07:32Z Q1): context, never verified words of the user. */
   readonly messages?: readonly string[];
   /** The objections the user recorded (S8 `statement`, verbatim): context the revision must not contradict. */
   readonly objections?: readonly string[];
 }
 export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model, to revise (Olumi\'s record of the model, not the user\'s words; keep its structure and the labels of what you keep):';
+/**
+ * ⚠ PLACEHOLDER pending the AIE's exact text (DL 15 Oct: "build with a placeholder and swap in its text"). Only the USER's
+ * later words supersede; Olumi's earlier readings, proposals and the saved model never do.
+ */
+export const USER_MESSAGES_SINCE_BRIEF_LEAD = 'The user\'s own later messages, after the brief, in the order they wrote them. Where a later message changes or withdraws something that the brief, an earlier message or the current saved model says (the question, the goal, a target, an option, a mechanism, an assumption or a figure), draw what the later message says and keep what the user did not change. Only the user\'s own words supersede; Olumi\'s earlier readings and proposals never do:';
 export const LATER_MESSAGES_CONTEXT_LEAD = 'Messages in this conversation after the brief (context only: their origin is not verified, so never quote them as the user\'s words or take a figure from them as stated):';
 export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier findings (context: keep the revised draft consistent with them):';
 

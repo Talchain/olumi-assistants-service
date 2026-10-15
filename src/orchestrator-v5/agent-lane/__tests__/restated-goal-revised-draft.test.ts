@@ -23,7 +23,7 @@ import { retainedLimitOnlyNodeIds, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../.
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
-import { buildModelFromBrief, constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, REVISED_DRAFT_MORE_LINKS, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, USER_MESSAGES_SINCE_BRIEF_LEAD, REVISED_DRAFT_MORE_LINKS, type CallStructuredModel } from '../runtime/build-model.js';
 import { revisedDraftBrief } from '../runtime/draft-replacement.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
@@ -559,7 +559,11 @@ function laneWith(s: ReturnType<typeof server>, o: { draft?: () => Rec; objectio
   });
   return { caps, proposals, inputs, drafts: () => inputs.length };
 }
-const typedBrief = `${FX.brief_text.trim()}\n\n${L20.trim()}`;
+/**
+ * ⚠ Lane A A1 re-pin (founder verify df243cbc): the drafter now sees WHICH of the user's words came after the brief. The typed goal
+ * reaches it as the user's later message under USER_MESSAGES_SINCE_BRIEF_LEAD; still nothing else is made the user's words.
+ */
+const typedBrief = `${FX.brief_text.trim()}\n\n${USER_MESSAGES_SINCE_BRIEF_LEAD} ${JSON.stringify([L20.trim()])}`;
 const cardOf = (proposals: ProposalStore, r: Rec): string => String(proposals.get(String(r.proposal_id))!.public_label);
 const candidateOf = (proposals: ProposalStore, r: Rec): Rec => (proposals.get(String(r.proposal_id))!.operations[0]!.value as Rec).candidate as Rec;
 
@@ -570,7 +574,7 @@ const candidateOf = (proposals: ProposalStore, r: Rec): Rec => (proposals.get(St
  * saved model. An unedited draft is prepared exactly as before.
  */
 describe('later human work is kept: carried by identity, read as context, named on the card', () => {
-  it('CONTROL: an unedited draft is prepared exactly as before: the drafter is sent the brief and the typed goal, nothing else', async () => {
+  it('CONTROL: an unedited draft: the drafter is sent the brief and the typed goal (as the user\'s later message), nothing else', async () => {
     const { caps, inputs } = laneWith(server());
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r).toMatchObject({ ok: true, mutated: false });
@@ -1432,6 +1436,63 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     const s = server();
     const { caps } = lane(s, new ProposalStore(), keepsRaw);
     expect(await change(caps)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.commits).toHaveLength(0);
+  });
+
+  /**
+   * ⭐ Lane A A1 (founder verify df243cbc; cee_drafter_raw_responses hash-proven: each redraft was sent the brief + ONLY that turn,
+   * so 60 h and £250k were re-asked and the 1.3 million kept). Every message the user TYPED since the brief (the route's
+   * request-level origin, `verified_user_messages`) is the revision's words, in order; a chip's words never are. The user's
+   * LATER target supersedes the saved one and stays theirs; a figure only the drafter holds never does.
+   */
+  const TYPED_60 = 'Let\'s assume 60 and possibly more if I needed to.';
+  const TYPED_250K = 'If I could secure angel funding of even \u00a3250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+  const NOW = 'I feel like we\'re going around in circles. Can you just update the model to reflect our conversation so I can actually decide what to spend my time on?';
+  const CHIP = 'Yes, use the revised draft.';
+  const typedTurn = (typed: readonly string[]) => ({ ...turn, turn_id: 'corr-a1-0001', user_turn_text: NOW,
+    user_text: [FX.l1.message, ...typed, NOW].join('\n'), verified_user_messages: [FX.l1.message, ...typed, NOW] });
+  const changeAs = async (caps: ReturnType<typeof lane>['caps'], ctx: Rec) => {
+    const { dispatchTool } = await import('../runtime/agent-tools.js');
+    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote: NOW }] }),
+      ctx as never, caps) as Promise<Rec>;
+  };
+  const at250k = (): Rec => { const c = qualitative(); c.goal = { ...c.goal, operator: '>=', target_stated: true, value: 250000, unit: '\u00a3' }; return c; };
+
+  it('⭐ A1 RED: the drafter is sent the brief, then every message the user TYPED since, in order; a chip\'s words are never among them', async () => {
+    const s = server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'typed-60', 'chip-yes', 'typed-250k'],
+      later_user_messages: [{ turn_id: 'typed-60', text: TYPED_60 }, { turn_id: 'chip-yes', text: CHIP }, { turn_id: 'typed-250k', text: TYPED_250K }] } });
+    const { caps, inputs } = laneWith(s, { draft: qualitative });
+    const out = await changeAs(caps, typedTurn([TYPED_60, TYPED_250K]));
+    expect(out, JSON.stringify(out).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.startsWith(`${FX.brief_text.trim()}\n\n${USER_MESSAGES_SINCE_BRIEF_LEAD} ${JSON.stringify([TYPED_60, TYPED_250K, NOW])}\n\n`)).toBe(true);
+    // CONTRAST: the chip's words ("Yes, use the revised draft.") stay context of unverified origin, never the user's later words.
+    expect(inputs[0]).toContain(`${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify([CHIP])}`);
+    expect(inputs[0]!.split(LATER_MESSAGES_CONTEXT_LEAD)[0]).not.toContain(CHIP);
+  });
+
+  it('⭐ A1 RED: the user\'s LATER typed target (\u00a3250,000) supersedes the saved 1.3 million: offered as theirs → press → reopen holds it', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), at250k);
+    const offer = await changeAs(caps, typedTurn([TYPED_60, TYPED_250K]));
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(String(offer.public_label)).toContain('built from your brief and what you have said since. ');
+    expect(String(offer.public_label)).toContain('takes the target you gave later: at least ');
+    expect(String(offer.public_label)).toContain(', in place of 1.3 million (currency unspecified). ');
+    s.said('corr-a1-0001');
+    expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect([goal.goal_threshold_raw, goal.goal_threshold_unit]).toEqual([250000, '\u00a3']);
+  });
+
+  it('CONTRAST A1: the same \u00a3250,000 held only by the DRAFTER (the user never typed it) → refused; the saved 1.3 million stays', async () => {
+    const s = server({ graph: withRawTarget() });
+    const { caps } = lane(s, new ProposalStore(), at250k);
+    const out = await changeAs(caps, typedTurn([TYPED_60]));
+    expect(out).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    // AIE-06: the refusal names the drafting limit and never asks again for what the user already said.
+    expect(String(out.detail)).toContain('Do not ask again if that relationship is already stated.');
     expect(s.commits).toHaveLength(0);
   });
 
