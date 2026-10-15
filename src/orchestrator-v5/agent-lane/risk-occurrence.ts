@@ -246,9 +246,7 @@ export const riskOccurrenceAskWords = (label: string, windowMonths: number): str
   .replace('{label}', () => label.trim()).replace('{window}', () => windowWords(windowMonths));
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
-/** S2 "holds now": the card and receipt. The user's words are quoted; Olumi's reading of them is offered, never assumed. */
-export const riskHoldsNowCardWords = (label: string, source: string): string => `From your message: ‘${source}’ Do you want to record that `
-  + `‘${label.trim()}’ is already true now? How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.`;
+/** S2 "holds now": the receipt (the card is the ONE statement door's, `statement-door/card.ts`). */
 export const riskHoldsNowRecordedWords = (label: string): string => `Recorded from your words: ‘${label.trim()}’ is already true now. `
   + 'How strongly it affects the model is still Olumi’s placeholder on its link.';
 /**
@@ -257,7 +255,9 @@ export const riskHoldsNowRecordedWords = (label: string): string => `Recorded fr
  */
 export const chanceAsStated = (s: UserStatement): string => `${s.qualifier !== undefined ? 'about ' : ''}`
   + `${s.low === s.high ? `${s.low}%` : `${s.low}–${s.high}%`}`;
-const statedWindowWords = (block: EventRiskV1T): string => `within the next ${block.horizon.months === 1 ? 'month' : `${block.horizon.months} months`} from today`;
+/** The user's window as the card and receipt say it: "within the next 3 months from today". */
+export const statedWindowMonthsWords = (months: number): string => `within the next ${months === 1 ? 'month' : `${months} months`} from today`;
+const statedWindowWords = (block: EventRiskV1T): string => statedWindowMonthsWords(block.horizon.months);
 /** What the risk's effect rests on: its links' sizes as held, or Olumi's placeholder still to be sized. */
 export function riskEffectBasisWords(graph: unknown, riskId: string): string {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -270,9 +270,6 @@ export function riskEffectBasisWords(graph: unknown, riskId: string): string {
     && /placeholder/.test(e.provenance.magnitude)));
   return placeholder ? `its effect on ${targets} is still Olumi’s placeholder, not yet sized` : `its effect on ${targets} is the size the model holds`;
 }
-export const riskStatedOccurrenceCardWords = (label: string, s: UserStatement, block: EventRiskV1T, goal: string, effect: string): string =>
-  `From your message: “${s.source}”. Olumi reads this as your estimate of ${chanceAsStated(s)} that ‘${label.trim()}’ happens at least once `
-  + `${statedWindowWords(block)}. Record this reading? How strongly it affects ‘${goal.trim()}’ is a separate assumption: ${effect}.`;
 export const riskStatedOccurrenceRecordedWords = (label: string, s: UserStatement, block: EventRiskV1T, effect: string): string =>
   `Recorded your estimate: ${chanceAsStated(s)} that ‘${label.trim()}’ happens at least once ${statedWindowWords(block)}. `
   + `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;

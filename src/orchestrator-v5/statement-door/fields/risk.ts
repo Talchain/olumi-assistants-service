@@ -10,7 +10,7 @@ import { isFactorNamedByUser, readStatedEventRiskWithBindingSpan, readStatedLike
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import {
   alreadyTrueQuoteOf, applyRiskOccurrenceEdit, approvedRiskOccurrenceOf, chanceAsStated, riskEffectBasisWords, riskHoldsNowRecordedWords, riskOccurrenceGoalHolds,
-  riskOccurrenceGoalLabel, riskOccurrencePostimageNode, riskOccurrenceSubject, RISK_OCCURRENCE_QUANTITY, riskOccurrenceWindowFromToday, riskStatedOccurrenceRecordedWords,
+  riskOccurrenceGoalLabel, riskOccurrencePostimageNode, riskOccurrenceSubject, RISK_OCCURRENCE_QUANTITY, statedWindowMonthsWords, riskOccurrenceWindowFromToday, riskStatedOccurrenceRecordedWords,
   userHoldsNowBlock, userOccurrenceBlock, type ApprovedRiskOccurrence,
 } from '../../agent-lane/risk-occurrence.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -126,7 +126,6 @@ const windowOf = (graph: unknown, subject: DoorSubject): number => {
   const e = riskOccurrenceSubject(graph, subject.id);
   return e.kind === 'eligible' ? e.window_months : 0;
 };
-const statedWindow = (months: number): string => `within the next ${months === 1 ? 'month' : `${months} months`} from today`;
 
 /** AIE 6179240850: the user's own chance of the risk happening at least once within the goal's window from today. */
 export const RISK_OCCURRENCE_ROW: RoleRow = {
@@ -135,7 +134,7 @@ export const RISK_OCCURRENCE_ROW: RoleRow = {
   applies: isRisk,
   read: readOccurrence,
   readingWords: (s, subject, label, graph) => `your estimate of ${chanceAsStated(s[0]!)} that ‘${label.trim()}’ happens at least once `
-    + statedWindow(windowOf(graph, subject)),
+    + statedWindowMonthsWords(windowOf(graph, subject)),
   assumptions: (_s, subject, graph) => [effectAssumption(subject, graph)],
   // Said after the write, so its window is the block the risk now holds (its own window, as recorded).
   recordedWords: (s, subject, label, graph) => {
