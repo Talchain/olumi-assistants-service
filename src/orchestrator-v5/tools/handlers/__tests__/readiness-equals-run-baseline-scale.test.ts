@@ -26,6 +26,7 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { applyFactorValueEdit } from '../../../system-events/factor-value-edit.js';
 import { recoverScaleFrame } from '../d1-shared/scale-frame.js';
 import { committedValueWrite } from '../../../agent-lane/__tests__/fixtures/served-value-write.js';
+import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
 
 // The drafter-raw recorder writes its own table; it is a recorder, not logic.
 vi.mock('../../../drafter-raw/index.js', () => ({
@@ -139,6 +140,12 @@ describe('readiness ≡ Run on a level recorded with no scale (the Run\'s baseli
           expect(own.refusal ?? '').not.toMatch(/baseline_scale_unresolved/);
         }
         if (v === 'bare') expect(asked.map((i) => i.factor_id)).toContain(id);
+        // Said as it is held: the factor's own unit when it has one (only the range is missing), else both are asked for.
+        const unit = (g.nodes as Rec[]).find((n) => n.id === id)?.observed_state?.unit as string | undefined;
+        for (const i of asked.filter((x) => x.factor_id === id)) {
+          if (unit) expect(i.message).toContain(`It is recorded as 250 ${unit} with no range`);
+          else expect(i.message).toContain('It is recorded as 250 with no unit or range');
+        }
         if (asked.length > 0) {
           expect(asked.every((i) => i.repairability === 'human_input_required')).toBe(true);
           const served = await run(g);
@@ -148,6 +155,15 @@ describe('readiness ≡ Run on a level recorded with no scale (the Run\'s baseli
       });
     }
   }
+});
+
+describe('the ask says what is actually missing', () => {
+  it('a level held WITH a unit but no range is asked for its range in that unit, never told it has no unit (D1 \u2018Headcount\u2019 12 people)', () => {
+    const asked = assessCanonicalAnalysisReadiness(buildD1Fixture()).blockingIssues.filter((i) => i.code === CODE);
+    expect(asked.map((i) => i.factor_id)).toEqual(['f-uncapped']);
+    expect(asked[0]!.message).toBe('What range could "Headcount" be in, in people? It is recorded as 12 people with no range, so the '
+      + 'analysis cannot use it yet. A rough upper end is fine if you are not sure.');
+  });
 });
 
 /**

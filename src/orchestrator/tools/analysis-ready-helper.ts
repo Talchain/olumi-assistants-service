@@ -1551,7 +1551,7 @@ function appendSemanticIssues(
  * values marked CEE-supplied as the Run marks them.
  */
 function runScaleGaps(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload):
-  { reason: 'baseline_scale_unresolved'; gaps: Array<{ id: string; label: string; value: number }> } | null {
+  { reason: 'baseline_scale_unresolved'; gaps: Array<{ id: string; label: string; value: number; unit?: string }> } | null {
   const { options, held } = runSubmission(graph, rawGraph, payload);
   const raw = options.map((o) => (isPlainObject(o.interventions) ? o.interventions as Record<string, unknown> : {}));
   const heldBy = new Map(held.map((r) => [r.option_id, new Set(r.factor_ids)] as const));
@@ -1562,9 +1562,10 @@ function runScaleGaps(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReady
   if (ids.length === 0) return null;
   const verdict = { reason_code: 'baseline_scale_unresolved' as const, unresolvedFactorIds: ids };
   return { reason: verdict.reason_code, gaps: verdict.unresolvedFactorIds.map((id) => {
-    const node = graph.nodes.find((n) => n.id === id) as { label?: unknown; observed_state?: { value?: unknown; raw_value?: unknown } } | undefined;
+    const node = graph.nodes.find((n) => n.id === id) as { label?: unknown; observed_state?: { value?: unknown; raw_value?: unknown; unit?: unknown } } | undefined;
     const v = node?.observed_state?.raw_value ?? node?.observed_state?.value;
-    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(v) };
+    const unit = typeof node?.observed_state?.unit === 'string' && node.observed_state.unit.trim() !== '' ? node.observed_state.unit.trim() : undefined;
+    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(v), ...(unit !== undefined ? { unit } : {}) };
   }) };
 }
 
@@ -1756,8 +1757,12 @@ export function assessCanonicalAnalysisReadiness(
         issue_id: `level_scale_${index + 1}`,
         code: 'FACTOR_LEVEL_SCALE_UNRESOLVED',
         category: 'numeric_integrity',
-        message: `What is "${gap.label}" today, in its own unit (for example £ per year, %, or a count)? It is recorded as ${gap.value} `
-          + 'with no unit or range, so the analysis cannot use it yet. A range is fine if you are not sure.',
+        // Said as it is held: a level with a unit lacks only its range; a bare number lacks both.
+        message: gap.unit !== undefined
+          ? `What range could "${gap.label}" be in, in ${gap.unit}? It is recorded as ${gap.value} ${gap.unit} with no range, so the `
+            + 'analysis cannot use it yet. A rough upper end is fine if you are not sure.'
+          : `What is "${gap.label}" today, in its own unit (for example £ per year, %, or a count)? It is recorded as ${gap.value} `
+            + 'with no unit or range, so the analysis cannot use it yet. A range is fine if you are not sure.',
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,
