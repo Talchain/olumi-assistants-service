@@ -5753,6 +5753,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         reply = 'The analysis did not run. Press Run to try again.';
         wireBody = { ...wireBody, suggested_actions: firstOfEachId([RUN_OFFER_CHIP, ...(wireBody.suggested_actions ?? [])]) };
       }
+      if (aiRunTurn) reply = withoutUnsizedLinkInvitation(reply, analysisResult);
       // Every prose writer, including cell-owned horizons and the build's Run risk marker, crosses the ONE chokepoint
       // before shaping, history and storage. The unchanged-body branch below retains this same gated carrier.
       wireBody = withEstimateGoalPointsAtEgress({ ...wireBody, assistant_text: reply }, {
@@ -5761,8 +5762,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
       });
-      if (aiRunTurn) wireBody = { ...wireBody,
-        assistant_text: withoutUnsizedLinkInvitation(String(wireBody.assistant_text ?? ''), analysisResult) };
       reply = String(wireBody.assistant_text ?? '');
       const horizonLine = faceContract === 'run' && chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
         ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
