@@ -14,6 +14,7 @@ import type { DoorWriteMember, FieldWriter } from './write.js';
 import { MEASURE_ROW } from './fields/measure.js';
 import { TIMING_ROW } from './fields/goal-timing.js';
 import { RISK_HOLDS_NOW_ROW, RISK_OCCURRENCE_ROW } from './fields/risk.js';
+import { COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW } from './fields/cohort-relation.js';
 
 /** A field reader's reading of one statement: the form, the figure's ends (absent for a figure-free form) and a qualifier. */
 export interface DoorFigure {
@@ -42,10 +43,20 @@ export interface RoleRow {
   readonly carrier: DoorWriteMember;
   /** Whether this row reads statements about this subject (its kind and the graph's structure); never by elimination. */
   readonly applies: (subject: DoorSubject, graph: unknown) => boolean;
+  /**
+   * The other subjects whose asks a statement about this subject may answer (SCIENCE AMEND (d)): a cohort option's "the same
+   * people" answers the GOAL's same-people question, asked once for every option. Absent: only this subject's own asks.
+   */
+  readonly answersFor?: (subject: DoorSubject, graph: unknown) => readonly DoorSubject[];
   /** The adapter onto `carrier`: the verified reading → ONE write, or the reason the carrier cannot hold it. */
   readonly writer: FieldWriter;
   /** A sentence the model already holds as this subject's ADMITTED source for this field (the brief's own words): bound by it. */
   readonly sourceOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
+  /**
+   * Forms recorded only from the words the user typed in THIS turn, the message that answers Olumi's ask (AIE 6174707160 and
+   * 6176433015: two conversion figures are the user's one-in-four estimates only as their answer to that question). `detail` says why not.
+   */
+  readonly answerTypedNow?: { readonly forms: readonly StatementForm[]; readonly detail: (subject: DoorSubject, label: string, graph: unknown) => string };
   /** Olumi's reading of the statement, as the card says it ("your estimate of about 30% that ‘X’ happens …"). */
   readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
   /** Every derived interpretation or separate Olumi assumption the reading rests on, each said once, before the card's question. */
@@ -77,8 +88,8 @@ export interface RoleRow {
   readonly signed_by: string;
 }
 
-/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now". */
-export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW];
+/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now"; M4 a cohort option's relation and the goal's same-people relation. */
+export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW];
 export const rowKey = (r: Pick<RoleRow, 'field' | 'carrier'>): string => `${r.field}:${r.carrier}`;
 
 /** The ONE row for this subject: its field, and the one row whose `applies` holds. None, or more than one, is no row. */

@@ -144,6 +144,7 @@ export interface ProposalOperation {
      * answer, verified S2 statements. Written only through the atomic level door's `cohort_forecast` member, alone, card-only.
      */
     | 'set_cohort_forecast'
+    | 'set_goal_relation'
     | 'set_team_time'
     /** E5 (SYS1): each capacity option's hiring times; field-scoped like `set_team_time` (`scoped_precondition_holds`). */
     | 'set_hiring_times'
@@ -333,7 +334,7 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   // G: the answer to the goal's open question about its reading is the user's choice on the card that shows that reading.
   return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
     // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
-    || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_option_capacity_change'
+    || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_goal_relation' || op.op === 'set_option_capacity_change'
     // A user's statement through the ONE door is recorded only by the press on the card that quotes it.
     || op.op === 'record_statement'
     || op.op === 'set_option_intervention'

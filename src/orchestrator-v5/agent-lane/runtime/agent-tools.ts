@@ -534,7 +534,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description: 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
       + 'field, and the complete statement with its actual speaker/source, qualifications, negation, conditions, reference and window; reuse '
       + 'a retained applicable statement rather than asking for it again. This door currently supports a risk\u2019s occurrence estimate and '
-      + 'its current-condition reading. Olumi proposes the interpretation; a complete quote or matching label alone does not verify it. Do not '
+      + 'its current-condition reading; an option\u2019s forecast of how many people it reaches over the goal\u2019s window, with the '
+      + 'user\u2019s lower and upper conversion estimates only as their answer, in this message, to Olumi\u2019s one-in-four question for '
+      + 'that option (answering set to that question exactly as asked; subject the option, field relation); and the user\u2019s answer '
+      + 'that a goal\u2019s count target counts people among the same people its rate target is measured on (subject the goal, field relation). Olumi proposes the interpretation; a complete quote or matching label alone does not verify it. Do not '
       + 'supply an Olumi estimate here or substitute a different event, quantity or time window. If the meaning or current carrier is '
       + 'unsupported, retain the original statement and explain that exact gap. This tool prepares one card and changes nothing. Only the '
       + 'bound approval records its complete shown postimage; a successful committed change then follows the existing automatic analysis '
@@ -573,39 +576,6 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           answering: { type: 'string', description: 'Only when the statement answers a question you asked: what that question was about, in your words (for example "the likely upper end"). It is shown as context on the card, never as the user\u2019s words.' },
         }, ['quote', 'form']) },
     }, []),
-  },
-  {
-    // ⭐ AIE same-cohort law (science PR-4b, `goal-target/cohort-forecast-write.ts`): ONE option's cohort forecast, the user's words only.
-    type: 'function', name: 'propose_cohort_forecast',
-    description: 'Record ONE option\u2019s forecast of the people it reaches, so the chance of meeting a goal\u2019s two targets together '
-      + '(a percentage of the people reached AND a count of them over the same window, for example conversion above 15% and 20 new '
-      + 'customers within three months of launch) can be calculated on the same people. Use only the user\u2019s own words, from any '
-      + 'of their messages, each their complete statement copied exactly. people: how many people this option reaches over the '
-      + 'goal\u2019s window, with value. conversion: their two estimates, given in this message as the answer to Olumi\u2019s question '
-      + '"For \u2018<option>\u2019, among the people it reaches during <window>, what lower and upper estimates of the underlying '
-      + 'conversion rate would leave, in your judgement, about a one-in-four chance that the rate is below the lower estimate and a '
-      + 'one-in-four chance that it is above the upper estimate?", with low and high in percent and answering set to that question as '
-      + 'asked. A range they gave any other way is kept as they said it and is never read as these estimates. If they cannot judge '
-      + 'those chances, keep their range and offer to look at a comparable past campaign instead. same_cohort: '
-      + 'their statement that the customers come from the same people the conversion is measured on. Never estimate or fill in any '
-      + 'of these yourself. Call once per option: every option, carrying on as now included, needs its own. This prepares a card; '
-      + 'only the user\u2019s press on it records the forecast.',
-    parameters: obj({
-      option_label: { type: 'string', description: 'The option exactly as the model labels it.' },
-      people: obj({
-        quote: { type: 'string', description: 'The user\u2019s complete statement of how many people this option reaches, copied exactly.' },
-        value: { type: 'number', exclusiveMinimum: 0, description: 'That number of people, as the quote states it.' },
-      }, ['quote', 'value']),
-      conversion: obj({
-        quote: { type: 'string', description: 'The user\u2019s complete answer to the one-in-four question, copied exactly from this message.' },
-        low: { type: 'number', exclusiveMinimum: 0, description: 'Its lower end, in percent.' },
-        high: { type: 'number', exclusiveMinimum: 0, description: 'Its upper end, in percent.' },
-        answering: { type: 'string', description: 'The one-in-four question exactly as asked, with this option and the goal\u2019s window filled in.' },
-      }, ['quote', 'low', 'high', 'answering']),
-      same_cohort: obj({
-        quote: { type: 'string', description: 'The user\u2019s complete statement that the customers come from the same people the conversion is measured on.' },
-      }, ['quote']),
-    }, ['option_label', 'people', 'conversion', 'same_cohort']),
   },
   {
     // ⭐ E5 (Paul's manual test, 12 Oct): the start of each person an option adds, quoted; Olumi reads the months (`hiring-times.ts`).
@@ -963,7 +933,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -1049,7 +1019,6 @@ export interface AgentCapabilities {
   proposeStatement?(ctx: AgentToolContext, args: { subject?: unknown; statements?: unknown }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months?: number; high_months?: number; statements?: readonly StatementArgs[] }): Promise<ToolResult>;
-  proposeCohortForecast?(ctx: AgentToolContext, args: { option_label?: unknown; people?: unknown; conversion?: unknown; same_cohort?: unknown }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
   proposeHiringTimes?(ctx: AgentToolContext, args: { options: { option_id: string; starts: { quote: string; months?: number }[] }[] }): Promise<ToolResult>;
   /** The coaching loop: the user's new figure for a share of time an unresolved option changes, on ONE card. */
@@ -1228,8 +1197,6 @@ async function dispatchToolUnbounded(
       return caps.proposeStatement !== undefined ? caps.proposeStatement(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_team_time':
       return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
-    case 'propose_cohort_forecast':
-      return caps.proposeCohortForecast !== undefined ? caps.proposeCohortForecast(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_hiring_times':
       return caps.proposeHiringTimes !== undefined ? caps.proposeHiringTimes(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_option_capacity_change':
