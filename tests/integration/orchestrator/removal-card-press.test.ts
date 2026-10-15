@@ -78,7 +78,12 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
 
   function world() {
     const store = new mods.ProposalStore();
-    const read = async () => ({ status: 200, json: { graph: persisted, graph_hash: hash() } });
+    let pending: (() => void) | undefined;
+    const read = async () => {
+      const at = { status: 200, json: { graph: structuredClone(persisted), graph_hash: hash() } };
+      const then = pending; pending = undefined; then?.();
+      return at;
+    };
     const caps = mods.createAgentCapabilities(read as never, store, undefined, 'full', undefined, {
       commitStructuralDelete: (input) => mods.commitStructuralDeleteInProcess(input, 'req-remove'),
     });
@@ -87,7 +92,7 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
       await mods.dispatchTool('propose_removal', JSON.stringify(args), ctx(said) as never, caps) as Rec;
     const press = async (proposalId: string, typed = true): Promise<Rec> => await caps.authoriseChange({ ...ctx('Yes, remove it.'),
       ...(typed ? { typed_approval_of: proposalId } : {}) } as never, { proposal_id: proposalId }) as Rec;
-    return { store, propose, press };
+    return { store, propose, press, afterNextRead: (f: () => void) => { pending = f; } };
   }
 
   it('RED (hiring): "Remove hiring spend" → ONE card saying what goes with it; the press removes it in ONE commit', async () => {
@@ -158,7 +163,18 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
     const tl = g().nodes.find((n: Rec) => n.id === 'hire_a_tech_lead').interventions.tech_leads;
     if (typeof tl === 'object' && tl !== null) tl.value = Number(tl.value ?? 0) + 1; else g().nodes.find((n: Rec) => n.id === 'hire_a_tech_lead').interventions.tech_leads = 2;
     const out = await w.press(card.proposal_id);
-    expect(out.ok, JSON.stringify(out)).toBe(false);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(nodeIds()).toContain('hiring_spend');
+    expect(rows.size).toBe(0);
+  });
+
+  it('CONTRAST: a write landing after the approval check, before the removal → the door refuses on the card\'s base; nothing removed', async () => {
+    const w = world();
+    const card = await w.propose(FACTOR_ASK, { kind: 'factor', label: 'Hiring spend', quote: FACTOR_ASK });
+    // The press reads the model once to check the card; another write lands right after that read.
+    w.afterNextRead(() => { g().nodes.find((n: Rec) => n.id === 'hire_a_tech_lead').interventions.tech_leads.raw_value = 2; });
+    const out = await w.press(card.proposal_id);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false, applied: false, refusal: 'superseded' });
     expect(nodeIds()).toContain('hiring_spend');
     expect(rows.size).toBe(0);
   });
