@@ -28,7 +28,7 @@ import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { goalReadingProjectionOf } from '../../goal-target/goal-reading-write.js';
 import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurrence.js';
 import { asMemberOp } from '../../statement-door/door.js';
-import { cohortForecastCardHolds, goalRelationCardHolds, SET_COHORT_FORECAST_OP, SET_GOAL_RELATION_OP } from '../../goal-target/cohort-forecast-write.js';
+import { cohortForecastCardHolds, statementRecordCardHolds, SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP } from '../../goal-target/cohort-forecast-write.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -78,7 +78,7 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   // A cohort forecast card: its own writer's gate (the option as shown, the two targets as read).
   if (op.op === SET_COHORT_FORECAST_OP) return cohortForecastCardHolds(op, graph);
   // The goal's same-people card: its own writer's gate (the goal as shown).
-  if (op.op === SET_GOAL_RELATION_OP) return goalRelationCardHolds(op, graph);
+  if (op.op === SET_STATEMENT_RECORD_OP) return statementRecordCardHolds(op, graph);
   return false;
 }
 
@@ -92,7 +92,7 @@ export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, 
   const op = asMemberOp(p.operations[0]!) ?? p.operations[0]!;
   if (op.op === SET_RISK_OCCURRENCE_OP) return !riskOccurrenceCardHolds(op, graph);
   if (op.op === SET_COHORT_FORECAST_OP) return !cohortForecastCardHolds(op, graph);
-  if (op.op === SET_GOAL_RELATION_OP) return !goalRelationCardHolds(op, graph);
+  if (op.op === SET_STATEMENT_RECORD_OP) return !statementRecordCardHolds(op, graph);
   return op.op === 'set_goal_deadline' && deadlineSubjectHolds(op, graph) === false;
 }
 

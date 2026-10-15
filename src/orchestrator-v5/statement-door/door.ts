@@ -18,7 +18,7 @@ import { SET_OPTION_CAPACITY_CHANGE_OP } from '../goal-target/option-capacity-ch
 import { timingAskOf } from './fields/goal-timing.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { cohortForecastAsks } from './fields/cohort-relation.js';
-import { SET_COHORT_FORECAST_OP, SET_GOAL_RELATION_OP } from '../goal-target/cohort-forecast-write.js';
+import { SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP } from '../goal-target/cohort-forecast-write.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -71,8 +71,8 @@ export function asMemberOp(op: { readonly op: string; readonly value?: unknown }
   if (card.member === 'cohort_forecast' && typeof card.payload.option_id === 'string') {
     return { op: SET_COHORT_FORECAST_OP, path: card.payload.option_id, value: card.payload };
   }
-  if (card.member === 'goal_relation' && typeof card.payload.goal_id === 'string') {
-    return { op: SET_GOAL_RELATION_OP, path: card.payload.goal_id, value: card.payload };
+  if (card.member === 'statement_record' && typeof card.payload.node_id === 'string') {
+    return { op: SET_STATEMENT_RECORD_OP, path: card.payload.node_id, value: card.payload };
   }
   // M5: the option-capacity member's own registered revision (`applyOptionCapacityChange`), keyed by the option.
   if (card.member === 'option_capacity' && typeof card.payload.option_id === 'string') {
