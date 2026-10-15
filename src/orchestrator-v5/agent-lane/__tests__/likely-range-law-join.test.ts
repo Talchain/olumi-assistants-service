@@ -24,6 +24,7 @@ import { readStatement } from '../../statement-door/read.js';
 import { doorCardWords, DOOR_DERIVED_APPROVE } from '../../statement-door/card.js';
 import { RANGE_LAW_ROW } from '../../statement-door/fields/range-law.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord } from '../../statement-door/statements.js';
+import type { ProposalOperation } from '../proposal.js';
 import { LIKELY_RANGE_LAW_NOTE, rangeLawsOfCard, STATED_RANGE_CARD_CLOSING, statedRangeAssumptionWords } from '../runtime/agent-capabilities.js';
 
 type Rec = Record<string, any>;
@@ -203,7 +204,7 @@ describe('the limit row on the served cloud brief: withheld on the user\'s unado
 });
 
 describe('the level card\'s press adopts only the approximation the card showed whole (`rangeLawsOfCard`)', () => {
-  const op = { op: 'set_option_intervention', path: `switch_to_gcp::${TARGET}`,
+  const op: ProposalOperation = { op: 'set_option_intervention', path: `switch_to_gcp::${TARGET}`,
     value: { normalised: 0.3, raw: 3, unit: 'weeks', likely_range: { low: 2, high: 5 }, range_quote: 'somewhere between 2 and 5 weeks' } };
   const shown = `Switch to GCP sets Migration downtime to 3 weeks${statedRangeAssumptionWords('2 weeks', '5 weeks')}. ${STATED_RANGE_CARD_CLOSING}`;
   it('RED: the template for those ends and the closing were shown → one adoption, the exact ends, the user\'s words', () => {
