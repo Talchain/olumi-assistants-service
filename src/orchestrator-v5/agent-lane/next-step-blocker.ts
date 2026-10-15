@@ -14,7 +14,7 @@ import { jointBlockerOf, olumiBaseTargetsOf } from '../goal-target/goal-targets-
 import { goalTargetMissingBlockerOf, isChanceGoalModel } from './decision-input-ask.js';
 import { oneNextStep, type PressBlocker } from './press-next-step.js';
 import { riskOccurrenceSubject } from './risk-occurrence.js';
-import { staleBlockerOf } from './write-outcome.js';
+import { staleBlockerOf, staleOnlyByRangeReading } from './write-outcome.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -67,7 +67,7 @@ export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null
     goalTargetMissingBlockerOf(read.raw),
     // Ahead of every later-stage ask (the first producer of a kind wins): only this figure lets the Run start.
     runWithheldBlockerOf(read.raw, read.analysis_ready),
-    staleBlockerOf(read.analysis_state, read.analysis_ready),
+    staleBlockerOf(read.analysis_state, read.analysis_ready, staleOnlyByRangeReading(read.raw, read.analysis_result)),
     parts === null ? null : targetBlockerOf(parts),
     joint === undefined ? null : jointBlockerOf(Math.max(named.length + (targets?.unsupported_targets?.length ?? 0), 2),
       joint.reason, targets?.unsupported_targets ?? [], olumiBaseTargetsOf(read.raw, named)),

@@ -43,9 +43,11 @@ describe('interim: a summary Olumi\'s own existence prior could have produced is
     expect(l.leader_option_id).toBe('a');
     expect(l).not.toHaveProperty('summary_withheld');
   });
-  it('a HELD user link at 0.8 (range excludes zero) is the user\'s, not Olumi\'s doubt → "highest" stands', () => {
+  // ⛔ SCIENCE C1 (AIE 6180618773): a range excluding zero does not prove the link exists, so the user's ranged link is not held.
+  it('⛔ C1: a user link at 0.8 whose range excludes zero is NOT held: its 0.8 is the stored default doubt → `each`', () => {
     const l = lic(env(['a', 0.5], ['b', 0.35]), graph([heldUser('price', 'customers'), link('customers', 'mrr', 1)]));
-    expect(l.form).toBe('highest');
+    expect(l.form).toBe('each');
+    expect(l.summary_withheld).toEqual({ cause: 'olumi_existence_assumption', form: 'highest' });
   });
   it('an IDENTITY edge at 0.8 is fixed by ISL → "highest" stands', () => {
     const g = graph([link('price', 'customers', 1), link('customers', 'mrr', 0.8)]);

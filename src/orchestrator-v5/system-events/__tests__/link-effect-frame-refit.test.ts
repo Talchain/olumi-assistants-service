@@ -448,19 +448,22 @@ describe('S5t receipt: a refit is said once, in Science\'s words', () => {
  * in their own units, is unchanged. Mutant: the refit leaves `natural_effect.strength_mean` → no longer held → RED.
  */
 describe('S5t × hold-at-1.0: a refit keeps a held user sibling held, its spread in natural units unchanged', () => {
-  it('HELD SIBLING: still held after the refit; held std × 3.5M / 5M', () => {
+  // ⛔ SCIENCE C1 (AIE 6180618773): a range no longer holds now; the refit must still keep the range's natural-unit spread for the
+  // 'pre_c1' history era (a model version recorded then still validates), so the rule is read there.
+  it('HELD SIBLING (pre-C1 era): still held after the refit; held std × 3.5M / 5M; C1: never range-held now', () => {
     const g = FIXTURE();
     const sib = edge2(g, 'integration_step_abandonment_rate', 'quarterly_revenue');
     sib.provenance = { source: 'brief_extraction', magnitude: 'user_stated',
       source_quote: 'Each 1% more integration-step abandonment costs about £10,000 a quarter, somewhere between £5,000 and £15,000.',
       natural_effect: { ...sib.provenance.natural_effect, stated_range: { low: -15000, high: -5000 } } };
-    const before = heldLinkOf(sib, endsOfGraph(g)(sib));
+    expect(heldLinkOf(sib, endsOfGraph(g)(sib))?.reason, 'C1').not.toBe('user_range');
+    const before = heldLinkOf(sib, endsOfGraph(g, 'pre_c1')(sib), 'pre_c1');
     expect(before, 'precondition: the sibling is held before the refit').not.toBeNull();
     const r = write(g);
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
     const sibAfter = edge2(r.mutatedGraph as Rec, 'integration_step_abandonment_rate', 'quarterly_revenue');
-    const after = heldLinkOf(sibAfter, endsOfGraph(r.mutatedGraph)(sibAfter));
+    const after = heldLinkOf(sibAfter, endsOfGraph(r.mutatedGraph, 'pre_c1')(sibAfter), 'pre_c1');
     expect(after).not.toBeNull();
     // Rule R adds a `route_once` hold whose std may be absent; this sibling is held by its own RANGE, before and after.
     expect([before?.reason, after?.reason]).toEqual(['user_range', 'user_range']);

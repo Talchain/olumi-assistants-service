@@ -3,6 +3,11 @@
  * zero holds at exists_probability 1.0 on the Run's input, with sd_β = |β(high) − β(low)| / 3.29 and the mean left at the
  * STATED value. One function: the PLoT payload, the licence's existence flag and the input snapshot all read it; the
  * persisted graph is untouched. No range → no hold (never mean ± k·std: circular).
+ *
+ * ⛔ SCIENCE C1 (AIE-signed table 6180618773): a bare range is not a calibrated central 90% Normal interval, and a range
+ * excluding zero does not prove existence. The CURRENT era holds no user range; the range rule below survives only as the
+ * 'pre_c1' history era, so a model version or Run recorded under it still validates. Rows that test the range rule's
+ * arithmetic read that era; rows that test what the Run and the model readers USE now keep the stored link.
  */
 import { describe, expect, it } from 'vitest';
 import { endsOfGraph, heldLinkOf, isUserStatedLink, labelHoldsQuantity, validatedDefinition, withHeldUserLinks, type LinkEnds } from '../held-user-links.js';
@@ -23,17 +28,23 @@ const NO_ENDS: LinkEnds = { routeOnce: false, fromLabel: undefined, toLabel: und
 const sdOf = (low: number, high: number): number => Math.abs(0.3 * (high / 20) - 0.3 * (low / 20)) / 3.29;
 
 describe('hold-at-1.0: a user link whose own range excludes zero holds on the Run input', () => {
-  it('HELD: user-sized, range 20 to 40 → exists 1.0, sd_β = |β(40) − β(20)| / 3.29, the mean stays the stated β', () => {
+  it('PRE-C1 HISTORY: user-sized, range 20 to 40 → held, sd_β = |β(40) − β(20)| / 3.29', () => {
     const e = userLink('price', 'subs', ranged(20, 40));
-    expect(heldLinkOf(e, NO_ENDS)).toEqual({ reason: 'user_range', std: sdOf(20, 40) });
-    const g = withHeldUserLinks({ nodes: [], edges: [e] });
-    expect(g.edges[0].exists_probability).toBe(1);
-    expect(g.edges[0].strength.std).toBeCloseTo(sdOf(20, 40), 12);
-    // Mutant "midpoint mean" → RED: the mean is the user's stated end, never (low + high) / 2.
-    expect(g.edges[0].strength.mean).toBe(0.3);
+    expect(heldLinkOf(e, NO_ENDS, 'pre_c1')).toEqual({ reason: 'user_range', std: sdOf(20, 40) });
   });
-  it('a NEGATIVE range (−40 to −20) excludes zero too → held', () => {
-    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS)).toEqual({ reason: 'user_range', std: sdOf(-40, -20) });
+  it('⛔ C1: the same bare range holds NOTHING now: the Run input is the stored link (0.8, its own spread, the stated β)', () => {
+    const e = userLink('price', 'subs', ranged(20, 40));
+    expect(heldLinkOf(e, NO_ENDS)).toBeNull();
+    const g = { nodes: [], edges: [e] };
+    const out = withHeldUserLinks(g);
+    expect(out).toBe(g);
+    expect(out.edges[0]).toMatchObject({ exists_probability: 0.8, strength: { mean: 0.3, std: 0.15 } });
+    // The range stays recorded on the link (its source is kept; nothing is re-elicited).
+    expect(out.edges[0].provenance.natural_effect.stated_range).toMatchObject({ low: 20, high: 40 });
+  });
+  it('PRE-C1 HISTORY: a NEGATIVE range (−40 to −20) excludes zero too → held', () => {
+    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS, 'pre_c1')).toEqual({ reason: 'user_range', std: sdOf(-40, -20) });
+    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS), 'C1: not now').toBeNull();
   });
   it('CONTRAST: a range that STRADDLES zero (−5 to 10) → not held, the edge is byte-identical', () => {
     const e = userLink('price', 'subs', ranged(-5, 10, 10));
@@ -50,35 +61,41 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
     expect(heldLinkOf(userLink('price', 'subs', ne), NO_ENDS)).toBeNull();
     expect(heldLinkOf(userLink('price', 'subs', undefined), NO_ENDS)).toBeNull();
   });
-  it('CLASS: an Olumi estimate carrying a range → not held; a brief-quoted link → held; brief WITHOUT its quote → not', () => {
+  it('PRE-C1 HISTORY CLASS: an Olumi estimate carrying a range → not held; a brief-quoted link → held; brief WITHOUT its quote → not', () => {
     const olumi = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(olumi, NO_ENDS)).toBeNull();
+    expect(heldLinkOf(olumi, NO_ENDS, 'pre_c1')).toBeNull();
     const brief = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'brief_extraction', source_quote: 'each £1 brings 20 to 40 subscribers', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(brief, NO_ENDS)).toEqual({ reason: 'user_range', std: sdOf(20, 40) });
-    expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } }, NO_ENDS)).toBeNull();
+    expect(heldLinkOf(brief, NO_ENDS, 'pre_c1')).toEqual({ reason: 'user_range', std: sdOf(20, 40) });
+    expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } }, NO_ENDS, 'pre_c1')).toBeNull();
+    expect(heldLinkOf(brief, NO_ENDS), 'C1: the quoted range holds nothing now').toBeNull();
   });
   it('the PERSISTED graph is never written: the input is not mutated and a held graph is a new object', () => {
-    const e = userLink('price', 'subs', ranged(20, 40));
-    const g = { nodes: [], edges: [e] };
+    // C1: a range no longer holds, so a validated definition is the held link here (the copy rule is the same).
+    const e = { from: 'part', to: 'total', strength: { mean: 1, std: 0.5 }, exists_probability: 0.8, provenance: { definitional: true,
+      source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 1, amount_unit: '£/month', per_source_change: 1,
+        per_source_change_unit: '£/month', strength_mean: 1, strength_mean_frame: 'edge_strength' } } };
+    const g = { nodes: [{ id: 'part', label: 'Starter-tier MRR' }, { id: 'total', label: 'monthly recurring revenue', observed_state: { unit: '£/month' } }], edges: [e] };
     const before = structuredClone(g);
     const out = withHeldUserLinks(g);
     expect(out).not.toBe(g);
+    expect(out.edges[0].exists_probability).toBe(1);
     expect(g).toEqual(before);
   });
-  it('MC 21\'s RESHAPED link (DL: hold → MC PR-1): switch × count, "about 150, between 80 and 250" (end: centre) → held', () => {
+  it('PRE-C1 HISTORY: MC 21\'s RESHAPED link: switch × count, "about 150, between 80 and 250" (end: centre) → held; C1: not now', () => {
     // The mean is the stated POINT (150), never the range's midpoint (165); each end maps through the same per-unit β.
     const beta150 = 0.45;
     const ne = { amount: 150, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: beta150,
       strength_mean_frame: 'edge_strength', stated_range: { low: 80, high: 250, text: 'about 150, between 80 and 250', end: 'centre' } };
     const e = userLink('switch', 'subs', ne);
     const sd = Math.abs(beta150 * 250 / 150 - beta150 * 80 / 150) / 3.29;
-    expect(heldLinkOf(e, NO_ENDS)?.std).toBeCloseTo(sd, 12);
+    expect(heldLinkOf(e, NO_ENDS, 'pre_c1')?.std).toBeCloseTo(sd, 12);
     const out = withHeldUserLinks({ nodes: [], edges: [e] });
-    expect(out.edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: beta150 } });
+    expect(out.edges[0]).toMatchObject({ exists_probability: 0.8, strength: { mean: beta150, std: 0.15 } });
   });
-  it('mutant "default spread on a held link" → RED: the held std is the range\'s, never the edge\'s prior 0.15', () => {
+  it('⛔ C1: no width/3.29 on the Run input: a ranged user link keeps its stored spread, never the range\'s', () => {
     const out = withHeldUserLinks({ nodes: [], edges: [userLink('price', 'subs', ranged(20, 40))] });
-    expect(out.edges[0].strength.std).not.toBe(0.15);
+    expect(out.edges[0].strength.std).toBe(0.15);
+    expect(out.edges[0].strength.std).not.toBeCloseTo(sdOf(20, 40), 6);
   });
 });
 
@@ -90,16 +107,16 @@ describe('the licence reads the SAME hold: a held link never counts as Olumi\'s 
     { id: 'b', kind: 'option', label: 'Starter', interventions: { price: { value: 0.4 } } },
   ], edges });
   const env = { option_comparison: [['a', 0.5], ['b', 0.35]].map(([id, p]) => ({ option_id: id, id, probability_of_goal: p, win_probability: 0.5 })), inference_warnings: [] };
-  it('TWIN (the deterministic line-absent case): both path links ranged off zero → no flag', () => {
+  it('⛔ C1 TWIN: both path links ranged off zero → the range proves no existence, so the first doubt counts as with no range', () => {
     const edges = [userLink('price', 'subs', ranged(20, 40)), userLink('subs', 'mrr', ranged(20, 40))];
-    expect(userStatedLinksBelowOne(graph(edges), 'mrr', ['a', 'b'])).toEqual([]);
-    expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toBeUndefined();
+    expect(userStatedLinksBelowOne(graph(edges), 'mrr', ['a', 'b'])).toMatchObject([{ from: 'price', to: 'subs' }]);
+    expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
   });
   it('CONTRAST: the same links with no range → first doubt counted, downstream route-once-held', () => {
     const edges = [userLink('price', 'subs', undefined), userLink('subs', 'mrr', undefined)];
     expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
   });
-  it('one held, one not → the count is the unheld one only', () => {
+  it('C1: one ranged, one not → the count is still one (the ranged first link is the doubt; the downstream is route-once held)', () => {
     const edges = [userLink('price', 'subs', ranged(20, 40)), userLink('subs', 'mrr', undefined)];
     expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
   });
@@ -125,15 +142,15 @@ describe('the Run sends PLoT the held copy (wire only); the persisted graph keep
       persisted: snapshot.rawPersistedGraph.edges.find((x: Rec) => x.from === 'paying_subscribers' && x.to === 'mrr') };
   };
 
-  it('a ranged user link (20 to 40) → PLoT gets exists 1.0 and the range\'s sd at the stated mean; the stored link keeps 0.8', async () => {
+  it('⛔ C1: a ranged user link (20 to 40) → PLoT gets the stored link (0.8, its own spread) at the stated mean', async () => {
     const { wire, persisted } = await sendOn((e) => {
       e.strength = { mean: 0.3, std: 0.15 };
       e.exists_probability = 0.8;
       e.provenance = { source: 'user_specified', magnitude: 'user_stated', natural_effect: ranged(20, 40) };
     });
-    expect(wire.exists_probability).toBe(1);
+    expect(wire.exists_probability).toBe(0.8);
     expect(wire.strength.mean).toBe(0.3);
-    expect(wire.strength.std).toBeCloseTo(sdOf(20, 40), 12);
+    expect(wire.strength.std).toBe(0.15);
     expect(persisted.exists_probability).toBe(0.8);
     expect(persisted.strength.std).toBe(0.15);
   });
@@ -150,7 +167,7 @@ describe('the Run sends PLoT the held copy (wire only); the persisted graph keep
     expect(wire.strength.std).toBe(0.15);
   });
 
-  it('ORDER: a stored CLAMP with a range → the full β is restored first, then the range sets the sd (never rescaled by the restore)', async () => {
+  it('ORDER (C1): a stored CLAMP with a range → the full β is restored; the range sets neither the sd nor existence', async () => {
     const full = 4.61;
     const { wire } = await sendOn((e) => {
       e.strength = { mean: 1, std: 0.5 };
@@ -160,8 +177,8 @@ describe('the Run sends PLoT the held copy (wire only); the persisted graph keep
           strength_mean_frame: 'edge_strength', stated_range: { low: 49, high: 69, text: '£49 to £69', end: 'low' } } };
     });
     expect(wire.strength.mean).toBe(full);
-    expect(wire.exists_probability).toBe(1);
-    expect(wire.strength.std).toBeCloseTo(Math.abs((69 - 49) * full / 49) / 3.29, 12);
+    expect(wire.exists_probability).toBe(0.8);
+    expect(wire.strength.std).not.toBeCloseTo(Math.abs((69 - 49) * full / 49) / 3.29, 6);
   });
 });
 
@@ -170,16 +187,16 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
     { id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'factor', label: 'Subscribers' }, { id: 'office', kind: 'factor', label: 'Office' },
     { id: 'mrr', kind: 'goal', label: 'MRR' }],
   edges: [userLink('price', 'subs', ranged(20, 40)), userLink('office', 'mrr', undefined)] });
-  it('graph-compact (decision-continuity reads it): the held link exists at 1, the unheld user link keeps 0.8', async () => {
+  it('⛔ C1 graph-compact (decision-continuity reads it): the ranged link keeps 0.8, as the Run now sends it', async () => {
     const { compactGraph } = await import('../../../orchestrator/context/graph-compact.js');
     const edges = (compactGraph(g() as never).edges as Rec[]);
-    expect(edges.find((e) => e.from === 'price')?.exists).toBe(1);
+    expect(edges.find((e) => e.from === 'price')?.exists).toBe(0.8);
     expect(edges.find((e) => e.from === 'office')?.exists).toBe(0.8);
   });
-  it('serialise compactGraph: the same; the EDIT view keeps the stored 0.8 (a patch must never persist the hold)', async () => {
+  it('⛔ C1 serialise compactGraph: the same 0.8; the EDIT view keeps the stored 0.8', async () => {
     const { compactGraph, editCompactGraph } = await import('../../../orchestrator/context/serialise.js');
     const edges = (compactGraph(g() as never).edges as Rec[]);
-    expect(edges.find((e) => e.from === 'price')?.exists_probability).toBe(1);
+    expect(edges.find((e) => e.from === 'price')?.exists_probability).toBe(0.8);
     expect(edges.find((e) => e.from === 'office')?.exists_probability).toBe(0.8);
     expect((editCompactGraph(g() as never).edges as Rec[]).find((e) => e.from === 'price')?.exists_probability).toBe(0.8);
   });
@@ -203,22 +220,24 @@ describe('held-link parity fixture (shared with DGAI)', () => {
     const { createHash } = await import('node:crypto');
     expect(createHash('sha256').update((await load()).bytes).digest('hex')).toBe(FIXTURE_SHA256);
   });
-  it('every row: heldLinkOf agrees with the fixture (both directions present)', async () => {
+  // ⛔ C1: the fixture is the pre-C1 rule DGAI's `isHeldUserLink` mirrors; its range rows read the 'pre_c1' era here until
+  // the UI's mirror moves to C1 (flagged to the DL: the UI session owns DGAI).
+  it('every row: heldLinkOf (pre-C1 era) agrees with the fixture (both directions present)', async () => {
     const { rows } = await load();
     expect(rows.filter((r) => r.held).length).toBeGreaterThan(0);
     expect(rows.filter((r) => !r.held).length).toBeGreaterThan(0);
-    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge, r.ends === undefined ? NO_ENDS : { ...r.ends, routeOnce: false }) !== null }).toEqual({ name: r.name, held: r.held });
+    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge, r.ends === undefined ? NO_ENDS : { ...r.ends, routeOnce: false }, 'pre_c1') !== null }).toEqual({ name: r.name, held: r.held });
   });
 });
 
 describe('Codex r1 #2643: identity, currency and the decision reviewer read the hold', () => {
   const graphWith = (edge: Rec): Rec => ({ nodes: [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'outcome', label: 'Subscribers' }], edges: [edge] });
-  it('P1 identity: a range edit on a HELD link (20–40 → 20–80) changes the analysis hash', async () => {
+  it('⛔ C1 identity: a range edit (20–40 → 20–80) moves no Run input, so the current hash stays; the pre_c1 history hash moves', async () => {
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
-    const a = computeAnalysisAffectingGraphHash(graphWith(userLink('price', 'subs', ranged(20, 40))) as never);
-    const b = computeAnalysisAffectingGraphHash(graphWith(userLink('price', 'subs', ranged(20, 80))) as never);
-    expect(a).not.toBeNull();
-    expect(a).not.toBe(b);
+    const at = (high: number, p: 'current' | 'pre_c1') => computeAnalysisAffectingGraphHash(graphWith(userLink('price', 'subs', ranged(20, high))) as never, p);
+    expect(at(40, 'current')).not.toBeNull();
+    expect(at(40, 'current')).toBe(at(80, 'current'));
+    expect(at(40, 'pre_c1')).not.toBe(at(80, 'pre_c1'));
   });
   it('CONTRAST (no churn): the same range edit on an UNHELD link (Olumi estimate) leaves the hash alone', async () => {
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
@@ -230,14 +249,14 @@ describe('Codex r1 #2643: identity, currency and the decision reviewer read the 
     const e = { ...userLink('price', 'subs', ranged(20, 40)), strength: { mean: 0.6, std: 0.15 } };
     expect(heldLinkOf(e, NO_ENDS)).toBeNull();
   });
-  it('P2 decision review: both branches read the existence the Run uses (fallback projection and enrichment graph)', async () => {
+  it('P2 decision review (C1): both branches read the existence the Run uses: a ranged link\'s stored 0.8', async () => {
     const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');
-    const held = userLink('price', 'subs', ranged(20, 40));
-    const viaRun = projectRunGraphForDecisionReview({}, graphWith(held)) as Rec;
-    expect((viaRun.graph.edges as Rec[])[0]).toMatchObject({ exists: 1 });
-    const viaEnrichment = projectRunGraphForDecisionReview(graphWith(held), null) as Rec;
+    const ranged2040 = userLink('price', 'subs', ranged(20, 40));
+    const viaRun = projectRunGraphForDecisionReview({}, graphWith(ranged2040)) as Rec;
+    expect((viaRun.graph.edges as Rec[])[0]).toMatchObject({ exists: 0.8 });
+    const viaEnrichment = projectRunGraphForDecisionReview(graphWith(ranged2040), null) as Rec;
     expect(viaEnrichment.via).toBe('enrichment');
-    expect((viaEnrichment.graph.edges as Rec[])[0].exists_probability).toBe(1);
+    expect((viaEnrichment.graph.edges as Rec[])[0].exists_probability).toBe(0.8);
     // CONTRAST: an unheld user link keeps its 0.8 on the fallback branch.
     expect(((projectRunGraphForDecisionReview({}, graphWith(userLink('price', 'subs', undefined))) as Rec).graph.edges as Rec[])[0]).toMatchObject({ exists: 0.8 });
   });
@@ -245,7 +264,7 @@ describe('Codex r1 #2643: identity, currency and the decision reviewer read the 
 
 describe('Codex r2 #2643: history recorded before the hold still validates; freshness still moves', () => {
   const graphWith = (edge: Rec): Rec => ({ nodes: [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'outcome', label: 'Subscribers' }], edges: [edge] });
-  it('a model version hashed BEFORE the hold (pre-hold projection) is still that version; the live hash differs (stale)', async () => {
+  it('a model version hashed BEFORE the hold (pre-hold projection) is still that version; C1: on a ranged-only model it is current again', async () => {
     const { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const { matchesHistoricalAnalysisIdentity } = await import('../../context/graph-identity.js');
     // Codex r2's shape: a held link AND an option with an unresolved target (admission gaps), so the frozen legacy
@@ -254,10 +273,11 @@ describe('Codex r2 #2643: history recorded before the hold still validates; fres
     g.nodes.push({ id: 'o1', kind: 'option', label: 'Raise', interventions: { price: { value: 0.6 } }, unresolved_targets: ['subs'] });
     const recordedBeforeHold = computeAnalysisAffectingGraphHashSha256(g as never, 'pre_hold')!;
     expect(computeAnalysisAffectingGraphHashSha256(g as never, 'legacy')).not.toBe(recordedBeforeHold); // PRECONDITION
-    expect(recordedBeforeHold).not.toBe(computeAnalysisAffectingGraphHashSha256(g as never));
     expect(matchesHistoricalAnalysisIdentity(g as never, recordedBeforeHold)).toBe(true);
-    // Freshness reads the CURRENT projection only: a pre-hold Run on this graph is stale.
-    expect(computeAnalysisAffectingGraphHash(g as never)).not.toBe(computeAnalysisAffectingGraphHash(g as never, 'pre_hold'));
+    // ⛔ C1: a Run from before the hold sent the stored link, which is what the Run sends again now, so on a model whose only
+    // hold was a range it is current; a Run recorded under the range hold ('pre_c1') is the one that is stale.
+    expect(computeAnalysisAffectingGraphHash(g as never)).toBe(computeAnalysisAffectingGraphHash(g as never, 'pre_hold'));
+    expect(computeAnalysisAffectingGraphHash(g as never)).not.toBe(computeAnalysisAffectingGraphHash(g as never, 'pre_c1'));
   });
   it('CONTRAST: a graph with no held link hashes the same under both projections (no churn)', async () => {
     const { computeAnalysisAffectingGraphHashSha256 } = await import('../../context/graph-hash.js');
@@ -299,9 +319,10 @@ describe('definitional hold: the user\'s own definitional link holds when it VAL
     const e = definitional({ source: 'user_specified', magnitude: 'user_stated' });
     expect(heldLinkOf(e, { ...VALID, fromLabel: 'Pipeline value', toLabel: 'Revenue' })).toBeNull();
     expect(heldLinkOf(e, NO_ENDS), 'and with no ends to validate it').toBeNull();
-    // It is then an ordinary user link: held only by its own range off zero (#2643).
+    // It is then an ordinary user link: before C1 held only by its own range off zero (#2643); after C1 not by a range at all.
     e.provenance.natural_effect.stated_range = { low: 0.8, high: 1.2, text: '80p to £1.20', end: 'centre' };
-    expect(heldLinkOf(e, { ...VALID, fromLabel: 'Pipeline value', toLabel: 'Revenue' })?.std).toBeCloseTo(0.4 / 3.29, 12);
+    expect(heldLinkOf(e, { ...VALID, fromLabel: 'Pipeline value', toLabel: 'Revenue' }, 'pre_c1')?.std).toBeCloseTo(0.4 / 3.29, 12);
+    expect(heldLinkOf(e, { ...VALID, fromLabel: 'Pipeline value', toLabel: 'Revenue' }), 'C1').toBeNull();
   });
   it('⛔ Codex r1 #2653 P1: a USER BAND EDIT keeps the flag but moves the size → not a definition, not held', () => {
     const edited = definitional({ source: 'user_specified', magnitude: 'user_stated' });
