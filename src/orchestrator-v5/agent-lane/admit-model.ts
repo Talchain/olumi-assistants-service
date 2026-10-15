@@ -3008,7 +3008,7 @@ export function goalLevelOfStatedSum(model: CandidateModel, brief: string | unde
   if (!(Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)))) return model;
   if (zeroParts.size === 0) return { ...model, goal: { ...goal, baseline_provenance: 'explicit' } };
   // ⭐ AIE 6181498097: the total is DERIVED from the user's figures, never an explicitly measured total. It is carried as the
-  // goal's level reading (`goal_level_reading`), which the Run's reply and the licence's readings say; the level itself keeps
+  // goal's level reading (its derived flag set), which the Run's reply and the licence's readings say; the level itself keeps
   // only the brief's stamp, never the explicit one.
   const said = (f: CandidateModel['factors'][number]): string => (zeroParts.has(f.label)
     ? `‘${f.label}’ is none today, because it counts only what is added` : `‘${f.label}’ is ${f.baseline_value} ${goal.unit}`);
