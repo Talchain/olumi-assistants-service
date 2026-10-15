@@ -12,6 +12,8 @@ import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { decisionSensitivityOf } from './decision-sensitivity.js';
 import { userStatementsOn } from '../statement-door/statements.js';
+import { leaderLicenceFromState } from '../compose/leader-licence.js';
+import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -28,9 +30,42 @@ export interface RunWithheld {
   readonly withheld_claims?: readonly string[];
 }
 
+/**
+ * WHO LEADS, from the ONE source the AI and the UI both read (UI Q3, DL 01:07Z): no second leader computation anywhere. The
+ * comparative leader is named only where its licence permits; the goal-chance leader only where the goal-chance licence's form
+ * names one; near-ties and similar shares are said as recorded.
+ */
+export interface RunLeader {
+  /** The Run's leader licence (`leaderLicenceFromState`): permitted, permitted with a caveat, or withheld. */
+  readonly licence: ReturnType<typeof leaderLicenceFromState>;
+  /** The comparative leader, only where the licence permits naming one; else null. */
+  readonly option_id: string | null;
+  /** The option with the highest licensed goal chance, only where the goal-chance licence names one. */
+  readonly goal_chance_leader: string | null;
+  /** Options whose licensed goal chances are similar (the licence's `similar` form). */
+  readonly similar_option_ids: readonly string[];
+  /** The engine's near-tie flag and robustness level, as recorded. */
+  readonly near_tie: boolean;
+  readonly robustness: string | null;
+}
+
+/** The Run's leader facts (see {@link RunLeader}); a Run that is not current names no leader. */
+export function runLeaderOf(analysisResult: unknown, analysisState: unknown, analysisReady: unknown, current: boolean): RunLeader {
+  const licence = leaderLicenceFromState(analysisState, analysisReady);
+  const goal = current ? goalChanceLicenceForAgent(analysisResult) : undefined;
+  const r = isRec(analysisResult) ? analysisResult : undefined;
+  const robust = current && isRec(r?.enrichment) ? readRawRobustnessSignals(r!.enrichment.robustness) : null;
+  const leading = current && licence !== 'withheld' && typeof r?.leading_option_id === 'string' ? r!.leading_option_id as string : null;
+  const named = goal !== undefined && (goal.form === 'highest' || goal.form === 'highest_all_likely_to_miss') ? goal.leader_option_id ?? null : null;
+  return { licence, option_id: leading, goal_chance_leader: named, similar_option_ids: goal?.similar_option_ids ?? [],
+    near_tie: robust?.near_tie_is_tie ?? false, robustness: robust?.level ?? null };
+}
+
 export interface RunFacts {
   /** Whether these facts are the selected CURRENT Run's (a stale Run's facts are never read as current). */
   readonly current: boolean;
+  /** Who leads, as the UI shows it too (`runLeaderOf`). */
+  readonly leader: RunLeader;
   /** The licence's chance facts, exactly as both Agent doors read them. */
   readonly chances: ReturnType<typeof goalChanceFactsForAgent>;
   readonly withheld: readonly RunWithheld[];
@@ -50,7 +85,8 @@ const warningsOf = (result: unknown): Rec[] => {
 };
 
 /** The packet for the selected Run (`analysisResult`, the graph it reads, and whether it is current). */
-export function runFactsOf(analysisResult: unknown, graph: unknown, current: boolean): RunFacts {
+export function runFactsOf(analysisResult: unknown, graph: unknown, current: boolean,
+  state: { readonly analysisState?: unknown; readonly analysisReady?: unknown } = {}): RunFacts {
   const chances = goalChanceFactsForAgent(analysisResult, graph, current);
   const licence = current ? goalChanceLicenceForAgent(analysisResult) : undefined;
   const withheld: RunWithheld[] = current ? warningsOf(analysisResult).filter((w) => typeof w.code === 'string' && w.code.startsWith('GOAL_FIGURES_'))
@@ -70,6 +106,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
       settings_by_option: licence.olumi_estimate_settings_by_option ?? {} } : undefined;
   return {
     current,
+    leader: runLeaderOf(analysisResult, state.analysisState, state.analysisReady, current),
     chances,
     withheld,
     sensitivity: s.status === 'measured' ? { measured: true, most_sensitive: s.most_sensitive.label } : { measured: false },

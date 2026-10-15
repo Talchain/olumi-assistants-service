@@ -11,6 +11,7 @@ import { ProposalStore } from '../proposal.js';
 import { runFactsOf } from '../run-facts.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { decisionSensitivityOf } from '../decision-sensitivity.js';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, any>;
 const ctx = { scenario_id: '11111111-1111-1111-1111-111111111111', authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -57,4 +58,36 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
       statements: [{ speaker: 'user', quote, source: quote, subject: { quantity: 'measure', node_id: goal.id }, form: 'describes', reading: 'olumi' }] }];
     expect(runFactsOf(body.analysis_result, g, true).user_statements).toEqual([{ node_id: goal.id, field: 'measure', said: [quote] }]);
   });
+
+  it.each(BRIEFS)('%s: the AI and the UI read the SAME leader facts (UI Q3): a withheld licence names no leader', async (_n, body) => {
+    const r = await read(body);
+    const leader = (r.run_facts as Rec).leader as Rec;
+    expect(leader.licence).toBe('withheld');
+    expect(leader.option_id).toBeNull();
+    const view = projectCanonicalAnalysisView({ revision: 1, graph: body.graph,
+      runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: { scenario_id: 's1', summary: '', run_id: 'run-1' } } as never,
+      analysisState: body.analysis_state, analysisReady: body.analysis_ready, currentResult: body.analysis_result } as never);
+    expect(view.leader).toEqual(leader);
+    expect(view.leader_licence).toBe(leader.licence);
+  });
+
+  it('a withheld licence never names the Run’s leading option, even when the result carries one', () => {
+    const [, body] = BRIEFS[1]!;
+    const result = { ...structuredClone(body.analysis_result), leading_option_id: 'opt-x' };
+    expect(runFactsOf(result, body.graph, true, { analysisState: body.analysis_state, analysisReady: body.analysis_ready }).leader)
+      .toMatchObject({ licence: 'withheld', option_id: null });
+  });
+
+  it('a permitted licence names the Run’s leading option; the goal-chance leader comes only from the licence’s own form', () => {
+    const [, body] = BRIEFS[1]!;
+    const result = { ...structuredClone(body.analysis_result), leading_option_id: 'opt-x' };
+    const state = { ...structuredClone(body.analysis_state), leader_claim: { permitted: true, separation: 'separated' } };
+    const ready = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
+    const facts = runFactsOf(result, body.graph, true, { analysisState: state, analysisReady: ready });
+    expect(facts.leader.licence).not.toBe('withheld');
+    expect(facts.leader.option_id).toBe('opt-x');
+    expect(facts.leader.licence).toBe('permitted');
+    expect(runFactsOf(result, body.graph, false, { analysisState: state, analysisReady: ready }).leader.option_id).toBeNull();
+  });
 });
+

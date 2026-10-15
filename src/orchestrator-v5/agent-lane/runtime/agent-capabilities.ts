@@ -4928,7 +4928,8 @@ export function createAgentCapabilities(
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
         // ⭐ S7 step 1: the ONE Run-facts packet every AI call after a Run reads (`run-facts.ts`).
         ...(g.analysis_result === undefined || g.analysis_result === null ? {} : { run_facts: runFactsOf(g.analysis_result, g.raw,
-          isPlainRecord(g.analysis_state) && isPlainRecord(g.analysis_state.run_state) && g.analysis_state.run_state.kind === 'complete_current') }),
+          isPlainRecord(g.analysis_state) && isPlainRecord(g.analysis_state.run_state) && g.analysis_state.run_state.kind === 'complete_current',
+          { analysisState: g.analysis_state, analysisReady: g.analysis_ready }) }),
         // ⭐ COACH (BYPASS1 fold-in): the ONE typed blocker this read has, if any (`next-step-blocker.ts`). The Q4 rule in the
         // host contract tells the AI to end its reply with that step; no host line says it.
         ...nextStepFactOf(g),
