@@ -77,10 +77,12 @@ describe('S10 fix 1: the Agent reads whose it is from the ONE authority, never t
     expect(links.map((l) => l.whose)).toEqual(['unknown', 'yours']);
   });
 
-  it('the AI is told what each link `whose` means in the AIE’s EXACT words (#94 6181933060), said once', () => {
-    // Copied from the AIE's comment, character for character.
-    const AIE = 'Each item in links states its recorded authorship and assumed strength. whose:yours means a positively verified user-authored link; brief means it came from retained brief material and keeps that material\'s actual speaker and source; unverified_brief means verification of the retained material or its binding is unresolved\u2014say what remains unverified, and do not erase a known human origin merely because its quantity role is unverified; olumi means a proposal or assumption Olumi made; unknown means authorship is not established. Approval does not change authorship.';
+  it('the AI is told what each link `whose` means in the AIE’s EXACT words (#94 6181933060, links’ vocabulary per 6182232796), said once', () => {
+    // Copied from the AIE's comment, character for character; the unused `unverified_brief` clause omitted (6182232796).
+    const AIE = 'Each item in links states its recorded authorship and assumed strength. whose:yours means a positively verified user-authored link; brief means it came from retained brief material and keeps that material\'s actual speaker and source; olumi means a proposal or assumption Olumi made; unknown means authorship is not established. Approval does not change authorship.';
     expect(HOST_TOOL_CONTRACT.split(AIE)).toHaveLength(2);
+    // Links never carry `unverified_brief`, so the AI is not taught a value it will never see.
+    expect(HOST_TOOL_CONTRACT).not.toContain('unverified_brief');
     // Every value the producer gives a link is one the sentence defines.
     const g = { nodes: [{ id: 'd', kind: 'decision' }, { id: 'o', kind: 'option' }, { id: 'a', kind: 'factor' }, { id: 'b', kind: 'factor' }],
       edges: [{ from: 'a', to: 'b', id: 'e1', provenance: { source: 'brief_extraction' } }, { from: 'a', to: 'b', id: 'e2', provenance: { source: 'user_specified' } },

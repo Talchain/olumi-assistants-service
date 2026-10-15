@@ -201,7 +201,10 @@ describe('Explain scoped assembly safety', () => {
       // OLUMI'S PURPOSE (DL 14 Oct; Paul via the DL): the purpose block first in the host's part (+1,721) and the template's
       // leader sentence (+201): 38,583 → 40,505 bytes. Captured from the SENT body against staging d529a94e's (which
       // reproduces 0755d398…); removing exactly the block and reversing that sentence gives staging's body byte for byte.
-      .toBe('1f004bc69ce902ed38cbd13a600473862744335491d224758d06363b95b75490');
+      // S10 fix 1 (#3177/#3178) + the AIE's EXACT links sentence (#94 6181933060, links' vocabulary per 6182232796): the host
+      // contract's links clause only: 40,505 → 40,683 bytes (+178). Captured from the SENT body: staging 7fa0aa53d's reproduces
+      // 1f004bc6… and 40,505 bytes, and with exactly that clause swapped equals this head's byte for byte.
+      .toBe('1a05a0f32965482e496f094e51529d1713f0c0f278ef2cd06374b11b094b354a');
   },60000);
 });
 

@@ -74,6 +74,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
@@ -130,8 +131,9 @@ import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue, identityReadingOf } from '../orchestrator-v5/agent-lane/identity-card.js';
-import { briefHoldsNowArgs, briefHoldsNowToIssue, heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
-import { precedingAssistantText, typedOccurrenceArgs, typedOccurrenceToIssue } from '../orchestrator-v5/agent-lane/risk-occurrence-statement.js';
+import { heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
+import { precedingAssistantText } from '../orchestrator-v5/statement-door/ask.js';
+import { doorIssueArgs } from '../orchestrator-v5/statement-door/door.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -698,14 +700,14 @@ function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
 }
 
 /** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
-function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
+function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[], omitted?: readonly RunOmittedRisk[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
   if (!chanceShownFor(cells)) return {};
   const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
   const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
     && node.draft_widening?.provenance === 'ai_suggested_widen') : [];
   // Each added risk's own line already says its option's chance leaves it out: the generic note and its marker would say
   // the same omission again (capacity e2e 57687e86 turn 01, judge row 4). Said once, by the line that names the risk.
-  const ownLines = risksSaidLeftOutOfTheChance(graph, cells);
+  const ownLines = risksSaidLeftOutOfTheChance(graph, cells, omitted);
   if (addedRisks.length > 0 && addedRisks.every(risk => ownLines.has(String(risk.id)))) return { saidByOwnLines: true };
   const note = widenedRiskNote({ options: 0, risks: addedRisks.length });
   const marker = widenedRiskMarker(addedRisks);
@@ -2522,7 +2524,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const waitingId = executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph);
           const atRest = { awaitingApproval: waitingId !== undefined && !isSteadyCardProposal(waitingId), builtOrRan: true,
-            chanceCells: replayChanceCells };
+            chanceCells: replayChanceCells, omittedRisks: runOmittedRisks(state.analysisResult) };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
             goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText),
@@ -2714,7 +2716,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
-          ...widenedRunWordsOf(state.graph, replayChanceCells),
+          ...widenedRunWordsOf(state.graph, replayChanceCells, runOmittedRisks(state.analysisResult)),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}),
@@ -4733,32 +4735,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         tool_results: [...result.tool_results, issued] };
       log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: confirm card for the user\'s own figure issued by the route after the Run');
     }
-    // ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): when THIS turn's typed words state one chance for the one risk it is
-    // about ("I'd say there's about a 30% chance it slips before launch") and nothing was offered, the route issues the card
-    // itself, quoting their statement: the SAME tool, once, writing nothing; the door re-verifies it and only the press records it.
-    const typedOccurrence = fastPath === 'approve' || readbackGraph == null || typedNow === null || !typedOccurrenceToIssue({ toolCalls: result.tool_calls,
-      mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 })
-      ? undefined : typedOccurrenceArgs(readbackGraph, typedNow, { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
-        ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) });
-    if (typedOccurrence !== undefined) {
-      const issued = await dispatchTool('propose_assumptions', JSON.stringify(typedOccurrence), toolCtx, capabilities, mode);
+    /**
+     * ⭐ SYSTEM 1: THE ONE ROUTE ISSUER (the harness contract: its card's button is "Record what you said", quoting the turn).
+     * When the Agent offered nothing, a statement THIS turn's typed words give (a risk's chance, bound and verified), else the
+     * brief's own sentence the model holds for a risk (`already_true_quote`), gets its door card: the SAME tool, once, writing
+     * nothing; the door re-verifies it and only the press records it.
+     */
+    const doorArgs = fastPath === 'approve' || readbackGraph == null ? undefined : doorIssueArgs(readbackGraph, typedNow,
+      { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
+        ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) },
+      { toolCalls: result.tool_calls, mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
+        heldWaiting: liveHolds.length > 0 });
+    if (doorArgs !== undefined) {
+      const issued = await dispatchTool('propose_statement', JSON.stringify({ subject: doorArgs.subject,
+        statements: doorArgs.quotes.map((quote) => ({ quote })) }), toolCtx, capabilities, mode);
       result = { ...result,
-        tool_calls: [...result.tool_calls, { name: 'propose_assumptions', ok: issued.ok === true, mutated: false,
+        tool_calls: [...result.tool_calls, { name: 'propose_statement', ok: issued.ok === true, mutated: false,
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
         tool_results: [...result.tool_results, issued] };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: card for the user\'s own risk chance issued by the route');
-    }
-    // ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd): a risk the brief already says holds gets S2-B's card,
-    // quoting the brief's own sentence (`already_true_quote`), on a turn that proposed and approved nothing: the SAME tool, once.
-    const briefHoldsNow = fastPath === 'approve' || readbackGraph == null || !briefHoldsNowToIssue({ toolCalls: result.tool_calls,
-      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 }) ? undefined : briefHoldsNowArgs(readbackGraph);
-    if (briefHoldsNow !== undefined) {
-      const issued = await dispatchTool('propose_assumptions', JSON.stringify(briefHoldsNow), toolCtx, capabilities, mode);
-      result = { ...result,
-        tool_calls: [...result.tool_calls, { name: 'propose_assumptions', ok: issued.ok === true, mutated: false,
-          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
-        tool_results: [...result.tool_results, issued] };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: holds-now card from the brief issued by the route');
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, field: doorArgs.subject.field },
+        'agent-lane: statement door card issued by the route');
     }
     const results = result.tool_results;
     const chipApprovals = fastPath === 'approve'
@@ -5234,6 +5230,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : owed.filter((line) => !owedHeldByAi.has(line));
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
+      // #3167 fix-forward: the risks the Run on screen recorded leaving out, never today's predicate.
+      omittedRisks: runOmittedRisks(analysisResult),
       // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
       // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
       awaitingApproval: offeredNow.some(a => { const id = typedApprovalOf({ chip: { id: a.id } }); return id !== undefined && !isSteadyCardProposal(id); })
@@ -5691,7 +5689,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
-        ? widenedRunWordsOf(readbackGraph, chanceCells) : {};
+        ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult)) : {};
       const widenNote = chanceShownFor(chanceCells) && runWidenWords.saidByOwnLines !== true
         ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
       // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.

@@ -25,7 +25,7 @@ import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
-import { unsizedOlumiRiskIds, unsizedOlumiRiskLine } from './unsized-risk.js';
+import { unsizedOlumiRiskLineFor, type RunOmittedRisk } from './unsized-risk.js';
 import { withoutProposalIds } from './display-ids.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
@@ -73,6 +73,11 @@ export interface DecisionInputAskContext {
   readonly recentReplies?: readonly string[];
   /** A proposal awaits the user's yes: that card is the step, so nothing else is asked. */
   readonly awaitingApproval: boolean;
+  /**
+   * The risks the Run on screen RECORDED leaving out (`runOmittedRisks` of its stored result; #3167 fix-forward). Absent: the
+   * Run recorded none, or there is no Run, so no omission is claimed (never re-derived from today's model).
+   */
+  readonly omittedRisks?: readonly RunOmittedRisk[];
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
   /** The selected current Run's UI cells own chance wording, including each risk's option-bound disclosure. */
@@ -160,8 +165,8 @@ const withinMonths = (goal: Rec): string => {
  * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
-function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[]): string[] {
-  return leftOutRiskLines(graph, goalLabel, cells).map((l) => l.line);
+function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[], omitted?: readonly RunOmittedRisk[]): string[] {
+  return leftOutRiskLines(graph, goalLabel, cells, omitted).map((l) => l.line);
 }
 
 /**
@@ -169,11 +174,11 @@ function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionC
  * include it yet."): the relies-on line beside a shown chance. Any generic sentence about the same omission repeats it
  * (capacity e2e 57687e86 turn 01, judge row 4). Same predicates as the lines themselves, so the two cannot disagree.
  */
-export function risksSaidLeftOutOfTheChance(graph: unknown, cells: readonly OptionChanceCell[]): ReadonlySet<string> {
-  return new Set(leftOutRiskLines(graph, '', cells).filter((l) => l.chanceOmission).map((l) => l.riskId));
+export function risksSaidLeftOutOfTheChance(graph: unknown, cells: readonly OptionChanceCell[], omitted?: readonly RunOmittedRisk[]): ReadonlySet<string> {
+  return new Set(leftOutRiskLines(graph, '', cells, omitted).filter((l) => l.chanceOmission).map((l) => l.riskId));
 }
 
-function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[]): { riskId: string; line: string; chanceOmission: boolean }[] {
+function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[], omitted: readonly RunOmittedRisk[] = []): { riskId: string; line: string; chanceOmission: boolean }[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const allEdges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -186,11 +191,11 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
   const leftOut = inertRiskBranch(typedNodes, allEdges, limits);
   const preconditions = preconditionRiskIds(typedNodes, allEdges, limits);
   const labelOf = (n: Rec): string => String(n.label ?? n.id);
-  // ⭐ An unsized Olumi risk (`unsizedOlumiRiskIds`, the Run's own projection): left out of the calculation, said here once in
-  // the AIE's words, with the occurrence ask where its window exists.
+  // ⭐ An unsized Olumi risk the Run on screen RECORDED leaving out (#3167 fix-forward): said here once in the AIE's words, by
+  // its label then. Never today's predicate: a risk sized since keeps that Run's omission; one left out since is not claimed.
   const besideAnyChance = chanceShownFor(cells);
-  const unsized = [...unsizedOlumiRiskIds(graph)].flatMap((riskId) => {
-    const line = unsizedOlumiRiskLine(graph, riskId, besideAnyChance);
+  const unsized = omitted.flatMap(({ node_id: riskId, label }) => {
+    const line = unsizedOlumiRiskLineFor(label, besideAnyChance);
     return line === null ? [] : [{ riskId, line, chanceOmission: besideAnyChance }];
   });
   return [...nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
@@ -436,7 +441,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   if (goal === undefined || label === '') return [];
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
-  const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? []);
+  const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? [], ctx.omittedRisks);
   const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.

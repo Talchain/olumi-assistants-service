@@ -22,9 +22,12 @@ describe('the Agent can distinguish an unadopted Olumi option from the user’s 
 
     expect(state.ok).toBe(true);
     const byId = Object.fromEntries((state.entities as Record<string, unknown>[]).map((entity) => [entity.id, entity]));
-    expect(byId.olumi).toMatchObject({ kind: 'option', label: '£54 Pro release', provenance: 'ai_inferred', proposed_by: 'olumi' });
-    expect(byId.keep.provenance).toBe('ai_inferred');
-    expect(byId.raise.provenance).toBe('ai_inferred');
+    // S10 fix 1 (#3177): the Agent reads who added each option from the ONE authority (`added_by`), never the raw stamp;
+    // `proposed_by` still marks the one Olumi proposed and the user has not adopted.
+    expect(byId.olumi).toMatchObject({ kind: 'option', label: '£54 Pro release', added_by: 'olumi', proposed_by: 'olumi' });
+    expect(byId.keep.added_by).toBe('olumi');
+    expect(byId.raise.added_by).toBe('olumi');
+    for (const e of Object.values(byId)) expect(e).not.toHaveProperty('provenance');
     expect(byId.keep).not.toHaveProperty('proposed_by');
     expect(byId.raise).not.toHaveProperty('proposed_by');
     expect(byId.goal).not.toHaveProperty('proposed_by');
