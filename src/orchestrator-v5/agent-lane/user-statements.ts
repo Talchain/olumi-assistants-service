@@ -119,7 +119,9 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
   const qualifier = trimmed(given?.qualifier, 80);
   const conditions = trimmed(given?.conditions, 160);
-  const answering = trimmed(given?.answering, 400);
+  // The ask's own words, whole: a cohort option's forecast ask (both questions, its label twice) runs past 500 characters, and a
+  // longer cap's silent drop lost the binding the writer re-checks (M4-cohort).
+  const answering = trimmed(given?.answering, 1000);
   const negated = given?.negated === true;
   const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
     ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),

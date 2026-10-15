@@ -17,6 +17,8 @@ import { RISK_HOLDS_NOW_ROW } from './fields/risk.js';
 import { SET_OPTION_CAPACITY_CHANGE_OP } from '../goal-target/option-capacity-change.js';
 import { timingAskOf } from './fields/goal-timing.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { cohortForecastAsks } from './fields/cohort-relation.js';
+import { SET_COHORT_FORECAST_OP, SET_GOAL_RELATION_OP } from '../goal-target/cohort-forecast-write.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -65,6 +67,13 @@ export function asMemberOp(op: { readonly op: string; readonly value?: unknown }
   if (card.member === 'risk_occurrence' && typeof card.payload.risk_id === 'string') {
     return { op: SET_RISK_OCCURRENCE_OP, path: card.payload.risk_id, value: card.payload };
   }
+  // M4-cohort (T8): an option's cohort forecast, and the goal's same-people answer, each through its own level door member.
+  if (card.member === 'cohort_forecast' && typeof card.payload.option_id === 'string') {
+    return { op: SET_COHORT_FORECAST_OP, path: card.payload.option_id, value: card.payload };
+  }
+  if (card.member === 'goal_relation' && typeof card.payload.goal_id === 'string') {
+    return { op: SET_GOAL_RELATION_OP, path: card.payload.goal_id, value: card.payload };
+  }
   // M5: the option-capacity member's own registered revision (`applyOptionCapacityChange`), keyed by the option.
   if (card.member === 'option_capacity' && typeof card.payload.option_id === 'string') {
     return { op: SET_OPTION_CAPACITY_CHANGE_OP, path: card.payload.option_id, value: card.payload };
@@ -91,11 +100,8 @@ function optionSettingAsks(graph: unknown): StatementAsk[] {
 
 /** The readiness asks the door binds an answer to, each in the words readiness says (`analysis-ready-helper` levelGapAsk). */
 export function doorAsks(graph: unknown): StatementAsk[] {
-  return [...optionSettingAsks(graph), ...nodeAsks(graph)];
-}
-
-function nodeAsks(graph: unknown): StatementAsk[] {
-  return nodesOf(graph).flatMap((n): StatementAsk[] => {
+  // M4-cohort: each option's forecast questions and the goal's same-people question; M5: an option's share (readiness's own words).
+  return [...cohortForecastAsks(graph), ...optionSettingAsks(graph), ...nodesOf(graph).flatMap((n): StatementAsk[] => {
     // M3b: the goal's ONE timing ask (every current option effect at the target's end point), so its answer binds by `answering`.
     if (n.kind === 'goal' && typeof n.id === 'string') { const t = timingAskOf(graph, n.id); return t === undefined ? [] : [t]; }
     if (n.kind !== 'risk' || typeof n.id !== 'string' || typeof n.label !== 'string') return [];
@@ -103,7 +109,7 @@ function nodeAsks(graph: unknown): StatementAsk[] {
     if (e.kind !== 'eligible') return [];
     return [{ subject: { kind: 'risk' as const, id: n.id, field: 'holds_now' as const }, words: `Is ‘${n.label.trim()}’ already true now?` },
       { subject: { kind: 'risk' as const, id: n.id, field: 'occurrence' as const }, words: riskOccurrenceAskWords(n.label, e.window_months) }];
-  });
+  })];
 }
 
 /** The user's complete statements in a typed message, each a whole statement of it. */

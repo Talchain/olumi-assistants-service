@@ -85,6 +85,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   add_limit: 'slice_3',
   attest_goal_steady: 'none', // the user's temporal judgement is a card answer, not a numeric field
   set_cohort_forecast: 'none', // the user's own cohort forecast, quoted on its card (science PR-4b): a card answer, not a field
+  set_goal_relation: 'none', // the user's same-people answer on the goal, quoted on its door card (M4-cohort): a card answer, not a field
   record_statement: 'none', // SYSTEM 1: the user's own statement through the ONE door, quoted on its card: a card answer, not a field
   set_risk_occurrence: 'slice_3', // Olumi's occurrence range for a risk root (`risk-occurrence.ts`): an estimate the user could correct, not yet a card field
   confirm_goal_reading: 'none', // the user's answer to how the goal's target is read: a card answer, not a numeric field

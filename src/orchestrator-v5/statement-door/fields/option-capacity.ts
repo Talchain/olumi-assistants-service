@@ -22,8 +22,12 @@ import type { FieldWriter } from '../write.js';
 
 type Rec = Record<string, any>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
-/** The AIE's signature on this row's meaning and words: PENDING until delivered (the row is not armed before it). */
-export const OPTION_CAPACITY_SIGNED_BY = 'PENDING';
+/**
+ * The AIE-signed science table (6180618773, as M4's rows cite it) governs this row's meaning: the figure is the user's, the
+ * freed-time relation and its timing stay Olumi's disclosed assumptions, and no capacity is counted twice (T8). The words are the
+ * coaching-loop card's, sent to the AIE for AMEND (#94 6182596562; DL 15 Oct: ship, fix forward on its AMEND).
+ */
+export const OPTION_CAPACITY_SIGNED_BY = '6180618773';
 const TIMED = /\b(?:days?|weeks?|months?|years?)\b/i;
 
 const targetOf = (subject: DoorSubject, graph: unknown) => (subject.kind === 'factor' && subject.option_id !== undefined && subject.to_id === undefined

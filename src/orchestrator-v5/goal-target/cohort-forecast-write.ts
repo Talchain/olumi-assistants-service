@@ -23,8 +23,10 @@ import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
-import { cohortTargetsOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
+import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
+import { holdsUserStatement, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
 type Rec = Record<string, unknown>;
@@ -45,6 +47,11 @@ export interface ApprovedCohortForecast {
   readonly statements: { readonly people: UserStatement; readonly conversion: UserStatement; readonly same_cohort: UserStatement };
   /** THIS proposal's own write already landed: only then is a node holding exactly the card's forecast a verified no-op. */
   readonly own_write_landed?: boolean;
+  /**
+   * ⭐ SYSTEM 1 (DL 14 Oct 23:09Z, ONE durable statement store): the user's verified statements a door press records on THIS
+   * option (`user_statements`), in the same commit as its forecast. Absent on the legacy card's press.
+   */
+  readonly user_statement?: { readonly subject: DoorSubject; readonly record: UserStatementRecord };
 }
 
 /** The stored goal-target rows of `graph` (`role: 'goal_target'`), in stored order. */
@@ -59,13 +66,20 @@ export function peopleFiguresIn(quote: string): { low: number; high: number }[] 
     .map((m) => Number(m[1]!.replace(/,/g, ''))).filter((n) => Number.isInteger(n) && n >= 1).map((n) => ({ low: n, high: n }));
 }
 
-/** Percentage ranges a quote states ("12–18%", "between 12 and 18 percent", "12% to 18%"), low below high. */
-export function percentRangesIn(quote: string): { low: number; high: number }[] {
+/** The ONE percentage-range pattern ("12–18%", "between 12 and 18 percent", "12% to 18%"). */
+const percentRangePattern = (): RegExp => {
   const n = '(\\d{1,2}(?:\\.\\d{1,2})?)';
   const pct = '\\s*(?:%|percent|per\\s*cent)';
-  const re = new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
-  return [...quote.matchAll(re)].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
+  return new RegExp(`(?:between\\s+)?${n}(?:${pct})?\\s*(?:–|—|-|to|and)\\s*${n}${pct}`, 'giu');
+};
+
+/** Percentage ranges a quote states, low below high. */
+export function percentRangesIn(quote: string): { low: number; high: number }[] {
+  return [...quote.matchAll(percentRangePattern())].map((m) => ({ low: Number(m[1]), high: Number(m[2]) })).filter((r) => r.low > 0 && r.low < r.high && r.high < 100);
 }
+
+/** The quote with its percentage ranges' own words removed (so a range's lower figure is never read as something else). */
+export const withoutPercentRanges = (quote: string): string => quote.replace(percentRangePattern(), ' ');
 
 /** The goal's window as the forecast is read over it ("the first three months after launch"), or `undefined` without one goal. */
 export function cohortWindowOf(graph: unknown): string | undefined {
@@ -86,11 +100,23 @@ export const cohortQuartileQuestion = (optionLabel: string, window: string): str
 /** The meaning the question rests on, said beside it (AIE 6176433015): the chance per person, not the fraction that results. */
 export const UNDERLYING_RATE_MEANING = 'Here the underlying conversion rate is the chance that any one of those people converts.';
 
+/**
+ * ⭐ Science PR-4b, AIE 6176433015: ONE option's two forecast questions as Olumi says them (readiness's step, and the door's ask
+ * in the option's relation subject): the people it reaches, then the one-in-four question for that option, cohort and window,
+ * with the meaning of "underlying conversion rate" beside it.
+ */
+export const cohortForecastAskWords = (option: string, period: string, window: string): string =>
+  `For ‘${option}’: how many people would it reach ${period}? ${cohortQuartileQuestion(option, window)} ${UNDERLYING_RATE_MEANING}`;
+
+/** A question as compared: quote marks, spacing and case aside. */
+const questionWords = (t: string): string => t.replace(/[\u2018\u2019\u201C\u201D'"]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** The ask a range answered holds THIS option's one-in-four question for this window, in its exact words. */
+export const asksQuartileQuestion = (answering: string | undefined, question: string): boolean =>
+  answering !== undefined && questionWords(answering).includes(questionWords(question));
+
 /** The same question, whatever quote marks, spacing or case it was passed back in. */
-export const sameQuestion = (a: string | undefined, b: string): boolean => {
-  const norm = (t: string): string => t.replace(/[\u2018\u2019\u201C\u201D'"]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-  return a !== undefined && norm(a) === norm(b);
-};
+export const sameQuestion = (a: string | undefined, b: string): boolean => a !== undefined && questionWords(a) === questionWords(b);
 
 const sayPeople = (n: number): string => `${n.toLocaleString('en-GB')} ${n === 1 ? 'person' : 'people'}`;
 
@@ -126,7 +152,7 @@ export function cohortForecastCardWords(optionLabel: string, f: CohortForecast, 
   ].join('\n');
 }
 
-export const cohortForecastRecordedWords = (optionLabel: string, f: CohortForecast): string =>
+export const cohortForecastRecordedWords = (optionLabel: string, f: Pick<CohortForecast, 'people_reached' | 'conversion_middle_half_pct'>): string =>
   `Recorded from your words: your forecast that ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, with about one chance in four that its `
   + `underlying conversion rate is below ${f.conversion_middle_half_pct[0]}% and one in four that it is above ${f.conversion_middle_half_pct[1]}%.`;
 
@@ -151,7 +177,7 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
     || s.people.form !== 'point' || s.people.low !== f.people_reached || s.people.high !== f.people_reached
     || s.conversion.form !== 'range' || s.conversion.low !== f.conversion_middle_half_pct[0] || s.conversion.high !== f.conversion_middle_half_pct[1]
     || named === undefined || window === undefined
-    || !sameQuestion(s.conversion.answering, cohortQuartileQuestion(String(named.label ?? ''), window))
+    || !asksQuartileQuestion(s.conversion.answering, cohortQuartileQuestion(String(named.label ?? ''), window))
     || s.same_cohort.form !== 'holds_now') {
     return { kind: 'refused', reason: 'invalid_forecast' };
   }
@@ -162,12 +188,25 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
   }
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.option_id && n.kind === 'option');
   if (matches.length !== 1) return { kind: 'refused', reason: 'option_not_found' };
-  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], { ...approved.expected_node, cohort_forecast: approved.cohort_forecast })) {
+  // The user's words go with the forecast their reading sets, on THIS option, as the door recorded them.
+  const said = approved.user_statement;
+  if (said !== undefined && (said.subject.kind !== 'option' || said.subject.id !== approved.option_id
+    || said.record.subject_key !== subjectKey(said.subject) || userStatementRecordOf(said.record) === undefined)) {
+    return { kind: 'refused', reason: 'invalid_forecast' };
+  }
+  // The option as the write leaves it: the card's forecast, and the door's record of the words when there is one.
+  const landed = ((): unknown => {
+    const node = { ...approved.expected_node, cohort_forecast: approved.cohort_forecast };
+    return said === undefined ? node : withUserStatement({ nodes: [node] }, said.record, said.subject)?.nodes[0];
+  })();
+  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], landed)) {
     return { kind: 'unchanged' };
   }
   if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'option_changed' };
 
-  const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
+  const cloned = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
+  const graph = said === undefined ? cloned : withUserStatement(cloned, said.record, said.subject);
+  if (graph === undefined || (said !== undefined && !holdsUserStatement(graph, said.record, said.subject))) return { kind: 'refused', reason: 'option_not_found' };
   const option = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.option_id)!;
   option.cohort_forecast = structuredClone(approved.cohort_forecast);
   const label = String(option.label ?? approved.option_id).trim();
@@ -196,6 +235,80 @@ export function cohortForecastPostimageIsScoped(before: unknown, after: unknown,
   return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
 }
 
+/**
+ * ⭐ M4-cohort (science table T8): the user's answer that the count target counts converts among the SAME people the rate target
+ * is measured on, recorded on the GOAL (its relation, `user_statements`) by the door's press. It is the goal's fact, said once for
+ * every option; readiness then asks each option's forecast instead of re-asking it. Nothing else on the goal moves.
+ */
+export interface ApprovedGoalRelation {
+  readonly goal_id: string;
+  /** The goal node exactly as stored when the card was made: the stale gate. */
+  readonly expected_goal: Readonly<Rec>;
+  readonly user_statement: { readonly subject: DoorSubject; readonly record: UserStatementRecord };
+}
+
+export type GoalRelationEditResult =
+  | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: 'invalid_graph' | 'invalid_statement' | 'goal_not_found' | 'goal_changed' };
+
+export function applyGoalRelationEdit(persistedGraph: unknown, approved: ApprovedGoalRelation): GoalRelationEditResult {
+  if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) return { kind: 'refused', reason: 'invalid_graph' };
+  const said = approved.user_statement;
+  const record = userStatementRecordOf(said.record);
+  if (said.subject.kind !== 'goal' || said.subject.id !== approved.goal_id || said.subject.field !== 'relation'
+    || said.record.subject_key !== subjectKey(said.subject) || record === undefined || record.statements.length !== 1
+    || record.statements[0]!.form !== 'holds_now') return { kind: 'refused', reason: 'invalid_statement' };
+  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id && n.kind === 'goal');
+  if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
+  // A retry after this press landed finds exactly these words held: the verified no-op.
+  if (holdsUserStatement(persistedGraph, said.record, said.subject)) return { kind: 'unchanged' };
+  if (!isDeepStrictEqual(matches[0], approved.expected_goal)) return { kind: 'refused', reason: 'goal_changed' };
+  const graph = withUserStatement(structuredClone(persistedGraph) as Rec & { nodes: unknown[] }, said.record, said.subject);
+  if (graph === undefined) return { kind: 'refused', reason: 'goal_not_found' };
+  const label = String(matches[0]!.label ?? approved.goal_id).trim();
+  const fact = EditGraphHandlerFactSchema.parse({
+    fact_type: 'edit_graph', fact_version: 1, noop: false,
+    result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+      graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
+      graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
+      safe_summary: 'Recorded from your words that both targets count the same people', impact: 'low', rerun_recommended: false },
+  });
+  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact], confirmation: sameCohortRecordedWords(graph) };
+}
+
+/** The labels of the goal's two cohort targets, the rate (a percentage of the people reached) and the count, or `undefined`. */
+export function sameCohortLabelsOf(graph: unknown): { readonly rate: string; readonly count: string } | undefined {
+  const rows = storedTargetRowsOf(graph);
+  const rate = rows.filter(isCohortRateRow);
+  const count = rows.filter((r) => !rate.includes(r));
+  if (rows.length !== 2 || rate.length !== 1 || count.length !== 1) return undefined;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const label = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id).trim();
+  return { rate: label(rate[0]!.node_id), count: label(count[0]!.node_id) };
+}
+
+/** The receipt of the user's same-people answer, after its verified read-back. */
+export function sameCohortRecordedWords(graph: unknown): string {
+  const l = sameCohortLabelsOf(graph);
+  return l === undefined ? 'Recorded from your words that both targets count the same people.'
+    : `Recorded from your words: ‘${l.count}’ counts the people who convert among the same people your ‘${l.rate}’ is measured on.`;
+}
+
+/** The post-image holds exactly this write and nothing else (the dispatch's scope check, as for the forecast). */
+export function goalRelationPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedGoalRelation): boolean {
+  const written = applyGoalRelationEdit(before, approved);
+  return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+}
+
+/** The user's same-people answer recorded on the goal (the door's goal relation), or `undefined`. */
+export function sameCohortStatementOf(graph: unknown): UserStatement | undefined {
+  const goals = (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : []).filter((n): n is Rec => isRec(n) && n.kind === 'goal');
+  if (goals.length !== 1 || typeof goals[0]!.id !== 'string') return undefined;
+  const record = userStatementFor(graph, { kind: 'goal', id: goals[0]!.id, field: 'relation' });
+  return record?.statements.length === 1 && record.statements[0]!.form === 'holds_now' ? record.statements[0] : undefined;
+}
+
 /** The card as its stored operation carries it, or `undefined` if malformed. */
 export function approvedCohortForecastOf(op: { readonly path: string; readonly value?: unknown }): ApprovedCohortForecast | undefined {
   const v = isRec(op.value) ? op.value : {};
@@ -204,8 +317,39 @@ export function approvedCohortForecastOf(op: { readonly path: string; readonly v
   const people = userStatementOf(st.people), conversion = userStatementOf(st.conversion), same = userStatementOf(st.same_cohort);
   if (f === undefined || !isRec(v.expected_node) || !Array.isArray(v.expected_targets) || !v.expected_targets.every(isRec)
     || people === undefined || conversion === undefined || same === undefined) return undefined;
+  const said = userStatementCarriedBy(v);
+  if (said === null) return undefined;
   return { option_id: op.path, cohort_forecast: f, expected_node: v.expected_node, expected_targets: v.expected_targets,
-    statements: { people, conversion, same_cohort: same } };
+    statements: { people, conversion, same_cohort: same }, ...(said !== undefined ? { user_statement: said } : {}) };
+}
+
+/** A stored card's `user_statement` (the door's record of the words): absent, well-formed, or `null` when malformed. */
+function userStatementCarriedBy(v: Rec): ApprovedGoalRelation['user_statement'] | undefined | null {
+  if (v.user_statement === undefined) return undefined;
+  const u = isRec(v.user_statement) ? v.user_statement : {};
+  const subject = isRec(u.subject) ? u.subject : undefined;
+  const record = userStatementRecordOf(u.record);
+  if (subject === undefined || typeof subject.id !== 'string' || !(SUBJECT_KINDS as readonly unknown[]).includes(subject.kind)
+    || !isStatementField(subject.field) || record === undefined) return null;
+  const parsed: DoorSubject = { kind: subject.kind as SubjectKind, id: subject.id, field: subject.field };
+  return record.subject_key === subjectKey(parsed) ? { subject: parsed, record } : null;
+}
+
+/** The proposal op of the goal's same-people answer (`path` is the goal's id, `value` is what {@link approvedGoalRelationOf} reads). */
+export const SET_GOAL_RELATION_OP = 'set_goal_relation' as const;
+
+/** The goal relation card as its stored operation carries it, or `undefined` if malformed. */
+export function approvedGoalRelationOf(op: { readonly path: string; readonly value?: unknown }): ApprovedGoalRelation | undefined {
+  const v = isRec(op.value) ? op.value : {};
+  const said = userStatementCarriedBy(v);
+  if (!isRec(v.expected_goal) || said === undefined || said === null) return undefined;
+  return { goal_id: op.path, expected_goal: v.expected_goal, user_statement: said };
+}
+
+/** A held goal relation card still applies to `graph` exactly when its own writer would not refuse it there. */
+export function goalRelationCardHolds(op: { readonly path: string; readonly value?: unknown }, graph: unknown): boolean {
+  const approved = approvedGoalRelationOf(op);
+  return approved !== undefined && applyGoalRelationEdit(graph, approved).kind !== 'refused';
 }
 
 /** A held forecast card still applies to `graph` exactly when its own writer would not refuse it there. */

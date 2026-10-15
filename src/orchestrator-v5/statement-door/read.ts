@@ -44,14 +44,18 @@ export interface DoorReading {
   readonly words?: string;
 }
 
-export type DoorRefusal = 'no_table_row' | 'statement_malformed' | 'not_this_field' | 'not_this_subject' | 'origin_unknown' | 'statement_not_found'
+export type DoorRefusal = 'no_table_row' | 'not_answered_now' | 'statement_malformed' | 'not_this_field' | 'not_this_subject' | 'origin_unknown' | 'statement_not_found'
   | 'figure_not_in_quote';
 export type DoorVerdict = { readonly kind: 'read'; readonly reading: DoorReading } | { readonly kind: 'refused'; readonly refusal: DoorRefusal; readonly detail: string };
 
 const KEEP = 'Keep the user’s words exactly as they said them and do not ask them to repeat them.';
 
 /** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
-export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string): 'bound' | 'another' | 'unbound' {
+export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
+  alsoAnswers: readonly DoorSubject[] = []): 'bound' | 'another' | 'unbound' {
+  // The subjects an ask of which this statement may answer: its own, and the row's `answersFor` (one key each).
+  // The NODES this statement may answer for: its own, and the rows' `answersFor` (a cohort option's "the same people" answers the goal's ask).
+  const answers = new Set([subject, ...alsoAnswers].map(subjectNodeKey));
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   if (subject.kind === 'link') {
     const entities = nodes.flatMap((n) => (typeof n.id === 'string' && typeof n.label === 'string' ? [{ id: n.id, label: n.label }] : []));
@@ -69,10 +73,10 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
   }
   const answered = answeredAsk(answering, ctx.asks ?? []);
   // The ask names the NODE; the field is the row's reading of the words (one readiness line asks "true now?" and "how likely?").
-  if (answered !== undefined) return subjectNodeKey(answered.subject) === subjectNodeKey(subject) ? 'bound' : 'another';
+  if (answered !== undefined) return answers.has(subjectNodeKey(answered.subject)) ? 'bound' : 'another';
   if (typeof answering === 'string' && answering.trim() !== '') return 'unbound';
   const asked = [...new Set(askedSubjects(ctx.preceding_ask, ctx.asks ?? []).map(subjectNodeKey))];
-  if (asked.length === 1) return asked[0] === subjectNodeKey(subject) ? 'bound' : 'another';
+  if (asked.length === 1) return answers.has(asked[0]!) ? 'bound' : 'another';
   return 'unbound';
 }
 
@@ -95,7 +99,8 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     // figure's clause (or the quote) by `statementBoundTo`.
     const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
     const source = row.sourceOf?.(subject, graph);
-    if (!whole && !(source !== undefined && source === quote) && statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering) !== 'bound') {
+    if (!whole && !(source !== undefined && source === quote)
+      && statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering, row.answersFor?.(subject, graph) ?? []) !== 'bound') {
       return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
@@ -107,6 +112,12 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
       ...(row.periodOf?.(subject, graph) !== undefined ? { period: row.periodOf(subject, graph) } : {}) });
     if (v.kind === 'refused') {
       return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
+    }
+    // A form the row records only from this turn's words: the same statement, verified against what the user typed now alone.
+    if (row.answerTypedNow?.forms.includes(fig.form) === true && verifyStatement({ quote, form: fig.form, ...(answering !== undefined ? { answering } : {}),
+      ...(fig.form === 'range' ? { low: fig.low, high: fig.high } : { value: fig.form === 'upper_bound' ? fig.high : fig.low }) }, { now: texts.now },
+    { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id }, unit: row.unit, forms: row.forms, figuresIn: () => figures }).kind !== 'verified') {
+      return { kind: 'refused', refusal: 'not_answered_now', detail: row.answerTypedNow.detail(subject, label, graph) };
     }
     statements.push(v.statement);
     words ??= fig.words;

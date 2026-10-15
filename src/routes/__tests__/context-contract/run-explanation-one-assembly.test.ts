@@ -201,7 +201,11 @@ describe('Explain scoped assembly safety', () => {
       // OLUMI'S PURPOSE (DL 14 Oct; Paul via the DL): the purpose block first in the host's part (+1,721) and the template's
       // leader sentence (+201): 38,583 → 40,505 bytes. Captured from the SENT body against staging d529a94e's (which
       // reproduces 0755d398…); removing exactly the block and reversing that sentence gives staging's body byte for byte.
-      .toBe('1f004bc69ce902ed38cbd13a600473862744335491d224758d06363b95b75490');
+      // C0 (AIE packet AIE-GENERATION-COACHING-CANDIDATE-20261015-v1, ADOPTED 15 Oct 00:34Z): the whole Interpreter v0.2 block is the
+      // packet's replacement: 40,544 → 40,783 bytes. Captured from the SENT body; replacing exactly the replacement with the old
+      // block on it gives 48037ea4…, which is staging 75fc1a95's own SENT body (staging already reads 48037ea4 against the
+      // stale 1f004bc6 pin above: that move is not C0's, and C0 adds only its own block on top of it).
+      .toBe('d6ce2c691ef6f56563baac912ba30a0742bb5cc448bbd28cdee1ced1c212db26');
   },60000);
 });
 

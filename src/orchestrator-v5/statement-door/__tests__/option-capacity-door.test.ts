@@ -16,7 +16,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
 import { doorRowFor } from '../role-table.js';
-import { asMemberOp } from '../door.js';
+import { asMemberOp, doorAsks } from '../door.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/paul-legacy-de659cfd-served-graph-20261014.json', import.meta.url), 'utf8')) as { graph_text: string };
@@ -28,8 +28,8 @@ const stored = (g: unknown): Rec => assignEntityRefs(projectGraphForPersistence(
 const ctx = (text: string, preceding?: string): Rec => ({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'm5', user_text: text, user_turn_text: text,
   ...(preceding !== undefined ? { preceding_assistant_text: preceding } : {}) });
 
-function world() {
-  let json = FX.graph_text;
+function world(initial: string = FX.graph_text) {
+  let json = initial;
   const graph = (): Rec => JSON.parse(json);
   const registers: Rec[] = [];
   const dispatch: InternalDispatch = async (path, body) => {
@@ -88,4 +88,35 @@ describe('M5: an option\'s new share of time is a statement on the door (served 
     const r = await offer(world(), SUBJECT, 'legacy work is 25% today', 'legacy work is 25% today');
     expect(r).toMatchObject({ ok: false, mutated: false });
   });
+
+  it('SECOND CAPTURE (7f5659fd, another drafting of the legacy brief: "Legacy-code time share", unit %): same row, same card, same write', async () => {
+    const FX2 = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/paul-legacy-7f5659fd-unsized-options-graph-20261014.json', import.meta.url), 'utf8')) as { graph_text: string };
+    const w = world(FX2.graph_text);
+    const ask = 'Factor "Legacy-code time share" is currently 25%. What should option "Reduce legacy-fix time" set it to?';
+    const r = await offer(w, { kind: 'factor', label: 'Legacy-code time share', option_label: 'Reduce legacy-fix time', field: 'level' }, PAUL, PAUL, ask);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false });
+    const out = await w.caps.authoriseChange({ ...ctx('Use this reading'), typed_approval_of: r.proposal_id } as never, { proposal_id: String(r.proposal_id) }) as Rec;
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(unresolvedEventOptionIds(w.graph())).toEqual(['event_option_3']);
+    // CONTRAST: "Add two developers" changes no share of time, so the door has no row for it and readiness's ask for it is not a door ask.
+    const g = JSON.parse(FX2.graph_text) as Rec;
+    expect(doorRowFor({ kind: 'factor', id: 'event_context_6', option_id: 'event_option_3', field: 'level' }, g)).toBeUndefined();
+    expect(doorAsks(g).map((a) => a.subject.option_id)).toEqual(['event_option_2']);
+  });
+
+  it('⛔ "in 3 months, cut legacy from 25% to 15%" → 25→15 with a 3-month lead (session 4\'s reader), never a 3%', async () => {
+    const SENTENCE = 'in 3 months, cut legacy from 25% to 15%';
+    const w = world();
+    const r = await offer(w, SUBJECT, SENTENCE, SENTENCE);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    const card = String(r.public_label);
+    expect(card).toContain('sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today)');
+    expect(card).toContain('Full effect 3 months from now: your start in 3 months');
+    expect(card).not.toMatch(/\b3%/);
+    await w.caps.authoriseChange({ ...ctx('Use this reading'), typed_approval_of: r.proposal_id } as never, { proposal_id: String(r.proposal_id) });
+    const extra = w.graph().nodes.find((n: Rec) => n.id === CARRIER).observed_state.extra_share_by_date;
+    expect(extra).toMatchObject({ lead_low: 3, lead_high: 3, lead_reading: { start: { low: 3, high: 3, role: 'stated' } } });
+    expect(extra.capacity_ratio).toBeCloseTo(85 / 75, 12);
+  });
 });
+
