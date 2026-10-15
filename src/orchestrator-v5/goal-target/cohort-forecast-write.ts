@@ -261,6 +261,11 @@ function recordable(subject: DoorSubject, record: UserStatementRecord): boolean 
   if (subject.kind === 'option' && subject.field === 'lead') {
     return record.statements.length >= 1 && record.statements.length <= 2 && record.attest !== undefined && typeof record.attest.fingerprint === 'string';
   }
+  // AIE 6184726873: the adoption of Olumi's equal-tail reading of an option's likely range (`RANGE_LAW_ROW`), with its exact ends.
+  if (subject.kind === 'factor' && subject.option_id !== undefined && subject.field === 'level') {
+    return record.statements.length === 1 && record.statements[0]!.form === 'range' && record.attest?.range_law === 'equal_tail'
+      && typeof record.attest.low === 'number' && typeof record.attest.high === 'number';
+  }
   return false;
 }
 
@@ -279,17 +284,20 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   if (graph === undefined) return { kind: 'refused', reason: 'node_not_found' };
   const label = String(matches[0]!.label ?? approved.node_id).trim();
   const lead = said.subject.field === 'lead';
+  const rangeLaw = said.subject.kind === 'factor';
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph', fact_version: 1, noop: false,
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
       affected_entities: [{ kind: said.subject.kind, label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place' : 'Recorded from your words that both targets count the same people',
-      impact: 'low', rerun_recommended: lead },
+      safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place'
+        : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted' : 'Recorded from your words that both targets count the same people',
+      impact: 'low', rerun_recommended: lead || rangeLaw },
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
-    confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.` : sameCohortRecordedWords(graph) };
+    confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.`
+      : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.` : sameCohortRecordedWords(graph) };
 }
 
 /** The labels of the goal's two cohort targets, the rate (a percentage of the people reached) and the count, or `undefined`. */
@@ -346,7 +354,10 @@ function userStatementCarriedBy(v: Rec): ApprovedStatementRecord['user_statement
   const record = userStatementRecordOf(u.record);
   if (subject === undefined || typeof subject.id !== 'string' || !(SUBJECT_KINDS as readonly unknown[]).includes(subject.kind)
     || !isStatementField(subject.field) || record === undefined) return null;
-  const parsed: DoorSubject = { kind: subject.kind as SubjectKind, id: subject.id, field: subject.field };
+  // An option's setting of a factor (`RANGE_LAW_ROW`) is keyed by its option too: the subject keeps it, or the key never matches.
+  const parsed: DoorSubject = { kind: subject.kind as SubjectKind, id: subject.id,
+    ...(typeof subject.to_id === 'string' ? { to_id: subject.to_id } : {}), ...(typeof subject.option_id === 'string' ? { option_id: subject.option_id } : {}),
+    field: subject.field };
   return record.subject_key === subjectKey(parsed) ? { subject: parsed, record } : null;
 }
 

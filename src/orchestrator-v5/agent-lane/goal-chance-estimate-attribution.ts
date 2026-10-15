@@ -10,7 +10,7 @@ import {
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from './olumi-estimates-feeding-result.js';
 import { EventRiskV1 } from '../../schemas/event-risk.js';
 import { computeResponseHash } from '../../utils/response-hash.js';
-import { likelyRangeUseOf, type LikelyRangeUse } from '../intervention-range.js';
+import { likelyRangeUseOf, rangeLawAdopted, type LikelyRangeUse } from '../intervention-range.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -173,7 +173,7 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
       if (o.is_baseline === true && holdsTodaysLevel(cell, byId.get(nodeId))) return [];
       // C2 join: a likely range on this setting is read with Olumi's equal-tail approximation, whoever gave its ends.
       const range = likelyRangeUseOf(nodeId, cell);
-      if (range !== undefined) (likelyRangesByOption[o.id as string] ??= []).push(range);
+      if (range !== undefined) (likelyRangesByOption[o.id as string] ??= []).push({ ...range, adopted: rangeLawAdopted(stored, o.id as string, range) });
       const whose = settingOriginOf(cell, byId.get(nodeId));
       if (whose === 'unverified') unverifiedSettingsByOption[o.id as string] = (unverifiedSettingsByOption[o.id as string] ?? 0) + 1;
       if (whose !== 'human' && whose !== 'ai') return [];

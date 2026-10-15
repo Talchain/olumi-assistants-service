@@ -66,7 +66,10 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
   const out: Record<string, GoalChanceRangeDisplay> = {};
+  // AIE 6184726873: a chance withheld for resting on an unadopted equal-tail approximation shows no range either (it rests there too).
+  const rangeLawWithheld = (optionId: string): boolean => goalChanceLicenceForAgent(result)?.withheld_reason_by_option?.[optionId]?.reason === 'range_law_unadopted';
   for (const optionId of optionIds) {
+    if (rangeLawWithheld(optionId)) continue;
     const v = ranges[optionId]!;
     // ⛔ S2 review r1 #1 (Codex AMEND #87 6028260969): the SCREEN's words (DGAI `goalChanceRangeLine`): 0 is "less than 1%",
     // 100 is "more than 99%", the high end drops its "about"; an unresolved link label drops the line, never a raw id.

@@ -12,7 +12,11 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
-import { LIKELY_RANGE_LAW_NOTE } from '../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { LIKELY_RANGE_LAW_NOTE, STATED_RANGE_CARD_CLOSING } from '../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { rangeLawAdopted, rangeLawSubject } from '../../../src/orchestrator-v5/intervention-range.js';
+import { userStatementOnNode } from '../../../src/orchestrator-v5/statement-door/statements.js';
+import { subjectKey } from '../../../src/orchestrator-v5/statement-door/subject.js';
+import { rangeLawAdoption, rangeLawStatementOf } from '../../../src/orchestrator-v5/statement-door/fields/range-law.js';
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 const LIFT = 'Lift-and-shift';
@@ -223,6 +227,72 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(cell, JSON.stringify(cell)).toMatchObject({ raw_value: 10, source: 'user_specified' });
     expect(cell.range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
     expect(currentHash()).not.toBe(before);
+  });
+
+  // ⭐ C2 (AIE 6184726873; DL 15 Oct): a chance resting on Olumi's equal-tail reading of the user's range is withheld until that
+  // reading is adopted. The level card SHOWED the whole approximation, so its press adopts it, in the same ONE commit.
+  const adoptionRecord = () => userStatementOnNode((persisted as { nodes: { id: string }[] }).nodes.find(n => n.id === 'fac_downtime'),
+    subjectKey(rangeLawSubject('opt_lift', 'fac_downtime')));
+  const adopted = (low = 5, high = 20): boolean => rangeLawAdopted(persisted, 'opt_lift', { factor_id: 'fac_downtime', low, high });
+
+  it('RED: the press on the card that showed the approximation adopts it in the SAME commit, with the user\'s sentence and the exact ends', async () => {
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
+    expect(String(proposed.public_label)).toContain(STATED_RANGE_CARD_CLOSING);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size).toBe(1);
+    expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+    expect(adopted()).toBe(true);
+    // Their words and the ends they gave; the law is Olumi's, attested beside them.
+    expect(adoptionRecord()?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: TEXT, form: 'range', low: 5, high: 20, reading: 'olumi' })]);
+    expect(adoptionRecord()?.attest).toEqual({ range_law: 'equal_tail', low: 5, high: 20 });
+  });
+
+  it('RED: words the figures cannot be found in ("five to twenty days") keep the user\'s whole message as the record\'s words', async () => {
+    const said = 'For Lift-and-shift, migration downtime is 10 days most likely; my likely range runs from five to twenty days.';
+    const { out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED }, said);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(adopted()).toBe(true);
+    expect(adoptionRecord()?.statements[0]?.quote).toBe(said);
+  });
+
+  it('CONTRAST: the door writes an adoption only beside the level that writes those exact ends; otherwise nothing at all', async () => {
+    const before = structuredClone(persisted);
+    const statement = rangeLawStatementOf('opt_lift', 'fac_downtime', TEXT, 5, 20, 'days');
+    const res = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, base_graph_hash: currentHash(), turn_id: 'c2-door-contrast',
+      links: [], levels: [{ option_id: 'opt_lift', factor_id: 'fac_downtime', value: 0.25, raw_value: 10, cap: 40, unit: 'days',
+        author: 'user_specified', likely_range: { low: 5, high: 25 } }],
+      range_laws: [rangeLawAdoption(persisted, 'opt_lift', 'fac_downtime', [statement], 5, 20, '2026-10-15T00:00:00.000Z')!] } as never, 'req-agent');
+    expect(res).toMatchObject({ status: 'refused', reason: 'range_law_without_its_level' });
+    expect(rows.size).toBe(0);
+    expect(persisted).toEqual(before);
+  });
+
+  it('RED: the starting-point card (values + a ranged level) adopts it in its ONE commit too', async () => {
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED }, TEXT, true);
+    expect(String(proposed.public_label)).toContain(STATED_RANGE_CARD_CLOSING);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size).toBe(1);
+    expect(adopted()).toBe(true);
+  });
+
+  it('CONTRAST: a level with no range adopts nothing', async () => {
+    const { out } = await proposeAndApprove({ value: 10 });
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(adoptionRecord()).toBeUndefined();
+  });
+
+  it('RED: the same range held but never adopted (recorded before the press adopted it) is proposed again, and its press adopts it', async () => {
+    await proposeAndApprove({ value: 10 });
+    liftCell().range = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
+    expect(adopted()).toBe(false);
+    const cell = structuredClone(liftCell());
+    rows.clear();
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size).toBe(1);
+    expect(adopted()).toBe(true);
+    expect(liftCell()).toEqual(cell);
   });
 
   it('the merged B3 gap declaration and temporal reading use one stored approval and one write', async () => {

@@ -24,7 +24,7 @@ import {
 } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
-import { likelyRangeLawWords, likelyRangeUseOf } from '../intervention-range.js';
+import { likelyRangeLawWords, likelyRangeUseOf, rangeLawAdopted } from '../intervention-range.js';
 
 export interface LimitCheck {
   /** The join key for MG's per-limit ask (`limited-level-ask.ts`, seam 5865033356): its sentence rides here verbatim. */
@@ -93,6 +93,10 @@ function guessWords(
   if (f.arm === 'point') {
     return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
   }
+  // AIE 6184726873: the next step is the approximation card (the route offers it), never a re-ask of the range they gave.
+  if (f.arm === 'range_law') {
+    return { why: `it uses an equal-tail approximation for ${q(target)} that has not been adopted. Your stated range remains recorded.`, ask: '' };
+  }
   return null;
 }
 
@@ -110,7 +114,9 @@ function likelyRangeLinesFor(graph: unknown, targetId: string | null, withheldLa
     const sets = [o.interventions, (o.data as { interventions?: unknown } | undefined)?.interventions]
       .find((x): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x) && targetId in x);
     const use = sets === undefined ? undefined : likelyRangeUseOf(targetId, sets[targetId]);
-    return use === undefined ? [] : [likelyRangeLawWords(label, target, use)];
+    // An unadopted range of the person's withholds the option instead (`placeholderPartsFinding`'s range_law arm).
+    if (use === undefined || (use.persons_own && (id === undefined || !rangeLawAdopted(graph, id, use)))) return [];
+    return [likelyRangeLawWords(label, target, use)];
   });
 }
 
@@ -155,7 +161,7 @@ function withheldOptionsFor(
     if (finding.reason === OLUMI_GUESS_LIMIT_REASON) {
       if (words === null) continue;
       out.guesses.set(words.why, [...(out.guesses.get(words.why) ?? []), label]);
-      out.guessAsk ??= words.ask;
+      if (words.ask !== '') out.guessAsk ??= words.ask;
       continue;
     }
     out.byReason.set(finding.reason, [...(out.byReason.get(finding.reason) ?? []), label]);
