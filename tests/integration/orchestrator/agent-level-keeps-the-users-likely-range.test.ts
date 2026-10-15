@@ -208,6 +208,9 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(String(proposed.public_label)).toContain("Your stated range: 5 days to 20 days, with the qualification that it is likely, and no conditions recorded. "
       + 'For this scenario, Olumi proposes an equal-tail approximation: about one chance in four below 5 days and one in four above 20 days');
     expect(String(proposed.public_label)).toContain('Your words did not specify those tail probabilities.');
+    // Nothing is recorded until the press (the approval_required row above): the card never says it already is.
+    expect(String(proposed.public_label)).toContain('Pressing records your original range as you stated it and adopts this approximation');
+    expect(String(proposed.public_label)).not.toMatch(/remains recorded/i);
     expect(String(proposed.public_label)).not.toMatch(/middle half/i);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
