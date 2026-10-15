@@ -1272,3 +1272,80 @@ describe('a revised draft over the link limit only is admitted as drafted (L20 s
     expect(s.commits).toHaveLength(0);
   });
 });
+
+/**
+ * ⭐ DEMO (Paul, 19 Oct; AIE #94 6192426755): a correction in chat → ONE revised-model card through the SAME prepare/approve/save
+ * path → the press saves it, so the corrected framing is OPERATIVE (the rejected mechanism is gone from the saved model the Run
+ * and a reopen read). Before this, a correction had no route to that path (only a typed goal target or deadline did).
+ */
+describe('a correction to the model as a whole becomes an approved, saved revised model (propose_change op revise_model)', () => {
+  const CORRECTION = 'Ad production costs are not a real risk for us. We have no budget for paid production, so take that out of the model.';
+  const corrTurn = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-corr', turn_id: 'corr-turn-0001',
+    user_turn_text: CORRECTION, user_text: `${FX.l1.message}\n${CORRECTION}` };
+  const dispatchChange = async (caps: ReturnType<typeof lane>['caps'], ctx: Rec, quote: string) => {
+    const { dispatchTool } = await import('../runtime/agent-tools.js');
+    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote }] }),
+      ctx as never, caps) as Promise<Rec>;
+  };
+  const labels = (g: Rec): string[] => (g.nodes as Rec[]).map((n) => String(n.label));
+
+  it('RED: the correction → ONE card from the brief + the correction; the press saves it; the rejected risk is gone on reopen', async () => {
+    const s = server();
+    const seen: string[] = [];
+    const proposals = new ProposalStore();
+    const call = (async (req: unknown) => { seen.push(JSON.stringify(req)); return { text: JSON.stringify(candidate()) }; }) as unknown as CallStructuredModel;
+    const caps = createAgentCapabilities(s.dispatch, proposals, call, 'full', undefined, { readCommittedTurnLedger: s.readCommittedTurnLedger, readStatedObjections: async () => [] });
+    expect(labels(s.graph())).toContain('Ad production costs erode budget');
+    const offer = await dispatchChange(caps, corrTurn, CORRECTION);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true, mutated: false, revised_draft: { correction: true } });
+    expect(String(offer.public_label)).toMatch(/^Replace the early draft with a revised one built from your brief and the correction you just gave: /);
+    // The construction read the brief AND this correction (revisedDraftBrief), and nothing is written before the press.
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toContain(JSON.stringify(revisedDraftBrief(FX.brief_text, CORRECTION)).slice(1, 80));
+    expect(seen[0]).toContain(CORRECTION);
+    expect(s.commits).toHaveLength(0);
+    // The card is card-only: its chip is the revised-draft button, naming exactly this stored proposal.
+    const chips = approvalChipsFor([{ name: 'propose_change', ok: true, mutated: false, proposal_id: String(offer.proposal_id) }],
+      () => ({ proposal: proposals.get(String(offer.proposal_id))!, result: offer as never }));
+    expect(chips[0]).toMatchObject({ label: 'Use the revised draft', message: 'Yes, use the revised draft.', detail: offer.public_label });
+    s.said(corrTurn.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    // OPERATIVE: the saved model (what the Run and a reopen read) is the revision; the rejected mechanism is not in it.
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    expect(labels(reopened.graph)).not.toContain('Ad production costs erode budget');
+    expect(labels(reopened.graph)).toContain('New customers');
+    const { payload } = await runFromStore(s.bytes());
+    expect(((payload.graph as Rec).nodes as Rec[]).map((n) => String(n.label))).not.toContain('Ad production costs erode budget');
+  });
+
+  it('CONTRAST: words not in this message → nothing drafted or offered; a typed yes without the press saves nothing', async () => {
+    const s = server();
+    const { caps, drafts } = lane(s);
+    expect(await dispatchChange(caps, { ...corrTurn, user_turn_text: 'What does the Run say?' }, CORRECTION))
+      .toMatchObject({ ok: false, refusal: 'not_asked' });
+    expect(drafts()).toBe(0);
+    const offer = await dispatchChange(caps, corrTurn, CORRECTION);
+    s.said(corrTurn.turn_id);
+    const { typed_approval_of: _pressed, ...typedOnly } = pressed(String(offer.proposal_id));
+    const out = await caps.authoriseChange({ ...typedOnly, user_turn_text: 'Yes, use the revised draft.' } as never, { proposal_id: offer.proposal_id } as never);
+    expect(out.ok).toBe(false);
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('CONTRAST (the gates stay): a saved history that cannot be read → no card, nothing drafted', async () => {
+    const s = server({ ledgerFails: true });
+    const { caps, drafts } = lane(s);
+    const out = await dispatchChange(caps, corrTurn, CORRECTION);
+    expect(out).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
+    expect(drafts()).toBe(0);
+  });
+
+  it('RED: a known fact whose origin cannot be verified is never re-asked: the refusal tells the AI not to ask again', async () => {
+    const { UNKNOWN_ORIGIN_DETAIL } = await import('../runtime/statement-origin.js');
+    expect(UNKNOWN_ORIGIN_DETAIL).not.toMatch(/ask for its source/i);
+    expect(UNKNOWN_ORIGIN_DETAIL).toContain('Do not ask the user to repeat or confirm it');
+    expect(UNKNOWN_ORIGIN_DETAIL).toContain('nothing was recorded as the user’s own figure');
+  });
+});
