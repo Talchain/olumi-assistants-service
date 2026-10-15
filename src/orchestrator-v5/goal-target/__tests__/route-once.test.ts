@@ -354,9 +354,10 @@ describe('rule R route-once', () => {
     }) as Rec;
     expect(state.ok).toBe(true);
     expect(state.mutated).toBe(false);
-    expect(state.links.find((e: Edge) => id(e) === 'capacity->goal')).toEqual({ from: 'capacity', to: 'goal', strength: { mean: 1, std: 0.05 },
+    // S10 fix 1 (#3177): whose link it is comes from the ONE authority; these links carry no stamp, so it is `unknown`.
+    expect(state.links.find((e: Edge) => id(e) === 'capacity->goal')).toEqual({ from: 'capacity', to: 'goal', whose: 'unknown', strength: { mean: 1, std: 0.05 },
       band: 'very strong', exists_probability: 1, counted_once: true, sizing: 'unmarked' });
-    const expected = { from: 'hire', to: 'capacity', strength: { mean: 0.4, std: 0.05 }, band: 'strong', exists_probability: 0.8, sizing: 'unmarked' };
+    const expected = { from: 'hire', to: 'capacity', whose: 'unknown', strength: { mean: 0.4, std: 0.05 }, band: 'strong', exists_probability: 0.8, sizing: 'unmarked' };
     const control = state.links.find((e: Edge) => id(e) === 'hire->capacity');
     expect(control).toEqual(expected);
     expect(JSON.stringify(control)).toBe(JSON.stringify(expected));

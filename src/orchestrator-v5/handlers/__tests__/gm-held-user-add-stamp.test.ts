@@ -317,13 +317,15 @@ describe('(a) an approved add-option: the user’s only when the user supplied i
     const answer = tryStructureOriginAnswer(ORIGIN_Q(PAUL_OPTION_LABEL), persisted);
     expect(answer ?? '', String(answer)).not.toMatch(/not because I suggested it/);
     expect(answer ?? '', String(answer)).not.toMatch(/you set it yourself/);
-    expect(agentView(option)['provenance'], 'the Agent’s state view').not.toBe(USER_SET);
+    // S10 fix 1 (#3177): the Agent's view carries the ONE authority's answer (`added_by`), never the raw stamp.
+    expect(agentView(option)['provenance'], 'no raw stamp in the Agent’s view').toBeUndefined();
+    expect(agentView(option)['added_by'], 'the Agent’s state view').not.toBe('yours');
     // POSITIVE CONTROL, same graph, same question: the probe DOES resolve 6526b52c — stamped, the reader says the
     // user-authorship sentence. So the absence above is the provenance, not a probe that sees nothing.
     const stamped = structuredClone(persisted);
     nodeOf(stamped, PAUL_OPTION_ID).provenance = USER_SET;
     expect(tryStructureOriginAnswer(ORIGIN_Q(PAUL_OPTION_LABEL), stamped)).toMatch(USER_AUTHORSHIP_SENTENCE);
-    expect(agentView(nodeOf(stamped, PAUL_OPTION_ID))['provenance']).toBe(USER_SET);
+    expect(agentView(nodeOf(stamped, PAUL_OPTION_ID))['added_by']).toBe('yours');
     // NEGATIVE CONTROL, by identity: no node the user did NOT add moved its provenance.
     for (const before of stored.nodes) {
       expect(nodeOf(persisted, before.id).provenance, `pre-existing ${before.id}`).toBe(before.provenance);
@@ -346,7 +348,8 @@ describe('(a) an approved add-option: the user’s only when the user supplied i
     const option = nodeOf(persisted, PAUL_OPTION_ID);
     expect(option.provenance, 'the option the user supplied is theirs').toBe(USER_SET);
     expect(tryStructureOriginAnswer(ORIGIN_Q(PAUL_OPTION_LABEL), persisted)).toMatch(USER_AUTHORSHIP_SENTENCE);
-    expect(agentView(option)['provenance']).toBe(USER_SET);
+    expect(agentView(option)['provenance'], 'no raw stamp in the Agent’s view').toBeUndefined();
+    expect(agentView(option)['added_by']).toBe('yours');
     for (const before of stored.nodes) {
       expect(nodeOf(persisted, before.id).provenance, `pre-existing ${before.id}`).toBe(before.provenance);
     }
@@ -716,7 +719,8 @@ describe('(c) a held add with no typed authorship signal, approved, keeps its ow
     expect(risk.label).toBe('Competitive response');
     expect(risk.provenance, 'the approved risk keeps the provenance it was proposed with').not.toBe(USER_SET);
     expect(tryStructureOriginAnswer(ORIGIN_Q('Competitive response'), after) ?? '').not.toMatch(/you set it yourself/);
-    expect(agentView(risk)['provenance']).not.toBe(USER_SET);
+    expect(agentView(risk)['provenance'], 'no raw stamp in the Agent’s view').toBeUndefined();
+    expect(agentView(risk)['added_by']).not.toBe('yours');
     // NEGATIVE CONTROL, by identity: the factor that drives it and the goal it threatens earn nothing.
     expect(nodeOf(after, 'fac_setup').provenance).toBeUndefined();
     expect(nodeOf(after, 'g_profit').provenance).toBeUndefined();
