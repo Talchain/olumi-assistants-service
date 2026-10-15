@@ -10,6 +10,7 @@
  * target edit (−20% → −25%) the reading still speaks for the level, and says the target as it now stands.
  */
 import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
+import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 
 type Rec = Record<string, unknown>;
@@ -49,9 +50,10 @@ export function goalLevelReadingWords(graph: unknown, goalNodeId: unknown): stri
   const unit = typeof os.unit === 'string' ? os.unit : '';
   if (unit !== reading.level_unit) return null;
   // A level the user states or edits since replaces the reading. The one exception is a DERIVED reading (SYSTEM 2, AIE
-  // 6181498097) over the level it derived from the user's figures, which keeps only the brief's stamp (`brief_extraction`, no
-  // explicit extraction type): the reading still says how it was derived, and no reader takes it for a measured total.
-  const derivedHolds = reading.derived === true && os.source === 'brief_extraction' && os.extractionType === undefined;
+  // 6181498097) over the level it derived from the user's figures, which keeps only the brief's stamp (the ONE authority's
+  // `stampOnly`, never the raw tags): the reading still says how it was derived, and no reader takes it for a measured total.
+  const author = authorshipOf({ value: os });
+  const derivedHolds = reading.derived === true && author.origin === 'human' && author.stampOnly === true;
   if (valueClassOf(os) === 'user_stated' && !derivedHolds) return null;
   // ⛔ AIQ 5895590866 (3) nit: while Olumi's level still feeds the model, the reading SPEAKS even when the target is no
   // longer a change (edited to a level frame, or removed): the lead alone, with no target clause to compose.
