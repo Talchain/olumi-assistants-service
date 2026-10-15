@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
-import { applyCohortForecastEdit, cohortForecastAskWords, cohortQuartileQuestion, storedTargetRowsOf } from '../../goal-target/cohort-forecast-write.js';
+import { applyCohortForecastEdit, cohortForecastAskWords, storedTargetRowsOf } from '../../goal-target/cohort-forecast-write.js';
 import { readCohortForecast, targetForecastWireOf } from '../../goal-target/cohort-forecast.js';
 import { goalTargetBasisOf, launchWindowQuestion, periodWords } from '../../goal-target/goal-target-basis.js';
 import { cohortForecastAsks, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW } from '../fields/cohort-relation.js';
@@ -90,7 +90,7 @@ function conversation(b: Brief) {
   const quartileQ = forecastQ;
   // The user's earlier verified messages (the people reached and the same-people answer), and this turn's range.
   const texts = { conversation: `${b.people}\n\n${b.same}`, now: b.range } as never;
-  const ctx = { asks: cohortForecastAsks(g, sameQ) };
+  const ctx = { asks: cohortForecastAsks(g) };
   const quotes: DoorQuote[] = [{ quote: b.people, answering: forecastQ }, { quote: b.same, answering: sameQ }, { quote: b.range, answering: forecastQ }];
   return { g, sameQ, quartileQ, texts, ctx, quotes };
 }
@@ -127,8 +127,8 @@ describe.each(BRIEFS)('T8 cohort relation on the door: $name', (b) => {
     expect(w.member, JSON.stringify(w)).toBe('cohort_forecast');
     const after = applyCohortForecastEdit(c.g, w.payload) as Rec;
     expect(after.kind).toBe('mutated');
-    expect(w.holds(after.mutatedGraph)).toBe(true);
-    expect(w.holds(c.g)).toBe(false);
+    expect(COHORT_RELATION_ROW.writer.holds(w as never, after.mutatedGraph)).toBe(true);
+    expect(COHORT_RELATION_ROW.writer.holds(w as never, c.g)).toBe(false);
     const option = after.mutatedGraph.nodes.find((n: Rec) => n.id === b.option);
     expect(readCohortForecast(option)).toMatchObject({ people_reached: b.reach, conversion_middle_half_pct: [b.low, b.high], author: 'user' });
     expect(userStatementFor(after.mutatedGraph, subjectOf(b))?.statements.map((s) => s.quote)).toEqual([b.people, b.same, b.range]);

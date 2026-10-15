@@ -52,6 +52,11 @@ export interface RoleRow {
   readonly writer: FieldWriter;
   /** A sentence the model already holds as this subject's ADMITTED source for this field (the brief's own words): bound by it. */
   readonly sourceOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
+  /**
+   * Forms recorded only from the words the user typed in THIS turn, the message that answers Olumi's ask (AIE 6174707160 and
+   * 6176433015: two conversion figures are the user's one-in-four estimates only as their answer to that question). `detail` says why not.
+   */
+  readonly answerTypedNow?: { readonly forms: readonly StatementForm[]; readonly detail: (subject: DoorSubject, label: string, graph: unknown) => string };
   /** Olumi's reading of the statement, as the card says it ("your estimate of about 30% that ‘X’ happens …"). */
   readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
   /** Every derived interpretation or separate Olumi assumption the reading rests on, each said once, before the card's question. */

@@ -44,7 +44,7 @@ export interface DoorReading {
   readonly words?: string;
 }
 
-export type DoorRefusal = 'no_table_row' | 'statement_malformed' | 'not_this_field' | 'not_this_subject' | 'origin_unknown' | 'statement_not_found'
+export type DoorRefusal = 'no_table_row' | 'not_answered_now' | 'statement_malformed' | 'not_this_field' | 'not_this_subject' | 'origin_unknown' | 'statement_not_found'
   | 'figure_not_in_quote';
 export type DoorVerdict = { readonly kind: 'read'; readonly reading: DoorReading } | { readonly kind: 'refused'; readonly refusal: DoorRefusal; readonly detail: string };
 
@@ -112,6 +112,12 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
       ...(row.periodOf?.(subject, graph) !== undefined ? { period: row.periodOf(subject, graph) } : {}) });
     if (v.kind === 'refused') {
       return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
+    }
+    // A form the row records only from this turn's words: the same statement, verified against what the user typed now alone.
+    if (row.answerTypedNow?.forms.includes(fig.form) === true && verifyStatement({ quote, form: fig.form, ...(answering !== undefined ? { answering } : {}),
+      ...(fig.form === 'range' ? { low: fig.low, high: fig.high } : { value: fig.form === 'upper_bound' ? fig.high : fig.low }) }, { now: texts.now },
+    { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id }, unit: row.unit, forms: row.forms, figuresIn: () => figures }).kind !== 'verified') {
+      return { kind: 'refused', refusal: 'not_answered_now', detail: row.answerTypedNow.detail(subject, label, graph) };
     }
     statements.push(v.statement);
     words ??= fig.words;

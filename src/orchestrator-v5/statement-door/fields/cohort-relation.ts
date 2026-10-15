@@ -13,17 +13,19 @@
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import {
-  applyCohortForecastEdit, applyGoalRelationEdit, cohortFixedReachScenario, cohortForecastAskWords, cohortForecastRecordedWords,
-  cohortLawApproximation, cohortWindowOf, peopleFiguresIn, percentRangesIn, sameCohortStatementOf, storedTargetRowsOf, withoutPercentRanges,
+  applyCohortForecastEdit, applyGoalRelationEdit, approvedCohortForecastOf, approvedGoalRelationOf, asksQuartileQuestion, cohortFixedReachScenario,
+  cohortQuartileQuestion, UNDERLYING_RATE_MEANING,
+  cohortForecastAskWords, cohortForecastRecordedWords, cohortLawApproximation, cohortWindowOf, peopleFiguresIn, percentRangesIn,
+  sameCohortLabelsOf, sameCohortRecordedWords, sameCohortStatementOf, storedTargetRowsOf, withoutPercentRanges,
   type ApprovedCohortForecast, type ApprovedGoalRelation,
 } from '../../goal-target/cohort-forecast-write.js';
-import { goalTargetBasisOf, periodWords } from '../../goal-target/goal-target-basis.js';
+import { goalTargetBasisOf, launchWindowQuestion, periodWords } from '../../goal-target/goal-target-basis.js';
 import type { StatementAsk } from '../ask.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
 import { holdsUserStatement, userStatementRecord } from '../statements.js';
 import type { DoorSubject } from '../subject.js';
-import type { FieldWriter } from '../write.js';
+import type { DoorWrite, FieldWriter } from '../write.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -53,6 +55,16 @@ const goalRelation = (graph: unknown): DoorSubject | undefined => {
 const applies = (subject: DoorSubject, graph: unknown): boolean => subject.kind === 'option' && subject.field === 'relation'
   && nodesOf(graph).some((n) => n.id === subject.id && n.kind === 'option') && cohortWindowOf(graph) !== undefined && rateAndCount(graph) !== undefined;
 
+/**
+ * Why two conversion figures were not recorded as the user's one-in-four estimates (AIE 6174707160 and 6176433015), with the coaching
+ * the retired `propose_cohort_forecast` gave: keep their range as said, and offer a comparable past campaign instead of asking again.
+ */
+export const quartilesNotAskedDetail = (optionLabel: string, window: string): string =>
+  `Two conversion figures are recorded as the user's own estimates only as their answer, in the message that answers it, to exactly: `
+  + `"${cohortQuartileQuestion(optionLabel, window)}" (${UNDERLYING_RATE_MEANING}) Pass answering set to that question. A range they gave any `
+  + 'other way is kept as they said it and is never read as these estimates. If they cannot judge those chances, keep their range as they '
+  + 'said it and offer to look at the conversion of a comparable past campaign instead; do not keep asking. Nothing was prepared.';
+
 export const COHORT_RELATION_ROW: RoleRow = {
   field: 'relation',
   unit: '',
@@ -66,6 +78,7 @@ export const COHORT_RELATION_ROW: RoleRow = {
     return goal === undefined ? [] : [goal];
   },
   get writer() { return COHORT_FORECAST_WRITER; },
+  answerTypedNow: { forms: ['range'], detail: (_subject, label, graph) => quartilesNotAskedDetail(label, cohortWindowOf(graph) ?? '') },
   read(quote, subject, graph) {
     if (!applies(subject, graph)) {
       return { refused: 'This forecast is only for an option, on a goal with a percentage and a count target over one window.' };
@@ -119,7 +132,12 @@ export const COHORT_FORECAST_WRITER: FieldWriter = {
     }
     const option = nodesOf(graph).find((n) => n.id === reading.subject.id && n.kind === 'option');
     const pair = rateAndCount(graph);
-    if (option === undefined || !applies(reading.subject, graph) || pair === undefined) return { refused: 'targets_not_cohort' };
+    const window = cohortWindowOf(graph);
+    if (option === undefined || !applies(reading.subject, graph) || pair === undefined || window === undefined) return { refused: 'targets_not_cohort' };
+    // ⛔ The range is the user's quartiles only as their answer to the one-in-four question for THIS option and window.
+    if (!asksQuartileQuestion(conv.answering, cohortQuartileQuestion(String(option.label ?? ''), window))) {
+      return { refused: quartilesNotAskedDetail(String(option.label ?? ''), window) };
+    }
     const f: CohortForecast = { people_reached: ppl.low!, conversion_middle_half_pct: [conv.low!, conv.high!],
       same_cohort: { rate_target_node_id: String(pair.rate.node_id), count_target_node_id: String(pair.count.node_id), stated_by: 'user' },
       author: 'user' };
@@ -131,11 +149,16 @@ export const COHORT_FORECAST_WRITER: FieldWriter = {
       user_statement: { subject: reading.subject, record } };
     const dry = applyCohortForecastEdit(graph, approved);
     if (dry.kind !== 'mutated') return { refused: dry.kind === 'refused' ? dry.reason : 'already_held' };
-    return { member: 'cohort_forecast', payload: approved,
-      holds: (after: unknown) => {
-        const held = readCohortForecast(nodesOf(after).find((n) => n.id === approved.option_id));
-        return held !== undefined && JSON.stringify(held) === JSON.stringify(f) && holdsUserStatement(after, record, reading.subject);
-      } };
+    return { member: 'cohort_forecast', payload: JSON.parse(JSON.stringify(approved)) as unknown };
+  },
+  /** The stored write's forecast and words, held on its option by identity (the read-back, and the retry's verified no-op). */
+  holds(write: DoorWrite, after: unknown) {
+    const approved = write.member === 'cohort_forecast' && isRec(write.payload) && typeof write.payload.option_id === 'string'
+      ? approvedCohortForecastOf({ path: write.payload.option_id, value: write.payload }) : undefined;
+    if (approved?.user_statement === undefined) return false;
+    const held = readCohortForecast(nodesOf(after).find((n) => n.id === approved.option_id));
+    return held !== undefined && JSON.stringify(held) === JSON.stringify(approved.cohort_forecast)
+      && holdsUserStatement(after, approved.user_statement.record, approved.user_statement.subject);
   },
 };
 
@@ -143,27 +166,24 @@ export const COHORT_FORECAST_WRITER: FieldWriter = {
  * The asks a cohort forecast answers, in the door's subjects, in the words readiness says them: each option's forecast questions
  * (`cohortForecastAskWords`: the people it reaches, then its one-in-four question), and the goal's same-people question.
  */
-export function cohortForecastAsks(graph: unknown, sameCohortQuestion: string | undefined): StatementAsk[] {
+export function cohortForecastAsks(graph: unknown): StatementAsk[] {
   const window = cohortWindowOf(graph);
   const goal = goalRelation(graph);
   const basis = goalTargetBasisOf(theGoal(graph));
-  if (window === undefined || goal === undefined || basis === undefined || rateAndCount(graph) === undefined) return [];
+  const labels = sameCohortLabelsOf(graph);
+  if (window === undefined || goal === undefined || basis === undefined || labels === undefined) return [];
+  // The same-people question in readiness's own words (`launchWindowQuestion`, target-testability's case (a)).
+  const sameCohortQuestion = launchWindowQuestion(labels.rate, basis, labels.count);
   return [
     ...nodesOf(graph).filter((n) => n.kind === 'option' && typeof n.id === 'string')
       .map((n) => ({ subject: { kind: 'option', id: String(n.id), field: 'relation' } as DoorSubject,
         words: cohortForecastAskWords(labelOf(graph, n.id), periodWords(basis), window) })),
-    ...(sameCohortQuestion === undefined || sameCohortQuestion.trim() === '' ? [] : [{ subject: goal, words: sameCohortQuestion }]),
+    { subject: goal, words: sameCohortQuestion },
   ];
 }
 
-const countLabelOf = (graph: unknown): string => {
-  const pair = rateAndCount(graph);
-  return pair === undefined ? 'the count' : labelOf(graph, pair.count.node_id);
-};
-const rateLabelOf = (graph: unknown): string => {
-  const pair = rateAndCount(graph);
-  return pair === undefined ? 'the rate' : labelOf(graph, pair.rate.node_id);
-};
+const countLabelOf = (graph: unknown): string => sameCohortLabelsOf(graph)?.count ?? 'the count';
+const rateLabelOf = (graph: unknown): string => sameCohortLabelsOf(graph)?.rate ?? 'the rate';
 const appliesToGoal = (subject: DoorSubject, graph: unknown): boolean => subject.kind === 'goal' && subject.field === 'relation'
   && goalRelation(graph)?.id === subject.id && cohortWindowOf(graph) !== undefined && rateAndCount(graph) !== undefined;
 
@@ -189,7 +209,7 @@ export const COHORT_SAME_PEOPLE_ROW: RoleRow = {
   },
   readingWords: (_s, _subject, _label, graph) => `‘${countLabelOf(graph)}’ counts the people who convert among the same people your ‘${rateLabelOf(graph)}’ is measured on, as you said`,
   assumptions: () => [],
-  recordedWords: (_s, _subject, _label, graph) => `Recorded from your words: ‘${countLabelOf(graph)}’ counts the people who convert among the same people your ‘${rateLabelOf(graph)}’ is measured on.`,
+  recordedWords: (_s, _subject, _label, graph) => sameCohortRecordedWords(graph),
 };
 
 /** The adapter onto the `goal_relation` member: the ONE verified answer, recorded on the goal and read back by identity. */
@@ -201,6 +221,12 @@ export const GOAL_RELATION_WRITER: FieldWriter = {
     const approved: ApprovedGoalRelation = { goal_id: String(goal.id), expected_goal: structuredClone(goal), user_statement: { subject: reading.subject, record } };
     const dry = applyGoalRelationEdit(graph, approved);
     if (dry.kind !== 'mutated') return { refused: dry.kind === 'refused' ? dry.reason : 'already_held' };
-    return { member: 'goal_relation', payload: approved, holds: (after: unknown) => holdsUserStatement(after, record, reading.subject) };
+    return { member: 'goal_relation', payload: JSON.parse(JSON.stringify(approved)) as unknown };
+  },
+  /** The stored write's words, held on its goal by identity. */
+  holds(write: DoorWrite, after: unknown) {
+    const approved = write.member === 'goal_relation' && isRec(write.payload) && typeof write.payload.goal_id === 'string'
+      ? approvedGoalRelationOf({ path: write.payload.goal_id, value: write.payload }) : undefined;
+    return approved !== undefined && holdsUserStatement(after, approved.user_statement.record, approved.user_statement.subject);
   },
 };

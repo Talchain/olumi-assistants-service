@@ -79,14 +79,14 @@ describe.each(BRIEFS)('the cohort ask chain, walked: $name', (b) => {
     expect(q, 'readiness asks the same-people question first').toBe(sameQ);
     said.push(b.same);
     const goalSubject = { kind: 'goal' as const, id: goalOf(g).id, field: 'relation' as const };
-    const v0 = readStatement(g, goalSubject, goalOf(g).label, [{ quote: b.same, answering: q! }], { now: b.same } as never, { asks: cohortForecastAsks(g, sameQ) });
+    const v0 = readStatement(g, goalSubject, goalOf(g).label, [{ quote: b.same, answering: q! }], { now: b.same } as never, { asks: cohortForecastAsks(g) });
     if (v0.kind !== 'read') throw new Error(JSON.stringify(v0));
     const w0 = doorRowFor(goalSubject, g)!.writer.approve(v0.reading, g) as Rec;
     expect(w0.member).toBe('goal_relation');
     const g0 = applyGoalRelationEdit(g, w0.payload) as Rec;
     expect(g0.kind).toBe('mutated');
     g = persisted(g0.mutatedGraph);
-    expect(w0.holds(g), 'the read-back holds the words after the persistence projection').toBe(true);
+    expect(doorRowFor(goalSubject, g)!.writer.holds(w0 as never, g), 'the read-back holds the words after the persistence projection').toBe(true);
     expect(sameCohortStatementOf(g)?.quote).toBe(b.same);
     // 2. Each option's forecast ask, in readiness's order, answered with the people and the one-in-four range.
     for (let guard = 0; guard < 10; guard += 1) {
@@ -103,14 +103,14 @@ describe.each(BRIEFS)('the cohort ask chain, walked: $name', (b) => {
       said.push(people, range);
       const subject = { kind: 'option' as const, id: option.id, field: 'relation' as const };
       const v = readStatement(g, subject, option.label, [{ quote: people, answering: q! }, { quote: range, answering: q! }],
-        { conversation: said.slice(0, -2).join('\n\n'), now: `${people} ${range}` } as never, { asks: cohortForecastAsks(g, sameQ) });
+        { conversation: said.slice(0, -2).join('\n\n'), now: `${people} ${range}` } as never, { asks: cohortForecastAsks(g) });
       if (v.kind !== 'read') throw new Error(`${option.id}: ${JSON.stringify(v)}`);
       const w = doorRowFor(subject, g)!.writer.approve(v.reading, g) as Rec;
       expect(w.member, JSON.stringify(w)).toBe('cohort_forecast');
       const written = applyCohortForecastEdit(g, w.payload) as Rec;
       expect(written.kind).toBe('mutated');
       g = persisted(written.mutatedGraph);
-      expect(w.holds(g)).toBe(true);
+      expect(doorRowFor(subject, g)!.writer.holds(w as never, g)).toBe(true);
     }
     return { g, asked };
   }

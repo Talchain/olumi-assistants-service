@@ -23,10 +23,10 @@ import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
-import { cohortTargetsOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
+import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
 import { holdsUserStatement, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
-import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
+import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
 type Rec = Record<string, unknown>;
@@ -248,7 +248,7 @@ export interface ApprovedGoalRelation {
 }
 
 export type GoalRelationEditResult =
-  | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[] }
+  | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: 'invalid_graph' | 'invalid_statement' | 'goal_not_found' | 'goal_changed' };
 
@@ -274,7 +274,25 @@ export function applyGoalRelationEdit(persistedGraph: unknown, approved: Approve
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
       safe_summary: 'Recorded from your words that both targets count the same people', impact: 'low', rerun_recommended: false },
   });
-  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact] };
+  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact], confirmation: sameCohortRecordedWords(graph) };
+}
+
+/** The labels of the goal's two cohort targets, the rate (a percentage of the people reached) and the count, or `undefined`. */
+export function sameCohortLabelsOf(graph: unknown): { readonly rate: string; readonly count: string } | undefined {
+  const rows = storedTargetRowsOf(graph);
+  const rate = rows.filter(isCohortRateRow);
+  const count = rows.filter((r) => !rate.includes(r));
+  if (rows.length !== 2 || rate.length !== 1 || count.length !== 1) return undefined;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const label = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id).trim();
+  return { rate: label(rate[0]!.node_id), count: label(count[0]!.node_id) };
+}
+
+/** The receipt of the user's same-people answer, after its verified read-back. */
+export function sameCohortRecordedWords(graph: unknown): string {
+  const l = sameCohortLabelsOf(graph);
+  return l === undefined ? 'Recorded from your words that both targets count the same people.'
+    : `Recorded from your words: ‘${l.count}’ counts the people who convert among the same people your ‘${l.rate}’ is measured on.`;
 }
 
 /** The post-image holds exactly this write and nothing else (the dispatch's scope check, as for the forecast). */
@@ -299,8 +317,39 @@ export function approvedCohortForecastOf(op: { readonly path: string; readonly v
   const people = userStatementOf(st.people), conversion = userStatementOf(st.conversion), same = userStatementOf(st.same_cohort);
   if (f === undefined || !isRec(v.expected_node) || !Array.isArray(v.expected_targets) || !v.expected_targets.every(isRec)
     || people === undefined || conversion === undefined || same === undefined) return undefined;
+  const said = userStatementCarriedBy(v);
+  if (said === null) return undefined;
   return { option_id: op.path, cohort_forecast: f, expected_node: v.expected_node, expected_targets: v.expected_targets,
-    statements: { people, conversion, same_cohort: same } };
+    statements: { people, conversion, same_cohort: same }, ...(said !== undefined ? { user_statement: said } : {}) };
+}
+
+/** A stored card's `user_statement` (the door's record of the words): absent, well-formed, or `null` when malformed. */
+function userStatementCarriedBy(v: Rec): ApprovedGoalRelation['user_statement'] | undefined | null {
+  if (v.user_statement === undefined) return undefined;
+  const u = isRec(v.user_statement) ? v.user_statement : {};
+  const subject = isRec(u.subject) ? u.subject : undefined;
+  const record = userStatementRecordOf(u.record);
+  if (subject === undefined || typeof subject.id !== 'string' || !(SUBJECT_KINDS as readonly unknown[]).includes(subject.kind)
+    || !isStatementField(subject.field) || record === undefined) return null;
+  const parsed: DoorSubject = { kind: subject.kind as SubjectKind, id: subject.id, field: subject.field };
+  return record.subject_key === subjectKey(parsed) ? { subject: parsed, record } : null;
+}
+
+/** The proposal op of the goal's same-people answer (`path` is the goal's id, `value` is what {@link approvedGoalRelationOf} reads). */
+export const SET_GOAL_RELATION_OP = 'set_goal_relation' as const;
+
+/** The goal relation card as its stored operation carries it, or `undefined` if malformed. */
+export function approvedGoalRelationOf(op: { readonly path: string; readonly value?: unknown }): ApprovedGoalRelation | undefined {
+  const v = isRec(op.value) ? op.value : {};
+  const said = userStatementCarriedBy(v);
+  if (!isRec(v.expected_goal) || said === undefined || said === null) return undefined;
+  return { goal_id: op.path, expected_goal: v.expected_goal, user_statement: said };
+}
+
+/** A held goal relation card still applies to `graph` exactly when its own writer would not refuse it there. */
+export function goalRelationCardHolds(op: { readonly path: string; readonly value?: unknown }, graph: unknown): boolean {
+  const approved = approvedGoalRelationOf(op);
+  return approved !== undefined && applyGoalRelationEdit(graph, approved).kind !== 'refused';
 }
 
 /** A held forecast card still applies to `graph` exactly when its own writer would not refuse it there. */
