@@ -24,8 +24,6 @@ export interface RunWithheld {
   readonly code: string;
   readonly option_ids: readonly string[];
   readonly reason?: string;
-  /** The record's own words for it (the AI says what it means, in its own words, once). */
-  readonly words?: string;
   /** The claims it holds back (`goal_probability`, `downside` …), as recorded. */
   readonly withheld_claims?: readonly string[];
 }
@@ -128,7 +126,9 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     .map((w) => {
       const detail = isRec(w.detail) ? w.detail : undefined;
       const claims = strs(w.withheld_claims);
-      return { code: String(w.code), option_ids: strs(w.option_ids), ...(typeof w.message === 'string' && w.message !== '' ? { words: w.message } : {}),
+      // Typed facts only, never the record's message: its words reach the AI through `goal_chance.say`, already scoped and
+      // asked once (never-reask-closed; target-not-testable-beside-ranges). A copy here would bypass both.
+      return { code: String(w.code), option_ids: strs(w.option_ids),
         ...(typeof detail?.reason === 'string' ? { reason: detail.reason } : {}), ...(claims.length > 0 ? { withheld_claims: claims } : {}) };
     }) : [];
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
@@ -157,16 +157,3 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
   };
 }
 
-const sayable = (t: string): string => t.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase();
-
-/**
- * ⭐ S7 PR-B MUST-SAY (DL 00:51Z condition 1): the AIE's exact disclosures for THIS Run are checked PRESENT in the AI's reply; a
- * line the reply does not say is appended exactly, never dropped and never paraphrased. Presence is by the line's own words
- * (quotes and spacing normalised); a reply that already says it is returned unchanged.
- */
-export function withMustSay(reply: string, mustSay: readonly string[]): { readonly text: string; readonly appended: readonly string[] } {
-  const said = sayable(reply);
-  const missing = mustSay.filter((line, i) => line.trim() !== '' && mustSay.indexOf(line) === i && !said.includes(sayable(line)));
-  if (missing.length === 0) return { text: reply, appended: [] };
-  return { text: [reply.trimEnd(), ...missing].filter((t) => t !== '').join('\n\n'), appended: missing };
-}
