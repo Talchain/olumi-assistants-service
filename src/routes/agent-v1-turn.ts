@@ -5167,7 +5167,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // A specific partial follow-up is already the narrator's authoritative status.
               text: result.tool_results.some(r => r.mutated === true && r.applied === false
                 && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
-        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus }, exactlyOneCardWaits);
+        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus, aiAsks: aiWroteReply }, exactlyOneCardWaits);
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
@@ -5196,7 +5196,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // real-writer, one-reply-build rows). After a refused first analysis the readiness line is the REST of that refusal
     // (T4: "Review all N readiness issues" names none; `refusalSaid` drops what it already said), so it stays with it.
     const aiStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine,
-      firstAnalysisRefusalSaid ? readinessLine : null, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+      firstAnalysisRefusalSaid ? readinessLine : null, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     // The retained fresh scope question is this turn's existing step, even if the
     // narrator parked it behind the questions toggle. Count it before another ask.
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
@@ -5286,7 +5286,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     // BYPASS1 keeps it: it is never said when the reply at rest already asks (the AI's own ask included), so it cannot double.
-    const linkAsk = decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
+    // ⭐ S6 (Paul ≤¼, 15 Oct): on the AI's reply the AI decides what to ask (from the user's words and canonical_state); the
+    // host adds no ask of its own: no link-size ask, no post-write ask, no build questions line or list. Host prose keeps them.
+    const linkAsk = !hostProse || decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
       message, restingText: textAtRest(composedWithout), awaitingApproval: decisionTurn.awaitingApproval,
     });
     if (linkAsk !== null) decisionLines.push(linkAsk);
@@ -5708,7 +5710,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const agentAnswer = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
       const cardOwed = automaticDeadlineLabel !== undefined && !agentAnswer.includes(automaticDeadlineLabel) ? [automaticDeadlineLabel] : [];
       let reply = withCellHorizon(withDisclosures(agentAnswer, cardOwed), readbackGraph, chanceCells);
-      const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
+      const asks = [...decisionLines, hostProse ? askLine : null, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
       // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
@@ -6320,7 +6322,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(() => {
           const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');
           // EBD (DL, 12 Oct): a question the reply already said before its status line is not restated in the toggle list.
-          const qs = (at >= 0 ? openQuestionsForReply(result.tool_results[at] as Parameters<typeof openQuestionsForReply>[0]) : [])
+          // S6: on the AI's reply the AI decides what to ask, so no host questions list rides beside it.
+          const qs = (at >= 0 && hostProse ? openQuestionsForReply(result.tool_results[at] as Parameters<typeof openQuestionsForReply>[0]) : [])
             .filter((q) => !saidBeforeStatus.includes(q));
           return qs.length > 0 ? { open_questions: qs } : {};
         })(),

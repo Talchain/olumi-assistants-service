@@ -442,7 +442,7 @@ export function partialRangeLevelsWarning(ranges: readonly { factor: string; ran
 }
 
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', exactlyOneCardWaits = false): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', exactlyOneCardWaits = false, aiAsks = false): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
@@ -476,7 +476,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       const approval = pending === null ? '' : pending === 'figures'
         ? 'Figures you did not give me are Olumi\u2019s estimates; when you approve one, it stays marked as Olumi\u2019s estimate, approved by you.'
         : 'What I proposed above is not made until you approve it.';
-      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r, alreadySaid)]
+      return [approval, leftOutLine(r), contextFactorsLine(r), aiAsks ? '' : openQuestionsLine(r, alreadySaid)]
         .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }
     if (r.refusal === 'event_goal_unadmitted') {
@@ -549,6 +549,8 @@ export function narrateWriteOutcome(
     readonly versioned?: boolean;
     /** EBD (DL, 12 Oct): what the reply already says before the status line; a question in it is not shown again. */
     readonly alreadySaid?: string;
+    /** ⭐ S6 (Paul ≤¼, 15 Oct): the AI wrote the reply, so it decides what to ask; the build's questions line is not added. */
+    readonly aiAsks?: boolean;
   } = {},
   /** R2 T1: exactly one card waits, so typed card words bind; otherwise "approval_required" names the button only. */
   exactlyOneCardWaits = false,
@@ -600,7 +602,7 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? '', exactlyOneCardWaits));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? '', exactlyOneCardWaits, opts.aiAsks === true));
   const status = lines.length > 0
     ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
