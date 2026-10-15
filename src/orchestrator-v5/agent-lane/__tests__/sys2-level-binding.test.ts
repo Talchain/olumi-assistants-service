@@ -60,8 +60,8 @@ describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s leve
     expect(goalReadingsOf(g, 'weekly_support_capacity')).toEqual([{ kind: 'level', node_id: 'weekly_support_capacity', words: `${DERIVED}.` }]);
     expect(asksForToday(g)).toBe(false);
     const entity = projectEntity(goal as Parameters<typeof projectEntity>[0]);
-    expect(entity).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { source: 'brief_extraction' } });
-    expect((entity.value_provenance as Rec).extraction_type).toBeUndefined();
+    // The AI's goal: the user's figures (system 3's one authority), and how today's level was reached, in the reading's words.
+    expect(entity).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { origin: 'user' }, level_today_reading: `${DERIVED}.` });
   });
 
   it('the 0 is by the user\'s DEFINITION ("additional"), never the status quo\'s setting: without "adds no specialist" it still holds', async () => {
