@@ -11,6 +11,7 @@ import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { approvedDeadlineReadingOf } from '../../goal-target/goal-horizon-write.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 
 type Rec = Record<string, any>;
 const ctx = { scenario_id: '11111111-1111-1111-1111-111111111111', authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -55,5 +56,16 @@ describe('S7 B2: the AI is told a deadline it approved is Olumi’s reading of t
     const none = structuredClone(HIRING);
     delete none.graph.nodes.find((n: Rec) => n.id === 'productivity').goal_horizon;
     expect((await goalsSeen(none)).find((g) => g.id === 'productivity')).not.toHaveProperty('deadline_set_by');
+  });
+
+  // ⭐ Hiring e2e 62e94f27 turn 05 (DL 08:03Z): the fact reached the AI (above) and the reply still put "a 15 January deadline"
+  // under "What you supplied". The instructions the AI reads now say what the fact means, naming the SAME keys the state carries.
+  it('the instructions say an approved Olumi reading is never a date the user supplied, by the same keys the state carries', async () => {
+    const rule = 'A goal\u2019s deadline_set_by olumi_reading means Olumi read that date from the user\u2019s words (from_words) and the user approved it: say it that way, never as a date the user supplied.';
+    expect(HOST_TOOL_CONTRACT.split(rule)).toHaveLength(2);
+    const goal = (await goalsSeen(HIRING)).find((g) => g.id === 'productivity')!;
+    expect(Object.keys(goal)).toContain('deadline_set_by');
+    expect(goal.deadline_set_by.origin).toBe('olumi_reading');
+    expect(goal.deadline_set_by).toHaveProperty('from_words', 'three months');
   });
 });
