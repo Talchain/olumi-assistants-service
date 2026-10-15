@@ -1,12 +1,12 @@
 {
   "selected-converse": [
-    "8740b2bf74d09106a79bbc78fbc3a959be18943705dd41ea43bd713b6b7bbea7"
+    "1b3e783adbfc17352f309dedbd8f98653e0655a05fb152a3b028adea6f2aa46f"
   ],
   "pre-mortem": [
     "006c51b45b8b42a1badc122c8d228b5c67925c6525507ec0992143d9709aa436"
   ],
   "chip-converse": [
-    "f2d31dea21e9c828c511063551aeaa03fe57cc94230eadf76a87e48f3f6eb353"
+    "37846d8444c68a9c5aa1f32bf62591d343691be4ee6974ef781d348ccecb8c51"
   ],
   "widen-risks": [
     "48eaa4b55e8061233b8c87717a051d45d62f307057fa136ee3072516dd337dd7"
@@ -15,13 +15,13 @@
     "68cd0bda36dec232317eeecfe6445b8147f63a97542c5438b0c781f8ae6bb2cf"
   ],
   "ordinary-converse": [
-    "005497bc5e28537e3d989641d097878e2cedb38e43cc4a4c4094a2f5b3dcb0c5"
+    "032ca024a03be5f4011be74d8eb65f0818256cc9458a6e6225e0acee27247db3"
   ],
   "widen-options": [
     "ec47b6ac2799c2ec423e40ebe6c15b840aced57d0b68dfaad904981cc9c1470b"
   ],
   "tool-continuation": [
-    "005497bc5e28537e3d989641d097878e2cedb38e43cc4a4c4094a2f5b3dcb0c5",
-    "236f0cb25f8dcef5b664b718ed6d27444c1d2bfdc2f10fce854ba1dc895d40f8"
+    "032ca024a03be5f4011be74d8eb65f0818256cc9458a6e6225e0acee27247db3",
+    "495bb25d10bc7ca5c5cd616c8a4743cb6f9ed85d0fd3b754a662fd6e83b58fa8"
   ]
 }

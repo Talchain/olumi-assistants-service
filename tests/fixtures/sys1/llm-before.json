@@ -1,9 +1,9 @@
 {
   "proof": [
     {
-      "body": "95610a64bea6b366f9de9c40f5f1aa46911ede11480af6197258f0335b9abbd3",
+      "body": "5e46ba9a3a5c1d2c2bcbf7e711999acf6e03aeb2da2b62df8320b59271f6fbe4",
       "instructions": "76b44ae6b4f1c60b70fc6f63bab2e293126fa22ad17ba7e1d446deac627a8a19",
-      "tools": "512174f6d7bcefe6660a905850db74a65b7cd61e5578da15b5578a44e37fbd75",
+      "tools": "6b33cab8732714e34a9dadd1b780a7898adb1aa1dd5836ff492959754c3e96c4",
       "schema": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
     }
   ],
