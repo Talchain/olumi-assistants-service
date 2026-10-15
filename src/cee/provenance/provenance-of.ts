@@ -986,6 +986,20 @@ export function whoseOf(p: Provenance): Whose {
   return 'unknown';
 }
 
+/**
+ * WHO DREW A LINK, as the ONE answer (S10 fix 1; PL 15 Oct 00:49Z on #3177): the person's stamp is theirs, their brief's stamp
+ * is theirs by its stamp, a structural, AI or repair link is Olumi's, and an unrecognised stamp, or none, is UNKNOWN. Never the
+ * display's `unverified_brief`, which for a link means nothing was established, not a human source with an unverified role.
+ */
+export function linkDrawnByOf(edge: unknown, context: LinkContext = {}): Provenance {
+  const src = isRec(edge) && isRec(edge.provenance) ? edge.provenance.source : undefined;
+  if (src === 'brief_extraction') return P('human', { stampOnly: true });
+  if (src === 'user_specified') return P('human');
+  if (context.validatedDefinition === true || context.fromKind === 'option' || context.fromKind === 'decision') return P('ai', { structural: true });
+  const drawnBy = classifyValueSource(src);
+  return drawnBy === 'user_stated' ? P('human') : drawnBy === 'ai_drafted' || drawnBy === 'system_repaired' ? P('ai') : P('unknown');
+}
+
 export function heldFigureOwnerOf(observed: unknown): HeldFigureOwner | undefined {
   const reading = readValue(observed);
   if (reading === undefined) return undefined;

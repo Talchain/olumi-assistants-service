@@ -38,7 +38,7 @@ describe('S10 fix 1: the Agent reads whose it is from the ONE authority, never t
     expect(entities.length).toBeGreaterThan(3);
     for (const e of entities) {
       expect(e).not.toHaveProperty('provenance');
-      if (e.value_provenance !== undefined) expect(Object.keys(e.value_provenance)).toEqual(['whose']);
+      if (e.value_provenance !== undefined) expect(Object.keys(e.value_provenance).filter((k) => !['whose', 'origin', 'role'].includes(k))).toEqual([]);
       if (e.value_provenance !== undefined) expect(WHOSE).toContain(e.value_provenance.whose);
       if (e.added_by !== undefined) expect(WHOSE).toContain(e.added_by);
     }
@@ -54,8 +54,25 @@ describe('S10 fix 1: the Agent reads whose it is from the ONE authority, never t
     const node = { id: 'churn', kind: 'factor', label: 'Monthly churn', provenance: 'ai_inferred',
       observed_state: { value: 0.05, raw_value: 5, unit: '%', source: 'user_assumption', reviewed_by_user: { intent: 'confirm', at: '2026-10-14T21:00:00Z' } } };
     const seen = projectEntity(node as never);
-    expect(seen.value_provenance).toEqual({ whose: 'olumi_accepted' });
+    expect(seen.value_provenance).toEqual({ whose: 'olumi_accepted', origin: 'olumi' });
     expect(seen.added_by).toBe('olumi');
     expect(JSON.stringify(seen)).not.toMatch(/user_assumption|reviewed_by_user|ai_inferred/);
+  });
+
+  it('PL #3177: the user’s own words with an UNVERIFIED binding (the served 80) stay the user’s source with an unverified role, never unknown', () => {
+    const node = { id: 'demand', kind: 'factor', label: 'Weekly demand', provenance: 'unverified_brief',
+      observed_state: { value: 80, raw_value: 80, unit: 'tickets/week', source: 'brief_extraction', user_material_unverified: true } };
+    const seen = projectEntity(node as never);
+    expect(seen.value_provenance).toMatchObject({ origin: 'user', role: 'unverified' });
+    expect(seen.value_provenance.whose).not.toBe('unknown');
+    expect(seen.added_by).toBe('unverified_brief');
+  });
+
+  it('a link with an unrecognised drawing stamp is unknown, never a human source', () => {
+    const g = { nodes: [{ id: 'a', kind: 'factor', label: 'A' }, { id: 'b', kind: 'goal', label: 'B' }],
+      edges: [{ from: 'a', to: 'b', strength: { mean: 0.4, std: 0.1 }, provenance: { source: 'mystery_importer' } },
+        { from: 'a', to: 'b', id: 'e2', strength: { mean: 0.4, std: 0.1 }, provenance: { source: 'user_specified' } }] };
+    const links = projectModelContext({ nodes: g.nodes, edges: g.edges, raw: g, analysis_state: undefined, analysis_ready: false } as never).links as Rec[];
+    expect(links.map((l) => l.whose)).toEqual(['unknown', 'yours']);
   });
 });
