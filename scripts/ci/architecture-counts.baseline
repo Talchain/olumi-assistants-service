@@ -7,7 +7,9 @@
 # 15 Oct 03:5xZ (DL): M5 #3191 lowered agent_tools 29→28 and user_statement_tools 5→4 (propose_option_capacity_change retired onto the door).
 # M3c #3199 raised door_write_members 10→11: an option's `lead` is a subject written through the ONE door (no new tool or writer
 # outside it); the PR did not raise the baseline, so every PR's advisory job went red. DL reports the rise to Paul.
-agent_tools=28
+# 15 Oct 09:2xZ (Paul's ≤¼ PoC ruling; DL: "No new tool unless it is ONE generic edit"): agent_tools 28→29, propose_change(ops[]), the ONE
+# generic change tool for the edits no tool made (remove, set_zero; rename, option timing and effect range follow as ops, never as tools). DL reports the rise.
+agent_tools=29
 user_statement_tools=4
 user_statement_args=1
 cas_door_members=20
