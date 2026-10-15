@@ -13,7 +13,9 @@ const graph = (source: typeof BASE_GRAPH, unit = 'GBP/month') => GraphStateIngre
   nodes: [...source.nodes.map(node => node.id === 'n_revenue'
     ? { ...node, kind: 'goal', goal_threshold_unit: unit }
     : { ...node, category: node.id === 'n_price' ? 'controllable' : 'external',
-      observed_state: { value: node.id === 'n_price' ? 10 : 100,
+      // n_price is framed by the user's own option levels (12, 9); every other level states its range (cap), as the Run's
+      // baseline gate requires (S10/S7 readiness ≡ Run, 15 Oct: a bare 100 with no range is refused by the Run).
+      observed_state: { value: node.id === 'n_price' ? 10 : 100, ...(node.id === 'n_price' ? {} : { cap: 200 }),
       source: node.id === 'n_price' ? 'user_edited' : 'cee_inference' } }),
     { id: 'dec-pricing', kind: 'decision', label: 'Pricing strategy' },
     { id: 'opt-a', kind: 'option', label: 'Offshore partner',

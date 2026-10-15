@@ -49,7 +49,7 @@ const COMMITTED_GRAPH = {
     { id: 'dec_1', kind: 'decision', label: 'Hiring Decision' },
     { id: 'opt_lead', kind: 'option', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
     { id: 'opt_devs', kind: 'option', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
-    { id: 'fac_cost', kind: 'factor', label: 'Hiring Cost', category: 'controllable', observed_state: { value: 120000, unit: 'GBP', extractionType: 'explicit', factor_type: 'cost' } },
+    { id: 'fac_cost', kind: 'factor', label: 'Hiring Cost', category: 'controllable', observed_state: { value: 120000, unit: 'GBP', cap: 200000, extractionType: 'explicit', factor_type: 'cost' } },
     { id: 'fac_velocity', kind: 'factor', label: 'Team Velocity', category: 'controllable', observed_state: { value: 0.7, extractionType: 'inferred', factor_type: 'other' } },
     { id: 'out_delivery', kind: 'outcome', label: 'Feature Delivery Rate' },
   ],
@@ -74,7 +74,7 @@ const DIVERGED_COMMITTED_GRAPH = {
   ...COMMITTED_GRAPH,
   nodes: COMMITTED_GRAPH.nodes.map((n) =>
     n.id === 'fac_cost'
-      ? { ...n, observed_state: { value: 90000, unit: 'GBP', extractionType: 'explicit', factor_type: 'cost' } }
+      ? { ...n, observed_state: { value: 90000, unit: 'GBP', cap: 200000, extractionType: 'explicit', factor_type: 'cost' } }
       : n,
   ),
 };
