@@ -30,6 +30,7 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
+import { MEANING_FLAG_NOTE, meaningFlagWords } from '../runtime/meaning-flags.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { sentDigest } from '../../tools/handlers/run-input-snapshot.js';
@@ -1457,13 +1458,25 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(goal.goal_threshold_unit).toBe('million (currency unspecified)');
   });
 
-  it('CONTRAST (raw target, normalised null): a revision that drops the stated 1.3 million → refused, never silently; nothing written', async () => {
+  // ⭐ CONFIRM, NOT REFUSE (PLAN-CONFIRM-NOT-REFUSE step 2): a dropped goal target is never silent. The card is OFFERED and
+  // OPENS with the loss, by the goal's own saved figure; nothing is written before the press, which saves what the card said.
+  const droppedRawFlag = meaningFlagWords({ kind: 'goal_target_change',
+    from: '\u2018product feature launch\u2019 1.3 million (currency unspecified)', to: '\u2018Larger fund secured\u2019 with no numeric target' });
+
+  it('CONTRAST (raw target, normalised null): a revision that drops the stated 1.3 million → the card opens with that loss, never silently; only the press saves it', async () => {
     const s = server({ graph: withRawTarget() });
     const { caps } = lane(s, new ProposalStore(), qualitative);
     const out = await change(caps);
-    expect(out).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
-    expect(String(out.detail)).toContain('(1.3 million (currency unspecified))');
+    expect(out, JSON.stringify(out).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(String(out.public_label).startsWith(`${droppedRawFlag} Replace the early draft`), String(out.public_label)).toBe(true);
+    expect(String(out.public_label)).not.toContain('as before');
+    expect(String(out.note)).toContain(MEANING_FLAG_NOTE.trim());
     expect(s.commits).toHaveLength(0);
+    s.said(turn.turn_id);
+    expect(await caps.authoriseChange(pressed(String(out.proposal_id)), { proposal_id: out.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(readGoalRecord(reopened.graph, goal.id)?.target?.raw).toBeUndefined();
   });
 
   it('CONTRAST: a qualitative saved goal and a revision that brings a figure of its own → refused; the card never claims "as before"', async () => {
@@ -1515,11 +1528,13 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     return c;
   };
 
-  it('a typed current-aim figure on another factor does not replace the raw governing-goal target', async () => {
+  it('a typed current-aim figure on another factor never silently replaces the raw governing-goal target: the card opens with its loss', async () => {
     const s = server({ graph: withRawTarget() });
     const { caps } = lane(s, new ProposalStore(), angelRow);
-    expect(await changeAs(caps, typedTurn([TYPED_250K])))
-      .toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    const out = await changeAs(caps, typedTurn([TYPED_250K]));
+    expect(out, JSON.stringify(out).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(String(out.public_label).startsWith(`${droppedRawFlag} Replace the early draft`), String(out.public_label)).toBe(true);
+    expect(String(out.public_label)).toContain('\u2018Angel funding secured\u2019 at least \u00a3250,000');
     expect(s.commits).toHaveLength(0);
   });
 
@@ -1609,13 +1624,18 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(JSON.stringify(goal.user_statements ?? []), 'the eventual 1.3 million is kept, as the user\'s own words').toContain('eventually, a larger fund of at least 1.3 million');
   });
 
-  it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
+  it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → the card opens with that loss', async () => {
     const base = structuredClone(FX.graph);
     base.goal_constraints = [...(base.goal_constraints ?? []), { constraint_id: 'agent-lane:product_feature_launch:>=', node_id: 'product_feature_launch',
       operator: '>=', value: 100, unit: '% complete', label: 'product feature launch', provenance: 'explicit', value_frame: 'level', role: 'goal_target' }];
     const s = server({ graph: base });
     const { caps } = lane(s, new ProposalStore(), qualitative);
-    expect(await change(caps)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    const out = await change(caps);
+    expect(out, JSON.stringify(out).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(String(out.public_label).startsWith(`${meaningFlagWords({ kind: 'goal_target_change',
+      from: '\u2018product feature launch\u2019 at least 100% complete', to: '\u2018Larger fund secured\u2019 with no numeric target' })} Replace the early draft`),
+    String(out.public_label)).toBe(true);
+    expect(String(out.note)).toContain(MEANING_FLAG_NOTE.trim());
     expect(s.commits).toHaveLength(0);
   });
 });
