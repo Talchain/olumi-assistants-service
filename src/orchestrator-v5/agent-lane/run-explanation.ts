@@ -1,5 +1,5 @@
 /** Read-only follow-up on the canonical reader's selected Run. No new Run or claim authority. */
-import { trimToRecentTurns } from './history-store.js';
+import { isOlderWordsItem, trimToRecentTurns } from './history-store.js';
 import { createHash } from 'node:crypto';
 import type { SuggestedAction } from '../compose/types.js';
 import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
@@ -76,9 +76,15 @@ export function runExplanationMatches(id: unknown, scenarioId: string, read: Run
   return chip !== null && chip.id === id;
 }
 
-/** Conversation only: old tool results are not another source for this explanation. */
+/**
+ * Conversation only: old tool results are not another source for this explanation.
+ * ⭐ S2 turnContext (DL 15 Oct): the history store's ONE labelled item of the user's older words is carried through the
+ * 3-turn trim (it sat first, so the trim cut it and the coaching lost what the user said earlier). It stays a user item.
+ */
 export function recentRunExplanationConversation(history: readonly unknown[]): unknown[] {
-  return trimToRecentTurns(history, 3).flatMap((item) => {
+  const older = history.find(isOlderWordsItem);
+  const recent = trimToRecentTurns(history.filter((item) => !isOlderWordsItem(item)), 3);
+  return [...(older === undefined ? [] : [older]), ...recent].flatMap((item) => {
     const value = record(item);
     return value?.role === 'user' || value?.role === 'assistant'
       ? [{ role: value.role, content: value.content }] : [];
