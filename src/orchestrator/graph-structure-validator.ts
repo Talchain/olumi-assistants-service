@@ -82,7 +82,7 @@
 import { retainedLimitOnlyNodeIds } from '../graph/retained-limit.js';
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
 import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
-import { draftedTeamPartOf } from '../orchestrator-v5/goal-target/event-by-date-model.js';
+import { draftedTeamPartOf, unsizedEventOptions } from '../orchestrator-v5/goal-target/event-by-date-model.js';
 import { NodeV3, type GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -411,6 +411,25 @@ export function validateGraphStructure(
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
   optionsWithoutGoalPath(graph, leftOut, violations);
+  // ⭐ DL ruling (A), 15 Oct: an event-forecast option linked only to the kept-aside sketch is UNSIZED, not unconnected, so it
+  // is no structural defect: readiness asks how much it changes the work (`assessCanonicalAnalysisReadiness`). While EVERY
+  // option is unsized, the goal is unreachable from the decision for that same reason. A really unconnected option keeps
+  // OPTION_NO_FACTOR_EDGES, and with it the structural messages stay.
+  const unsized = opts.leaveOutInertRisks === true ? new Set(unsizedEventOptions(graph).map(o => o.option_id)) : new Set<string>();
+  if (unsized.size > 0) {
+    const allUnsized = graph.nodes.filter(n => n.kind === 'option').every(n => unsized.has(n.id));
+    // The two unscoped forms that unsized options cause, named by this file's own details: the goal unreachable from the
+    // decision (loop 1) and the decision itself dead-ending through them (loop 2). Any other dead end stays.
+    const causedByUnsized = new Set([
+      ...graph.nodes.filter(n => n.kind === 'goal').map(n => `Goal node "${n.id}" (${n.label}) not reachable from decision node`),
+      ...graph.nodes.filter(n => n.kind === 'decision').map(n => `Node "${n.id}" (${n.label}) cannot reach the goal via directed paths`),
+    ]);
+    for (let i = violations.length - 1; i >= 0; i--) {
+      const v = violations[i]!;
+      if (v.code !== 'NO_PATH_TO_GOAL') continue;
+      if (v.option_id !== undefined ? unsized.has(v.option_id) : allUnsized && causedByUnsized.has(v.detail)) violations.splice(i, 1);
+    }
+  }
   checkCycles(graph, violations);
 
   return {

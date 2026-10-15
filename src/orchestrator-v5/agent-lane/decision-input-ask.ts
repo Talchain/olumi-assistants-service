@@ -25,6 +25,7 @@ import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
+import { unsizedOlumiRiskIds, unsizedOlumiRiskLine } from './unsized-risk.js';
 import { withoutProposalIds } from './display-ids.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
@@ -185,7 +186,14 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
   const leftOut = inertRiskBranch(typedNodes, allEdges, limits);
   const preconditions = preconditionRiskIds(typedNodes, allEdges, limits);
   const labelOf = (n: Rec): string => String(n.label ?? n.id);
-  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
+  // ⭐ An unsized Olumi risk (`unsizedOlumiRiskIds`, the Run's own projection): left out of the calculation, said here once in
+  // the AIE's words, with the occurrence ask where its window exists.
+  const besideAnyChance = chanceShownFor(cells);
+  const unsized = [...unsizedOlumiRiskIds(graph)].flatMap((riskId) => {
+    const line = unsizedOlumiRiskLine(graph, riskId, besideAnyChance);
+    return line === null ? [] : [{ riskId, line, chanceOmission: besideAnyChance }];
+  });
+  return [...nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
     if (preconditions.has(r.id as string)) {
       // A member is either CEE's `relies_on` stamp or an Olumi draft-time widening (#2854: `draft_widening.hits`, NO
       // relies_on). Never read one shape blind: the served B1 draft 500'd on exactly that (27dfd9e5, 8 Oct).
@@ -208,7 +216,7 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
     const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
     return { riskId: r.id as string, line: `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`,
       chanceOmission: false };
-  });
+  }), ...unsized];
 }
 
 /** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */

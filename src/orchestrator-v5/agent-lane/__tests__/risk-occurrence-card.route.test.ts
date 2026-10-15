@@ -9,6 +9,7 @@
  * in-process level door (`commitOptionLevelsInProcess` → `risk_occurrence`) → the store's append → the read-back. The graph is
  * the served `/graph` read, verbatim. Scripted: only the Agent's outputs. 0 provider calls. TESTED, not WIRE-WITNESSED.
  */
+import { unsizedOlumiRiskIds, unsizedOlumiRiskLine } from '../unsized-risk.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -37,8 +38,6 @@ const SERVED = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-h
 const RISK = 'code_quality_deterioration';
 const LABEL = 'Code quality deterioration';
 /** AIE packet 6e52e896 `event_risk.readiness_copy` (the eligible event path), then the ask's existing sentences. */
-const ASK = 'Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ to happen at least once within 3 months? Olumi can’t run the numbers until '
-  + 'this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.';
 const BASIS = 'Adding people under a three-month launch deadline often strains review time.';
 const ARGS = { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: BASIS, user_stated: false,
   occurrence_range: { low_percent: 20, high_percent: 40 } }] };
@@ -155,11 +154,16 @@ const offerCard = async (turn: Awaited<ReturnType<typeof route>>) => {
 };
 
 describe('Hiring path (a): Olumi’s starting assumption for the risk root, through the real route', () => {
-  it('precondition (served graph): the risk root has no level and no cause; readiness withholds the whole Run and asks the event question (AIE)', () => {
+  // AMENDED (DL 15 Oct 23:19Z; AIE #94 6177505214; was: readiness withholds the whole Run and asks the event question). The
+  // risk is Olumi's own suggestion (`ai_inferred`) and unsized, so it no longer holds the Run: it is left out of the calculation
+  // and the host's line says so in the AIE's words. The card below still sizes it (coaching in addition, never the completion).
+  it('precondition (served graph): the risk root has no level and no cause; it is left out of the Run, and its event question is coaching (AIE)', () => {
     expect(riskOf(SERVED.graph)).toEqual({ id: RISK, ref: 'R1', kind: 'risk', label: LABEL, provenance: 'ai_inferred' });
     expect((SERVED.graph.edges as Rec[]).filter((e) => e.to === RISK)).toEqual([]);
-    expect(buildCanonicalAnalysisReadyFromGraph(SERVED.graph)).toMatchObject({ may_run: false });
-    expect(levelAsks(SERVED.graph).map((i) => [i.factor_id, i.message])).toEqual([[RISK, ASK]]);
+    expect(buildCanonicalAnalysisReadyFromGraph(SERVED.graph)).toMatchObject({ may_run: true });
+    expect(levelAsks(SERVED.graph)).toEqual([]);
+    expect(unsizedOlumiRiskLine(SERVED.graph, RISK, false)).toBe(`This calculation covers the modelled effects only. ‘${LABEL}’ is Olumi’s unsized `
+      + 'risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.');
   });
 
   it('GREEN: propose → ONE card → the press → saved as Olumi’s → the Run is admitted → a cold reopen keeps it', async () => {
@@ -219,7 +223,8 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((typed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'))
       .toEqual([expect.objectContaining({ ok: false, mutated: false })]);
     expect(w.graph()).toEqual(SERVED.graph);
-    expect(levelAsks(w.graph()).map((i) => i.factor_id)).toEqual([RISK]);
+    // Still unsized, so still left out of the calculation (DL 15 Oct 23:19Z), never asked as a blocker.
+    expect([...unsizedOlumiRiskIds(w.graph())]).toEqual([RISK]);
   }, ROUTE_MS);
 
   it('CONTRAST: a declined card writes nothing', async () => {
@@ -354,16 +359,20 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect((offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_assumptions')).toMatchObject({ ok: false });
     expect((offer.suggested_actions ?? []).filter((c: Rec) => String(c.id).startsWith('agent-approve'))).toEqual([]);
     expect(w.graph()).toEqual(unperiod.graph);
-    expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK).map((i) => i.message)).toEqual([
-      'How likely or how large is "Code quality deterioration" today? Olumi can’t run the numbers until this risk has a figure.']);
+    // AMENDED (DL 15 Oct 23:19Z): left out, not asked; its line is the AIE's omission sentence.
+    expect(levelAsks(w.graph()).filter((i) => i.factor_id === RISK)).toEqual([]);
+    expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toBe(`This calculation covers the modelled effects only. ‘${LABEL}’ is Olumi’s unsized `
+      + 'risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.');
   }, ROUTE_MS);
 
   it('PL 05:53Z: adoption alone never licenses the Run — another unresolved root still withholds it after the press', async () => {
-    // A second risk root with no level, acting on the goal as the first does.
+    // A second risk root with no level, acting on the goal as the first does. AMENDED (DL 15 Oct 23:19Z; AIE 6177505214): it has
+    // NO origin stamp, so it is never Olumi's by a missing stamp and still holds the Run (an Olumi one would be left out instead).
     const twoRoots = { ...structuredClone(SERVED), scenario_id: randomUUID() } as Rec;
-    (twoRoots.graph.nodes as Rec[]).push({ id: 'key_developer_leaves', kind: 'risk', label: 'Key developer leaves', provenance: 'ai_inferred' });
+    (twoRoots.graph.nodes as Rec[]).push({ id: 'key_developer_leaves', kind: 'risk', label: 'Key developer leaves' });
     (twoRoots.graph.edges as Rec[]).push({ ...structuredClone((twoRoots.graph.edges as Rec[]).find((e) => e.from === RISK)!), from: 'key_developer_leaves' });
-    expect(levelAsks(twoRoots.graph).map((i) => i.factor_id).sort()).toEqual(['code_quality_deterioration', 'key_developer_leaves']);
+    expect(levelAsks(twoRoots.graph).map((i) => i.factor_id).sort()).toEqual(['key_developer_leaves']);
+    expect([...unsizedOlumiRiskIds(twoRoots.graph)]).toEqual([RISK]);
     const w = world(twoRoots);
     const turn = await route(w);
     const { offer, chip } = await offerCard(turn);
