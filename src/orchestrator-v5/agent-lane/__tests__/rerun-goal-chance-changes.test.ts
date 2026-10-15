@@ -91,6 +91,47 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
       current: 'between about 35% and more than 99%' })]);
   });
 
+  it('AIE exact lead (PL 07:50Z): the interpret instruction introduces the pairs in the AIE’s words', () => {
+    expect(planOf(R2E)!.instruction).toContain('Recorded goal-chance displays for options with figures in both Runs (earlier Run → later Run): ‘Add one specialist’: between about 30% and 36% → between about 54% and 59%.');
+  });
+
+  // ⭐ PL 07:50Z: `prior_withheld` is the earlier Run's WIN SHARES. With goal chances recorded in both Runs, the plan, the typed
+  // record and the checker ban only share movement; the chance moved as recorded. Without such chances, the full ban stands.
+  describe('prior-withheld shares beside goal chances recorded in both Runs', () => {
+    const withheldShares = (): Rec => ({ ...structuredClone(R2E.current_read.run_delta), win_probabilities: undefined,
+      win_probabilities_unavailable: 'prior_withheld' });
+    const MOVED = 'Its chance of meeting your goal moved from between about 30% and 36% to between about 54% and 59% in this model.';
+
+    it('the chance may be said to move; the record keeps prior_withheld true (the shares were withheld) and says so once', () => {
+      const plan = planOf(R2E, withheldShares())!;
+      expect(plan.inputs.prior_withheld).toBe(true);
+      expect(plan.inputs.goal_chances_in_both).toBe(true);
+      expect(plan.instruction).not.toContain('never say anything rose, fell, moved or changed in value');
+      expect(plan.instruction).toContain('never say a share rose, fell or moved; say a goal chance moved only as recorded above.');
+      const c = composeRerunExplanation(MOVED, plan);
+      expect(c.failed).toEqual([]);
+      expect(c.text).toContain(MOVED);
+      const record = rerunRecordForModel(withheldShares(), false, R2E.graph.nodes)!;
+      expect(record.prior_withheld).toBe(true);
+      expect(record.goal_chance_changes).toEqual(plan.goalChanceChanges);
+      expect(record.use).toContain('except a chance listed in goal_chance_changes, as recorded there.');
+    });
+
+    it('CONTRASTS: a share said to move fails; with no chance in both Runs the full ban stands for the same sentence', () => {
+      const plan = planOf(R2E, withheldShares())!;
+      for (const bad of ['Its share of runs rose to 40%.', 'Its chance of coming out on top rose.', 'Add one specialist moved ahead of the others.']) {
+        expect(composeRerunExplanation(bad, plan).text, bad).not.toContain(bad);
+      }
+      const none = withheldShares();
+      none.goal_chances.find((g: Rec) => g.option_id === ADD).prior = { kind: 'withheld' };
+      const bare = planOf(R2E, none)!;
+      expect(bare.inputs.prior_withheld).toBe(true);
+      expect(bare.inputs.goal_chances_in_both).toBeUndefined();
+      expect(bare.instruction).toContain('never say anything rose, fell, moved or changed in value');
+      expect(composeRerunExplanation(MOVED, bare).text).not.toContain(MOVED);
+    });
+  });
+
   it('CONTRAST: withheld on either side (served marketing: withheld → withheld) is no figure in both Runs, so the guard stays', () => {
     const delta = MARKETING.current_read?.run_delta ?? MARKETING.run_delta;
     expect(goalChanceChangesOf(delta, labelsOf(MARKETING))).toEqual([]);

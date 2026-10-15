@@ -391,6 +391,9 @@ export function rerunExplanationPlan(
     leader_licensed: leaderLicensed,
     ...(noise !== undefined ? { noise_verdict: noise } : {}),
     prior_withheld: priorWithheld,
+    // ⭐ S9 (PL 07:50Z): `prior_withheld` is the earlier Run's WIN SHARES (`win_probabilities_unavailable`). Goal chances recorded
+    // in both Runs ARE figures to move from, so the ban covers the shares only, never those chances.
+    ...(goalChanceChanges.length > 0 ? { goal_chances_in_both: true } : {}),
     no_matched_figures: noMatched,
     current_option_labels: optionLabels,
     model_labels: modelLabels,
@@ -414,8 +417,10 @@ export function rerunExplanationPlan(
     'Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.',
     `Run record: "${codeLine}"`,
     ...(goalChanceChanges.length === 0 ? [] : [`${GOAL_CHANCE_CHANGES_LEAD} ${goalChanceChanges.map((c) => `‘${c.option_label}’: ${c.prior} → ${c.current}.`).join(' ')}`]),
-    priorWithheld
+    priorWithheld && goalChanceChanges.length === 0
       ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
+      : priorWithheld
+        ? 'The earlier Run held its comparison shares back, so never say a share rose, fell or moved; say a goal chance moved only as recorded above.'
       : noMatched
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'
@@ -463,7 +468,7 @@ export const TYPED_RERUN_RECORD_RULE =
   + 'first say code_line exactly, as Olumi\u2019s record, then say what the latest Run shows. '
   + '\u201cSince the last run\u201d means the latest Run against the one before it; say any edit made after the latest Run separately. '
   + 'Never say nothing changed when code_line names a change. '
-  + 'If prior_withheld is true, never say anything rose, fell or moved. '
+  + 'If prior_withheld is true, never say anything rose, fell or moved, except a chance listed in goal_chance_changes, as recorded there. '
   + 'Unless attribution_case is C1_attributable, never say which change caused the difference. '
   + 'If the latest Run still holds its comparison back, name every link in unsized_goal_path_links as what the comparison still needs, ranking none.';
 
@@ -473,7 +478,7 @@ type NodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label
  * S9: the words that introduce the goal chances both Runs showed (interpret request). They are chances of meeting the goal as
  * each Run displayed them, never win shares, and say nothing of cause beyond the case line.
  */
-export const GOAL_CHANCE_CHANGES_LEAD = 'Each option’s chance of meeting the goal as each Run showed it, earlier Run → latest Run:';
+export const GOAL_CHANCE_CHANGES_LEAD = 'Recorded goal-chance displays for options with figures in both Runs (earlier Run → later Run):';
 
 /** The chip's no-matched-figures guard, appended to the typed rule when it holds. */
 export const NO_MATCHED_FIGURES_RULE = ' No option has figures in both Runs, so never say anything rose, fell or moved.';

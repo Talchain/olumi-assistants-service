@@ -48,7 +48,7 @@ const TEMPLATE_SHA = '7546b130973218710840fa1d76ebf867ceee8fc15a69ec0ba8c4398308
 //   contract's links clause only: 22,232 → 22,410 bytes (+178; clause 529 → 707 bytes). The last green head's (staging 7fa0aa53d)
 //   host reproduces c716ecec… and 22,232 bytes; staging 75fc1a95a's reproduces 7234aa43… (22,271); swapping in exactly this
 //   clause gives this.
-const HOST_SHA = '61b7106036d1dc306b97c43d0a1a849df147d7c0f47e4d606e50cb919116c4e7';
+const HOST_SHA = 'ffc8144ffc131379110e79504cf18bce484976581ee69a8817db052752e39d01';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -95,8 +95,8 @@ const HOST_SHA = '61b7106036d1dc306b97c43d0a1a849df147d7c0f47e4d606e50cb919116c4
 // + S10 fix 1 / AIE 6181933060 + 6182232796: the host contract's links clause only: 35,726 → 35,904 bytes (+178). Derived from
 //   the SENT body: staging 7fa0aa53d's SENT instructions reproduce a3d35f6f… and 35,726 bytes, and with exactly that clause
 //   swapped equal this head's SENT prefix byte for byte (staging 75fc1a95a's SENT body, clause swapped, equals this head's).
-const RENDERED_SHA = '2bdea47a5f21e306797d8b10f8c01af12fdeccbc8e64d25e2620639fe47b8e0a';
-const RENDERED_BYTES = 36_087;
+const RENDERED_SHA = 'e3b4f5cf3ef119accd4a3b72bb43f2b4010faabb2fee1ec6db9a68d8e70e6a8d';
+const RENDERED_BYTES = 36_584;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.

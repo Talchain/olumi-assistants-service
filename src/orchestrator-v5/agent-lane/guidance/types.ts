@@ -154,6 +154,8 @@ export interface MethodInputs {
   readonly leader_licensed?: boolean;
   readonly noise_verdict?: string;
   readonly prior_withheld?: boolean;
+  /** S9: goal chances recorded in BOTH Runs (`goal_chance_changes`): the only figures a prior-withheld pair may say moved. */
+  readonly goal_chances_in_both?: boolean;
   readonly no_matched_figures?: boolean;
 }
 export interface MethodTurnCheck {

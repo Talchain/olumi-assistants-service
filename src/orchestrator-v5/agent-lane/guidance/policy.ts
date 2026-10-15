@@ -1189,7 +1189,8 @@ export const POLICY = {
         },
         {
           "id": "RX-NO-MOVEMENT-WITHOUT-PRIOR",
-          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i (on the label-masked reply, shared.label_masking)"
+          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i (on the label-masked reply, shared.label_masking); when prior_withheld AND goal_chances_in_both (goal chances recorded in both Runs), only a sentence about a chance with no share word may use them",
+          "source": "S9, PL 07:50Z: prior_withheld is the earlier Run's shares, never its goal chances"
         },
         {
           "id": "RX-NO-CONTRARY-SAME",
