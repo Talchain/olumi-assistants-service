@@ -9738,7 +9738,9 @@ export function createAgentCapabilities(
         structure: structuralFacts(after.nodes, after.edges, limitNodeIdsOf(after.raw)),
         // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
         // get_canonical_state, so the first reply never contradicts the Run control.
-        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
+        // ⭐ S7 B2 (capacity e2e c1e944a4 turn 01, judge item 4): the risks the Run leaves out, WITH their typed reason, as
+        // get_canonical_state gives them. Without it the build turn's AI saw `relies_on` and no reason, and invented one.
+        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness', 'left_out_of_run']),
         // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
         ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
