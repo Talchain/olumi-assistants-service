@@ -335,6 +335,8 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
     // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
     || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_statement_record' || op.op === 'set_option_capacity_change'
+    // S5: a removal the user asked for is applied ONLY by the press on the card that says what goes with it.
+    || op.op === 'remove_node' || op.op === 'remove_edge'
     // A user's statement through the ONE door is recorded only by the press on the card that quotes it.
     || op.op === 'record_statement'
     || op.op === 'set_option_intervention'

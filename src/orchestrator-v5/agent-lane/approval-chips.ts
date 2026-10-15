@@ -99,6 +99,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
+  propose_removal: { label: 'Remove it', message: 'Yes, remove it.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).

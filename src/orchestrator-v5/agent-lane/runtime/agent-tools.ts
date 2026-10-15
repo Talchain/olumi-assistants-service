@@ -633,6 +633,24 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_removal',
+    description:
+      'Remove ONE factor or risk from the model, or ONE link between two parts, ONLY when the user asks for that in THIS message '
+      + '("remove staff training", "drop that risk", "set this link to zero": a link set to zero is removed, so the analysis reads no '
+      + 'effect along it). This does NOT change anything: it prepares ONE card that quotes their words and says exactly what goes with '
+      + 'it (a factor\u2019s or risk\u2019s links, and any option\u2019s setting of a factor); only their press removes it. Never for an '
+      + 'option (use propose_option_status) or the goal, and never a part the user did not ask to remove.',
+    parameters: obj({
+      kind: { type: 'string', enum: ['factor', 'risk', 'link'] },
+      label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
+      to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
+      id: { type: 'string', description: 'The part\u2019s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.' },
+      to_id: { type: 'string', description: 'Only for a link: the id of the part it points to.' },
+      quote: { type: 'string', description: 'The user\u2019s complete statement asking for the removal, copied exactly from THIS message.' },
+    }, ['kind', 'label', 'quote']),
+  },
+  {
+    type: 'function',
     name: 'propose_new_risk',
     description:
       'Add a RISK the user has just asked for, when the model does NOT already have it: something that could go wrong and would '
@@ -936,7 +954,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_removal', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -1030,6 +1048,10 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). S5 (DL 15 Oct): ONE removal card. */
+  proposeRemoval?(ctx: AgentToolContext, args: {
+    kind: 'factor' | 'risk' | 'link'; label: string; to_label?: string; id?: string; to_id?: string; quote: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
@@ -1209,6 +1231,10 @@ async function dispatchToolUnbounded(
       return caps.proposeOptionStatus !== undefined
         ? caps.proposeOptionStatus(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'An option cannot be taken out or put back here. Nothing was changed.' };
+    case 'propose_removal':
+      return caps.proposeRemoval !== undefined
+        ? caps.proposeRemoval(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A part of the model cannot be removed here. Nothing was changed.' };
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
         ? caps.proposeNewRisk(ctx, args as never)
