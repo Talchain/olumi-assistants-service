@@ -1,0 +1,642 @@
+{
+ "source": "live/runs/2026-10-15T072000Z-marketing-widen4-87d5f90e (served CEE 87d5f90e): reads/01-02-before-approve.json body + turns/02.json request_body",
+ "scenario_id": "ab8bf0f9-db4d-4f92-ab98-fcd936d9236a",
+ "brief_text": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+ "graph_hash": "4b8c70e8e300678b",
+ "graph": {
+  "edges": [
+   {
+    "to": "hire_marketing_manager",
+    "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "use_ai_and_advertise_more",
+    "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "carry_on_as_now",
+    "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "effective_campaign_planning_expertise",
+    "from": "hire_marketing_manager",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "founder_time_on_campaign",
+    "from": "hire_marketing_manager",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_campaign_spend",
+    "from": "hire_marketing_manager",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "effective_campaign_planning_expertise",
+    "from": "use_ai_and_advertise_more",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "founder_time_on_campaign",
+    "from": "use_ai_and_advertise_more",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "advertising_spend",
+    "from": "use_ai_and_advertise_more",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_campaign_spend",
+    "from": "use_ai_and_advertise_more",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "effective_campaign_planning_expertise",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "founder_time_on_campaign",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_campaign_spend",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "advertising_spend",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "effective_campaign_planning_expertise",
+    "from": "marketing_experience",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "campaign_performance",
+    "from": "effective_campaign_planning_expertise",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "campaign_performance",
+    "from": "founder_time_on_campaign",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "campaign_performance",
+    "from": "advertising_spend",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "inexperienced_campaign_planning",
+    "from": "marketing_experience",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "campaign_performance",
+    "from": "inexperienced_campaign_planning",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "mean_projected": true
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ],
+  "nodes": [
+   {
+    "id": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Should I hire a marketing manager, or use an AI tool to plan the campaign for…",
+    "provenance": "from_brief",
+    "description": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?"
+   },
+   {
+    "id": "campaign_performance",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Campaign performance",
+    "provenance": "ai_inferred",
+    "goal_threshold_unit": "unspecified campaign-performance unit",
+    "goal_threshold_frame": "level"
+   },
+   {
+    "id": "hire_marketing_manager",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Hire marketing manager",
+    "provenance": "from_brief",
+    "user_statements": [
+     {
+      "field": "occurrence",
+      "attest": {
+       "recorded_by": "construction"
+      },
+      "statements": [
+       {
+        "form": "describes",
+        "unit": "",
+        "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+        "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "reading": "olumi",
+        "speaker": "user",
+        "subject": {
+         "quantity": "option|hire marketing manager|||occurrence"
+        },
+        "conditions": "Alternative under consideration for the next product feature launch."
+       }
+      ],
+      "recorded_at": "2026-10-15T07:22:16.422Z",
+      "subject_key": "option|hire_marketing_manager|||occurrence"
+     }
+    ]
+   },
+   {
+    "id": "use_ai_and_advertise_more",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Use AI and advertise more",
+    "provenance": "from_brief",
+    "user_statements": [
+     {
+      "field": "occurrence",
+      "attest": {
+       "recorded_by": "construction"
+      },
+      "statements": [
+       {
+        "form": "describes",
+        "unit": "",
+        "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+        "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "reading": "olumi",
+        "speaker": "user",
+        "subject": {
+         "quantity": "option|use ai and advertise more|||occurrence"
+        },
+        "qualifier": "use the money I'd save",
+        "conditions": "AI tool plans the campaign and the saving is spent more on advertising.",
+        "qualifier_in_quote": true
+       }
+      ],
+      "recorded_at": "2026-10-15T07:22:16.422Z",
+      "subject_key": "option|use_ai_and_advertise_more|||occurrence"
+     }
+    ]
+   },
+   {
+    "id": "carry_on_as_now",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Carry on as now",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "marketing_experience",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Marketing experience",
+    "category": "observable",
+    "provenance": "from_brief",
+    "scale_frame": 30,
+    "user_statements": [
+     {
+      "field": "holds_now",
+      "attest": {
+       "recorded_by": "construction"
+      },
+      "statements": [
+       {
+        "form": "holds_now",
+        "unit": "",
+        "quote": "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "reading": "olumi",
+        "speaker": "user",
+        "subject": {
+         "quantity": "factor|marketing experience|||holds_now"
+        },
+        "qualifier": "not that experienced",
+        "conditions": "with marketing",
+        "qualifier_in_quote": true
+       }
+      ],
+      "recorded_at": "2026-10-15T07:22:16.422Z",
+      "subject_key": "factor|marketing_experience|||holds_now"
+     }
+    ]
+   },
+   {
+    "id": "effective_campaign_planning_expertise",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Effective campaign-planning expertise",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100
+   },
+   {
+    "id": "founder_time_on_campaign",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Founder time on campaign",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "scale_frame": 100,
+    "user_statements": [
+     {
+      "field": "level",
+      "attest": {
+       "recorded_by": "construction"
+      },
+      "statements": [
+       {
+        "form": "upper_bound",
+        "high": 25,
+        "unit": "% of founder time",
+        "quote": "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "reading": "olumi",
+        "speaker": "user",
+        "subject": {
+         "quantity": "factor|founder time on campaign|||level"
+        },
+        "qualifier": "cannot spend more than",
+        "conditions": "on this",
+        "qualifier_in_quote": false
+       }
+      ],
+      "recorded_at": "2026-10-15T07:22:16.422Z",
+      "subject_key": "factor|founder_time_on_campaign|||level"
+     }
+    ]
+   },
+   {
+    "id": "advertising_spend",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "Advertising spend",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "scale_frame": 100000
+   },
+   {
+    "id": "annual_campaign_spend",
+    "ref": "F5",
+    "kind": "factor",
+    "label": "Annual campaign spend",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 200000,
+    "user_statements": [
+     {
+      "field": "level",
+      "attest": {
+       "recorded_by": "construction"
+      },
+      "statements": [
+       {
+        "form": "upper_bound",
+        "high": 100000,
+        "unit": "£/year",
+        "quote": "Our budget for the year is £100,000.",
+        "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "reading": "olumi",
+        "speaker": "user",
+        "subject": {
+         "quantity": "factor|annual campaign spend|||level"
+        },
+        "qualifier": "budget cap",
+        "conditions": "The brief does not say whether this annual budget is wholly available for the campaign.",
+        "qualifier_in_quote": false
+       }
+      ],
+      "recorded_at": "2026-10-15T07:22:16.422Z",
+      "subject_key": "factor|annual_campaign_spend|||level"
+     }
+    ]
+   },
+   {
+    "id": "inexperienced_campaign_planning",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Inexperienced campaign planning",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "manager_hiring_delays_launch",
+    "ref": "R2",
+    "kind": "risk",
+    "label": "Manager hiring delays launch",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "draft_widening": {
+     "hits": {
+      "id": "hire_marketing_manager",
+      "kind": "option",
+      "label": "Hire marketing manager"
+     },
+     "affects": {
+      "id": "campaign_performance",
+      "label": "Campaign performance",
+      "direction": "negative"
+     },
+     "through": {
+      "id": "effective_campaign_planning_expertise",
+      "label": "Effective campaign-planning expertise",
+      "direction": "negative"
+     },
+     "mechanism": "relies_on",
+     "relies_on": "hiring a manager before launch planning",
+     "watch_for": "No suitable candidates in pipeline",
+     "provenance": "ai_suggested_widen"
+    },
+    "analysis_participation": "retained_excluded"
+   },
+   {
+    "id": "ai_plan_needs_founder_review",
+    "ref": "R3",
+    "kind": "risk",
+    "label": "AI plan needs founder review",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "draft_widening": {
+     "hits": {
+      "id": "use_ai_and_advertise_more",
+      "kind": "option",
+      "label": "Use AI and advertise more"
+     },
+     "affects": {
+      "id": "campaign_performance",
+      "label": "Campaign performance",
+      "direction": "negative"
+     },
+     "through": {
+      "id": "founder_time_on_campaign",
+      "label": "Founder time on campaign",
+      "direction": "positive"
+     },
+     "mechanism": "drives",
+     "relies_on": "reviewing AI outputs within founder time",
+     "watch_for": "Review tasks exceed time allowance",
+     "provenance": "ai_suggested_widen"
+    },
+    "analysis_participation": "retained_excluded"
+   },
+   {
+    "id": "advertising_spend_lacks_conversion",
+    "ref": "R4",
+    "kind": "risk",
+    "label": "Advertising spend lacks conversion",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "draft_widening": {
+     "hits": {
+      "id": "use_ai_and_advertise_more",
+      "kind": "option",
+      "label": "Use AI and advertise more"
+     },
+     "affects": {
+      "id": "campaign_performance",
+      "label": "Campaign performance",
+      "direction": "negative"
+     },
+     "through": {
+      "id": "advertising_spend",
+      "label": "Advertising spend",
+      "direction": "positive"
+     },
+     "mechanism": "drives",
+     "relies_on": "converting additional advertising reach",
+     "watch_for": "Engagement rises without feature interest",
+     "provenance": "ai_suggested_widen"
+    },
+    "analysis_participation": "retained_excluded"
+   }
+  ],
+  "ref_high_water": {
+   "D": 1,
+   "F": 5,
+   "G": 1,
+   "O": 3,
+   "R": 4
+  },
+  "goal_constraints": [
+   {
+    "unit": "£/year",
+    "label": "Annual campaign spend",
+    "value": 100000,
+    "node_id": "annual_campaign_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_campaign_spend:<="
+   },
+   {
+    "unit": "% of founder time",
+    "label": "Founder time on campaign",
+    "value": 25,
+    "node_id": "founder_time_on_campaign",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:founder_time_on_campaign:<="
+   }
+  ]
+ },
+ "l20": {
+  "turn_id": "de8b81cf-c34d-494e-b723-161355ee567f",
+  "message": "I have two goals: For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months."
+ }
+}

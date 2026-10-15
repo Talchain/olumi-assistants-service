@@ -9,6 +9,7 @@
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { goalTargetBasisOf } from '../goal-target/goal-target-basis.js';
+import { sayGoalChanceSide } from './goal-chance-side-words.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -22,6 +23,12 @@ export interface LicensedChance {
    * point display, or the range display). A kept sentence states one of them whole, so a range endpoint said as a point fails.
    */
   readonly displays: readonly string[];
+  /**
+   * ⭐ S9 (DL 07:1xZ, capacity e2e R2e): the PRECEDING Run's licensed display for this option, from the recorded pair
+   * (`run_delta.goal_chances`), only where the pair's current side IS this Run's display. It may be said ONLY inside a from→to
+   * comparison sentence that also states this Run's display; anywhere else it is not exempt.
+   */
+  readonly prior?: { readonly display: string; readonly figures: readonly number[] };
 }
 export interface LicensedChances {
   readonly options: readonly LicensedChance[];
@@ -35,8 +42,20 @@ const PCT = /(?<![\w.])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent\b)/gi;
 /** The percentages a text states, as numbers. */
 export const figuresIn = (text: string): number[] => [...text.matchAll(PCT)].map((m) => Number(m[1]!.replace(',', '.')));
 
+/** The pair's preceding-Run display per option, where its current side is one of this Run's own displays for that option. */
+function priorDisplaysOf(runDelta: unknown, displaysById: ReadonlyMap<string, readonly string[]>): Map<string, string> {
+  const d = isRec(runDelta) ? runDelta : undefined;
+  const ends = isRec(d?.endpoints) ? d!.endpoints : undefined;
+  if (!isRec(ends?.prior) || typeof ends!.prior.run_id !== 'string' || !isRec(ends!.current) || typeof ends!.current.run_id !== 'string') return new Map();
+  return new Map((Array.isArray(d!.goal_chances) ? d!.goal_chances : []).filter(isRec).flatMap((row): [string, string][] => {
+    const id = typeof row.option_id === 'string' ? row.option_id : undefined;
+    const prior = sayGoalChanceSide(row.prior); const current = sayGoalChanceSide(row.current);
+    return id !== undefined && prior !== undefined && current !== undefined && (displaysById.get(id) ?? []).includes(current) ? [[id, prior]] : [];
+  }));
+}
+
 /** The selected Run's licensed chances, by option label, or undefined when it licenses none or is not current. */
-export function licensedChancesOf(analysisResult: unknown, graph: unknown, current: boolean): LicensedChances | undefined {
+export function licensedChancesOf(analysisResult: unknown, graph: unknown, current: boolean, runDelta?: unknown): LicensedChances | undefined {
   if (!current) return undefined;
   const facts = goalChanceFactsForAgent(analysisResult, graph, true);
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -45,12 +64,16 @@ export function licensedChancesOf(analysisResult: unknown, graph: unknown, curre
     return typeof label === 'string' && label.trim() !== '' ? label : undefined;
   };
   const ids = new Set([...Object.keys(facts.goal_chance_display ?? {}), ...Object.keys(facts.goal_chance_range_display ?? {})]);
+  const displaysById = new Map([...ids].map((id) => [id, [facts.goal_chance_range_display?.[id]?.range, facts.goal_chance_display?.[id]]
+    .filter((d): d is string => typeof d === 'string' && d.trim() !== '')] as const));
+  const priors = priorDisplaysOf(runDelta, displaysById);
   const options = [...ids].flatMap((id): LicensedChance[] => {
     const label = labelOf(id);
-    const displays = [facts.goal_chance_range_display?.[id]?.range, facts.goal_chance_display?.[id]]
-      .filter((d): d is string => typeof d === 'string' && d.trim() !== '');
+    const displays = displaysById.get(id) ?? [];
     const figures = displays.flatMap(figuresIn);
-    return label === undefined || figures.length === 0 ? [] : [{ label, figures, displays }];
+    const prior = priors.get(id);
+    return label === undefined || figures.length === 0 ? []
+      : [{ label, figures, displays, ...(prior !== undefined ? { prior: { display: prior, figures: figuresIn(prior) } } : {}) }];
   });
   if (options.length === 0) return undefined;
   const goal = nodes.find((n) => n.kind === 'goal');
@@ -72,6 +95,8 @@ const WORD_MONTHS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4,
 const NUM = String.raw`(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen|twenty-four)`;
 /** "month 3" / "month three", and "3 months" / "three-month": every stated window, each read on its own. */
 const MONTH_WINDOWS = [new RegExp(String.raw`\bmonth\s+${NUM}\b`, 'gi'), new RegExp(String.raw`\b${NUM}[\s-]+months?\b`, 'gi')];
+/** A from→to comparison between the two displays: "from X to Y", "X → Y", "X, now Y". */
+const FROM_TO = /\bfrom\b[\s\S]*\bto\b|→|->|\bnow\b/i;
 const DATE = /\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/i;
 
 /**
@@ -94,12 +119,21 @@ export function isLicensedChanceLine(sentence: string, chances: LicensedChances 
   const ownWords = wordsRe !== undefined && wordsRe.test(sentence);
   const rest = sentence.replace(labelRe, ' ').replace(wordsRe ?? /$^/, ' ');
   const figures = figuresIn(rest);
-  if (figures.length === 0 || !figures.every((f) => named[0]!.figures.includes(f))) return false;
+  // ⭐ S9: the preceding Run's display counts only inside a from→to comparison that states it BEFORE one of this Run's own displays.
+  const priorDisplay = named[0]!.prior?.display;
+  const ownAt = Math.min(...named[0]!.displays.map((d) => key(rest).indexOf(key(d))).filter((i) => i >= 0));
+  const priorAt = priorDisplay === undefined ? -1 : key(rest).indexOf(key(priorDisplay));
+  // The from→to words sit between the earlier display and this Run's (the slice is empty when the order is reversed).
+  const comparison = priorAt >= 0 && Number.isFinite(ownAt)
+    && FROM_TO.test(key(rest).slice(Math.max(0, priorAt - 12), ownAt));
+  const allowedFigures = [...named[0]!.figures, ...(comparison ? named[0]!.prior!.figures : [])];
+  if (figures.length === 0 || !figures.every((f) => allowedFigures.includes(f))) return false;
   // Point vs range: the sentence states one of THIS option's licensed displays whole.
-  if (!named[0]!.displays.some((d) => key(rest).includes(key(d)))) return false;
+  if (!Number.isFinite(ownAt)) return false;
   // The event and target: the goal itself, or the licence's own chance words; any other number is another target.
   if (!ownWords && !GOAL_EVENT.test(sentence)) return false;
   const allowed = new Set([...named[0]!.displays.flatMap(numbersIn), ...numbersIn(chances.chanceWords ?? ''),
+    ...(comparison ? numbersIn(priorDisplay!) : []),
     ...(chances.periodMonths !== undefined ? [chances.periodMonths] : [])]);
   if (!numbersIn(rest).every((n) => allowed.has(n))) return false;
   if (!CHANCE.test(sentence) || SHARE.test(sentence)) return false;

@@ -162,7 +162,11 @@ describe('marketing turn 02: an unverifiable card target is unknown, never "not 
     // quantity); its figure, comparator and period are unchanged, so the Run reads the same target.
     const goalNode = (s.graph().nodes as Rec[]).find((n) => n.kind === 'goal')!;
     expect(goalNode).not.toHaveProperty('threshold_source');
-    expect(goalNode).toMatchObject({ goal_threshold_raw: 15, goal_direction: '>', goal_deadline_as_stated: '3 months' });
+    expect(goalNode).toMatchObject({ goal_threshold_raw: 15, goal_direction: '>' });
+    // AIE #94 6184383302: "within the first 3 months" is not written as the CONVERSION goal's deadline. This pre-statement raw
+    // has no goal target statement, and its own basis asks whether the conversion target is measured over those 3 months; the
+    // period stays on the second target ('New customers in first 3 months') and is asked, never assumed.
+    expect(goalNode).not.toHaveProperty('goal_deadline_as_stated');
   });
 
   it('⭐ RED→GREEN: a card withdrawn this turn is re-issued under a FRESH id, never returned dead (the served propose → withdraw → propose)', async () => {
@@ -200,8 +204,10 @@ describe('marketing turn 02: an unverifiable card target is unknown, never "not 
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true });
     const cold = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, {})).json.graph as Rec;
     expect(heldTargets(cold)).toEqual(expect.arrayContaining(BOTH));
-    // The period Paul gave ("within the first 3 months") is read back with the targets: on the goal, as stated.
-    expect((cold.nodes as Rec[]).find((n) => n.kind === 'goal')).toMatchObject({ goal_deadline_as_stated: '3 months' });
+    // The period Paul gave ("within the first 3 months") is read back with the targets, in the second target's own label; it
+    // is not written as the conversion goal's deadline (no goal target statement, AIE 6184383302).
+    expect(heldTargets(cold).map(([id]) => id)).toContain('new_customers_in_first_3_months');
+    expect((cold.nodes as Rec[]).find((n) => n.kind === 'goal')).not.toHaveProperty('goal_deadline_as_stated');
     expect(s.commits, 'one write').toHaveLength(1);
   });
 

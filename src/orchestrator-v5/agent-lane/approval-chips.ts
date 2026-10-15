@@ -163,6 +163,15 @@ export const AMEND_CHIP: SuggestedAction = {
 };
 
 /**
+ * ⭐ S5 (DL 15 Oct): the ONE rename card a committed edit's receipt offers when the option's name counts what its level no
+ * longer holds (`optionRenameCardOf`). Minted by the route, not by a tool call, so its chip is built here, card-only: only its
+ * press renames. Its words ride in `detail`.
+ */
+export const OPTION_RENAME_APPROVE = { label: 'Rename it', message: 'Yes, rename it.' } as const;
+export const optionRenameChipsFor = (proposalId: string, words: string): SuggestedAction[] =>
+  [{ id: approvalChipIdFor(proposalId), ...OPTION_RENAME_APPROVE, detail: words }, AMEND_CHIP];
+
+/**
  * The proposals a turn's own tool calls leave awaiting the user's yes, each with the tool that made it —
  * the ONE rule the approve chip and the build's save line (`write-outcome.ts`) both read. Empty when any
  * authorisation's identity is unknown: never a guess about which proposal it consumed.

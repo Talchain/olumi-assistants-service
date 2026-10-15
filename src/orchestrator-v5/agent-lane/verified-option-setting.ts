@@ -12,7 +12,7 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
-import { sourceMapOf, subjectKey } from './construction-source-map.js';
+import { draftStatements, sourceMapOf, subjectKey } from './construction-source-map.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -473,7 +473,7 @@ function differentFrameRepeat(text: string, factor: Factor, value: number): bool
  * week per specialist.") still refuses.
  */
 function aboutOtherSubjects(model: CandidateModel, factor: Factor, brief: string, text: string): boolean {
-  const keys = [...sourceMapOf(Reflect.get(model, 'statements'), brief).verified.entries()]
+  const keys = [...sourceMapOf(draftStatements(model), brief).verified.entries()]
     .filter(([, statements]) => statements.some((s) => s.quote.trim() === text.trim())).map(([key]) => key);
   if (keys.length === 0) return false;
   const own = subjectKey({ kind: 'factor', label: factor.label }, 'level').split('|')[1]!;
@@ -801,7 +801,7 @@ export function statementBindsFactorLevel(model: CandidateModel, factor: Factor,
 function boundByStatement(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   const value = factor.baseline_value;
   if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value === 0) return false;
-  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const map = sourceMapOf(draftStatements(model), brief);
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
   const unit = JSON.stringify(readUnitParts(factor.unit));
   if (unit === 'null') return false;
@@ -878,7 +878,7 @@ export function levelQuotedByBrief(model: CandidateModel, brief: string | undefi
 function claimsLevelStatement(model: CandidateModel, factor: Factor, brief: string): boolean {
   if (!carriesStatements(model)) return false;
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
-  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const map = sourceMapOf(draftStatements(model), brief);
   return map.verified.has(key) || map.refused.some((r) => r.key === key);
 }
 export function recordedRawSettingQuote(model: CandidateModel, intervention: Intervention): string | undefined {
@@ -901,7 +901,7 @@ export function statementCitesLevel(model: CandidateModel, factor: Factor, brief
   const value = factor.baseline_value;
   if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return false;
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
-  return (sourceMapOf(Reflect.get(model, 'statements'), brief).verified.get(key) ?? [])
+  return (sourceMapOf(draftStatements(model), brief).verified.get(key) ?? [])
     .some((s) => s.negated !== true && (s.low === Math.abs(value) || s.high === Math.abs(value)));
 }
 
@@ -911,7 +911,7 @@ export function statementCitesLevel(model: CandidateModel, factor: Factor, brief
  * other subject bound to that figure in it. Otherwise none: the setting is not the user's.
  */
 function statedSettingQuote(model: CandidateModel, option: Option, intervention: Intervention, brief: string): string | null {
-  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const map = sourceMapOf(draftStatements(model), brief);
   const key = subjectKey({ kind: 'option', label: option.label, factor_label: intervention.factor_label }, 'level');
   const quotes = [...new Set((map.verified.get(key) ?? [])
     .filter((s) => s.form === 'point' && s.low === intervention.value && s.negated !== true).map((s) => s.quote))];

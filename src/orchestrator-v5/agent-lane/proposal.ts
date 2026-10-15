@@ -110,6 +110,12 @@ export interface ProposalOperation {
      */
     | 'set_option_status'
     /**
+     * ⭐ S5 (DL 15 Oct): RENAME AN OPTION whose name counts what its level no longer holds — `path` is the option's id, `value`
+     * is `{expected_label, label}`. Minted by the route on the committed edit's receipt, never by the AI; card-only; written
+     * through the ONE label writer (`structural_rename`).
+     */
+    | 'rename_option'
+    /**
      * ⭐ S-E GOALS — THE GOAL'S DEADLINE AS A DATE (Science ruling 7 Oct §3) — `path` is the goal's id, `value` is
      * `{deadline, expected_deadline, words, reference}`: the calendar date CEE worked out from the user's own words
      * (`deadline-date.ts`), the date the goal held when the card was made (`null` for none: the stale gate, since the date
@@ -335,6 +341,8 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
     // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
     || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_statement_record' || op.op === 'set_option_capacity_change'
+    // An option's name is the user's: Olumi's proposed rename is applied ONLY by the press on its card.
+    || op.op === 'rename_option'
     // S5: a removal the user asked for is applied ONLY by the press on the card that says what goes with it.
     || op.op === 'remove_node' || op.op === 'remove_edge'
     // A user's statement through the ONE door is recorded only by the press on the card that quotes it.
