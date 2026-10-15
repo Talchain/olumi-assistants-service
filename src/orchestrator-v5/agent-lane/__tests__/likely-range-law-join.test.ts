@@ -23,6 +23,7 @@ import { doorIssueArgs } from '../../statement-door/door.js';
 import { readStatement } from '../../statement-door/read.js';
 import { doorCardWords, DOOR_DERIVED_APPROVE } from '../../statement-door/card.js';
 import { RANGE_LAW_ROW } from '../../statement-door/fields/range-law.js';
+import { CONSTRUCTION_ATTEST, userStatementRecord } from '../../statement-door/statements.js';
 import { LIKELY_RANGE_LAW_NOTE, rangeLawsOfCard, STATED_RANGE_CARD_CLOSING, statedRangeAssumptionWords } from '../runtime/agent-capabilities.js';
 
 type Rec = Record<string, any>;
@@ -123,6 +124,16 @@ describe('the goal chance on the served pricing brief: withheld until the approx
     const facts = runFactsOf({ ...block, enrichment: published }, after, true) as Rec;
     expect(facts.chances.goal_chance_display).toHaveProperty(STARTER);
     expect((facts.must_say as string[]).filter((x) => x === ADOPTED_LINE)).toHaveLength(1);
+  });
+
+  it('CONTRAST (#3207): the brief\'s sentence recorded by construction on the same setting is never an adoption', () => {
+    const g = clone(READ.graph);
+    const subs = g.nodes.find((n: Rec) => n.id === SUBS);
+    subs.user_statements = [userStatementRecord(STARTER_SUBJECT, [{ speaker: 'user', quote: SAID, source: SAID, form: 'range', reading: 'olumi',
+      low: 80, high: 250, subject: { quantity: 'level', node_id: SUBS, option_id: STARTER } }], '2026-10-15T00:00:00.000Z',
+    { ...CONSTRUCTION_ATTEST, range_law: 'equal_tail', low: 80, high: 250 })];
+    expect(rangeLawAdopted(g, STARTER, { factor_id: SUBS, low: 80, high: 250 })).toBe(false);
+    expect((goalChanceLicenceOf(envelope(), g, GOAL) as Rec).withheld_reason_by_option[STARTER]?.reason).toBe('range_law_unadopted');
   });
 
   it('CONTRAST: an adoption of other ends is not this range\'s (a changed range is withheld again)', () => {

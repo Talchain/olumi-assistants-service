@@ -19,7 +19,7 @@
 import { InterventionRangeMeaningV3, InterventionRangeV3, type InterventionRangeV3T } from '../schemas/cee-v3.js';
 import { isPersonsOwnSetting } from '../cee/provenance/provenance-of.js';
 import { sayFigureExactly } from './agent-lane/say-figure.js';
-import { userStatementOnNode } from './statement-door/statements.js';
+import { pressedRecord, userStatementOnNode } from './statement-door/statements.js';
 import { subjectKey, type DoorSubject } from './statement-door/subject.js';
 
 /** schemas 0.66.0 `InterventionRangeMeaning`, imported. Only `likely_range` is sampled by ISL. */
@@ -187,7 +187,8 @@ export const rangeLawSubject = (optionId: string, factorId: string): DoorSubject
 export function rangeLawAdopted(graph: unknown, optionId: string, u: Pick<LikelyRangeUse, 'factor_id' | 'low' | 'high'>): boolean {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const node = nodes.find((n) => isRec(n) && n.id === u.factor_id);
-  const record = node === undefined ? undefined : userStatementOnNode(node, subjectKey(rangeLawSubject(optionId, u.factor_id)));
+  // Only a PRESS adopts (#3207: a record construction wrote from the brief on the same setting is never one).
+  const record = node === undefined ? undefined : pressedRecord(userStatementOnNode(node, subjectKey(rangeLawSubject(optionId, u.factor_id))));
   return record?.attest?.range_law === RANGE_LAW_EQUAL_TAIL && record.attest.low === u.low && record.attest.high === u.high;
 }
 /** AIE 6184726873's face, exact, where the recorded use is known. */
