@@ -1,5 +1,5 @@
 {
- "_provenance": "v2 GEN pre-H0/H1 foundation (15 Oct 2026, head c515cfcb, diagnosis only) raw provider responses, copied, never authored. Each `text` is the response's message/output_text, concatenated by the route's own rule (agent-v1-turn.ts callStructured); `raw_sha256` is the sha256 of the whole raw body file at recovery/aie-compare-20261015-v2/gen/pre-H0H1-foundation-c515cfcb/<raw>. `brief` is the input the drafting call received. `saved_goal_deadline_as_stated` is what that run registered on the goal (AIE #94 6183705670).",
+ "_provenance": "v2 GEN pre-H0/H1 foundation (15 Oct 2026, head c515cfcb, diagnosis only) raw provider responses, copied, never authored. Each `text` is the response's message/output_text, concatenated by the route's own rule (agent-v1-turn.ts callStructured); `raw_sha256` is the sha256 of the whole raw body file at recovery/aie-compare-20261015-v2/gen/pre-H0H1-foundation-c515cfcb/<raw>. `brief` is the input the drafting call received. `saved_goal_deadline_as_stated` is what that run registered on the goal (AIE #94 6183705670). These raws predate SYSTEM 2, so they still carry the retired drafter carriers; they are listed in scripts/ci/recorded-raw-carriers.json as the recorded v2 raws that exposed AIE 6183705670 (wire evidence, never stripped).",
  "episodes": {
   "D5_r1_A": {
    "arm": "A",
