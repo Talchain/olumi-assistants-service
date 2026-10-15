@@ -1,4 +1,5 @@
 import { verbatimSourceLine } from '../quote-confirmation.js';
+import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
@@ -1985,6 +1986,10 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     // ⭐ DL 0df0e1 ruling C (6 Oct): where each option's chance reaches the Agent, so does the Run's licence to compare them.
     ...goalFacts,
     ...(participation !== undefined ? { option_participation: participation } : {}),
+    // #3167 fix-forward (AIE 6180618773 T9): the risks THIS selected Run recorded leaving out, and the narrower scope its chances
+    // cover. A typed fact of the Run, never today's model's set; a Run that recorded none carries nothing.
+    ...((omitted) => (current && omitted !== undefined ? { omitted_from_calculation: { scope: 'modelled_effects_only', risks: omitted } } : {}))(
+      runOmittedRisks(g.analysis_result)),
     // ⭐ GOAL-REACH (#2838 rebuilt, DL 14 Oct): every licensed option below the floor → the model's own reason and the one
     // question, as a fact of this same current Run, for the AI to word (`out-of-reach-why.ts`).
     ...((why) => (why !== null ? { goal_out_of_reach: goalOutOfReachFact(why) } : {}))(current ? outOfReachWhyOf(g.analysis_result, g.raw) : null),
