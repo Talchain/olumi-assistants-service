@@ -60,7 +60,7 @@ async function runOn(graph: Rec): Promise<{ sent: Rec | undefined; failure: unkn
     scenarioReader: vi.fn(() => Promise.resolve(snapshotOf(graph))) });
   let failure: unknown = null;
   try { await handler(invocation()); } catch (e) { failure = e; }
-  return { sent: run.mock.calls[0]?.[0] as Rec | undefined, failure };
+  return { sent: (run.mock.calls as unknown[][])[0]?.[0] as Rec | undefined, failure };
 }
 
 describe('S4: a stated net loss carries its raw value and frame, and the Run reads it', () => {
