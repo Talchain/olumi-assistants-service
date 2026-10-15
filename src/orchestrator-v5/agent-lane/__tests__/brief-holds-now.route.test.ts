@@ -195,7 +195,9 @@ describe('the launch period: his answer to its ONE question is his forecast for 
     const nowAsk = `Is ‘${LABEL}’ already true now?`;
     expect(readStatement(launch, holdsNow, LABEL, [{ quote: 'Yes, it is.', answering: nowAsk }], { now: 'Yes, it is.' }, { asks: doorAsks(launch) }).kind).toBe('refused');
   });
-  it.each(['No, I’ll have learnt a lot by then.', 'Probably, yes.', 'Yes, if we don’t hire an agency.', 'I’m not sure.', 'Not really.'])(
+  it.each(['No, I’ll have learnt a lot by then.', 'Probably, yes.', 'Yes, if we don’t hire an agency.', 'I’m not sure.', 'Not really.',
+    // PL 04:05: a later denial in the WHOLE answer, and a hedged yes, are never a derived 100%.
+    'Yes, but it will not hold during that period.', 'Yes, probably.'])(
     'CONTRAST: “%s” keeps his words as his answer and writes nothing', (said) => {
       const v = readStatement(launch, holdsNow, LABEL, [{ quote: said, answering: WINDOW_ASK }], { now: said }, { asks: doorAsks(launch) });
       expect(v.kind, JSON.stringify(v)).toBe('refused');
@@ -214,6 +216,8 @@ describe('the launch period: his answer to its ONE question is his forecast for 
     // Olumi's last reply asked something else: a yes answers THAT, never the period question.
     expect(doorIssueArgs(launch, ANSWER, { preceding_ask: 'Shall I suggest some risks you have not considered?' }, turn)).toBeUndefined();
     expect(doorIssueArgs(launch, 'No, I’ll have learnt a lot by then.', { preceding_ask: WINDOW_ASK }, turn)).toBeUndefined();
+    // PL 04:05: a yes the rest of the answer denies issues no card either.
+    expect(doorIssueArgs(launch, 'Yes, but it will not hold during that period.', { preceding_ask: WINDOW_ASK }, turn)).toBeUndefined();
   });
 });
 
