@@ -53,12 +53,15 @@ const nodeIds = (): string[] => g().nodes.map((n: Rec) => String(n.id));
 const edgePairs = (): string[] => g().edges.map((e: Rec) => `${String(e.from)}::${String(e.to)}`);
 
 const FACTOR_ASK = 'Remove hiring spend from the model.';
-const FACTOR_CARD = `From your message: “${FACTOR_ASK}” Olumi proposes removing ‘Hiring spend’ from the model. Its links with `
+// AIE 6188873084's cards, exact.
+const FACTOR_CARD = `From your message: “${FACTOR_ASK}”. Olumi proposes removing ‘Hiring spend’ from this model. Its links with `
   + '‘Carry on as now’ and ‘Budget pressure’ go with it. ‘Hire a Tech lead’ and ‘Hire two developers’ no longer set it. Remove it?';
 const LINK_ASK = 'Set the link from tickets resolved per specialist to additional specialist capacity to zero.';
-const LINK_CARD = `From your message: “${LINK_ASK}” Olumi proposes removing the link from ‘Tickets resolved per specialist’ to `
-  + '‘Additional specialist capacity’, so the analysis reads ‘Tickets resolved per specialist’ as having no effect on '
-  + '‘Additional specialist capacity’. Remove it?';
+const LINK_CARD = `From your message: “${LINK_ASK}”. Olumi proposes removing the direct link from ‘Tickets resolved per specialist’ to `
+  + '‘Additional specialist capacity’. The model will no longer include that direct influence; other modelled paths between them may remain. '
+  + 'Remove this link?';
+const ZERO_READING = 'Olumi is reading “zero” here as removing this direct link, rather than setting only its average effect to zero. ';
+const ZERO_CARD = LINK_CARD.replace('”. Olumi proposes', `”. ${ZERO_READING}Olumi proposes`);
 
 describe('a removal the user asks for is ONE card; only its press removes it, through the ONE removal writer', () => {
   let mods: {
@@ -126,21 +129,22 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
     const edgesBefore = edgePairs().filter((p) => p !== 'tickets_resolved_per_specialist::additional_specialist_capacity');
     const out = await w.press(card.proposal_id);
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true,
-      follow_up: 'Removed the link from ‘Tickets resolved per specialist’ to ‘Additional specialist capacity’.' });
+      follow_up: 'Removed the direct link from ‘Tickets resolved per specialist’ to ‘Additional specialist capacity’.' });
     expect(rows.size).toBe(1);
     expect(nodeIds()).toEqual(nodesBefore);
     expect(edgePairs()).toEqual(edgesBefore);
   });
 
-  it('RED (capacity): op set_zero on the link → the same ONE card; its button says what the press does ("Remove it")', async () => {
+  it('RED (capacity): op set_zero on the link → the removal card, showing "zero" read as removing the direct link; button "Remove it"', async () => {
     persisted = structuredClone(CAPACITY);
     const w = world();
     const card = await w.propose(LINK_ASK, { kind: 'link', label: 'Tickets resolved per specialist', to_label: 'Additional specialist capacity', quote: LINK_ASK }, 'set_zero');
-    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, public_label: LINK_CARD });
+    // AIE 6188873084: "zero" is not automatically removal — the card SHOWS that reading for the user to adopt.
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, public_label: ZERO_CARD });
     const stored = w.store.get(card.proposal_id)!;
     const chips = mods.approvalChipsFor([{ name: 'propose_change', ok: true, mutated: false, proposal_id: card.proposal_id }],
       () => ({ proposal: stored, result: card as never }));
-    expect(chips[0]).toMatchObject({ label: 'Remove it', message: 'Yes, remove it.', detail: LINK_CARD });
+    expect(chips[0]).toMatchObject({ label: 'Remove it', message: 'Yes, remove it.', detail: ZERO_CARD });
     expect(String(chips[0]!.id)).toBe(`agent-approve-proposal:${card.proposal_id}`);
   });
 
@@ -152,6 +156,15 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
     expect(await mods.dispatchTool('propose_change', JSON.stringify({ ops: [one, one] }), { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a',
       request_id: 'r', user_text: FACTOR_ASK, user_turn_text: FACTOR_ASK } as never, w.caps)).toMatchObject({ ok: false, refusal: 'unsupported_change' });
     expect(w.store.outstanding(SCENARIO_ID, 'user-a')).toEqual([]);
+  });
+
+  it('a risk\'s card says removing it is no evidence it cannot happen (AIE 6188873084)', async () => {
+    const w = world();
+    const ask = 'Drop the budget pressure risk.';
+    const card = await w.propose(ask, { kind: 'risk', label: 'Budget pressure', quote: ask });
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true });
+    expect(card.public_label).toMatch(/^From your message: “Drop the budget pressure risk\.”\. Olumi proposes removing ‘Budget pressure’ from this model\. /);
+    expect(card.public_label).toMatch(/ Removing it from this model does not mean it cannot happen\. Remove it\?$/);
   });
 
   it('CONTRAST: card-only — a typed yes without the card\'s press removes nothing', async () => {
