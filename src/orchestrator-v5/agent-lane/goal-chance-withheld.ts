@@ -70,6 +70,19 @@ export function goalChanceSayPromisedThisTurn(toolResults: readonly unknown[]): 
   return promised;
 }
 
+/**
+ * ⭐ SAY-SHOWN FOR THE CALL THAT INTERPRETS A RUN (legacy e2e 7f5659fd turn 08: the withholding said twice). The Run's own
+ * output promised the AI its `say` is shown (`say_shown`), and the route kept that promise; but the one call that
+ * interprets that Run read the SAME `say` from the canonical state, which carries no promise, explained the cause in its
+ * own words, and the host then showed `say` as promised. That call is told what the Run promised, for the same `say`
+ * (by identity: the exact string the Run promised), and never for another; nothing is promised where the Run promised
+ * nothing (an Explain press, an identity ask, a `say` that asks).
+ */
+export function withRunsSayShownPromise<T extends { readonly say: string }>(goalChance: T, toolResults: readonly unknown[]): T {
+  return goalChanceSayPromisedThisTurn(toolResults) && goalChanceSayFromThisTurn(toolResults) === goalChance.say
+    ? { ...goalChance, say_shown: SAY_SHOWN_NOTE } : goalChance;
+}
+
 // DL words ruling (8 Oct): chance vocabulary, with the same held-target words as the horizon line.
 function withheldOpeningForGraph(graph: unknown): string {
   const target = statedTargetWords(graph);
