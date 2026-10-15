@@ -95,6 +95,20 @@ export const sameQuestion = (a: string | undefined, b: string): boolean => {
 const sayPeople = (n: number): string => `${n.toLocaleString('en-GB')} ${n === 1 ? 'person' : 'people'}`;
 
 /**
+ * ⭐ AIE 6180618773 C4: the number reached is held at the user's point forecast only as Olumi's explicit conditional scenario. A
+ * human point forecast is not human certainty, so the card says the chance is conditional on that many and that the reach's own
+ * uncertainty is not carried. Said once, as Olumi's, on the card the press adopts.
+ */
+export const cohortFixedReachScenario = (people: number, window: string): string =>
+  `Olumi’s scenario, not yours: the chance is worked out as if exactly ${sayPeople(people)} are reached during ${window}; `
+  + 'how many it actually reaches may differ, and that uncertainty is not included.';
+
+/** The same-draw law through the user's two estimates: Olumi's approximation (AIE 6180618773 T8: the relation alone does not establish it). */
+export const cohortLawApproximation = (rateLabel: string): string =>
+  `Olumi’s approximation, not yours: the underlying ‘${rateLabel}’ is treated as a smooth curve (a Beta distribution) through your `
+  + 'two estimates, and each person converts or not at that same chance. If no such curve fits them, no chance is given for this option.';
+
+/**
  * The card: the user's answer recorded as their estimates in AIE 6176433015's exact words, their other two statements, and
  * Olumi's own modelling approximation, said as Olumi's and kept apart from theirs.
  */
@@ -105,15 +119,15 @@ export function cohortForecastCardWords(optionLabel: string, f: CohortForecast, 
     `From your answer to the question about one chance in four below and one chance in four above: “${s.conversion.source}”. `
       + `Record your estimates as about one chance in four below ${lo}% and one chance in four above ${hi}% for ‘${optionLabel.trim()}’, `
       + `among the people it reaches, during ${window}? These are your estimates, not a minimum and maximum.`,
-    `From your messages: ‘${s.people.source}’ · ‘${s.same_cohort.source}’. It reaches ${sayPeople(f.people_reached)} during ${window}, `
-      + `and ‘${countLabel}’ counts the people who convert among those same people, as you said. The number reached is held fixed.`,
-    `Olumi’s approximation, not yours: the underlying ‘${rateLabel}’ is treated as a smooth curve (a Beta distribution) through your `
-      + 'two estimates, and each person converts or not at that same chance. If no such curve fits them, no chance is given for this option.',
+    `From your messages: ‘${s.people.source}’ · ‘${s.same_cohort.source}’. Your forecast is that it reaches ${sayPeople(f.people_reached)} `
+      + `during ${window}, and ‘${countLabel}’ counts the people who convert among those same people, as you said.`,
+    cohortFixedReachScenario(f.people_reached, window),
+    cohortLawApproximation(rateLabel),
   ].join('\n');
 }
 
 export const cohortForecastRecordedWords = (optionLabel: string, f: CohortForecast): string =>
-  `Recorded from your words: ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, with about one chance in four that its `
+  `Recorded from your words: your forecast that ‘${optionLabel.trim()}’ reaches ${sayPeople(f.people_reached)}, with about one chance in four that its `
   + `underlying conversion rate is below ${f.conversion_middle_half_pct[0]}% and one in four that it is above ${f.conversion_middle_half_pct[1]}%.`;
 
 export type CohortForecastRefusal = 'invalid_graph' | 'invalid_forecast' | 'option_not_found' | 'option_changed' | 'targets_changed';
