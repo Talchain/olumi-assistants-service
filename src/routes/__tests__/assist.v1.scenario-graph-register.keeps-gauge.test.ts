@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ A GAUGE SURVIVES THE UI's RE-REGISTER (no-dead-end #2623; MC 21's chain item, code-read on DGAI staging 39e1143f):
@@ -88,7 +89,7 @@ async function register(graph: unknown) {
   const app = Fastify();
   await registerRoute(app);
   await app.ready();
-  const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
+  const res = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
   await app.close();
   return res;
 }

@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /** Lens3 P1-1: DGAI buildRegistrationGraph omits provenance on every edge. */
 import Fastify from 'fastify';
@@ -54,7 +55,7 @@ beforeEach(() => {
 async function post(graph: unknown) {
   const app = Fastify();
   await registerRoute(app);
-  const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
+  const response = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
   await app.close();
   return response;
 }

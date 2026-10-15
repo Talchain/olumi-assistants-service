@@ -17,6 +17,7 @@
  * FIXTURE: Paul's stored graph `cbd15f83`. Goal `mrr`: target 20000 "GBP MRR", cap 25000, frame `level`, no
  * `observed_state`. Every assertion names the goal by id and binds the stamp by its literal source.
  */
+import { injectAsCeeWriter } from '../../../../tests/utils/inject-as-cee-writer.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -104,7 +105,7 @@ async function harness(initial: Graph) {
       return { status: 200, json: { graph: g, graph_hash: computeAnalysisAffectingGraphHash(g as never), graph_identity_hash: computeGraphIdentityHash(g as never) } };
     }
     if (path === `/assist/v1/scenarios/${SCENARIO}/graph/register`) {
-      const res = await app.inject({ method: 'POST', url: path, payload: body as Record<string, unknown> });
+      const res = await injectAsCeeWriter(app, { method: 'POST', url: path, payload: body as Record<string, unknown> });
       return { status: res.statusCode, json: res.json() as Record<string, unknown> };
     }
     return { status: 500, json: {} };

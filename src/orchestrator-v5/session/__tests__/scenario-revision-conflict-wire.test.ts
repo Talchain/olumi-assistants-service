@@ -1,4 +1,5 @@
 /** RPC-boundary OLRV1 -> typed error -> real HTTP mapping, without a database. */
+import { injectAsCeeWriter } from '../../../../tests/utils/inject-as-cee-writer.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,7 +93,7 @@ afterEach(async () => {
 async function register() {
   app = Fastify({ requestIdHeader: "x-request-id" });
   await registerRoute(app);
-  return await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, headers: { "x-request-id": "version-cas" }, payload: { graph: GRAPH } });
+  return await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, headers: { "x-request-id": "version-cas" }, payload: { graph: GRAPH } });
 }
 
 describe('revision CAS wire refusal', () => {
@@ -122,7 +123,7 @@ describe('revision CAS wire refusal', () => {
       cause: { details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) } }));
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
-    const res = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+    const res = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
       kind: 'message', turn_id: 'b2222222-2222-4222-8222-222222222222', scenario_id: SCENARIO,
       message: 'Add a risk for supplier delays affecting the launch', turn_class: 'decide', stage: 'analyse',
       source: 'composer', graph_state: GRAPH,
@@ -148,7 +149,7 @@ describe('revision CAS wire refusal', () => {
       cause: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) } }));
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
-    const res = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+    const res = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
       kind: 'message', turn_id: 'b1111111-1111-4111-8111-111111111111', scenario_id: SCENARIO,
       message: 'Consider the strategic framing.', turn_class: 'frame', stage: 'analyse', source: 'composer',
     } });
@@ -168,7 +169,7 @@ describe('revision CAS wire refusal', () => {
       throw new GraphStaleWriteError('stale revision', { conflict_category: 'revision_conflict',
         cause: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 0, current: 1 }) } });
     });
-    const res = await app.inject({ method: 'POST', url: '/revision-write' });
+    const res = await injectAsCeeWriter(app, { method: 'POST', url: '/revision-write' });
     expect(res.statusCode).toBe(409);
     expect(res.json().message).toBe('The scenario changed while I was saving, so nothing was saved. Try again.');
     expect(res.json()).toMatchObject({ code: 'revision_conflict', expected: 0, current: 1,

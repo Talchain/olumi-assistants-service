@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from "../../../tests/utils/inject-as-cee-writer.js";
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ROADMAP 2.467 — `POST /assist/v1/scenarios/:scenario_id/graph/register`.
@@ -141,7 +142,7 @@ async function post(
   scenarioId: string,
   body: Record<string, unknown>,
 ) {
-  return await app.inject({
+  return await injectAsCeeWriter(app, {
     method: "POST",
     url: `/assist/v1/scenarios/${scenarioId}/graph/register`,
     payload: body,

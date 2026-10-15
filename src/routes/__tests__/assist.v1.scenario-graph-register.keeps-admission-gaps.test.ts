@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * B3 joined registration regression — serialized offline route witness.
@@ -93,7 +94,7 @@ const option = (graph: Graph) => buildCanonicalAnalysisReadyFromGraph(graph)!.op
 async function register(graph: Graph) {
   const app = Fastify();
   await registerRoute(app); await app.ready();
-  try { return await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${FIX_SCENARIO}/graph/register`, payload: { graph } }); }
+  try { return await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${FIX_SCENARIO}/graph/register`, payload: { graph } }); }
   finally { await app.close(); }
 }
 beforeEach(() => {
