@@ -85,13 +85,13 @@ describe('Q4 presence: the snapshot records analysis membership, not a structura
 
 describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', () => {
   const cases = [
-    ['all skipped', { input_changes: [UNKNOWN] }],
-    ['one named and one skipped', { input_changes: [NAMED, UNKNOWN] }],
-    ['partial coverage with no named row', { input_changes: [], input_coverage: 'partial' }],
-    ['partial coverage beside a named row', { input_changes: [NAMED], input_coverage: 'partial' }],
-    ['unrecorded coverage', { input_changes: [], input_coverage: 'not_recorded' }],
-    ['an older delta with no row record', {}],
-    ['a malformed row record', { input_changes: [null] }],
+    ['all skipped', { input_changes: [UNKNOWN] }, false],
+    ['one named and one skipped', { input_changes: [NAMED, UNKNOWN] }, true],
+    ['partial coverage with no named row', { input_changes: [], input_coverage: 'partial' }, false],
+    ['partial coverage beside a named row', { input_changes: [NAMED], input_coverage: 'partial' }, true],
+    ['unrecorded coverage', { input_changes: [], input_coverage: 'not_recorded' }, false],
+    ['an older delta with no row record', {}, false],
+    ['a malformed row record', { input_changes: [null] }, false],
   ] as const;
   const paraphrases = [
     'Nothing else was altered.', 'No other inputs moved.', 'The rest stayed the same.',
@@ -101,7 +101,8 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     'Unchanged were the other inputs.', 'As they were, the other inputs stayed.',
     'The inputs did not move.', 'The inputs never altered.',
   ];
-  for (const [name, delta] of cases) {
+  // Explicit policy cases: a named change leads; unknown/no-change records may follow the finding.
+  for (const [name, delta, recordFirst] of cases) {
     it.each([
       'Nothing changed.', 'Nothing else changed.', 'Nothing else has been changed.',
       'Nothing in your model changed.', 'Nothing in your model has changed.',
@@ -111,7 +112,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     ])(`${name}: %s is dropped through composition`, (claim) => {
       const p = plan(delta);
       const composed = composeRerunExplanation(`${WHY} ${claim}`, p);
-      expect(composed).toEqual({ text: `${p.codeLine}\n\n${WHY}`, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
+      expect(composed).toEqual({ text: recordFirst ? `${p.codeLine}\n\n${WHY}` : `${WHY}\n\n${p.codeLine}`, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
       expect(composeRerunExplanation(claim, p).text, 'an all-rejected draft keeps the honest code line').toBe(p.codeLine);
     });
 
@@ -120,7 +121,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
       'Olumi isn\'t naming an option on this run.',
     ])(`${name}: a negation unrelated to input changes is kept: %s`, (draft) => {
       const p = plan(delta);
-      expect(composeRerunExplanation(draft, p)).toEqual({ text: `${p.codeLine}\n\n${draft}`, dropped: [], failed: [] });
+      expect(composeRerunExplanation(draft, p)).toEqual({ text: recordFirst ? `${p.codeLine}\n\n${draft}` : `${draft}\n\n${p.codeLine}`, dropped: [], failed: [] });
       expect(dropLog).not.toHaveBeenCalled();
     });
   }
@@ -129,7 +130,8 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     expect(plan({ input_changes: [null] }).codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
   });
 
-  for (const [name, delta] of cases) {
+  // Explicit policy cases: a named change leads; unknown/no-change records may follow the finding.
+  for (const [name, delta, recordFirst] of cases) {
     it.each([
       'Olumi cannot confirm that nothing else changed.',
       'Olumi can\'t confirm that nothing else changed.',
@@ -137,7 +139,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     ])(`${name}: honest uncertainty survives composition and provisional-view checking: %s`, (uncertainty) => {
       const p = plan(delta);
       expect(p.inputs.changes_unsaid).toBe(true);
-      expect.soft(composeRerunExplanation(uncertainty, p)).toEqual({ text: `${p.codeLine}\n\n${uncertainty}`, dropped: [], failed: [] });
+      expect.soft(composeRerunExplanation(uncertainty, p)).toEqual({ text: recordFirst ? `${p.codeLine}\n\n${uncertainty}` : `${uncertainty}\n\n${p.codeLine}`, dropped: [], failed: [] });
       expect.soft(rerunViewFailures({ reasoning: uncertainty }, p)).toEqual([]);
     });
 
@@ -179,7 +181,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     const p = plan({ input_changes: [] });
     const claim = 'Nothing in your model changed.';
     expect(p.codeLine).toBe(RERUN_NO_CHANGE_LINES.nothing);
-    expect(composeRerunExplanation(claim, p)).toEqual({ text: `${p.codeLine}\n\n${claim}`, dropped: [], failed: [] });
+    expect(composeRerunExplanation(claim, p)).toEqual({ text: `${claim}\n\n${p.codeLine}`, dropped: [], failed: [] });
   });
 
   it.each(paraphrases)('CONTROL: full coverage keeps the prior paraphrase behaviour: %s', (claim) => {

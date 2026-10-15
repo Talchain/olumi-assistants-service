@@ -15,8 +15,8 @@
  *     changed."; anything else → "Olumi can't say what changed between these two runs.";
  *   · the `MethodInputs` RC's `checkMethodTurn('RERUN-EXPLANATION')` judges on;
  *   · an instruction handing the model that line, told never to restate whether inputs changed.
- * Every model sentence passes RC's checker beside the code line. AIE-04 lets the current finding lead;
- * any recorded sentence the AI omits is repaired after its prose, and a complete citation is not prefixed again. No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
+ * Every model sentence passes RC's checker beside the code line. A named change leads as a fail-safe;
+ * no-change/unknown records may follow the current finding. A complete record is always said once. No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
  */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
 import { POLICY } from './guidance/policy.js';
@@ -556,7 +556,8 @@ const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
 
 /**
  * Check every model sentence beside the unchanged record, then repair only record sentences the answer omitted.
- * The current finding may lead; a complete quoted record is not prefixed a second time. Nothing left → the record alone.
+ * A named-change record leads even when an unrecognised contrary paraphrase survives the checker.
+ * No-change/unknown records may follow the finding. Copied record sentences never create a second copy.
  */
 export function composeRerunExplanation(reply: string, plan: RerunExplanationPlan): {
   readonly text: string; readonly dropped: readonly string[]; readonly failed: readonly string[];
@@ -564,6 +565,7 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
   const dropped: string[] = [];
   const failed = new Set<string>();
   const recordSentences = sentencesOf(plan.codeLine);
+  const recordLeads = plan.changes.length > 0;
   const saidRecord = new Set<number>();
   let sentenceIndex = 0;
   const kept = reply.split(/\r?\n/u).map((line) => line.split(SENTENCE_BREAK).filter((sentence) => {
@@ -573,7 +575,10 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
     if (recordIndex >= 0 && saidRecord.has(recordIndex)) return false;
     const verdict = checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${sentence}`, plan.inputs, true, sentence);
     if (verdict.failed.length === 0) {
-      if (recordIndex >= 0) saidRecord.add(recordIndex);
+      if (recordIndex >= 0) {
+        saidRecord.add(recordIndex);
+        if (recordLeads) return false; // The complete authoritative record is placed once, before this prose.
+      }
       return true;
     }
     dropped.push(sentence);
@@ -585,6 +590,7 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
   }).join(' ')).filter((line) => line.trim() !== '').join('\n').trim();
   // The AI may integrate the exact record beside its current finding. Repair only missing record sentences;
   // formatting does not make a second obligation, while a changed number, unit, source or negative is still missing.
+  if (recordLeads) return { text: [plan.codeLine, kept].filter(Boolean).join('\n\n'), dropped, failed: [...failed] };
   const missing = recordSentences.filter(sentence => !recordedSentenceIn(kept, sentence));
   return { text: kept === '' ? plan.codeLine : [kept, missing.join(' ')].filter(Boolean).join('\n\n'), dropped, failed: [...failed] };
 }

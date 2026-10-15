@@ -680,11 +680,34 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     expect(r.dropped).toContain(line);
     expect(r.text).not.toContain(line);
     expect(r.text.split(LINE)).toHaveLength(2);
-    expect(r.text).toBe(`${WHY}\n\n${LINE}`);
+    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
     expect(rerunViewFailures({ reasoning: line }, p)).toContain('RX-NO-CONTRARY-SAME');
   });
 
-  it.each(['Nothing else changed.', 'Olumi cannot confirm that your model is unchanged.'])(
+  it.each([
+    'Nothing about your model changed.', 'There were no changes to your model.', 'None of your assumptions changed.',
+    'Your inputs are identical to last time.', "Your settings haven't changed.", 'No edits were made to the model.',
+    'Everything in the model is as it was.', 'This run used exactly the same model.', 'No inputs differ from the previous run.',
+    'The inputs are as before.', 'Your model remains as it was.', 'Your model is the same as before.',
+    'The model has not changed since the last run.', 'The model stayed the same.', "You haven't changed anything.",
+  ])('BUDDY-B round 3: the named-change record leads before outside phrasing "%s"', line => {
+    const r = composeRerunExplanation(`${WHY} ${line}`, p);
+    expect(r.text.startsWith(`${LINE}\n\n`)).toBe(true);
+    expect(r.text.split(LINE)).toHaveLength(2);
+  });
+
+  it.each([
+    ['C0', { ...UNWITHHELD, attribution_case: 'C0_identical', input_changes: [] }],
+    ['unknown', { ...UNWITHHELD, attribution_case: 'C5_unattributed', input_changes: [], input_coverage: 'partial' }],
+  ] as const)('BUDDY-B round 3: finding-first remains for a %s record with no named change', (_name, delta) => {
+    const noChange = plan(delta)!;
+    expect(noChange.changes).toEqual([]);
+    const r = composeRerunExplanation(WHY, noChange);
+    expect(r.text).toBe(`${WHY}\n\n${noChange.codeLine}`);
+  });
+
+  it.each(['Nothing else changed.', 'Olumi cannot confirm that your model is unchanged.',
+    '‘Carry on’ does not change the price.', 'Olumi can’t say what changed between these two runs.', 'The comparison uses the current calculation inputs.'])(
     'keeps the qualified full-coverage control "%s" and record once', (line) => {
       const r = composeRerunExplanation(`${WHY} ${line}`, p);
       expect(r.failed).toEqual([]);
@@ -770,26 +793,26 @@ describe('the typed provisional view is the model\'s words too (Codex pre-review
 describe('AIE-04: one integrated checked comparison', () => {
   const p = plan({ ...UNWITHHELD, input_changes: [AI] })!;
   const current = 'The model now shows a provisional comparison of the four options.';
-  it('keeps the current finding first and the quoted record once, without a host prefix', () => {
+  it('puts a named change first and keeps a complete quoted record once', () => {
     const answer = `${current}\n**What changed:** Olumi’s record says: “${SAID_AI}”\n${RERUN_FALLBACK_LINES.unwithheld}`;
     const composed = composeRerunExplanation(answer, p);
-    expect(composed).toEqual({ text: answer, dropped: [], failed: [] });
+    expect(composed).toEqual({ text: `${p.codeLine}\n\n${current}`, dropped: [], failed: [] });
     expect(composed.text.split(SAID_AI)).toHaveLength(2);
   });
   it('a second complete record citation is said once, even beneath a different heading', () => {
     const once = `${current}\n**What changed:** Olumi’s record says: “${SAID_AI}”\n${RERUN_FALLBACK_LINES.unwithheld}`;
     const r = composeRerunExplanation(`${once}\n**What changed:** Olumi’s record says: “${SAID_AI}”`, p);
-    expect(r.text).toBe(once);
+    expect(r.text).toBe(`${p.codeLine}\n\n${current}`);
     expect(r.text.split(SAID_AI)).toHaveLength(2);
   });
-  it('repairs only the missing record sentence, keeping the recorded change once', () => {
+  it('keeps the full named-change record first, repairing its missing sentence once', () => {
     const answer = `${current}\n${SAID_AI}`;
-    expect(composeRerunExplanation(answer, p).text).toBe(`${answer}\n\n${RERUN_FALLBACK_LINES.unwithheld}`);
+    expect(composeRerunExplanation(answer, p).text).toBe(`${p.codeLine}\n\n${current}`);
   });
   it('still drops a fabricated movement and repairs the record beside the honest finding', () => {
     const r = composeRerunExplanation(`${current} Its chance rose to 57%.`, p);
     expect(r.failed).toContain('RX-NO-MOVEMENT-WITHOUT-PRIOR');
     expect(r.text).not.toContain('57%');
-    expect(r.text).toBe(`${current}\n\n${p.codeLine}`);
+    expect(r.text).toBe(`${p.codeLine}\n\n${current}`);
   });
 });
