@@ -86,6 +86,17 @@ describe('S4: a stated net loss carries its raw value and frame, and the Run rea
     expect(node?.observed_state?.value, wire.slice(0, 400)).toBe(-15 / 200);
   });
 
+  it('CONTROL: an option that SETS the negative factor is refused, never rescaled (PLoT keeps no frame for a negative domain, D-9)', async () => {
+    const graph = await registered(GYM);
+    const id = lossNode(graph).id as string;
+    const option = (graph.nodes as Rec[]).find((n) => n.kind === 'option')!;
+    option.interventions = { ...option.interventions, [id]: { value: -5 / 200, raw_value: -5, unit: 'members per month', source: 'user_confirmed' } };
+    (graph.edges as Rec[]).push({ from: option.id, to: id });
+    const { sent, failure } = await runOn(graph);
+    expect(sent).toBeUndefined();
+    expect((failure as HandlerInvocationFailedError).details).toMatchObject({ reason_code: 'mixed_scale_unresolved' });
+  });
+
   it('CONTROL: a bare raw −15 beside the same frame (no pair) still blocks, naming the factor', async () => {
     const graph = await registered(GYM);
     const n = lossNode(graph);
