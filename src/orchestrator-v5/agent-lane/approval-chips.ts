@@ -95,7 +95,6 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // E5: the user's hiring times per option, on ONE card (`hiring-times.ts`). Two buttons: [Use these times] [Change].
   propose_hiring_times: { label: 'Use these times', message: 'Yes, use these hiring times.' },
   // The coaching loop: the user's new figure for a share of time, with Olumi's reading, on ONE card-only card.
-  propose_option_capacity_change: { label: 'Use this', message: 'Yes, use this for the option.' },
   propose_new_limit: { label: 'Yes', message: 'Yes, record that limit.' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
