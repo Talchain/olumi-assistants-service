@@ -1428,6 +1428,13 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(s.commits).toHaveLength(0);
   });
 
+  it('CONTRAST: a qualitative saved goal and a revision that brings a figure of its own → refused; the card never claims "as before"', async () => {
+    const s = server();
+    const { caps } = lane(s, new ProposalStore(), keepsRaw);
+    expect(await change(caps)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.commits).toHaveLength(0);
+  });
+
   it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
     const base = structuredClone(FX.graph);
     base.goal_constraints = [...(base.goal_constraints ?? []), { constraint_id: 'agent-lane:product_feature_launch:>=', node_id: 'product_feature_launch',
