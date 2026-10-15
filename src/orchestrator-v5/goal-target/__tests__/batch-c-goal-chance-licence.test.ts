@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { agentLicenceRecordOf, goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceLicenceForAgent, goalChanceLicenceOf, ZERO_SPREAD_FIXED_BASELINE_LINE, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
@@ -679,14 +679,15 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     const l = goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {})!;
     expect(l).not.toBeNull();
     expect(l).toMatchObject({ message: '', pct_by_option: {}, withheld_option_ids: ['lead', 'two', 'carry_on'],
-      withheld_reason_by_option: { carry_on: { reason: 'zero_spread', side: 'falls_short', line: ZERO_SPREAD_LINE } } });
+      // ⭐ S7 B2 (capacity e2e c1e944a4 item 3): the status quo holds every factor at today's value: its true line says so (typed).
+      withheld_reason_by_option: { carry_on: { reason: 'zero_spread', side: 'falls_short', line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' } } });
     expect(l.status_quo).toBeUndefined();
     for (const key of ['leader_option_id', 'similar_option_ids', 'olumi_estimate_link_count', 'provisional']) {
       expect(l).not.toHaveProperty(key);
     }
     const env = wireEnvelope(run, g);
     const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
-    expect(cells.carry_on).toMatchObject({ kind: 'withheld', why: ZERO_SPREAD_LINE });
+    expect(cells.carry_on).toMatchObject({ kind: 'withheld', why: ZERO_SPREAD_FIXED_BASELINE_LINE });
     expect(JSON.stringify(cells.carry_on)).not.toMatch(/by assumption|doesn’t match/);
     // NEGATIVE: a status-quo figure already withheld upstream (an untested horizon strips every option's) said nothing before,
     // so no status-quo-only record is added for it (goal-horizon-verdict.route "a stored triple does not unlock…").
