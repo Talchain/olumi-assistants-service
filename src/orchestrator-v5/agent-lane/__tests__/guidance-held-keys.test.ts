@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { isHeldEntryKey } from '../guidance/held-keys.js';
 import { POLICY } from '../guidance/policy.js';
 import { entryKey } from '../guidance/index.js';
+import { guidanceOnAnswer } from '../turn-context/guidance-history.js';
+import type { GuidanceWire } from '../turn-context/guidance-wire.js';
 
 const storeEntryKey = (() => {
   const dir = new URL('../../../../supabase/migrations/', import.meta.url);
@@ -31,5 +33,13 @@ describe('A3(a) the guidance entry keys CEE writes are exactly the ones the stor
     for (const k of ['RC-STRENGTHEN-ITEM', 'RC-STRENGTHEN-ITEM:XYZ', 'RC-WIDEN:abcdefabcdef', 'RC-WIDEN:x:y', 'rc-widen', '']) {
       expect([k, isHeldEntryKey(k)]).toStrictEqual([k, storeEntryKey.test(k)]);
     }
+  });
+  it('the writer never puts an unheld row on the answer (the wire Paul\'s pricing turn b5a28fad carried)', () => {
+    const row = (policy_id: string) => ({ policy_id, priority: 'P5', item: 'pro_plan_price', state_key_hash: '5296850c5d6c' });
+    const shown = guidanceOnAnswer({ slot1: row('RC-OUTSIDE-VIEW') } as unknown as GuidanceWire, {});
+    expect(shown).toBeUndefined();
+    // Contrast: a held row on the same wire is recorded as offered.
+    expect(guidanceOnAnswer({ slot1: row('RC-PREMORTEM') } as unknown as GuidanceWire, {})?.entries).toStrictEqual({
+      'RC-PREMORTEM': { status: 'offered', state_key_hash: '5296850c5d6c', slot: 1 } });
   });
 });
