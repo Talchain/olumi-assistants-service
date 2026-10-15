@@ -144,6 +144,21 @@ describe('the real card on the served graph before the press: it shows the quest
   });
 });
 
+// TWO BRIEFS (DL 15 Oct): pricing's served graph (2a35ff31, after reopen) holds its 12-month deadline and a reading with its own
+// period and its own question (MRR scope). Neither the card nor the write touches it.
+const PRICING = (): Rec => structuredClone((JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/pricing-e2e-2a35ff31-read02-after-reopen.json', import.meta.url), 'utf8')) as { body: { graph: Rec } }).body.graph);
+describe('a second brief: pricing\'s held deadline and its own question are unaffected', () => {
+  it('CONTRAST (pricing): re-holding its deadline even with its own question named keeps the MRR question, the 12 months and the verdict', () => {
+    const g = PRICING(), goal = goalOf(g), verdictBefore = goalHorizonVerdict(g);
+    expect(goal.goal_target_basis).toMatchObject({ period_months: 12, open_question: expect.stringMatching(/MRR across all plans/) });
+    const out = applyGoalHorizonEdit(g, { goal_id: goal.id, deadline: '2027-10-15', expected_deadline: null, reference_date: '2026-10-15', stated_months: 12,
+      answers_question: goal.goal_target_basis.open_question }) as { mutatedGraph: Rec };
+    expect(goalOf(out.mutatedGraph).goal_target_basis).toEqual(goal.goal_target_basis);
+    expect(goalTargetBasisOf(goalOf(out.mutatedGraph))).toMatchObject({ period_months: 12, open_question: expect.stringMatching(/MRR across all plans/) });
+    expect(goalHorizonVerdict(out.mutatedGraph)).toBe(verdictBefore);
+  });
+});
+
 describe('turn 07 on the approved graph: the timing answer reaches the model', () => {
   // CONTROL (green on staging too): the option-lead door was available on the approved graph; the served AI chose propose_hiring_times.
   it('CONTROL: the Tech lead\'s timing is a card through the option-lead door → press → recorded; at month 3 it is in place', async () => {
