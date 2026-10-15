@@ -35,19 +35,16 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { LAUNCH_WINDOW_UNBUILT, launchWindowOf, launchWindowQuestion, periodWords } from '../goal-target/goal-target-basis.js';
 import { readCohortForecast } from '../goal-target/cohort-forecast.js';
-import { cohortQuartileQuestion, cohortWindowOf, UNDERLYING_RATE_MEANING } from '../goal-target/cohort-forecast-write.js';
+import { cohortForecastAskWords, cohortWindowOf, sameCohortStatementOf } from '../goal-target/cohort-forecast-write.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
 /** AIQ's cases (#77 5912882031): (a) no today's level · (b) an unscorable comparator · (c) no quantified path · (d) a target-derived scale. */
 export type TargetCase = 'a' | 'b' | 'c' | 'd';
 
-/**
- * ⭐ Science PR-4b, AIE 6176433015: the next option's two forecast questions, said once each. The people it reaches, then the
- * one-in-four question for that option, cohort and window, with the meaning of "underlying conversion rate" beside it.
- */
+/** The next option's two forecast questions, said once each (`cohortForecastAskWords`, the door's ask too). */
 const cohortForecastAsk = (option: string, period: string, window: string | undefined): string | null => window === undefined ? null
-  : `For ‘${option}’: how many people would it reach ${period}? ${cohortQuartileQuestion(option, window)} ${UNDERLYING_RATE_MEANING}`;
+  : cohortForecastAskWords(option, period, window);
 
 export interface TargetTestabilityFailure {
   readonly precondition: TargetPrecondition;
@@ -561,7 +558,9 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   // question until any forecast holds their answer, then the next option's forecast, then nothing.
   const options = launch === undefined || otherTarget === undefined ? [] : nodes.filter((n) => n.kind === 'option');
   const awaiting = options.filter((n) => readCohortForecast(n) === undefined);
-  const cohortQuestion = options.length === 0 ? undefined : awaiting.length === options.length ? launchWindowQuestion(name, launch!, otherTarget)
+  // M4-cohort: the user's same-people answer, once recorded on the goal, is never asked again: the next option's forecast is.
+  const sameCohortSaid = sameCohortStatementOf(graph) !== undefined;
+  const cohortQuestion = options.length === 0 ? undefined : awaiting.length === options.length && !sameCohortSaid ? launchWindowQuestion(name, launch!, otherTarget)
     : awaiting.length > 0 ? cohortForecastAsk(labelOf(String(awaiting[0]!.id)), periodWords(launch!), cohortWindowOf(graph)) ?? launchWindowQuestion(name, launch!, otherTarget) : null;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'

@@ -1,11 +1,14 @@
 # Shrink-only (Paul 14 Oct 2026). Patterns: scripts/ci/architecture-counts.sh. Lower a value when its count falls; a rise needs the DL's report to Paul.
 # drafter_fields 11→12 at #3152 (statements[], SYSTEM 2; it retires 6 per-field carriers in steps 2–6, which lowers drafter_node_fields).
 # agent_tools 29→30 at M1 (propose_statement, the ONE statement door; DL pre-approved 15 Oct); user_statement_args 2→1 (holds_now retired).
-agent_tools=30
-user_statement_tools=6
+# M4-cohort 15 Oct: agent_tools 30→29 and user_statement_tools 6→5 (propose_cohort_forecast retired onto the door); cas_door_members 19→20 and
+# door_write_members 9→10 (goal_relation: the goal's same-people answer, words only; goal_reading's writer answers the goal's reading, so it
+# would have to accept a words-only write to carry it). DL to report the rise.
+agent_tools=29
+user_statement_tools=5
 user_statement_args=1
-cas_door_members=19
-door_write_members=9
+cas_door_members=20
+door_write_members=10
 drafter_fields=12
 drafter_node_fields=35
 drafter_option_fields=6
