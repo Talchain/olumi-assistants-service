@@ -36,6 +36,7 @@ import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/
  */
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
+import { turnContextItems } from '../orchestrator-v5/agent-lane/turn-context.js';
 import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
@@ -3481,7 +3482,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * comparison #3036 gives the model) and tool-less call; `admit` false spends no call.
      */
     const interpretSelectedRun = async (st: Awaited<ReturnType<typeof readBackState>>, runDelta: unknown,
-      conversation: readonly unknown[], admit: boolean) => {
+      conversation: readonly unknown[], admit: boolean, briefText: unknown) => {
       let admitted = admit;
       // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
       const canonicalAfterRun: Awaited<ReturnType<typeof capabilities.getCanonicalState>> = { ...await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' }),
@@ -3517,7 +3518,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
         ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
       } };
-      const explanationInput = [...conversation, { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
+      // ⭐ S2 turnContext (DL 15 Oct): today and the brief, verbatim, before the conversation (`turn-context.ts`).
+      const explanationInput = [...turnContextItems({ now: new Date(), briefText, conversation }), ...conversation,
+        { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];
       const standingAfterRun = leaderStandingOf(st);
@@ -3612,7 +3615,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
       const { admitted: matches, interpreted, explanationReady, rerunPlan, words, providerMs: interpretMs } =
-        await interpretSelectedRun(st, currentRead?.run_delta, recentRunExplanationConversation(history ?? []), admit);
+        await interpretSelectedRun(st, currentRead?.run_delta, recentRunExplanationConversation(history ?? []), admit,
+          explanationBriefText);
       runInterpreted = matches;
       if (words !== null) narratorWords = words;
       narrationStatus = matches ? explanationReady ? 'ready' : 'unavailable' : 'stale';
@@ -4325,7 +4329,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const pressedAfterChange = autoRunIdentity === undefined && selected
         && (delta !== undefined ? (delta as { attribution_case?: unknown }).attribution_case !== 'C0_identical' : await committedSinceConstruction());
       const interpretedRun = !selected || (autoRunIdentity === undefined && !pressedAfterChange) ? undefined
-        : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true);
+        : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true,
+          selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined);
       if (interpretedRun?.admitted === true) {
         const said = interpretedRun.interpreted?.answer
           ?? interpretedRun.rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true });

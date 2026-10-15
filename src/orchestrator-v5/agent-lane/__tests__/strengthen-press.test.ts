@@ -41,7 +41,7 @@ describe('the card for a press (pure)', () => {
     expect(card!.args.links[0]).not.toHaveProperty('from_words');
     expect(card!.target).not.toHaveProperty('band');
     expect(card!.text.split('\n\n')).toEqual([
-      'The comparison rests on a link nobody has sized yet.',
+      'A link on the path to your goal has no size yet.',
       'How much does "AI reporting module availability" change when "Sprint capacity for AI reporting" goes up by one percentage point?',
     ]);
   });
@@ -155,7 +155,7 @@ describe('the real route: the press → ONE size ask, 0 model calls', () => {
     expect(b._diagnostic_trace?.fast_path).toBe('strengthen');
   });
 
-  const SIZE_ASK = 'The comparison rests on a link nobody has sized yet.\n\nHow much does "AI reporting module availability" change when "Sprint capacity for AI reporting" goes up by one percentage point?';
+  const SIZE_ASK = 'A link on the path to your goal has no size yet.\n\nHow much does "AI reporting module availability" change when "Sprint capacity for AI reporting" goes up by one percentage point?';
   const approveOf = (b: Body) => (b.suggested_actions as { id: string; detail?: string }[]).find((a) => a.id.startsWith('agent-approve-proposal:'));
 
   it('the visible size ask carries no estimate approval card on the wire', async () => {
