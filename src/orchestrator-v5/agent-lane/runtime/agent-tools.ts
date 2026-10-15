@@ -641,8 +641,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'card that quotes their words and says exactly what the change does; only their press makes it. '
       + 'op remove: remove ONE factor or risk, or ONE link between two parts ("remove staff training", "drop that risk"); a factor\u2019s '
       + 'or risk\u2019s links, and any option\u2019s setting of a factor, go with it. '
-      + 'op set_zero: the user says a link has no effect ("set this link to zero"): the link is removed, so the analysis reads no effect '
-      + 'along it (kind link). Never remove an option (use propose_option_status) or the goal. '
+      + 'op set_zero: the user says a link should be zero ("set this link to zero") and means it has no DIRECT influence: the card shows '
+      + 'that reading and proposes removing that direct link (kind link). If they mean only its average effect is zero, or it "barely '
+      + 'matters" or "could go either way", this is NOT set_zero: keep the link, and ask only which they mean where that is unclear. '
+      + 'Never remove an option (use propose_option_status) or the goal. '
       + 'op rename: the user gives a new name for ONE option, factor or risk ("call it Hire three developers"): new_label is that name, '
       + 'copied exactly from their words. Never a part the user did not ask to change, and never a name of your own.',
     parameters: obj({
@@ -1061,6 +1063,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). S5 (DL 15 Oct): propose_change's remove/set_zero ops. */
   proposeRemoval?(ctx: AgentToolContext, args: {
     kind: 'factor' | 'risk' | 'link'; label: string; to_label?: string; id?: string; to_id?: string; quote: string;
+    /** op set_zero: the card shows that "zero" is read as removing the direct link (AIE 6188873084). */
+    zero?: boolean;
   }): Promise<ToolResult>;
   /** Optional: propose_change's rename op (S5): the user's own new name for ONE option, factor or risk. */
   proposeRename?(ctx: AgentToolContext, args: { kind: 'option' | 'factor' | 'risk'; label: string; id?: string; new_label: string; quote: string }): Promise<ToolResult>;
@@ -1247,7 +1251,8 @@ async function dispatchToolUnbounded(
       const ops = Array.isArray(args?.ops) ? args.ops as unknown[] : [];
       const op = ops.length === 1 && ops[0] !== null && typeof ops[0] === 'object' ? ops[0] as Record<string, unknown> : undefined;
       if ((op?.op === 'remove' || (op?.op === 'set_zero' && op.kind === 'link')) && caps.proposeRemoval !== undefined) {
-        return caps.proposeRemoval(ctx, { kind: op.kind, label: op.label, to_label: op.to_label, id: op.id, to_id: op.to_id, quote: op.quote } as never);
+        return caps.proposeRemoval(ctx, { kind: op.kind, label: op.label, to_label: op.to_label, id: op.id, to_id: op.to_id, quote: op.quote,
+          ...(op.op === 'set_zero' ? { zero: true } : {}) } as never);
       }
       if (op?.op === 'rename' && caps.proposeRename !== undefined) {
         return caps.proposeRename(ctx, { kind: op.kind, label: op.label, id: op.id, new_label: op.new_label, quote: op.quote } as never);

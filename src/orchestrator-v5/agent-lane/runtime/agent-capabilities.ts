@@ -6038,15 +6038,18 @@ export function createAgentCapabilities(
       const nodes = Array.isArray(raw.nodes) ? raw.nodes : [];
       const edges = Array.isArray(raw.edges) ? raw.edges : [];
       const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id);
-      const said = `From your message: “${quote}” `;
+      // AIE 6188873084's cards, exact.
+      const said = `From your message: “${quote}”. `;
       const listed = (xs: readonly string[]): string => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)!}`;
       let operation: ProposalOperation;
       let card: string;
       if (kind === 'link') {
         const { id: from, to_id: to } = resolved.subject;
         operation = { op: 'remove_edge', path: `${from}::${to}`, value: { from_label: labelOf(from), to_label: labelOf(to) } };
-        card = `${said}Olumi proposes removing the link from ‘${labelOf(from)}’ to ‘${labelOf(to)}’, so the analysis reads ‘${labelOf(from)}’ `
-          + `as having no effect on ‘${labelOf(to)}’. Remove it?`;
+        // ⛔ AIE 6188873084: the DIRECT link only (another modelled path may still connect them); "zero" is shown as the reading it is.
+        card = `${said}${args.zero === true ? 'Olumi is reading “zero” here as removing this direct link, rather than setting only its average effect to zero. ' : ''}`
+          + `Olumi proposes removing the direct link from ‘${labelOf(from)}’ to ‘${labelOf(to)}’. The model will no longer include that direct `
+          + 'influence; other modelled paths between them may remain. Remove this link?';
       } else {
         const id = resolved.subject.id;
         // What goes with it, said once: its links with other parts, then the options that set a value for it (setting and link go).
@@ -6056,9 +6059,11 @@ export function createAgentCapabilities(
         const others = neighbours.filter((o) => !setterIds.includes(o)).map((o) => `‘${labelOf(o)}’`);
         const setters = setterIds.map((o) => `‘${labelOf(o)}’`);
         operation = { op: 'remove_node', path: id, value: { kind, expected_label: resolved.label } };
-        card = `${said}Olumi proposes removing ‘${resolved.label}’ from the model.`
+        card = `${said}Olumi proposes removing ‘${resolved.label}’ from this model.`
           + (others.length > 0 ? ` ${others.length === 1 ? 'Its link with' : 'Its links with'} ${listed(others)} ${others.length === 1 ? 'goes' : 'go'} with it.` : '')
           + (setters.length > 0 ? ` ${listed(setters)} no longer ${setters.length === 1 ? 'sets' : 'set'} it.` : '')
+          // AIE 6188873084: removing a risk from the model is no evidence it cannot occur.
+          + (kind === 'risk' ? ' Removing it from this model does not mean it cannot happen.' : '')
           + ' Remove it?';
       }
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
@@ -6101,7 +6106,7 @@ export function createAgentCapabilities(
       if (nodes.some((n) => n.id !== id && same(n.label))) {
         return { ok: false, mutated: false, refusal: 'name_taken', detail: `Another part of the model is already called ‘${label}’, so nothing was prepared. Ask the user for another name.` };
       }
-      const card = `From your message: “${quote}” Olumi proposes renaming ‘${resolved.label}’ to ‘${label}’. Rename it?`;
+      const card = `From your message: “${quote}”. Olumi proposes renaming ‘${resolved.label}’ to ‘${label}’. Rename it?`;
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'rename_option', path: id, value: { expected_label: resolved.label, label } }],
         provenance: { authored_by: 'user_stated', basis: quote }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: card });
@@ -8136,7 +8141,7 @@ export function createAgentCapabilities(
         const v = (op.value ?? {}) as { expected_label?: string; from_label?: string; to_label?: string };
         return { ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts: [],
           follow_up: op.op === 'remove_node' ? `Removed ‘${String(v.expected_label ?? op.path)}’ from the model.`
-            : `Removed the link from ‘${String(v.from_label ?? from)}’ to ‘${String(v.to_label ?? to)}’.`,
+            : `Removed the direct link from ‘${String(v.from_label ?? from)}’ to ‘${String(v.to_label ?? to)}’.`,
           note: 'The last analysis no longer reflects this model. Offer to run the analysis again.' };
       }
       /**

@@ -56,7 +56,7 @@ const nodeIds = (): string[] => g().nodes.map((n: Rec) => String(n.id));
 const edgePairs = (): string[] => g().edges.map((e: Rec) => `${String(e.from)}::${String(e.to)}`);
 
 const OPT_ASK = 'Rename Hire two developers to Hire three developers.';
-const OPT_CARD = `From your message: “${OPT_ASK}” Olumi proposes renaming ‘Hire two developers’ to ‘Hire three developers’. Rename it?`;
+const OPT_CARD = `From your message: “${OPT_ASK}”. Olumi proposes renaming ‘Hire two developers’ to ‘Hire three developers’. Rename it?`;
 const FAC_ASK = 'Call hiring spend Recruitment budget instead.';
 
 describe('a rename the user asks for is ONE card; only its press renames, through the ONE label writer', () => {
@@ -114,7 +114,7 @@ describe('a rename the user asks for is ONE card; only its press renames, throug
     const edges = g().edges.map((e: Rec) => `${e.from}::${e.to}`);
     const card = await w.propose(FAC_ASK, { kind: 'factor', label: 'Hiring spend', new_label: 'Recruitment budget', quote: FAC_ASK });
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true,
-      public_label: `From your message: “${FAC_ASK}” Olumi proposes renaming ‘Hiring spend’ to ‘Recruitment budget’. Rename it?` });
+      public_label: `From your message: “${FAC_ASK}”. Olumi proposes renaming ‘Hiring spend’ to ‘Recruitment budget’. Rename it?` });
     const out = await w.press(card.proposal_id);
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
     expect(labelOf('hiring_spend')).toBe('Recruitment budget');
