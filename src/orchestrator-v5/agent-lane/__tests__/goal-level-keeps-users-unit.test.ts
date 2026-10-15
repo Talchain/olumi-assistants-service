@@ -14,6 +14,7 @@
  * the PLoT boundary through the REAL run loader and the REAL `run_analysis` handler, PLoT faked.
  * FIXTURE: the served graph at the level step (`served-dental-fresh-before-level-c175e908.json`).
  */
+import { injectAsCeeWriter } from '../../../../tests/utils/inject-as-cee-writer.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -87,7 +88,7 @@ async function harness(initial: Graph, userText: string) {
       return { status: 200, json: { graph: g, graph_hash: computeAnalysisAffectingGraphHash(g as never), graph_identity_hash: computeGraphIdentityHash(g as never) } };
     }
     if (path === `/assist/v1/scenarios/${SCENARIO}/graph/register`) {
-      const res = await app.inject({ method: 'POST', url: path, payload: body as Record<string, unknown> });
+      const res = await injectAsCeeWriter(app, { method: 'POST', url: path, payload: body as Record<string, unknown> });
       return { status: res.statusCode, json: res.json() as Record<string, unknown> };
     }
     return { status: 500, json: {} };

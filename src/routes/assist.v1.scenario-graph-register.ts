@@ -34,6 +34,7 @@ import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, Preconditio
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { isAgentSubturnFor } from "../orchestrator-v5/session/agent-subturn-context.js";
 import { useAppendV6 } from "../orchestrator-v5/session/supabase-store.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
@@ -783,6 +784,51 @@ export default async function route(app: FastifyInstance) {
       }
 
       /**
+       * The raw read, decided independently of hashability (see the absence assertion below, which reads the same three).
+       */
+      const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
+      /**
+       * ⛔ AN ENTITY-LESS STORED GRAPH IS ABSENT FOR THIS ASSERTION (create-only construction,
+       * #69 5834761926 / 5834838346). `{nodes:[], edges:[]}` parses, has no identity, and is
+       * raw-present, so the guard below refused ordinary creation into an emptied scenario as
+       * "content that could not be read". There is nothing in it to protect. A present graph that
+       * does NOT parse as that still refuses: that is the case the guard exists for.
+       */
+      const rawGraphEntityLess = (() => {
+        if (baseGraphForInvariants === null || typeof baseGraphForInvariants !== "object") return false;
+        const { nodes, edges } = baseGraphForInvariants as { nodes?: unknown; edges?: unknown };
+        return Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0;
+      })();
+      /**
+       * ⛔ AN IDENTICAL RETRY IS ITS OWN REPLAY, NOT A COMPETING WRITER. A construction whose
+       * response was lost is retried with the SAME operation and the SAME bytes; by then the graph
+       * it wrote is present, so the absence check below refused it before the replay arm inside
+       * the atomic writer could return the original receipt. Only a PROVEN identical commit — the
+       * derived turn id already holds this exact request hash — passes through; the writer then
+       * replays (SQL replay precedes CAS) and writes nothing. A different request under the same
+       * operation, no committed turn, or a read that fails all still refuse: none proves a replay.
+       */
+      const identicalCommittedReplay = async (): Promise<boolean> => {
+        if (operationId === undefined || typeof store.readCommittedTurn !== "function") return false;
+        try {
+          const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
+          if (committed === null) return false;
+          const bytes = withEntityRefs(projectGraphForPersistence(graphToRegister, {
+            scenarioId,
+            turnClass: "direct_answer",
+            source: "graph_registration",
+          }));
+          return committed.request_hash === registrationRequestHash(bytes, brief.value);
+        } catch {
+          return false;
+        }
+      };
+      /** Asked once, and only where a graph is present: `identicalCommittedReplay` is a read. */
+      let replayAnswer: Promise<boolean> | undefined;
+      const replayOfThisOperationOnce = (): Promise<boolean> =>
+        (replayAnswer ??= rawGraphPresent && !rawGraphEntityLess ? identicalCommittedReplay() : Promise.resolve(false));
+
+      /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
        * SERVER'S OWN READ.
        *
@@ -882,45 +928,7 @@ export default async function route(app: FastifyInstance) {
          * present one that cannot be hashed must refuse, because we cannot show it
          * is safe to discard and a caller asserting emptiness has not asked to.
          */
-        const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
-        /**
-         * ⛔ AN ENTITY-LESS STORED GRAPH IS ABSENT FOR THIS ASSERTION (create-only construction,
-         * #69 5834761926 / 5834838346). `{nodes:[], edges:[]}` parses, has no identity, and is
-         * raw-present, so the guard below refused ordinary creation into an emptied scenario as
-         * "content that could not be read". There is nothing in it to protect. A present graph that
-         * does NOT parse as that still refuses: that is the case the guard exists for.
-         */
-        const rawGraphEntityLess = (() => {
-          if (baseGraphForInvariants === null || typeof baseGraphForInvariants !== "object") return false;
-          const { nodes, edges } = baseGraphForInvariants as { nodes?: unknown; edges?: unknown };
-          return Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0;
-        })();
-        /**
-         * ⛔ AN IDENTICAL RETRY IS ITS OWN REPLAY, NOT A COMPETING WRITER. A construction whose
-         * response was lost is retried with the SAME operation and the SAME bytes; by then the graph
-         * it wrote is present, so the absence check below refused it before the replay arm inside
-         * the atomic writer could return the original receipt. Only a PROVEN identical commit — the
-         * derived turn id already holds this exact request hash — passes through; the writer then
-         * replays (SQL replay precedes CAS) and writes nothing. A different request under the same
-         * operation, no committed turn, or a read that fails all still refuse: none proves a replay.
-         */
-        const identicalCommittedReplay = async (): Promise<boolean> => {
-          if (operationId === undefined || typeof store.readCommittedTurn !== "function") return false;
-          try {
-            const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
-            if (committed === null) return false;
-            const bytes = withEntityRefs(projectGraphForPersistence(graphToRegister, {
-              scenarioId,
-              turnClass: "direct_answer",
-              source: "graph_registration",
-            }));
-            return committed.request_hash === registrationRequestHash(bytes, brief.value);
-          } catch {
-            return false;
-          }
-        };
-        const replayOfThisOperation =
-          rawGraphPresent && !rawGraphEntityLess ? await identicalCommittedReplay() : false;
+        const replayOfThisOperation = await replayOfThisOperationOnce();
         if (expectedGraphIdentityHash === null && rawGraphPresent && !rawGraphEntityLess && !replayOfThisOperation) {
           log.warn(
             {
@@ -1020,6 +1028,47 @@ export default async function route(app: FastifyInstance) {
               ),
             );
         }
+      }
+
+      /**
+       * ⛔ S10: A WHOLE MODEL IS SAVED ONLY INTO AN EMPTY SCENARIO. A client's whole-graph register over a scenario that
+       * already holds a saved model REPLACES it with the client's copy: every element the copy lacks is deleted and every
+       * value it holds wins, with no edit, approval or receipt for any of it (arch12 `10-shared-data-layer.md` (iv); the UI
+       * re-arms one whenever its canvas is not acknowledged, `useImportRegistration.ts:214-241`). So it is refused, with
+       * nothing written: a saved model changes through its edits, and an import goes to a new scenario. It sits AFTER the
+       * caller's own expectations, so a caller asserting "empty" or naming a moved model keeps its `GRAPH_STALE` answer.
+       *
+       * CEE's OWN whole-graph writers (the build, a draft replacement, hiring times, a capacity change, a goal's current
+       * level) run inside the Agent's in-process dispatch for THIS scenario, which `AsyncLocalStorage` marks and nothing
+       * outside the process can forge (`agent-subturn-context.ts`). They keep their own compare-and-set below. An empty
+       * scenario (absent, or entity-less) still takes a client's first model, and a client's identical lost-response retry
+       * of that first model is its own replay, not an overwrite.
+       */
+      if (rawGraphPresent && !rawGraphEntityLess && !isAgentSubturnFor(scenarioId) && !await replayOfThisOperationOnce()) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.client_over_saved_model",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            current: expectedGraphIdentityHash ?? null,
+          },
+          "Graph registration — a client whole-model register over a saved model; nothing written",
+        );
+        return reply
+          .code(409)
+          .send(
+            buildErrorV1(
+              "BAD_INPUT",
+              "This scenario already has a saved model, and a whole model is only saved into an empty scenario. Nothing was written — change the saved model through its edits, or start a new scenario for this one.",
+              {
+                code: "MODEL_ALREADY_SAVED",
+                current_graph_identity_hash: expectedGraphIdentityHash ?? null,
+                current_graph_unhashable: expectedGraphIdentityHash === null,
+                current_graph_hash: expectedGraphAnalysisHash ?? null,
+              },
+              requestId,
+            ),
+          );
       }
 
       // ── 5. Project, then hash, then write — in that order ────────────────

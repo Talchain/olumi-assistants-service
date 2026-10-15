@@ -1,4 +1,5 @@
 /** CAS-ON integration: only provider and Supabase transport boundaries are fake. */
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { log } from '../../utils/telemetry.js';
@@ -480,7 +481,7 @@ describe.each([true, false])('CAS-ON door population (model versions=%s)', versi
     const app = Fastify();
     await registerRoute(app);
     try {
-      const result = await app.inject({ method: 'POST',
+      const result = await injectAsCeeWriter(app, { method: 'POST',
         url: `/assist/v1/scenarios/${SCENARIO}/graph/register`,
         payload: { graph: imported, operation_id: TURN } });
       expect(result.statusCode, result.body).toBe(200);
@@ -661,7 +662,7 @@ describe.each([true, false])('CAS-ON door population (model versions=%s)', versi
       const app = Fastify();
       await ceeOrchestratorRouteV2(app);
       try {
-        const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: { ...message('Add opportunity cost of founder time as a risk'), turn_class: 'propose' } });
+        const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: { ...message('Add opportunity cost of founder time as a risk'), turn_class: 'propose' } });
         expect(result.statusCode, result.body).toBe(failRead ? 503 : 200);
         expect(ports.routeDispatch).toHaveBeenCalledTimes(failRead ? 0 : 1);
         if (failRead) expect(h.graphReadFailures).toBe(1);
@@ -677,7 +678,7 @@ describe.each([true, false])('CAS-ON real HTTP wire (model versions=%s)', versio
   it.each([false, true])('factor edit with framing rename in flight=%s returns the honest status and message', async renameInFlight => {
     const h = harness({ renameInFlight }); const app = Fastify(); await ceeOrchestratorRouteV2(app);
     try {
-      const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+      const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
         kind: 'system_event', scenario_id: SCENARIO, turn_id: TURN, stage: 'analyse',
         event: { kind: 'factor_value_edit', target_id: 'fac_price', value: 0.7 },
       } });
@@ -696,7 +697,7 @@ describe.each([true, false])('CAS-ON real HTTP wire (model versions=%s)', versio
     if (mode === 'corrupt') h.tables.scenarios![0]!.graph = { corrupt: true };
     const app = Fastify(); await ceeOrchestratorRouteV2(app);
     try {
-      const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+      const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
         ...message('Add opportunity cost of founder time as a risk'), graph_state: baseGraph(),
       } });
       expect(result.statusCode, result.body).toBe(503);
@@ -726,7 +727,7 @@ describe.each([true, false])('J: a fence-refused wire option edit is the revisio
   async function wireEdit(_h: ReturnType<typeof harness>) {
     const app = Fastify(); await ceeOrchestratorRouteV2(app);
     try {
-      const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+      const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
         kind: 'system_event', scenario_id: SCENARIO, turn_id: TURN, stage: 'analyse',
         event: { kind: 'option_intervention_edit', option_id: 'opt_raise', factor_id: 'fac_price', value: 0.65,
           base_graph_hash: computeAnalysisAffectingGraphHash(baseGraph() as never)! },

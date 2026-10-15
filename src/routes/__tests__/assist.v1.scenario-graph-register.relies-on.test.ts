@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /** RC3 (a′): the identity stamp survives the same register → persistence → Run-loader parse as event_risk. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -70,7 +71,7 @@ async function register(graph: unknown) {
   await registerRoute(app);
   await app.ready();
   try {
-    return await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
+    return await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph } });
   } finally {
     await app.close();
   }

@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ A RE-REGISTER KEEPS THE STORED CEE-OWNED FACTS OF AN UNCHANGED EDGE.
@@ -109,7 +110,7 @@ async function post(body: unknown) {
   apps.push(app);
   await registerRoute(app);
   await app.ready();
-  return app.inject({
+  return injectAsCeeWriter(app, {
     method: 'POST',
     url: `/assist/v1/scenarios/${SCENARIO}/graph/register`,
     payload: clone(body) as Rec,

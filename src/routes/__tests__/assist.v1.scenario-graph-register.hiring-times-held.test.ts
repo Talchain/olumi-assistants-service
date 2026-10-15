@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ E5 — THE REAL REGISTER ROUTE STORES PAUL'S HIRING TIMES AS APPROVED.
@@ -99,7 +100,7 @@ async function register() {
   const app = Fastify();
   await registerRoute(app);
   await app.ready();
-  const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: {
+  const r = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: {
     graph: clone(withHiringTimes(before, approval)), expected_graph_hash: computeAnalysisAffectingGraphHash(before as never),
     expected_graph_identity_hash: computeGraphIdentityHash(before as never)?.value, operation_id: '0b6a8c1e-5e5e-4e5e-8e5e-00000000e5e5' } });
   await app.close();

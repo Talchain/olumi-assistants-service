@@ -1,3 +1,4 @@
+import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
 import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
@@ -162,7 +163,7 @@ async function realRegistration(ownerAtDoor: string, failRead = false) {
   try {
     await installOwnershipHarness(app, () => ({ mode: 'verified', userId: 'u-owner' }));
     await registerRoute(app);
-    const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SID}/graph/register`,
+    const response = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SID}/graph/register`,
       payload: { graph: { ...GRAPH, nodes: GRAPH.nodes.map(n => ({ ...n, label: `${n.label} updated` })) } } });
     return { ...f, response, fence };
   } finally { await app.close(); }
