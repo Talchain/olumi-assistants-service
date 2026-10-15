@@ -659,18 +659,15 @@ export function staleResultLine(analysisState: unknown, analysisReady: unknown, 
   const s = analysisState as { run_state?: { kind?: unknown; cause?: unknown }; requires_rerun?: unknown } | undefined;
   if (s?.run_state?.kind !== 'complete_stale' || s.run_state.cause !== 'graph_changed' || s.requires_rerun !== true) return null;
   const mayRun = (analysisReady as { may_run?: unknown } | undefined)?.may_run === true;
-  if (rangeReadingOnly) {
-    return mayRun
-      ? `${RANGE_READING_STALE}, so run it again to see the result without that assumption.`
-      : `${RANGE_READING_STALE}.`;
-  }
+  if (rangeReadingOnly) return RANGE_READING_STALE;
   return mayRun
     ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
     : 'The analysis on screen was computed before this change.';
 }
 
-const RANGE_READING_STALE = 'The analysis on screen treated a range you gave as a calibrated 90% interval and the link as certain to exist. '
-  + 'Olumi no longer assumes either from a range alone';
+/** ⛔ AIE 6182232796 (AMEND, exact): no manual-Run step — the automatic analysis owns the refresh, so no duplicate Run is asked for. */
+export const RANGE_READING_STALE = 'The displayed analysis assumed that a range you gave was a 90% uncertainty interval and that the affected '
+  + 'relationship was certain to exist. A range alone does not justify those assumptions. This result needs a fresh analysis using Olumi’s updated assumptions.';
 
 /**
  * ⛔ SCIENCE C1 (AIE 6180618773): a Run is stale ONLY because a user's bare range no longer holds as a 90% interval when
@@ -688,7 +685,8 @@ export function staleOnlyByRangeReading(graph: unknown, analysisResult: unknown)
  * control's own verdict). Where the Run may not run, the line has no step to take: another blocker holds the Run and owns
  * the step (Codex buddy r1), so nothing is typed here. Only from `run_state`, never from a result that could not be bound. */
 export function staleBlockerOf(analysisState: unknown, analysisReady: unknown, rangeReadingOnly = false): PressBlocker | null {
-  if ((analysisReady as { may_run?: unknown } | undefined)?.may_run !== true) return null;
+  // AIE 6182232796: a Run stale only by the range reading has no step for the user (the automatic analysis refreshes it).
+  if (rangeReadingOnly || (analysisReady as { may_run?: unknown } | undefined)?.may_run !== true) return null;
   const say = staleResultLine(analysisState, analysisReady, rangeReadingOnly);
   return say === null ? null : { kind: 'stale', say };
 }

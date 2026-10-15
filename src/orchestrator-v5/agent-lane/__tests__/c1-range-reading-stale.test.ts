@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { staleOnlyByRangeReading, staleResultLine, staleBlockerOf } from '../write-outcome.js';
+import { RANGE_READING_STALE, staleOnlyByRangeReading, staleResultLine, staleBlockerOf } from '../write-outcome.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { deriveDecisionContextGraphHash } from '../../build-turn-context.js';
 import { matchesHistoricalAnalysisIdentity } from '../../context/graph-identity.js';
@@ -40,8 +40,9 @@ const BRIEFS: ReadonlyArray<readonly [string, () => Rec, (g: Rec) => Rec]> = [
 
 // The served approve turn's typed stale state (CEE e3b0844), reused as the stale read: complete_stale, graph_changed, rerun.
 const STALE = fixture('./fixtures/served-approve-stale-e3b0844.json').analysis_state as Rec;
-const RANGE_RERUN = 'The analysis on screen treated a range you gave as a calibrated 90% interval and the link as certain to exist. '
-  + 'Olumi no longer assumes either from a range alone, so run it again to see the result without that assumption.';
+// AIE 6182232796, verbatim (bound by identity below too): no "run it again" — the automatic analysis owns the refresh.
+const RANGE_STALE = 'The displayed analysis assumed that a range you gave was a 90% uncertainty interval and that the affected relationship was '
+  + 'certain to exist. A range alone does not justify those assumptions. This result needs a fresh analysis using Olumi’s updated assumptions.';
 const EDIT_RERUN = 'The analysis on screen was computed before this change; run it again to see the comparison with this change.';
 const runAt = (hash: string | null): Rec => ({ type: 'analysis_result', computed_against_hash: hash });
 
@@ -64,10 +65,13 @@ describe.each(BRIEFS)('C1 on %s', (_name, graphOf, linkOf) => {
     const g = graphOf();
     const old = runAt(deriveDecisionContextGraphHash(g, 'pre_c1'));
     expect(staleOnlyByRangeReading(g, old)).toBe(true);
-    expect(staleResultLine(STALE, { may_run: true }, staleOnlyByRangeReading(g, old))).toBe(RANGE_RERUN);
-    // The one next step the agent lane offers on this read says the same.
-    expect(nextStepBlockerForAgent({ raw: g, analysis_state: STALE, analysis_ready: { may_run: true }, analysis_result: old }))
-      .toEqual({ kind: 'stale', say: RANGE_RERUN });
+    expect(RANGE_READING_STALE).toBe(RANGE_STALE);
+    expect(staleResultLine(STALE, { may_run: true }, staleOnlyByRangeReading(g, old))).toBe(RANGE_STALE);
+    expect(staleResultLine(STALE, { may_run: false }, staleOnlyByRangeReading(g, old))).toBe(RANGE_STALE);
+    // No manual-Run step: the one next step never asks the user to run it (no duplicate Run), and never says "before this change".
+    const step = nextStepBlockerForAgent({ raw: g, analysis_state: STALE, analysis_ready: { may_run: true }, analysis_result: old });
+    expect(step?.kind).not.toBe('stale');
+    expect(JSON.stringify(step ?? null)).not.toMatch(/before this change|run it again/i);
   });
 
   it('CONTRAST: a Run stale because the USER edited the model (another size) keeps "computed before this change"', () => {
@@ -95,10 +99,9 @@ describe.each(BRIEFS)('C1 on %s', (_name, graphOf, linkOf) => {
 });
 
 describe('C1 stale line: the boundaries', () => {
-  it('a run that may not run: the range sentence alone, no "run it again"', () => {
-    expect(staleResultLine(STALE, { may_run: false }, true)).toBe(
-      'The analysis on screen treated a range you gave as a calibrated 90% interval and the link as certain to exist. '
-      + 'Olumi no longer assumes either from a range alone.');
+  it('the range sentence never carries "run it again", whatever the Run control says', () => {
+    for (const ready of [{ may_run: true }, { may_run: false }, undefined]) expect(staleResultLine(STALE, ready, true)).not.toMatch(/run it again/i);
+    expect(staleBlockerOf(STALE, { may_run: true }, true)).toBeNull();
   });
   it('no recorded hash, or no graph → never claimed (the ordinary line stands)', () => {
     expect(staleOnlyByRangeReading(structuredClone(B9), runAt(null))).toBe(false);
