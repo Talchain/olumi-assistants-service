@@ -133,6 +133,12 @@ export interface ProposalOperation {
      */
     | 'set_risk_occurrence'
     /**
+     * ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (`statement-door/`) — `path` is the subject's key, `value` the stored `DoorCard`: the
+     * subject, its row's (field, carrier), the user's verified statements and the carrier member's write. Written only through that
+     * EXISTING member of the atomic level door (`asMemberOp`), alone, card-only.
+     */
+    | 'record_statement'
+    /**
      * ⭐ AIE SAME-COHORT LAW (science PR-4b; `goal-target/cohort-forecast-write.ts`) — `path` is the option's id, `value` is
      * `{cohort_forecast, expected_node, expected_targets, statements}`: the user's own people reached, middle half and same-cohort
      * answer, verified S2 statements. Written only through the atomic level door's `cohort_forecast` member, alone, card-only.
@@ -328,6 +334,8 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'confirm_goal_reading'
     // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
     || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_option_capacity_change'
+    // A user's statement through the ONE door is recorded only by the press on the card that quotes it.
+    || op.op === 'record_statement'
     || op.op === 'set_option_intervention'
     && op.value !== null && typeof op.value === 'object'
     && (Object.hasOwn(op.value, 'unmodelled_mechanisms') || Object.hasOwn(op.value, 'likely_range')));

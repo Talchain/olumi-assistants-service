@@ -275,8 +275,10 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     return { caps, graph: () => g, commits: () => commits };
   };
   const ctx = (said: string, extra: Rec = {}): Rec => ({ scenario_id: 'dc4e09b6-3727-4b14-a3af-dceef435b7d9', authenticated_user_id: null, request_id: 'r',
-    turn_id: 't', user_text: said, user_turn_text: said, ...extra });
-  const holdsNow = (quote: string): Rec => ({ assumptions: [{ factor_label: riskOf(G).label, value: 0, unit: '', basis: '', user_stated: true, holds_now: { quote } }] });
+    turn_id: 't', user_text: said, user_turn_text: said, preceding_assistant_text: ASKED, ...extra });
+  // SYSTEM 1 M1: "holds now" is the ONE statement door's (field holds_now), answering Olumi's readiness ask about this risk.
+  const holdsNow = (quote: string): Rec => ({ subject: { kind: 'risk', label: riskOf(G).label, field: 'holds_now' }, statements: [{ quote }] });
+  const ASKED = 'Is ‘Code quality deterioration’ already true now? If so, say so.';
   const asks = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
     .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message as string);
 
@@ -285,16 +287,16 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     // Before: readiness offers the held-state reading first, then the AIE occurrence ask.
     expect(asks(w.graph())).toEqual(['Is ‘Code quality deterioration’ already true now? If so, say so. If not: How likely is ‘Code quality deterioration’ '
       + 'to happen at least once within 3 months? Olumi can’t run the numbers until this risk has a figure. Or ask Olumi to suggest a starting estimate for you to review.']);
-    const card = await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
-    expect(card).toMatchObject({ ok: true, risk_holds_now: { risk: 'Code quality deterioration', quote: SAID, within_months: 3 } });
-    expect(card.public_label).toBe(`From your message: ‘${SAID}’ Do you want to record that ‘Code quality deterioration’ is already true now? `
-      + 'How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.');
+    const card = await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
+    expect(card).toMatchObject({ ok: true, statement: { subject: 'Code quality deterioration', field: 'holds_now', quotes: [SAID] } });
+    expect(card.public_label).toBe(`From your message: “${SAID}” Olumi reads this as ‘Code quality deterioration’ already being true now. Record this `
+      + 'reading? How strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized.');
     expect(card.public_label).not.toMatch(/chance|likely|Olumi’s starting assumption/);
     // Card-only: the Agent's reading of a yes never applies it.
     expect(await w.caps.authoriseChange(ctx('Yes') as never, { proposal_id: String(card.proposal_id) })).toMatchObject({ ok: false, refusal: 'approval_required' });
     expect(w.commits()).toBe(0);
-    const res = await w.caps.authoriseChange({ ...ctx('Yes, use that.'), typed_approval_of: String(card.proposal_id), typed_approval_words: 'Yes, use that.' } as never,
-      { proposal_id: String(card.proposal_id) }) as Rec;
+    const res = await w.caps.authoriseChange({ ...ctx('Yes, record what I said.'), typed_approval_of: String(card.proposal_id),
+      typed_approval_words: 'Yes, record what I said.' } as never, { proposal_id: String(card.proposal_id) }) as Rec;
     expect(res).toMatchObject({ ok: true, applied: true, follow_up: 'Recorded from your words: ‘Code quality deterioration’ is already true now. '
       + 'How strongly it affects the model is still Olumi’s placeholder on its link.' });
     expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
@@ -304,13 +306,20 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
   it('never on unverified, partial or other words; a risk that cannot hold it says why; the writer refuses a holds-now block without its statement', async () => {
     const w = world(), before = JSON.stringify(w.graph());
     // "code quality is already slipping" drops "Honestly, our": not their whole statement (T2A5's one check).
-    expect(await w.caps.proposeAssumptions(ctx(SAID) as never, holdsNow('code quality is already slipping.') as never)).toMatchObject({ ok: false, refusal: 'holds_now_not_stated' });
-    expect(await w.caps.proposeAssumptions(ctx('Please record it.', { user_text: 'Please record it.', unverified_user_text: SAID }) as never, holdsNow(SAID) as never))
+    expect(await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow('code quality is already slipping.'))).toMatchObject({ ok: false, refusal: 'statement_not_found' });
+    expect(await w.caps.proposeStatement!(ctx('Please record it.', { user_text: 'Please record it.', unverified_user_text: SAID }) as never, holdsNow(SAID)))
       .toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    // AIE 6178729504 + SCIENCE 22:40Z: the blocker is the figure's write, said once; never that it is not true now.
     const conflict = structuredClone(G); goalOf(conflict).goal_horizon_months = 6;
-    const c = await world(conflict).caps.proposeAssumptions(ctx(SAID) as never, holdsNow(SAID) as never) as Rec;
-    expect(c).toMatchObject({ ok: false, refusal: 'holds_now_not_recordable' });
-    expect(c.detail).toContain('the goal does not have one clear time window yet');
+    const c = await world(conflict).caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
+    expect(c).toMatchObject({ ok: false, refusal: 'not_this_field' });
+    expect(c.detail).toContain('‘Code quality deterioration’ being true now is the user’s own statement: keep it as theirs');
+    expect(c.detail).toContain('the goal does not have one clear period yet');
+    // A window counted from a LAUNCH: true now does not show it holds then, so no p = 1 is offered over it.
+    const launch = structuredClone(G); goalOf(launch).goal_target_basis.reference = 'launch';
+    const l = await world(launch).caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
+    expect(l).toMatchObject({ ok: false, refusal: 'not_this_field' });
+    expect(l.detail).toContain('the goal’s period counts from the launch, and being true now does not show it still holds then');
     expect(JSON.stringify(w.graph())).toBe(before);
     expect(w.commits()).toBe(0);
     // The writer: a user block needs its verified statement, and a statement never carries Olumi's range.

@@ -62,7 +62,7 @@ export interface ApprovedRiskOccurrence {
   /**
    * ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): their verified statement of how likely this risk is to happen within the
    * goal's window ("I'd say there's about a 30% chance it slips before launch"), governed by THIS risk
-   * (`risk-occurrence-statement.ts`). Its block is the user's (`basis: 'user'`), exactly the figure or range the words state over
+   * (the ONE statement door's occurrence row, `statement-door/rows/risk.ts`). Its block is the user's (`basis: 'user'`), exactly the figure or range the words state over
    * the goal's window, never rescaled and never given Olumi's spread. How strongly it acts stays on its link.
    */
   readonly stated_occurrence?: UserStatement;
@@ -193,9 +193,12 @@ const isHoldsNowBlock = (block: EventRiskV1T): boolean =>
   block.occurrence.basis === 'user' && block.occurrence.p_low === 1 && block.occurrence.p_high === 1 && block.mitigations === undefined;
 
 const share = (percent: number): number => Number((percent / 100).toFixed(6));
-/** The user's stated chance as a validated block, from percentages (0 < low ≤ high ≤ 100), over the goal's window, or `undefined`. */
+/**
+ * The user's stated chance as a validated block, from percentages (0 ≤ low ≤ high ≤ 100), over the goal's window, or `undefined`.
+ * An explicit 0 is theirs and is kept as 0, never lifted to a positive floor (AIE 6180618773 row 6).
+ */
 export function userOccurrenceBlock(lowPercent: unknown, highPercent: unknown, windowMonths: number): EventRiskV1T | undefined {
-  if (!finite(lowPercent) || !finite(highPercent) || lowPercent <= 0 || highPercent > 100 || lowPercent > highPercent) return undefined;
+  if (!finite(lowPercent) || !finite(highPercent) || lowPercent < 0 || highPercent > 100 || lowPercent > highPercent) return undefined;
   const parsed = EventRiskV1.safeParse({ version: 1,
     occurrence: { p_low: share(lowPercent), p_high: share(highPercent), meaning: 'at_least_once_within_horizon', basis: 'user' },
     horizon: { months: windowMonths } });
