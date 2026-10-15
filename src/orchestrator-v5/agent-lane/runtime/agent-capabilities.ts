@@ -2489,6 +2489,8 @@ export function createAgentCapabilities(
      * An observer only — a throw here is swallowed and never costs the build. Absent ⇒ nothing is told.
      */
     readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+    /** S3: the admitted draft, before the widening calls start (`buildModelFromBrief`'s `onDraftAdmitted`); an observer only. */
+    readonly onDraftAdmitted?: (graph: unknown) => void;
     /** X5 (DESIGN Q3): why the one construction retry ran and its outcome — for `_diagnostic_trace`, never the model. */
     readonly onConstructionTrace?: (t: ConstructionTrace) => void;
     /**
@@ -9936,7 +9938,8 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured));
+        built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured,
+          undefined, undefined, undefined, undefined, opts.onDraftAdmitted));
         if (built.ok !== true) return built;
       }
 
