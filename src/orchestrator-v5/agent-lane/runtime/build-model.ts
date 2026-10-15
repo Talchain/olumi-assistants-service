@@ -87,6 +87,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
+import { withConstructionStatements } from '../construction-source-map.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -2518,7 +2519,8 @@ export async function buildModelFromBrief(
       return [`${path}.set_aside_estimate`, `${path}.magnitude_question`];
     }));
     admitted = { ...admitted, loss: admitted.loss.filter((l) => !fittedOlumiFields.has(l.field_path)) };
-    const graph = clampForPersist(prePersistGraph);
+    // AIE 6183705670 (1): the draft's verified statements are recorded on their subjects, as the door records a press.
+    const graph = withConstructionStatements(clampForPersist(prePersistGraph), Reflect.get(candidate, 'statements'), brief, new Date().toISOString());
 
     const parked = (candidate as { unknowns?: unknown }).unknowns;
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
