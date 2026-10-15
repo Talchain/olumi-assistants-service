@@ -13,8 +13,9 @@
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import {
-  applyCohortForecastEdit, cohortFixedReachScenario, cohortForecastAskWords, cohortForecastRecordedWords, cohortLawApproximation,
-  cohortWindowOf, peopleFiguresIn, percentRangesIn, storedTargetRowsOf, withoutPercentRanges, type ApprovedCohortForecast,
+  applyCohortForecastEdit, applyGoalRelationEdit, cohortFixedReachScenario, cohortForecastAskWords, cohortForecastRecordedWords,
+  cohortLawApproximation, cohortWindowOf, peopleFiguresIn, percentRangesIn, sameCohortStatementOf, storedTargetRowsOf, withoutPercentRanges,
+  type ApprovedCohortForecast, type ApprovedGoalRelation,
 } from '../../goal-target/cohort-forecast-write.js';
 import { goalTargetBasisOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import type { StatementAsk } from '../ask.js';
@@ -110,7 +111,9 @@ export const COHORT_FORECAST_WRITER: FieldWriter = {
   approve(reading: DoorReading, graph: unknown) {
     const [conv, ...moreConv] = byForm(reading.statements, 'range');
     const [ppl, ...morePpl] = byForm(reading.statements, 'point');
-    const [same, ...moreSame] = byForm(reading.statements, 'holds_now');
+    // The same-people answer is the goal's, once recorded there (`COHORT_SAME_PEOPLE_ROW`); else it comes with this reading.
+    const [said, ...moreSame] = byForm(reading.statements, 'holds_now');
+    const same = said ?? sameCohortStatementOf(graph);
     if (conv === undefined || ppl === undefined || same === undefined || moreConv.length + morePpl.length + moreSame.length > 0) {
       return { refused: 'incomplete: the forecast needs the people reached, the two conversion estimates and the same-people answer, one each.' };
     }
@@ -152,3 +155,52 @@ export function cohortForecastAsks(graph: unknown, sameCohortQuestion: string | 
     ...(sameCohortQuestion === undefined || sameCohortQuestion.trim() === '' ? [] : [{ subject: goal, words: sameCohortQuestion }]),
   ];
 }
+
+const countLabelOf = (graph: unknown): string => {
+  const pair = rateAndCount(graph);
+  return pair === undefined ? 'the count' : labelOf(graph, pair.count.node_id);
+};
+const rateLabelOf = (graph: unknown): string => {
+  const pair = rateAndCount(graph);
+  return pair === undefined ? 'the rate' : labelOf(graph, pair.rate.node_id);
+};
+const appliesToGoal = (subject: DoorSubject, graph: unknown): boolean => subject.kind === 'goal' && subject.field === 'relation'
+  && goalRelation(graph)?.id === subject.id && cohortWindowOf(graph) !== undefined && rateAndCount(graph) !== undefined;
+
+/**
+ * ⭐ M4-cohort, T8 on the GOAL: the user's answer to the same-people question (`launchWindowQuestion`), one figure-free statement,
+ * recorded on the goal. It is the relation between the goal's two targets, said once for every option. Olumi claims no law from
+ * it (the same-draw approximation is said on each option's forecast card, T8).
+ */
+export const COHORT_SAME_PEOPLE_ROW: RoleRow = {
+  field: 'relation',
+  unit: '',
+  forms: ['holds_now'],
+  carrier: 'goal_relation',
+  maxStatements: 1,
+  signed_by: COHORT_RELATION_SIGNED_BY,
+  applies: appliesToGoal,
+  get writer() { return GOAL_RELATION_WRITER; },
+  read(quote, subject, graph) {
+    if (!appliesToGoal(subject, graph)) return { refused: 'This is said of a goal with a percentage and a count target over one window.' };
+    return percentRangesIn(quote).length > 0 || peopleFiguresIn(withoutPercentRanges(quote)).length > 0
+      ? { refused: 'That statement holds a figure, so it is not the answer to whether both targets count the same people. It is kept as said.' }
+      : { form: 'holds_now' };
+  },
+  readingWords: (_s, _subject, _label, graph) => `‘${countLabelOf(graph)}’ counts the people who convert among the same people your ‘${rateLabelOf(graph)}’ is measured on, as you said`,
+  assumptions: () => [],
+  recordedWords: (_s, _subject, _label, graph) => `Recorded from your words: ‘${countLabelOf(graph)}’ counts the people who convert among the same people your ‘${rateLabelOf(graph)}’ is measured on.`,
+};
+
+/** The adapter onto the `goal_relation` member: the ONE verified answer, recorded on the goal and read back by identity. */
+export const GOAL_RELATION_WRITER: FieldWriter = {
+  approve(reading: DoorReading, graph: unknown) {
+    const goal = nodesOf(graph).find((n) => n.id === reading.subject.id && n.kind === 'goal');
+    if (goal === undefined || !appliesToGoal(reading.subject, graph) || reading.statements.length !== 1) return { refused: 'targets_not_cohort' };
+    const record = userStatementRecord(reading.subject, reading.statements, new Date().toISOString());
+    const approved: ApprovedGoalRelation = { goal_id: String(goal.id), expected_goal: structuredClone(goal), user_statement: { subject: reading.subject, record } };
+    const dry = applyGoalRelationEdit(graph, approved);
+    if (dry.kind !== 'mutated') return { refused: dry.kind === 'refused' ? dry.reason : 'already_held' };
+    return { member: 'goal_relation', payload: approved, holds: (after: unknown) => holdsUserStatement(after, record, reading.subject) };
+  },
+};

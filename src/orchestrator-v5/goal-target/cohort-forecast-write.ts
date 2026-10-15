@@ -25,7 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
-import { holdsUserStatement, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { holdsUserStatement, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
@@ -233,6 +233,62 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
 export function cohortForecastPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedCohortForecast): boolean {
   const written = applyCohortForecastEdit(before, approved);
   return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+}
+
+/**
+ * ⭐ M4-cohort (science table T8): the user's answer that the count target counts converts among the SAME people the rate target
+ * is measured on, recorded on the GOAL (its relation, `user_statements`) by the door's press. It is the goal's fact, said once for
+ * every option; readiness then asks each option's forecast instead of re-asking it. Nothing else on the goal moves.
+ */
+export interface ApprovedGoalRelation {
+  readonly goal_id: string;
+  /** The goal node exactly as stored when the card was made: the stale gate. */
+  readonly expected_goal: Readonly<Rec>;
+  readonly user_statement: { readonly subject: DoorSubject; readonly record: UserStatementRecord };
+}
+
+export type GoalRelationEditResult =
+  | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[] }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: 'invalid_graph' | 'invalid_statement' | 'goal_not_found' | 'goal_changed' };
+
+export function applyGoalRelationEdit(persistedGraph: unknown, approved: ApprovedGoalRelation): GoalRelationEditResult {
+  if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) return { kind: 'refused', reason: 'invalid_graph' };
+  const said = approved.user_statement;
+  const record = userStatementRecordOf(said.record);
+  if (said.subject.kind !== 'goal' || said.subject.id !== approved.goal_id || said.subject.field !== 'relation'
+    || said.record.subject_key !== subjectKey(said.subject) || record === undefined || record.statements.length !== 1
+    || record.statements[0]!.form !== 'holds_now') return { kind: 'refused', reason: 'invalid_statement' };
+  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id && n.kind === 'goal');
+  if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
+  // A retry after this press landed finds exactly these words held: the verified no-op.
+  if (holdsUserStatement(persistedGraph, said.record, said.subject)) return { kind: 'unchanged' };
+  if (!isDeepStrictEqual(matches[0], approved.expected_goal)) return { kind: 'refused', reason: 'goal_changed' };
+  const graph = withUserStatement(structuredClone(persistedGraph) as Rec & { nodes: unknown[] }, said.record, said.subject);
+  if (graph === undefined) return { kind: 'refused', reason: 'goal_not_found' };
+  const label = String(matches[0]!.label ?? approved.goal_id).trim();
+  const fact = EditGraphHandlerFactSchema.parse({
+    fact_type: 'edit_graph', fact_version: 1, noop: false,
+    result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+      graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
+      graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
+      safe_summary: 'Recorded from your words that both targets count the same people', impact: 'low', rerun_recommended: false },
+  });
+  return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact] };
+}
+
+/** The post-image holds exactly this write and nothing else (the dispatch's scope check, as for the forecast). */
+export function goalRelationPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedGoalRelation): boolean {
+  const written = applyGoalRelationEdit(before, approved);
+  return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+}
+
+/** The user's same-people answer recorded on the goal (the door's goal relation), or `undefined`. */
+export function sameCohortStatementOf(graph: unknown): UserStatement | undefined {
+  const goals = (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : []).filter((n): n is Rec => isRec(n) && n.kind === 'goal');
+  if (goals.length !== 1 || typeof goals[0]!.id !== 'string') return undefined;
+  const record = userStatementFor(graph, { kind: 'goal', id: goals[0]!.id, field: 'relation' });
+  return record?.statements.length === 1 && record.statements[0]!.form === 'holds_now' ? record.statements[0] : undefined;
 }
 
 /** The card as its stored operation carries it, or `undefined` if malformed. */

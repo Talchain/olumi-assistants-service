@@ -13,7 +13,7 @@ import type { DoorSubject, StatementField } from './subject.js';
 import type { DoorWriteMember, FieldWriter } from './write.js';
 import { MEASURE_ROW } from './fields/measure.js';
 import { TIMING_ROW } from './fields/goal-timing.js';
-import { COHORT_RELATION_ROW } from './fields/cohort-relation.js';
+import { COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW } from './fields/cohort-relation.js';
 
 /** A field reader's reading of one statement: the form, the figure's ends (absent for a figure-free form) and a qualifier. */
 export interface DoorFigure {
@@ -71,7 +71,7 @@ export interface RoleRow {
 }
 
 /** The table. Each migration adds its signed row(s), one per (field, carrier). */
-export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, COHORT_RELATION_ROW];
+export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW];
 export const rowKey = (r: Pick<RoleRow, 'field' | 'carrier'>): string => `${r.field}:${r.carrier}`;
 
 /** The ONE row for this subject: its field, and the one row whose `applies` holds. None, or more than one, is no row. */
