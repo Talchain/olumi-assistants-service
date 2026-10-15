@@ -104,7 +104,11 @@ const STARTER_RANGE = '‘Launch starter tier’: between about 95% and 99% chan
 // DL 12 Oct (LABEL-ONLY, last check BLOCKING 1): this capture's goal level and 'Starter support cost per subscriber' are
 // type-less `brief_extraction` — the person's by their stamp alone — so the result also carries the unverified note, once.
 const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true,
-  notes: ['Provisional: Olumi could not confirm where some figures behind this result came from.'] };
+  notes: ['Provisional: Olumi could not confirm where some figures behind this result came from.',
+    // C2 join (AIE 6184022140; DL 15 Oct): Starter's 97% rests on the brief's 80–250 read with Olumi's equal-tail approximation.
+    '‘Launch starter tier’ uses your range for ‘New starter subscribers’, 80 subscribers to 250 subscribers, read with Olumi’s '
+      + 'equal-tail approximation: about one chance in four below 80 subscribers and one in four above 250 subscribers, a modelling '
+      + 'convention, not your own calibration.'] };
 const withoutAmendment7 = (record: Rec): Rec => Object.fromEntries(Object.entries(record).filter(([key]) => !Object.hasOwn(AMENDMENT_7, key)));
 const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, inference_warnings: enrichment.inference_warnings
   .map((warning: Rec) => (warning.code === GOAL_CHANCE_LICENSED ? withoutAmendment7(warning) : warning)) });

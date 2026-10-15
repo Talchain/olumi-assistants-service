@@ -10,6 +10,7 @@ import {
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from './olumi-estimates-feeding-result.js';
 import { EventRiskV1 } from '../../schemas/event-risk.js';
 import { computeResponseHash } from '../../utils/response-hash.js';
+import { likelyRangeUseOf, type LikelyRangeUse } from '../intervention-range.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -63,6 +64,9 @@ export interface GoalChanceEstimateCounts {
   /** ONE PROVENANCE AUTHORITY (internal): links whose size is Olumi's estimate the person ACCEPTED (`olumi_accepted`) —
    *  acceptance is not authorship: still Olumi's, so the result resting on them is provisional (DL 12 Oct, BLOCKING 3). */
   readonly acceptedLinks: number;
+  /** C2 join (internal): each option's settings on the set that carry a `likely_range`, which the analysis reads with Olumi's
+   *  equal-tail approximation (`likelyRangeUseOf`): the result rests on that approximation too, so it is provisional and says so. */
+  readonly likelyRangesByOption?: Readonly<Record<string, readonly LikelyRangeUse[]>>;
 }
 
 /**
@@ -157,6 +161,7 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
   const optionOf = new Map<string, string>();
   const ownSetting = new Set<string>();
   const unverifiedSettingsByOption: Record<string, number> = {};
+  const likelyRangesByOption: Record<string, LikelyRangeUse[]> = {};
   const settings = nodes.flatMap((o) => {
     if (o.kind !== 'option') return [];
     return Object.entries(setsOf(o)).flatMap(([nodeId, cell]) => {
@@ -166,6 +171,9 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
       // that holds today's level mirrors today's figure, which the node's own starting value already counts — never a
       // setting Olumi filled, whatever its stamp.
       if (o.is_baseline === true && holdsTodaysLevel(cell, byId.get(nodeId))) return [];
+      // C2 join: a likely range on this setting is read with Olumi's equal-tail approximation, whoever gave its ends.
+      const range = likelyRangeUseOf(nodeId, cell);
+      if (range !== undefined) (likelyRangesByOption[o.id as string] ??= []).push(range);
       const whose = settingOriginOf(cell, byId.get(nodeId));
       if (whose === 'unverified') unverifiedSettingsByOption[o.id as string] = (unverifiedSettingsByOption[o.id as string] ?? 0) + 1;
       if (whose !== 'human' && whose !== 'ai') return [];
@@ -196,7 +204,8 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
   const counts: GoalChanceEstimateCounts = { links: census.links.length, values: census.values.filter(v => valueIds.has(v.id)).length,
     settingsByOption, unverifiedValues: factors.filter(f => f.value_authorship === 'unknown').length, unverifiedSettingsByOption,
     unread: false, acceptedValues: factors.filter(f => f.value_authorship === 'olumi_accepted').length, unverifiedLinks,
-    acceptedLinks: links.filter(l => l.link_sizing === 'olumi_accepted').length };
+    acceptedLinks: links.filter(l => l.link_sizing === 'olumi_accepted').length,
+    ...(Object.keys(likelyRangesByOption).length > 0 ? { likelyRangesByOption } : {}) };
   return { counts, estimates: census };
 }
 

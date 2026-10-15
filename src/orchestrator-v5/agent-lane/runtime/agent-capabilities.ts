@@ -1050,6 +1050,9 @@ export const statedRangeAssumptionWords = (low: string, high: string): string =>
   + `for this analysis, based on how the analysis treats a likely range (as its lower and upper quarter points), a modelling convention, `
   + `not evidence about this case or what “likely” means, with the limitation that the shape of the spread is also Olumi’s assumption: `
   + `always above zero, with a longer tail on the high side. Your words did not specify those tail probabilities or how values are distributed`;
+/** C2 join: what the Agent is told beside a likely range it proposed: the ends and the law have different authors. */
+export const LIKELY_RANGE_LAW_NOTE = 'The two ends are the user’s. The equal-tail approximation the analysis reads them with (about one chance '
+  + 'in four below and one in four above) is Olumi’s modelling convention, adopted only by the press: never call it the user’s calibration.';
 /** AIE 6184022140's exact closing, said once on a card that carries a likely range. */
 export const STATED_RANGE_CARD_CLOSING = 'Use this reading to record your original range as stated and adopt the shown Olumi approximation. '
   + 'You can change or reject it instead.';
@@ -7577,7 +7580,8 @@ export function createAgentCapabilities(
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           ...(i.needsLink ? { adds_the_link: true } : {}),
-          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
+          // C2 join (AIE 6184022140): the ends are the user's; the law the analysis reads them with is Olumi's, kept apart.
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, likely_range_law: LIKELY_RANGE_LAW_NOTE } : {}),
           basis: i.basis,
           // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
           stated_by: i.userStated ? 'user' : 'olumi_estimate',

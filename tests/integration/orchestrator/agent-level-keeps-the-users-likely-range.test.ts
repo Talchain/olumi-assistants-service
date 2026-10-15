@@ -12,6 +12,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { LIKELY_RANGE_LAW_NOTE } from '../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 const LIFT = 'Lift-and-shift';
@@ -213,6 +214,8 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(String(proposed.public_label).endsWith('Use this reading to record your original range as stated and adopt the shown Olumi approximation. '
       + 'You can change or reject it instead.')).toBe(true);
     expect(String(proposed.public_label)).not.toMatch(/remains recorded|no conditions recorded/i);
+    // C2 join: the Agent is told the ends are the user's and the law Olumi's, beside the range it proposed.
+    expect((proposed.interventions as Array<Record<string, unknown>>)[0]).toMatchObject({ likely_range: { low: 5, high: 20 }, likely_range_law: LIKELY_RANGE_LAW_NOTE });
     expect(String(proposed.public_label)).not.toMatch(/middle half/i);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);

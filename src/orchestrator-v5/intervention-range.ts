@@ -17,6 +17,8 @@
  *      scored as though the user's range had been sampled.
  */
 import { InterventionRangeMeaningV3, InterventionRangeV3, type InterventionRangeV3T } from '../schemas/cee-v3.js';
+import { isPersonsOwnSetting } from '../cee/provenance/provenance-of.js';
+import { sayFigureExactly } from './agent-lane/say-figure.js';
 
 /** schemas 0.66.0 `InterventionRangeMeaning`, imported. Only `likely_range` is sampled by ISL. */
 export const INTERVENTION_RANGE_MEANINGS = InterventionRangeMeaningV3.options;
@@ -151,4 +153,36 @@ export function wireInterventionRangePlan(
     (ranges ??= {})[factorId] = { low, high, meaning };
   }
   return { ranges, notForwarded };
+}
+
+/**
+ * ⭐ C2 JOIN (AIE 6184022140; DL 15 Oct: disclose + provisional for every likely range): a `likely_range` the analysis samples is
+ * two ends (the person's, or the brief's, or Olumi's) READ WITH OLUMI'S EQUAL-TAIL APPROXIMATION, which ISL samples as the
+ * quartiles of a lognormal. No writer elicits that law from anyone, so it is never the person's calibration, whoever gave the
+ * ends: every result that rests on it says so ({@link likelyRangeLawWords}), and the person's own ends stay theirs.
+ */
+export interface LikelyRangeUse {
+  readonly factor_id: string;
+  readonly low: number;
+  readonly high: number;
+  readonly unit?: string;
+  /** The ends are the person's own (the range's own stamp, `isPersonsOwnSetting`), else not theirs. */
+  readonly persons_own: boolean;
+}
+
+/** The admitted `likely_range` an option's cell carries for a factor, or `undefined` (none, another meaning, or refused). */
+export function likelyRangeUseOf(factorId: string, cell: unknown): LikelyRangeUse | undefined {
+  const verdict = admitInterventionRange(cell);
+  if (verdict === undefined || 'refused' in verdict || verdict.range.meaning !== 'likely_range') return undefined;
+  const unit = isRec(cell) && typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit.trim() : undefined;
+  return { factor_id: factorId, low: verdict.range.low, high: verdict.range.high, ...(unit !== undefined ? { unit } : {}),
+    persons_own: isPersonsOwnSetting(verdict.range) };
+}
+
+/** One sentence: the option, the range's ends with whose they are, and the law as Olumi's approximation (never their calibration). */
+export function likelyRangeLawWords(optionLabel: string, factorLabel: string, u: LikelyRangeUse): string {
+  const say = (n: number): string => sayFigureExactly(n, u.unit ?? '') ?? `${n}${u.unit !== undefined ? ` ${u.unit}` : ''}`;
+  return `‘${optionLabel.trim()}’ uses ${u.persons_own ? 'your' : 'Olumi’s'} range for ‘${factorLabel.trim()}’, ${say(u.low)} to ${say(u.high)}, `
+    + `read with Olumi’s equal-tail approximation: about one chance in four below ${say(u.low)} and one in four above ${say(u.high)}, `
+    + `a modelling convention, not ${u.persons_own ? 'your own' : 'a measured'} calibration.`;
 }

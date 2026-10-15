@@ -54,6 +54,7 @@ import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldCh
 import { effectsTimingOf, periodEndAssumptionNote, type EffectsTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { likelyRangeLawWords } from '../intervention-range.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import { goalReadingsOf, type GoalReading } from '../coaching/goal-reading-disclosure.js';
@@ -686,6 +687,9 @@ export function goalChanceLicenceOf(
   const estimates = licensed.length === 0 ? NO_ESTIMATES : goalChanceEstimateCounts(graph, option_ids, goalId);
   const jointEstimates = eventNodes.length === 0 ? undefined : goalChanceEstimateCounts(graph, option_ids, goalId, eventNodes);
   const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
+  // C2 join (AIE 6184022140; DL 15 Oct): a licensed option whose setting on the path carries a likely range rests on Olumi's
+  // equal-tail approximation of it: provisional, and said once per range, beside the result.
+  const rangeUses = Object.entries(estimates.likelyRangesByOption ?? {}).filter(([id, xs]) => licensed.includes(id) && xs.length > 0);
   // ⛔ R5-2: an input whose origin is unverified is never "zero estimates" and never Olumi's: disclosed once, beside the result.
   const unverifiedInputs = unverifiedOn(estimates, licensed);
   const estimateLinks = estimates.links;
@@ -743,7 +747,7 @@ export function goalChanceLicenceOf(
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
-      + estimates.acceptedValues + estimates.acceptedLinks > 0, unverifiedInputs,
+      + estimates.acceptedValues + estimates.acceptedLinks + rangeUses.length > 0, unverifiedInputs,
     constraints, option_ids,
     estimates, jointEstimates,
   });
@@ -754,7 +758,8 @@ export function goalChanceLicenceOf(
   // ⭐ E-TAIL (b), AIE 6130197656 §2: a licensed option whose hire link rests on Olumi's limit says so once, verbatim.
   // L4 (DL conditions 2–3): a licensed capacity-ratio option says what its chance leaves out, and why no comparison is shown.
   const ratioLicensed = onShare && capacityRatioOptionIds(graph).some(id => licensed.includes(id));
-  const notes = [...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
+  const rangeLines = rangeUses.flatMap(([id, xs]) => xs.map(u => likelyRangeLawWords(labelOfNode(nodes, id) ?? id, labelOfNode(nodes, u.factor_id) ?? u.factor_id, u)));
+  const notes = [...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
     ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
     ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
   return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
