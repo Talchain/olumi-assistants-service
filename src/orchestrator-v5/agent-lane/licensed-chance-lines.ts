@@ -123,7 +123,8 @@ export function isLicensedChanceLine(sentence: string, chances: LicensedChances 
   const priorDisplay = named[0]!.prior?.display;
   const ownAt = Math.min(...named[0]!.displays.map((d) => key(rest).indexOf(key(d))).filter((i) => i >= 0));
   const priorAt = priorDisplay === undefined ? -1 : key(rest).indexOf(key(priorDisplay));
-  const comparison = priorAt >= 0 && Number.isFinite(ownAt) && priorAt < ownAt
+  // The from→to words sit between the earlier display and this Run's (the slice is empty when the order is reversed).
+  const comparison = priorAt >= 0 && Number.isFinite(ownAt)
     && FROM_TO.test(key(rest).slice(Math.max(0, priorAt - 12), ownAt));
   const allowedFigures = [...named[0]!.figures, ...(comparison ? named[0]!.prior!.figures : [])];
   if (figures.length === 0 || !figures.every((f) => allowedFigures.includes(f))) return false;
