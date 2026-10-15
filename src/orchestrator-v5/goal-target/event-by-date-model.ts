@@ -12,6 +12,7 @@ import { figureTheUserWroteForSpan } from '../agent-lane/stated-by-user.js';
 import { sameUnit, unitsAt } from '../agent-lane/same-unit.js';
 import { readTeamTime } from './team-share-write.js';
 import { valueAuthorshipOf } from '../../cee/provenance/provenance-of.js';
+import { carriesStatements, recordedRawLevelQuote, statementCitesLevel } from '../agent-lane/verified-option-setting.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -427,14 +428,15 @@ const PEOPLE_UNIT = /\b(developers?|engineers?|people|persons?|staff|ftes?|headc
  * through either. An Olumi-proposed time factor (T5 D2's "Working time on feature launch") is not a basis. Reads the
  * drafter's structured unit and provenance, never the brief's words.
  */
-function eventCapacityBasisStated(candidate: CandidateModel): boolean {
+function eventCapacityBasisStated(candidate: CandidateModel, brief: string | undefined): boolean {
   const factors = Array.isArray(candidate.factors) ? candidate.factors : [];
-  const stated = factors.some((f) => {
-    const quote = (f.baseline_evidence as { quote?: unknown } | null | undefined)?.quote;
-    return f.provenance === 'explicit' && typeof quote === 'string' && quote.trim() !== ''
+  // SYSTEM 2: the figure is the brief's through the factor's verified level statement; a recording made before SYSTEM 2
+  // (no `statements[]`) reads its retired carrier through the one recorded-raw reader.
+  const quoted = (f: CandidateModel['factors'][number]): boolean => (carriesStatements(candidate)
+    ? statementCitesLevel(candidate, f, brief) : recordedRawLevelQuote(candidate, f) !== undefined);
+  const stated = factors.some((f) => f.provenance === 'explicit' && quoted(f)
       && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value)
-      && typeof f.unit === 'string' && (TIME_SHARE_UNIT.test(f.unit) || PEOPLE_UNIT.test(f.unit));
-  });
+      && typeof f.unit === 'string' && (TIME_SHARE_UNIT.test(f.unit) || PEOPLE_UNIT.test(f.unit)));
   if (stated) return true;
   const identities = (candidate as { identities?: unknown }).identities;
   return Array.isArray(identities) && identities.some((i: Rec) => i?.operation === 'product'
@@ -553,7 +555,7 @@ export function eventCapacityRatios(candidate: unknown): ReadonlyMap<number, Eve
 }
 
 /** Preconditions for a construction that already selected the event prompt; never classifies text. */
-export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof EVENT_BY_DATE_REFUSALS[number] | null {
+export function eventByDateAdmissionRefusal(candidate: CandidateModel, brief?: string): typeof EVENT_BY_DATE_REFUSALS[number] | null {
   const deliverable = candidate.goal?.deliverable;
   if (typeof deliverable !== 'string' || !deliverable.trim() || deliverable.trim().length > 100) return EVENT_BY_DATE_REFUSALS[0];
   if (!Array.isArray(candidate.options)) return EVENT_BY_DATE_REFUSALS[1];
@@ -572,7 +574,7 @@ export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof E
   // rise "with the next release") keeps its ordinary model when nothing in it changes the team's capacity.
   // DL ruling C (14 Oct): and only where the draft carries a capacity basis from the brief (`eventCapacityBasisStated`). A
   // marketing brief with a fixed launch date (T5 D2) keeps its outcome goals instead of a "share of the launch" forecast.
-  if (candidate.goal?.kind === 'event_by_date' && eventDeadlineStated(candidate.goal) && eventCapacityBasisStated(candidate)) return null;
+  if (candidate.goal?.kind === 'event_by_date' && eventDeadlineStated(candidate.goal) && eventCapacityBasisStated(candidate, brief)) return null;
   if (!options.some(o => validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
   return options.some(o => validEventCapacity(o.added_capacity) && o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
 }

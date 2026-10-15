@@ -263,7 +263,7 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
 function verified(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
   if (typeof brief !== 'string') return false;
   // SYSTEM 2's whole-raw switch: a draft with statements[] gives the quote only through its verified statement.
-  const quote = carriesStatements(model) ? statedSettingQuote(model, option, intervention, brief) : intervention.stated_evidence?.quote ?? null;
+  const quote = carriesStatements(model) ? statedSettingQuote(model, option, intervention, brief) : recordedRawSettingQuote(model, intervention) ?? null;
   if (quote === null) return false;
   const sentences = assertions(brief);
   // Only the unique normalized quote is model evidence. Every offset, including amount_start, is ignored.
@@ -584,7 +584,7 @@ function differentGoalBound(model: CandidateModel, factor: Factor, text: string)
  */
 export function quoteBindsFactorFigure(model: CandidateModel, factor: Factor, brief?: string): boolean {
   try {
-    const quote = factor.baseline_evidence?.quote;
+    const quote = recordedRawLevelQuote(model, factor);
     const value = factor.baseline_value;
     if (typeof quote !== 'string' || quote.length > MAX_ASSERTION || typeof value !== 'number' || !Number.isFinite(value)) return false;
     if (factorLevelSpans(model, factor, quote, value).length > 0) return true;
@@ -728,7 +728,7 @@ export function verifiedFactorLevelValue(model: CandidateModel, factor: Factor, 
   // number, sign or quote into a different claim which happens to pass.
   if (typeof brief !== 'string' || factor.baseline_known
     || !['ai_proposed', 'inferred'].includes(factor.provenance)
-    || factor.baseline_evidence != null) return null;
+    || recordedRawLevelQuote(model, factor) !== undefined || claimsLevelStatement(model, factor, brief)) return null;
   const verified = new Map<number, Factor>();
   for (const a of assertions(brief)) {
     for (const amount of findLinkEffectAmounts(a.text)) {
@@ -805,6 +805,31 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
 }
 
 /**
+ * ⛔ THE ONE RECORDED-RAW READER (DL ruling 15 Oct ~02:4xZ, SYSTEM 2 retirement): the retired carriers (`baseline_evidence`,
+ * `stated_evidence`) are no longer sent to the drafter, so only a draft RECORDED before SYSTEM 2 (no `statements[]`) holds
+ * them. A draft carrying `statements[]` never reaches them (it gets `undefined` here, structurally); every reader of the
+ * retired carriers goes through these two, and the recordings that still feed them are listed shrink-only
+ * (`scripts/ci/recorded-raw-carriers.json`), shrinking as fixtures migrate to fresh served raws.
+ */
+export function recordedRawLevelQuote(model: CandidateModel, factor: Factor): string | undefined {
+  if (carriesStatements(model)) return undefined;
+  const q = (factor as { baseline_evidence?: { quote?: unknown } | null } | undefined)?.baseline_evidence?.quote;
+  return typeof q === 'string' ? q : undefined;
+}
+/** SYSTEM 2: the draft states a level for this factor (verified or refused): its claimed receipt, never rewritten into another. */
+function claimsLevelStatement(model: CandidateModel, factor: Factor, brief: string): boolean {
+  if (!carriesStatements(model)) return false;
+  const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
+  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  return map.verified.has(key) || map.refused.some((r) => r.key === key);
+}
+export function recordedRawSettingQuote(model: CandidateModel, intervention: Intervention): string | undefined {
+  if (carriesStatements(model)) return undefined;
+  const q = intervention.stated_evidence?.quote;
+  return typeof q === 'string' ? q : undefined;
+}
+
+/**
  * ⭐ SYSTEM 2, THE WHOLE-RAW SWITCH (DL ruling 15 Oct ~02:1xZ): a draft that carries `statements[]` is read ONLY through its
  * statements; the legacy carriers (`baseline_evidence`, `stated_evidence`) apply only to a draft with no `statements[]` at
  * all (recorded before SYSTEM 2), never as a per-subject fallback. Both carriers retire together once fresh served raws exist.
@@ -841,7 +866,8 @@ function statedSettingQuote(model: CandidateModel, option: Option, intervention:
 
 /** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
 function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
-  return factor?.baseline_evidence != null && levelInContext(model, factor, brief, factor.baseline_evidence.quote, (text) => {
+  const quote = factor === undefined ? undefined : recordedRawLevelQuote(model, factor);
+  return quote !== undefined && levelInContext(model, factor, brief, quote, (text) => {
     const matches = factorLevelSpans(model, factor, text);
     if (matches.length !== 1) return null;
     const span = matches[0]!;
