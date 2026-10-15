@@ -810,7 +810,7 @@ function zeroStatedByStatusQuo(model: CandidateModel, factor: Factor, brief: str
   const quo = model.options.filter((o) => (o as { is_status_quo?: unknown }).is_status_quo === true);
   if (quo.length !== 1) return false;
   const option = quo[0]!;
-  if (option.interventions.some((iv) => iv.factor_label === factor.label && iv.value !== 0)) return false;
+  if ((option.interventions ?? []).some((iv) => iv.factor_label === factor.label && iv.value !== 0)) return false;
   const raw = Reflect.get(model, 'statements');
   const own = new Set(words(factor.label).map(singular));
   return (Array.isArray(raw) ? raw : []).some((entry: unknown) => {

@@ -47,7 +47,7 @@ describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s leve
     const goal = node(g, 'weekly_support_capacity');
     expect(valueProvenanceOf(goal.observed_state).origin).toBe('human');
     expect(asksForToday(g)).toBe(false);
-    expect(projectEntity(goal)).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { source: 'brief_extraction', extraction_type: 'explicit' } });
+    expect(projectEntity(goal as Parameters<typeof projectEntity>[0])).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { source: 'brief_extraction', extraction_type: 'explicit' } });
   });
 
   it('CONTRAST (no default 0): without the status quo\'s "adds no specialist", the goal keeps no level and readiness still asks', async () => {
