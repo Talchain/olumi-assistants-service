@@ -1,4 +1,3 @@
-import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
@@ -3923,13 +3922,19 @@ export function createAgentCapabilities(
     // holds, that the revision drops. ⭐ DEMO (served 34a4a4cb, Paul's founder brief): a goal with NO numeric target ("Larger fund
     // secured") is no loss to a correction: the revision keeps it qualitative, and no target is ever invented for it.
     // ⛔ AIE #94 6194613256 / DL: a target can be held two ways, as a target ROW or as the goal's own stated figure
-    // (`goal_threshold_raw`, e.g. "at least 1.3 million" whose unit the analysis cannot yet use). Both count; neither is dropped.
+    // (the one goal record's `target.raw`, e.g. "at least 1.3 million" whose unit the analysis cannot yet use). Both count; neither is dropped.
     const goalIn = (raw: unknown): Record<string, unknown> | undefined =>
       (((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? []).find((n) => n?.kind === 'goal');
     const savedGoalNode = goalIn(g.raw);
     const draftGoalNode = goalIn(candidate);
-    const savedStated = savedGoalNode === undefined ? null : statedGoalTargetOf(g.raw as Record<string, unknown>, savedGoalNode);
-    const draftStated = draftGoalNode === undefined ? null : statedGoalTargetOf(candidate, draftGoalNode);
+    // Through the ONE goal record (S5 census): its stated figure, unit and held comparator.
+    const statedOf = (raw: unknown, node: Record<string, unknown> | undefined): { value: number; unit?: string; held?: string } | null => {
+      const t = node === undefined || typeof node.id !== 'string' ? null : readGoalRecord(raw, node.id)?.target ?? null;
+      return t === null || typeof t.raw !== 'number' || !Number.isFinite(t.raw) ? null
+        : { value: t.raw, ...(typeof t.unit === 'string' ? { unit: t.unit } : {}), ...(typeof t.comparator === 'string' ? { held: t.comparator } : {}) };
+    };
+    const savedStated = statedOf(g.raw, savedGoalNode);
+    const draftStated = statedOf(candidate, draftGoalNode);
     const stillStated = savedStated !== null && draftStated !== null && draftStated.value === savedStated.value
       && (draftStated.unit ?? '') === (savedStated.unit ?? '');
     if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated) {
