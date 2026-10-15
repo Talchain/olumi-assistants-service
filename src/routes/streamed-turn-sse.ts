@@ -265,7 +265,8 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
         });
         break;
       case "GRAPH_READY":
-        graphReadyAtMs = event.elapsed_ms;
+        // The FIRST model frame is when the canvas drew it (a draft before widening, then the saved model).
+        if (graphReadyAtMs === null) graphReadyAtMs = event.elapsed_ms;
         writeStage("GRAPH_READY", {
           graph: toOutboundGraph(event.graph),
           schema_version: event.schema_version,
