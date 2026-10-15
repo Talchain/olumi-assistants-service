@@ -9,6 +9,7 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
  */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,7 +23,9 @@ const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
 /** Capacity witness (CEE 351eeda0, `JUDGE-capacity-post2996-codex.md` row 4): the served graph read after its second Run. */
 const CAPACITY = ((): Json => {
   const j = (JSON.parse(readFileSync(new URL('./fixtures/capacity-post2996-run2-read.json', import.meta.url), 'utf8')) as { j: Json }).j;
-  return { ...j, scenario_id: SCENARIO };
+  // ⛔ SCIENCE C1: the capture's specialists → capacity link is user-ranged, so its captured read hash is the range-held one; the
+  // graph read now serves this graph's current hash (the CAS base), which this row's view check reads.
+  return { ...j, scenario_id: SCENARIO, graph_hash: computeAnalysisAffectingGraphHash(j.graph) };
 })();
 /**
  * Capacity on CEE 5b6e5eb7 (live run 2026-10-14T065335Z-capacity-post3017, judge row 4): the served graph read right after

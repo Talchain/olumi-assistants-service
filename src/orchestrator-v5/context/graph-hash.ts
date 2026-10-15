@@ -71,9 +71,10 @@ export function computeDeterministicGraphHash(
  * Which analysis-affecting projection to hash. 'current' is the only one freshness ever reads. The others identify HISTORY
  * only (`graph-identity.ts`): 'legacy' (frozen), 'pre_hold' (before hold-at-1.0, Codex r2 #2643) and 'pre_definition'
  * (the user-only hold, before a validated definition held whoever drew it; Science d5 #87 6011224941), and 'pre_route_once'.
- * Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+ * Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6. 'pre_c1': the hold before SCIENCE C1
+ * (AIE 6180618773), when a user's bare range held as a 90% Normal interval; every earlier projection keeps that range reading.
  */
-export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_definition' | 'pre_route_once';
+export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_definition' | 'pre_route_once' | 'pre_c1';
 
 /**
  * Compute a deterministic 16-char hex hash of all graph fields that AFFECT
@@ -178,10 +179,12 @@ export function computeAnalysisAffectingGraphHashSha256(
   // The hold this projection hashes (`EdgeHold`): the current one reads this graph's ends (d5 6011224941: a VALIDATED
   // definition holds whoever flagged it); 'pre_definition' is the user-only hold of #2643/#2653; 'pre_hold' none (history).
   const endsOf = endsOfGraph(graph);
+  const endsPreC1 = endsOfGraph(graph, 'pre_c1');
   const hold: EdgeHold = projection === 'pre_hold' ? () => null
     : projection === 'pre_definition' ? heldLinkBeforeValidatedDefinition
-      : projection === 'pre_route_once' ? (edge) => heldLinkBeforeRouteOnce(edge, endsOf(edge))
-        : (edge) => heldLinkOf(edge, endsOf(edge));
+      : projection === 'pre_route_once' ? (edge) => heldLinkBeforeRouteOnce(edge, endsPreC1(edge), 'pre_c1')
+        : projection === 'pre_c1' ? (edge) => heldLinkOf(edge, endsPreC1(edge), 'pre_c1')
+          : (edge) => heldLinkOf(edge, endsOf(edge));
   const mirroredOptions = Array.isArray(options)
     ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
         .filter((option) => option !== null)

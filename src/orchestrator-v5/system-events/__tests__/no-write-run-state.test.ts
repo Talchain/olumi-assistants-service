@@ -34,7 +34,10 @@ const fact = RunAnalysisHandlerFactSchema.parse({
     leading_option_id: read.analysis_result.leading_option_id,
     win_probabilities: read.analysis_result.win_probabilities,
     enrichment: read.analysis_result.enrichment,
-    graph_hash_at_run: read.graph_hash, computed_at: computedAt },
+    // ⛔ SCIENCE C1: the capture's graph has a user-ranged link, and its recorded hash is the range-held ('pre_c1') one, so a Run
+    // recorded then is stale now (truthfully). These rows are about a no-write refusal keeping the prior Run, so the Run is
+    // recorded under today's hold.
+    graph_hash_at_run: computeAnalysisAffectingGraphHash(read.graph), computed_at: computedAt },
 });
 const factRow = { fact, fact_row_id: '11111111-1111-4111-8111-111111111111', fact_created_at: computedAt };
 let graph: unknown;
@@ -92,14 +95,15 @@ async function run(input = payload) {
 
 test('ROW 1 — captured refused inspector preset, no graph write: retain the prior Run state', async () => {
   assert.deepEqual(wire.analysis_state.run_state, { kind: 'unknown_degraded', cause: 'no_graph_this_turn' });
-  assert.equal(computeAnalysisAffectingGraphHash(read.graph), wire.graph_hash);
+  assert.equal(computeAnalysisAffectingGraphHash(read.graph, 'pre_c1'), wire.graph_hash, 'the capture predates C1');
+  assert.notEqual(computeAnalysisAffectingGraphHash(read.graph), wire.graph_hash, 'C1 moves the current hash of a ranged link');
   const { result, response, state } = await run();
   assert.equal(result.commitPerformed, true, 'must reach the refusal commit');
   assert.equal(response.assistant_text, wire.assistant_text, 'must reach the captured user-figure refusal');
   assert.equal(writes.length, 1);
   assert.ok(writes.every(w => w.graph == null && w.handler_facts.length === 0));
   assert.deepEqual(graph, read.graph);
-  assert.equal(response.graph_hash, wire.graph_hash);
+  assert.equal(response.graph_hash, computeAnalysisAffectingGraphHash(read.graph), 'the same captured graph, under C1 (the wire hash predates it)');
   assert.deepEqual(state.run_state, priorState.run_state);
   assert.notEqual(state.readiness.status, 'unknown');
 });
@@ -181,7 +185,7 @@ test('FAIL CLOSED — a hung post-refusal graph reread returns degraded at the d
   assert.equal(result.commitPerformed, true);
   assert.equal(result.freshness, undefined);
   assert.equal(response.assistant_text, wire.assistant_text);
-  assert.equal(response.graph_hash, wire.graph_hash);
+  assert.equal(response.graph_hash, computeAnalysisAffectingGraphHash(read.graph), 'the same captured graph, under C1 (the wire hash predates it)');
   assert.ok(writes.every(w => w.graph == null && w.handler_facts.length === 0));
   assert.deepEqual(state.run_state, { kind: 'unknown_degraded', cause: 'no_graph_this_turn' });
   assert.equal(vi.getTimerCount(), 0);

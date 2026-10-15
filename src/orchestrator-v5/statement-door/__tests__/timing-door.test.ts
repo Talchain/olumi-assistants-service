@@ -16,8 +16,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { readStatement, type DoorQuote } from '../read.js';
 import { doorCardWords } from '../card.js';
 import { doorRowFor } from '../role-table.js';
-import { goalTargetBasisIn, humanEffectsTimingOf, timingAskOf, TIMING_ROW } from '../fields/goal-timing.js';
-import { userStatementFor } from '../statements.js';
+import { goalTargetBasisIn, humanEffectsTimingOf, timingAskOf, timingBasisNote, TIMING_ROW } from '../fields/goal-timing.js';
+import { userStatementFor, userStatementsOn } from '../statements.js';
 import type { DoorSubject } from '../subject.js';
 import type { DoorWrite } from '../write.js';
 import { applyGoalReadingEdit } from '../../goal-target/goal-reading-write.js';
@@ -181,22 +181,46 @@ describe('M3b TWO-BRIEF RULE: pricing MRR (2a35ff31), a level target at twelve m
 describe('PL 15 Oct 00:49Z on #3171: a negated or conditional statement never attests the timing; a source correction stales it', () => {
   const NOT = 'All of these effects would not be fully in place by month 3.';
   const IF = 'If we hire by November, all of these effects would be fully in place by month 3.';
-  it.each([['hiring r4', R10], ['pricing MRR', PRICING]] as const)('%s: negated and conditional statements are refused with their words kept, never true', (_n, g) => {
-    for (const [said, words] of [[NOT, 'All of these effects would not be fully in place by month 3'], [IF, 'all of these effects would be fully in place by month 3']] as const) {
-      const v = read(g, [volunteered(said, words)], { now: said });
-      expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
-      expect((v as Rec).detail).toContain('Keep the user’s words exactly as they said them');
-      // With an answer to the ask too, it still never prepares: the dated statement itself is negated or conditional.
-      expect(read(g, [volunteered(said, words), answered(g)], { now: YES, conversation: said }).kind).toBe('refused');
-      expect(doorRowFor(subjectOf(g), g)!.bindsWhole!(said, subjectOf(g), g, words)).toBe(false);
+  // PL 15 Oct 01:26Z (DL): a denial or a condition is the user's statement too. It is recorded as said, with its stance, and
+  // never attests that the effects are in place; it is never refused, and the user is never asked to drop a condition.
+  it.each([['hiring r4', R10], ['pricing MRR', PRICING]] as const)('%s: negated and conditional statements are recorded as said and never attest', (_n, g) => {
+    const goalId = String(goalOf(g).id);
+    for (const [said, words, stance] of [[NOT, 'All of these effects would not be fully in place by month 3', 'denied'],
+      [IF, 'all of these effects would be fully in place by month 3', 'conditional']] as const) {
+      for (const quotes of [[volunteered(said, words)], [volunteered(said, words), answered(g)]]) {
+        const v = read(g, quotes, quotes.length === 1 ? { now: said } : { now: YES, conversation: said });
+        expect(v.kind, `${_n} ${stance}`).toBe('read');
+        const { after } = write(g, quotes, quotes.length === 1 ? { now: said } : { now: YES, conversation: said });
+        expect((goalOf(after).goal_target_basis as Rec).effects_at_period_end, `${_n} ${stance}: never attested`).toBe(false);
+        expect(humanEffectsTimingOf(after, goalId)?.kind).not.toBe('in_place');
+        expect(timingBasisNote(after, goalId, goalOf(after).goal_target_basis as never)).toBeUndefined();
+        const reading = (v as Rec).reading as Rec;
+        expect(reading.reading).toContain(stance === 'denied' ? 'would not be fully in place by month 3' : 'under the condition you stated');
+        // The condition is kept with the record, in the user's words; nothing asks them to remove it.
+        expect(JSON.stringify(userStatementsOn(goalOf(after)))).toContain(said.replace(/\.$/, ''));
+      }
+      expect(doorRowFor(subjectOf(g), g)!.bindsWhole!(said, subjectOf(g), g, words)).toBe(true);
     }
   });
 
-  it('an answer of "No" to the timing ask never confirms every effect and the end point', () => {
-    const no = { quote: 'No, not all of them.', answering: timingAskOf(R10, 'productivity')!.words };
-    const v = read(R10, [volunteered(), no], { now: no.quote, conversation: SAID });
-    expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
-    expect((v as Rec).detail).toMatch(/^Not yet clear:/);
+  it.each([['hiring r4', R10, 'All of these effects would be fully in place no later than month 3 from today.', 3],
+    ['pricing MRR', PRICING, 'All of these effects would be fully in place no later than month 12 from today.', 12]] as const)(
+    '%s CONTRAST: "no later than" is an affirmative bound, never a denial', (_n, g, said, month) => {
+      const words = said.replace(/\.$/, '');
+      const { after } = write(g, [volunteered(said, words), answered(g)], { now: YES, conversation: said });
+      expect(humanEffectsTimingOf(after, String(goalOf(g).id))).toMatchObject({ kind: 'in_place', month });
+      expect((goalOf(after).goal_target_basis as Rec).effects_at_period_end).toBe(true);
+    });
+
+  it('a committed "No" to the timing ask ends an earlier attestation (a denial replaces the record)', () => {
+    const { after: attested } = write(R10, [volunteered(), answered(R10)], { now: YES, conversation: SAID });
+    expect(humanEffectsTimingOf(attested, 'productivity')?.kind).toBe('in_place');
+    const no = { quote: 'No, not all of them.', answering: timingAskOf(attested, 'productivity')!.words };
+    const { after } = write(attested, [no], { now: no.quote, conversation: SAID });
+    expect(humanEffectsTimingOf(after, 'productivity')).toMatchObject({ kind: 'later', stance: 'denied', month: 3 });
+    expect((goalOf(after).goal_target_basis as Rec).effects_at_period_end).toBe(false);
+    expect(userStatementsOn(goalOf(after))).toHaveLength(1);
+    expect(JSON.stringify(userStatementsOn(goalOf(after)))).not.toContain(SAID.replace(/\.$/, ''));
   });
 
   it('a corrected effect source, or a changed condition on the target, makes the recorded forecast stale', () => {

@@ -63,16 +63,18 @@ describe('S-DEF: an existence driver\'s doubt is the user\'s only when the USER\
     r.probability_of_goal_drivers.drivers = [row];
     return r;
   };
-  it('an Olumi link (not held) → olumi; the user\'s own link held by its range → user', () => {
+  // ⛔ SCIENCE C1 (AIE 6180618773): a range excluding zero does not prove the link exists, so the user's ranged link is not held;
+  // its existence doubt is the stored default (Olumi's), flagged as on the user's stated link.
+  it('C1: an Olumi link (not held) → olumi; the user\'s own RANGED link is not held either → olumi, user_stated_link kept', () => {
     const edge = GRAPH.edges.find((e: Rec) => e.from === 'price_rise_from_current_price' && e.to === 'customers_lost_from_price_rise');
     // The user's link: their brief stated it with its evidence ("Each 1% price rise loses about 2 customers, between 1 and 4.").
     expect(edge.provenance).toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated', source_quote: expect.stringContaining('between 1 and 4') });
     const user = goalChanceDriverOf(existenceOnly(edge.from, edge.to), 'launch_starter_tier', GRAPH, BLOCK) as Rec;
-    expect(user.driver).toMatchObject({ kind: 'link_existence', authored_by: 'user' });
+    expect(user.driver).toMatchObject({ kind: 'link_existence', authored_by: 'olumi', user_stated_link: true });
     const olumi = goalChanceDriverOf(existenceOnly('starter_subscribers', 'starter_tier_monthly_recurring_revenue'), 'launch_starter_tier', GRAPH, BLOCK) as Rec;
     expect(olumi.driver).toMatchObject({ kind: 'link_existence', authored_by: 'olumi' });
   });
-  it('TWIN (author): the SAME user link with its range removed is not held, so the doubt is Olumi\'s (user_stated_link kept)', () => {
+  it('TWIN (author): the SAME user link with its range removed reads the same (the range no longer decides authorship)', () => {
     const graph = clone(GRAPH);
     const edge = graph.edges.find((e: Rec) => e.from === 'price_rise_from_current_price' && e.to === 'customers_lost_from_price_rise');
     expect(edge.provenance.natural_effect.stated_range).toBeDefined();

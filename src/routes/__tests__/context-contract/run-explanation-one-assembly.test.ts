@@ -205,7 +205,10 @@ describe('Explain scoped assembly safety', () => {
       // packet's replacement: 40,544 → 40,783 bytes. Captured from the SENT body; replacing exactly the replacement with the old
       // block on it gives 48037ea4…, which is staging 75fc1a95's own SENT body (staging already reads 48037ea4 against the
       // stale 1f004bc6 pin above: that move is not C0's, and C0 adds only its own block on top of it).
-      .toBe('d6ce2c691ef6f56563baac912ba30a0742bb5cc448bbd28cdee1ced1c212db26');
+      // S10 fix 1 + the AIE's EXACT links sentence (#94 6181933060, links' vocabulary per 6182232796): the host contract's links
+      // clause only: 40,783 → 40,922 bytes (+139). Captured from the SENT body: staging's reproduces d6ce2c69… and 40,783 bytes, and with
+      // exactly that clause swapped equals this head's byte for byte.
+      .toBe('571c6f9fb1408c2072658d131908e53c15de69e9ed3c8d450122453e51edad57');
   },60000);
 });
 

@@ -584,7 +584,7 @@ describe('R11 — a CONFIRMED link is settled: never re-sized, re-asked or re-fl
         if (Array.isArray(x)) { for (const y of x) { const f = find(y); if (f) return f; } return undefined; }
         if (x === null || typeof x !== 'object') return undefined;
         const r = x as Record<string, unknown>;
-        if (r.from === FROM && r.to === TO && 'source' in r) return r;
+        if (r.from === FROM && r.to === TO && 'whose' in r) return r;
         for (const v of Object.values(r)) { const f = find(v); if (f) return f; }
         return undefined;
       };
@@ -594,7 +594,10 @@ describe('R11 — a CONFIRMED link is settled: never re-sized, re-asked or re-fl
     expect(before, 'the Agent is shown the link').toBeDefined();
     expect(before!.confirmed_by_user).toBeUndefined();
     const after = await viewOf(await confirmed());
-    expect(after).toMatchObject({ source: 'cee_hypothesis', confirmed_by_user: true });
+    // S10 fix 1 (#3177): its author is the ONE authority's answer (`whose`), and a confirm never changes it.
+    expect(before).toMatchObject({ whose: 'olumi' });
+    expect(after).toMatchObject({ whose: 'olumi', confirmed_by_user: true });
+    expect(after).not.toHaveProperty('source');
   });
 
   it('DL row 1: a confirm leaves the ADMISSION census byte-identical (Paul\'s R11: confirming "strong" moved the gate)', async () => {

@@ -131,11 +131,24 @@ interface TimingReading {
   readonly reference: 'today' | 'launch' | undefined;
   readonly covers: 'all' | 'yours';
   readonly answeredAsk: boolean;
+  /**
+   * The statement's own semantics (the shared `NEGATED`/`CONDITIONAL`, PL 15 Oct 00:49Z/01:26Z): an AFFIRMED forecast can attest
+   * that the effects are in place; a DENIED one ("would NOT be fully in place by month 3", "No") is recorded and never attests;
+   * a CONDITIONAL one is recorded with its condition, as said, and never attests unconditionally.
+   */
+  readonly stance: TimingStance;
 }
-type TimingVerdict = { readonly kind: 'complete'; readonly r: TimingReading; readonly later: boolean } | { readonly kind: 'missing'; readonly what: readonly string[] };
+export type TimingStance = 'affirmed' | 'denied' | 'conditional';
+type TimingVerdict = { readonly kind: 'complete'; readonly r: TimingReading; readonly later: boolean; readonly attests: boolean }
+  | { readonly kind: 'missing'; readonly what: readonly string[] };
+const stanceOf = (quote: string): TimingStance => (NEGATED.test(quote) ? 'denied' : CONDITIONAL.test(quote) ? 'conditional' : 'affirmed');
 
 /** The statements' timing against the held target: complete (in place at the end, or later), or exactly what is missing. */
 function timingVerdict(graph: unknown, h: HeldTiming, r: TimingReading): TimingVerdict {
+  // A denial or a conditional forecast attests nothing, so nothing more is needed to record it: it replaces any earlier record
+  // (a committed denial or correction ends an old attestation). A denial at or after the end says the effects are not in place
+  // there; a denial before it says nothing about the end.
+  if (r.stance !== 'affirmed') return { kind: 'complete', r, later: r.stance === 'denied' && r.month >= h.basis.period_months, attests: false };
   const missing: string[] = [];
   const reference = r.answeredAsk ? h.basis.reference : r.reference;
   if (reference === undefined) missing.push(`whether month ${r.month} is ${referenceWords(h.basis)} or ${h.basis.reference === 'launch' ? 'from today' : 'after launch'}`);
@@ -145,13 +158,15 @@ function timingVerdict(graph: unknown, h: HeldTiming, r: TimingReading): TimingV
   if (!r.answeredAsk && notCovered.length > 0) missing.push(`whether it also covers ${listed(notCovered.map((e) => effectWords(graph, e)))} (Olumi’s estimate${notCovered.length > 1 ? 's' : ''}, not yours)`);
   if (r.covers === 'yours' && !r.answeredAsk) missing.push('whether it covers every option’s effect');
   if (missing.length === 0 && r.month < h.basis.period_months) missing.push(`whether they would still be fully in place at ${periodEndWords(h.basis)}`);
-  return missing.length > 0 ? { kind: 'missing', what: missing } : { kind: 'complete', r, later: r.month > h.basis.period_months };
+  return missing.length > 0 ? { kind: 'missing', what: missing } : { kind: 'complete', r, later: r.month > h.basis.period_months, attests: true };
 }
 
 /** The user's recorded forecast for the goal: in place, later, or stale (its effects, options, target or reference moved). */
 export type HumanEffectsTiming =
   | { readonly kind: 'in_place'; readonly month: number; readonly record: UserStatementRecord }
-  | { readonly kind: 'later'; readonly month: number; readonly record: UserStatementRecord }
+  | { readonly kind: 'later'; readonly month: number; readonly stance: TimingStance; readonly record: UserStatementRecord }
+  /** Recorded, attesting nothing: a conditional forecast, or a denial before the end. */
+  | { readonly kind: 'not_attested'; readonly month: number; readonly stance: TimingStance; readonly record: UserStatementRecord }
   | { readonly kind: 'stale'; readonly record: UserStatementRecord };
 export function humanEffectsTimingOf(graph: unknown, goalId: string): HumanEffectsTiming | undefined {
   const goal = nodesOf(graph).find((n) => n.kind === 'goal' && n.id === goalId);
@@ -159,7 +174,10 @@ export function humanEffectsTimingOf(graph: unknown, goalId: string): HumanEffec
   const month = record?.attest?.month;
   if (record === undefined || typeof month !== 'number') return undefined;
   if (record.attest?.fingerprint !== timingFingerprintOf(graph, goalId)) return { kind: 'stale', record };
-  return record.attest?.later === true ? { kind: 'later', month, record } : { kind: 'in_place', month, record };
+  // A record from before the stance was kept (#3171) was written only for an affirmed, complete reading.
+  const stance: TimingStance = record.attest?.stance === 'denied' || record.attest?.stance === 'conditional' ? record.attest.stance : 'affirmed';
+  if (record.attest?.later === true) return { kind: 'later', month, stance, record };
+  return stance === 'affirmed' ? { kind: 'in_place', month, record } : { kind: 'not_attested', month, stance, record };
 }
 
 /**
@@ -189,7 +207,9 @@ export function timingBasisNote(graph: unknown, goalId: string, basis: GoalTarge
 /** The withhold's words where the user's recorded forecast puts the effects after the target's end (never "not stated"). */
 export function laterTimingWords(graph: unknown, goalId: string, basis: GoalTargetBasis): string | undefined {
   const human = humanEffectsTimingOf(graph, goalId);
-  return human?.kind === 'later' ? `You said they would be fully in place by month ${human.month} ${referenceWords(basis)}, after that.` : undefined;
+  if (human?.kind !== 'later') return undefined;
+  return human.stance === 'denied' ? `You said they would not be fully in place by month ${human.month} ${referenceWords(basis)}.`
+    : `You said they would be fully in place by month ${human.month} ${referenceWords(basis)}, after that.`;
 }
 
 /** The reading of ONE statement's words: its month, its reference and its scope; the ask it answered is the context. */
@@ -199,29 +219,36 @@ function readWords(quote: string, words: string | undefined): Omit<TimingReading
   if (month === undefined || w.length > 200 || !inQuote(w, quote)) {
     return { refused: `Give reading_words: the user’s own words for when the effects are fully in place, with its one month figure, copied from “${quote}”.` };
   }
-  // The statement's own semantics (the risk door's, shared): a negated or conditional statement never attests that the effects
-  // are in place. Its words are kept as said; only the missing affirmative is asked.
-  if (NEGATED.test(quote)) return { refused: `“${quote}” says when the effects would NOT be in place, which is not a forecast that they are. Ask only by when they would be fully in place.` };
-  if (CONDITIONAL.test(quote)) return { refused: `“${quote}” states the timing under a condition. Ask only whether it holds as the model stands, without that condition.` };
-  return { month, reference: FROM_TODAY.test(w) ? 'today' : AFTER_LAUNCH.test(w) ? 'launch' : undefined, covers: UNIVERSAL.test(w) ? 'all' : 'yours' };
+  // The statement's own semantics (the risk door's, shared): kept as said, with its stance; only an affirmed one can attest.
+  return { month, reference: FROM_TODAY.test(w) ? 'today' : AFTER_LAUNCH.test(w) ? 'launch' : undefined, covers: UNIVERSAL.test(w) ? 'all' : 'yours',
+    stance: stanceOf(quote) };
 }
 
 /** The reading across the statements: the one that states the month, plus any answer to the timing ask. */
 function readingOf(statements: readonly UserStatement[], words: string | undefined, graph: unknown, goalId: string): TimingReading | undefined {
+  const ask = timingAskOf(graph, goalId)?.words;
+  const answers = statements.filter((s) => ask !== undefined && s.answering === ask);
   const dated = statements.filter((s) => s.form === 'upper_bound');
+  // "No" (or "Only if …") to the ONE timing ask answers it for every effect and the target's own end, without a month of its own.
+  if (dated.length === 0) {
+    const h = heldTiming(graph, goalId);
+    const stance = answers.length === 1 ? stanceOf(answers[0]!.quote) : 'affirmed';
+    return h === undefined || stance === 'affirmed' ? undefined
+      : { month: h.basis.period_months, reference: h.basis.reference, covers: 'all', answeredAsk: true, stance };
+  }
   if (dated.length !== 1) return undefined;
   const r = readWords(dated[0]!.quote, words);
   if ('refused' in r) return undefined;
-  const ask = timingAskOf(graph, goalId)?.words;
-  // An answer confirms the ask only when it affirms it: "No, …" or "Only if …" never confirms every effect and the end point.
-  return { ...r, answeredAsk: ask !== undefined && statements.some((s) => s.answering === ask && !NEGATED.test(s.quote) && !CONDITIONAL.test(s.quote)) };
+  // An answer confirms the ask only when it affirms it; a denied or conditional answer makes the whole reading so.
+  const answerStance = answers.map((s) => stanceOf(s.quote)).find((x) => x !== 'affirmed');
+  return { ...r, answeredAsk: answers.length > 0, stance: r.stance !== 'affirmed' ? r.stance : answerStance ?? 'affirmed' };
 }
 
 export function timingAssumptions(statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string): string[] {
   const h = heldTiming(graph, subject.id);
   const r = h === undefined ? undefined : readingOf(statements, words, graph, subject.id);
   const v = h === undefined || r === undefined ? undefined : timingVerdict(graph, h, r);
-  if (h === undefined || v?.kind !== 'complete') return [];
+  if (h === undefined || v?.kind !== 'complete' || !v.attests) return [];
   return [`This target is evaluated at ${endWords(graph, subject.id, h.basis)}.`,
     'It describes the effects at that point; it does not say they operate throughout the preceding window or that their arrival has been simulated.',
     ...(v.later ? [`That is after ${periodEndWords(h.basis)}, so no chance at ${periodEndWords(h.basis)} can rest on it.`] : [])];
@@ -232,6 +259,13 @@ export function timingRecordedWords(statements: readonly UserStatement[], subjec
   const r = h === undefined ? undefined : readingOf(statements, words, graph, subject.id);
   const v = h === undefined || r === undefined ? undefined : timingVerdict(graph, h, r);
   if (h === undefined || v?.kind !== 'complete') return `Recorded your forecast: ${said(statements)}.`;
+  if (!v.attests) {
+    const end = periodEndWords(h.basis);
+    return v.r.stance === 'conditional'
+      ? `Recorded your forecast: ${said(statements)}, with its condition. It depends on that condition, so no chance at ${end} treats the effects as in place on your forecast.`
+      : v.later ? `Recorded your forecast: ${said(statements)}. So no chance at ${end} rests on these effects being in place.`
+        : `Recorded your forecast: ${said(statements)}. It does not say they are in place at ${end}, so no chance there rests on your forecast.`;
+  }
   const what = `${listed(h.effects.map((e) => effectWords(graph, e)))} would be fully in place by month ${v.r.month} ${referenceWords(h.basis)}`;
   if (v.later) return `Recorded your forecast: ${what}. That is after ${periodEndWords(h.basis)}, so no chance at ${periodEndWords(h.basis)} rests on it.`;
   const assumed = effectsBasisWords({ ...h.basis, effects_at_period_end: true });
@@ -260,15 +294,17 @@ export const TIMING_ROW: RoleRow = {
     const h = heldTiming(graph, subject.id);
     const r = h === undefined ? undefined : readingOf(statements, words, graph, subject.id);
     if (h === undefined || r === undefined) return '';
-    return `your forecast that ${listed(h.effects.map((e) => effectWords(graph, e)))} would be fully in place by month ${r.month} ${referenceWords(h.basis)}`;
+    const effects = listed(h.effects.map((e) => effectWords(graph, e)));
+    if (r.stance === 'denied') return `your forecast that ${effects} would not be fully in place by month ${r.month} ${referenceWords(h.basis)}`;
+    return `your forecast${r.stance === 'conditional' ? ', under the condition you stated,' : ''} that ${effects} would be fully in place by month ${r.month} ${referenceWords(h.basis)}`;
   },
   assumptions: timingAssumptions,
   recordedWords: timingRecordedWords,
   bindsWhole: (quote, subject, graph, words) => {
     const goals = nodesOf(graph).filter((n) => n.kind === 'goal');
-    // Only an AFFIRMED statement scoped to every effect binds by its own scope; a negated or conditional one never does.
+    // A statement scoped to every effect binds by its own scope; its stance travels with it, and only an affirmed one attests.
     return goals.length === 1 && goals[0]!.id === subject.id && typeof words === 'string' && UNIVERSAL.test(words)
-      && !NEGATED.test(quote) && !CONDITIONAL.test(quote) && inQuote(words.trim().replace(/[.,;:!?]+$/, ''), quote);
+      && inQuote(words.trim().replace(/[.,;:!?]+$/, ''), quote);
   },
   incomplete: (statements, subject, graph, words) => {
     const h = heldTiming(graph, subject.id);
@@ -303,8 +339,10 @@ export const TIMING_WRITER: FieldWriter = {
     if (h === undefined || v === undefined || fingerprint === undefined || !isRec(h.goal.goal_target_basis)) return { refused: 'timing_not_applicable' };
     // Only a complete reading is written; what is missing is asked first (`timingMissing`).
     if (v.kind === 'missing') return { refused: 'timing_incomplete' };
-    const members = { effects_at_period_end: !v.later };
-    const record = userStatementRecord(reading.subject, reading.statements, new Date().toISOString(), { fingerprint, month: v.r.month, later: v.later });
+    // Only an affirmed, complete forecast puts the effects in place at the end; a denial or a conditional one never does.
+    const members = { effects_at_period_end: v.attests && !v.later };
+    const record = userStatementRecord(reading.subject, reading.statements, new Date().toISOString(),
+      { fingerprint, month: v.r.month, later: v.later, ...(v.r.stance !== 'affirmed' ? { stance: v.r.stance } : {}) });
     const payload: ApprovedGoalReading = { goal_id: reading.subject.id, expected_basis: h.goal.goal_target_basis, expected_goal: h.projection, members,
       user_statement: { subject: reading.subject, record } };
     const written = applyGoalReadingEdit(graph, payload);

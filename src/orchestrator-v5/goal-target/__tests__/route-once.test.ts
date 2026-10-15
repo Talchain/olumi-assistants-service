@@ -34,10 +34,12 @@ const edgeOf = (graph: Graph, identity: string): Edge => {
   expect(edge, identity).toBeDefined();
   return edge!;
 };
-const heldIds = (graph: Graph, routeOnly = false): string[] => {
-  const ends = endsOfGraph(graph);
+// ⛔ SCIENCE C1 (AIE 6180618773): a user's bare range is no longer a base hold. 'pre_c1' reads the rule as it was (history,
+// and the rule DGAI's parity fixture mirrors); 'current' is what the Run uses now.
+const heldIds = (graph: Graph, routeOnly = false, era: 'current' | 'pre_c1' = 'current'): string[] => {
+  const ends = endsOfGraph(graph, era);
   return graph.edges.filter((e) => {
-    const held = heldLinkOf(e, ends(e));
+    const held = heldLinkOf(e, ends(e), era);
     return routeOnly ? held?.reason === 'route_once' : held !== null;
   }).map(id).sort();
 };
@@ -92,7 +94,8 @@ describe('rule R route-once', () => {
   it('Parity fixture: every row and pinned SHA-256', () => {
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(PARITY_SHA256);
     expect(parity.length).toBeGreaterThanOrEqual(12);
-    for (const row of parity) expect({ name: row.name, held: heldIds(row.graph) }).toEqual({ name: row.name, held: row.held });
+    // C1: the fixture is the pre-C1 rule (a user range is a base hold) that DGAI mirrors; until the UI's mirror moves, read it there.
+    for (const row of parity) expect({ name: row.name, held: heldIds(row.graph, false, 'pre_c1') }).toEqual({ name: row.name, held: row.held });
   });
 
   it('R4 (ISL 0.638 → 0.796): capacity->goal only, exact R4h', () => {
@@ -175,7 +178,10 @@ describe('rule R route-once', () => {
   });
 
   it('I4: user range, validated definition, p=1, p=0, bidirected and identity operand never default-cover', () => {
-    for (const name of ['I4 user range', 'I4 validated definition', 'I4 certain', 'I4 zero', 'Bidirected', 'Identity operand', 'I4 absent probability']) {
+    // C1: a user range was a base hold, so it never covered (pre_c1); now it is an ordinary default doubt (row below).
+    expect(heldIds(graphOf('I4 user range'), true, 'pre_c1')).toEqual([]);
+    expect(heldIds(graphOf('I4 user range'), true), 'C1: the ranged A->M is a default doubt, so it covers M').toEqual(['M->Y']);
+    for (const name of ['I4 validated definition', 'I4 certain', 'I4 zero', 'Bidirected', 'Identity operand', 'I4 absent probability']) {
       const graph = graphOf(name);
       expect(heldIds(graph, true), name).toEqual([]);
       expect(endsOfGraph(graph)(edgeOf(graph, 'M->Y')).routeOnce, name).toBe(false);
@@ -214,14 +220,21 @@ describe('rule R route-once', () => {
     expect(withHeldUserLinks(graph)).toBe(graph);
   });
 
-  it('I6: user range on A->M moves doubt to M->Y and keeps exactly one doubt', () => {
+  it('I6 (pre-C1 history): user range on A->M moved doubt to M->Y and kept exactly one doubt', () => {
+    const before = graphOf('I6 before');
+    const after = graphOf('I6 after');
+    expect(heldIds(before, true, 'pre_c1')).toEqual(['M->Y']);
+    expect(heldIds(after, true, 'pre_c1')).toEqual([]);
+    const edge = edgeOf(after, 'A->M');
+    expect(heldLinkOf(edge, endsOfGraph(after, 'pre_c1')(edge), 'pre_c1')).toEqual({ reason: 'user_range', std: 0.3 / 3.29 });
+  });
+  it('⛔ C1 I6: a user range on A->M moves NO doubt now: A->M keeps its 0.8 and M->Y stays route-once held, exactly one doubt', () => {
     const before = graphOf('I6 before');
     const after = graphOf('I6 after');
     expect(heldIds(before, true)).toEqual(['M->Y']);
-    expect(heldIds(after, true)).toEqual([]);
-    const edge = edgeOf(after, 'A->M');
-    expect(heldLinkOf(edge, endsOfGraph(after)(edge))).toEqual({ reason: 'user_range', std: 0.3 / 3.29 });
-    expect(withHeldUserLinks(after).edges.filter((e) => e.exists_probability === 0.8).map(id)).toEqual(['M->Y']);
+    expect(heldIds(after, true)).toEqual(['M->Y']);
+    expect(heldLinkOf(edgeOf(after, 'A->M'), endsOfGraph(after)(edgeOf(after, 'A->M')))).toBeNull();
+    expect(withHeldUserLinks(after).edges.filter((e) => e.exists_probability === 0.8).map(id)).toEqual(['A->M']);
   });
 
   it('Shared node: two doubted causes hold its out-link; an undoubted route removes the hold', () => {
@@ -232,9 +245,11 @@ describe('rule R route-once', () => {
   it('Cycle: any directed cycle removes all route-once holds, preserving base holds', () => {
     const graph = graphOf('Cycle');
     expect(heldIds(graph, true)).toEqual([]);
-    expect(heldIds(graph)).toEqual(['A->M']);
+    // Its one base hold was A->M's user range (pre-C1); C1 removes it, so nothing is held and the Run input is the stored graph.
+    expect(heldIds(graph, false, 'pre_c1')).toEqual(['A->M']);
+    expect(heldIds(graph)).toEqual([]);
     expect(routeOnceCoveredSources(structural(graph).map((e) => ({ from: e.from, to: e.to, isDefault: true })))).toEqual(new Set());
-    expect(withHeldUserLinks(graph)).toEqual({ ...graph, edges: graph.edges.map((e) => id(e) === 'A->M' ? { ...e, exists_probability: 1 } : e) });
+    expect(withHeldUserLinks(graph)).toBe(graph);
   });
 
   it('Dangling edge: ignored in structure, never route-once held even from a covered source', () => {
@@ -301,14 +316,15 @@ describe('rule R route-once', () => {
     expect(olumiExistenceOnGoalPath(graph, 'goal', ['option'])).toBe(true);
   });
 
-  it('run-input-changes (a): doubt-moved I6 snapshots explain M->Y existence; std rule unchanged', () => {
+  it('run-input-changes (a, C1): the I6 snapshots differ only by A->M\'s sizing (a range moves no doubt now); std rule unchanged', () => {
     const before = snapshot(withHeldUserLinks(graphOf('I6 before')));
     const after = snapshot(withHeldUserLinks(graphOf('I6 after')));
     expect(diffRunInputs(before, after)).toEqual({ rows: [{ entity_kind: 'link', entity_id: 'A->M', link: { from: 'A', to: 'M' },
       field: 'sizing', before: { raw: 'unmarked' }, after: { raw: 'user' }, change: 'changed' }], complete: true });
-    // Reverse coverage isolates the route-once move: undoing the user-range hold itself remains partial by today's sizing rule.
+    // C1: no hold moved, so the reverse is the same one sizing row and complete too.
     const reverse = diffRunInputs(after, before);
-    expect(reverse.complete).toBe(false);
+    expect(reverse).toEqual({ rows: [{ entity_kind: 'link', entity_id: 'A->M', link: { from: 'A', to: 'M' },
+      field: 'sizing', before: { raw: 'user' }, after: { raw: 'unmarked' }, change: 'changed' }], complete: true });
     after.links[1]!.std = 0.2;
     expect(diffRunInputs(before, after).complete).toBe(false);
   });
@@ -354,9 +370,10 @@ describe('rule R route-once', () => {
     }) as Rec;
     expect(state.ok).toBe(true);
     expect(state.mutated).toBe(false);
-    expect(state.links.find((e: Edge) => id(e) === 'capacity->goal')).toEqual({ from: 'capacity', to: 'goal', strength: { mean: 1, std: 0.05 },
+    // S10 fix 1 (#3177): whose link it is comes from the ONE authority; these links carry no stamp, so it is `unknown`.
+    expect(state.links.find((e: Edge) => id(e) === 'capacity->goal')).toEqual({ from: 'capacity', to: 'goal', whose: 'unknown', strength: { mean: 1, std: 0.05 },
       band: 'very strong', exists_probability: 1, counted_once: true, sizing: 'unmarked' });
-    const expected = { from: 'hire', to: 'capacity', strength: { mean: 0.4, std: 0.05 }, band: 'strong', exists_probability: 0.8, sizing: 'unmarked' };
+    const expected = { from: 'hire', to: 'capacity', whose: 'unknown', strength: { mean: 0.4, std: 0.05 }, band: 'strong', exists_probability: 0.8, sizing: 'unmarked' };
     const control = state.links.find((e: Edge) => id(e) === 'hire->capacity');
     expect(control).toEqual(expected);
     expect(JSON.stringify(control)).toBe(JSON.stringify(expected));
