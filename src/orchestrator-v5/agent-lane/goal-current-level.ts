@@ -719,6 +719,19 @@ export async function proposeGoalCurrentLevel(
 ): Promise<ToolResult> {
   const g = await deps.readGraph(ctx.scenario_id);
   if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+  return goalCurrentLevelProposalOn(g, deps, ctx, args);
+}
+
+/**
+ * ⭐ M2a: the same proposal on a model already read. Synchronous, so the statement door's {goal, level} row runs it as its
+ * writer (`statement-door/fields/goal-level.ts`): one builder of the goal's current level, whichever door it is reached by.
+ */
+export function goalCurrentLevelProposalOn(
+  g: GoalLevelRead,
+  deps: { readonly proposals: ProposalStore },
+  ctx: AgentToolContext,
+  args: GoalCurrentLevelArgs,
+): ToolResult {
   const goals = g.nodes.filter((n) => n.kind === 'goal');
   const goalNames = goals.map((n) => `"${n.label}"`).join(', ') || 'none';
 
