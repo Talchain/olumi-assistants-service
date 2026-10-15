@@ -26,6 +26,7 @@
  * S0); the door stamps `USER_EDIT_SOURCE`, the product's literal for a figure the user typed in chat.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
@@ -417,7 +418,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       expect(proposal?.public_label).toContain(`Your words: “${words}” in “Our deadline is ${words}”.`);
     } else {
       expect(output).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown',
-        detail: 'The retained source is not verified. Its origin stays unknown; nothing was prepared. Ask for its source.' });
+        detail: UNKNOWN_ORIGIN_DETAIL });
       expect(await heldOnLatestRow()).toEqual([]);
       expect(approveChipOf(result)).toBeUndefined();
     }
@@ -445,7 +446,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
     expect(saw).toBe(true);
     expect(callOf(result)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
-    expect(JSON.stringify(output)).toContain('origin stays unknown');
+    expect(JSON.stringify(output)).toContain(UNKNOWN_ORIGIN_DETAIL);
     expect(await heldOnLatestRow()).toHaveLength(0);
     expect(bytes()).toBe(before);
   });
@@ -506,7 +507,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const result = await turn({ message: 'Use those hiring times.', agent_session_id: randomUUID() });
     const call = result._agent.tool_calls.find(c => c.name === 'propose_hiring_times');
     expect(call, JSON.stringify(output)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
-    expect(JSON.stringify(output)).toContain('origin stays unknown');
+    expect(JSON.stringify(output)).toContain(UNKNOWN_ORIGIN_DETAIL);
   });
 
   it.each(['fresh', 'restored', 'capped'])('A2i incomplete %s source miss refuses the quoted figure; explicit own estimate is a new act', async source => {
@@ -989,7 +990,9 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     let out: Record<string, unknown> = {};
     const again = await propose(factorArgs(), 'Add those figures.', o => { out = o; });
     expect(callOf(again)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
-    expect(JSON.stringify(out.today_not_set)).toContain('origin stays unknown');
+    // The same meaning, in plain words (DL 15 Oct): Olumi can't tell whose figure it is, and never relabels it as its own.
+    expect(JSON.stringify(out.today_not_set)).toContain('is the user’s figure or its own estimate, so nothing was prepared');
+    expect(JSON.stringify(out.today_not_set)).toContain('never relabel it as Olumi’s estimate');
     expect(bytes()).toBe(before);
   }, 120_000);
 

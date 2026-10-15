@@ -5,7 +5,7 @@ import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpret
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
-import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { FIGURES_LEFT_OUT_NOTE, statementOrigin, UNKNOWN_ORIGIN_DETAIL, type FigureLeftOut } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
@@ -6688,6 +6688,7 @@ export function createAgentCapabilities(
         goal_id: string; goal: Record<string, unknown> }[] = [];
       const riskRangeNeeded: { label: string; within_months: number }[] = [];
 
+      const figuresLeftOut: FigureLeftOut[] = [];
       for (const given of input) {
         let a = given;
         // AIE #94 6140145484: incomplete source never supplies a missing authorship declaration.
@@ -6884,9 +6885,16 @@ export function createAgentCapabilities(
         const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
           && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
-        if (statementOrigin(writtenAbout || quote !== null,
-          figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
+        const collides = figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text);
+        if (statementOrigin(writtenAbout || quote !== null, collides, ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
+          // Olumi's declared estimate that is the same number the user wrote elsewhere: left out and asked (FIGURES_LEFT_OUT_NOTE).
+          if (a.user_stated === false && a.revise !== true && collides && !writtenAbout && quote === null) {
+            const unit = String(a?.unit ?? nodeUnit ?? '');
+            const words = quoteOfFigure(Number(a.value), unit, ctx.unverified_user_text) ?? quoteOfFigure(Number(a.value), unit, g.brief_text);
+            figuresLeftOut.push({ factor: node.label, factor_id: node.id, value: Number(a.value), unit, ...(words !== null ? { your_words: words } : {}) });
+            continue;
+          }
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         /**
@@ -6930,6 +6938,8 @@ export function createAgentCapabilities(
           detail: 'Keeping Olumi\u2019s estimate is its own approval. Nothing was proposed: propose the figures to keep in one call '
             + 'and any other values in another.' };
       }
+      // Every figure left out for its origin and nothing else adoptable: the one refusal, as before (K3 rows).
+      if (adopted.length === 0 && figuresLeftOut.length > 0) return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       if (adopted.length === 0) {
         return {
           ok: false, mutated: false, refusal: 'nothing_to_adopt',
@@ -7052,6 +7062,7 @@ export function createAgentCapabilities(
           ...(a.kept ? { keeps_olumis_estimate: true } : {}),
         })),
         ...(notKeepable.length > 0 ? { not_keepable: notKeepable, not_keepable_note: NOT_KEEPABLE_NOTE } : {}),
+        ...(figuresLeftOut.length > 0 ? { figures_left_out: figuresLeftOut, figures_left_out_note: FIGURES_LEFT_OUT_NOTE } : {}),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
@@ -7153,6 +7164,11 @@ export function createAgentCapabilities(
       };
       const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
       if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
+      // A level left out for its origin is ASKED of the user (FIGURES_LEFT_OUT_NOTE), never forgotten: not a missing pair.
+      const leftOut = [a, b].flatMap((r) => (r !== null && Array.isArray(r.figures_left_out) ? r.figures_left_out as FigureLeftOut[] : []));
+      const asked = new Set(leftOut.filter((f) => f.option_id !== undefined).map((f) => `${f.option_id}::${f.factor_id}`));
+      const withAsked = (paths: ReadonlySet<string>): Set<string> => new Set([...paths, ...asked]);
+      const leftOutFields = leftOut.length > 0 ? { figures_left_out: leftOut, figures_left_out_note: FIGURES_LEFT_OUT_NOTE } : {};
       // ⛔ A name that matched two entities travels to the joined result from EITHER half,
       // so the starting point never looks complete at the moment of consent.
       const ambiguousTargets = [a, b].flatMap((r) => (r !== null && Array.isArray(r.ambiguous_targets) ? r.ambiguous_targets : []));
@@ -7160,7 +7176,7 @@ export function createAgentCapabilities(
       // Only one half could be proposed: it is an ordinary proposal already.
       if (made.length === 1) {
         const only = proposals.get(made[0].proposal_id as string);
-        const missing = await missingPairs(ctx, levelPathsOf(only !== undefined ? [only] : []));
+        const missing = await missingPairs(ctx, withAsked(levelPathsOf(only !== undefined ? [only] : [])));
         if (missing === null || missing.length > 0) {
           if (only !== undefined) proposals.discard(only.proposal_id);
           if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -7172,7 +7188,7 @@ export function createAgentCapabilities(
           });
         }
         const ifApproved = await readinessIfApplied(ctx, only?.operations ?? []);
-        return { ...made[0], ...ambiguity, ...refused, readiness_if_approved: ifApproved,
+        return { ...made[0], ...ambiguity, ...refused, ...leftOutFields, readiness_if_approved: ifApproved,
           ...(stillBlockedNote(ifApproved) !== '' ? { note: `${String(made[0].note ?? '')}${stillBlockedNote(ifApproved)}` } : {}) };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
@@ -7180,7 +7196,7 @@ export function createAgentCapabilities(
         for (const h of halves) proposals.discard(h.proposal_id);
         return { ok: false, mutated: false, refusal: 'model_changed_while_proposing', detail: 'The model changed while this was being put together. Read the state again and propose once more.' };
       }
-      const missing = await missingPairs(ctx, levelPathsOf(halves));
+      const missing = await missingPairs(ctx, withAsked(levelPathsOf(halves)));
       if (missing === null || missing.length > 0) {
         for (const h of halves) proposals.discard(h.proposal_id);
         if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -7226,6 +7242,7 @@ export function createAgentCapabilities(
         // review of #1800, 5806926323): when both halves succeed, the value half's omission otherwise
         // never reached the Agent, and the starting point looked complete at the moment of consent.
         ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
+        ...leftOutFields,
         ...ambiguity,
         ...refused,
         // The same rule as `propose_assumptions`: a level the user gave (`stated_by: 'user'`) or a value marked
@@ -7271,6 +7288,7 @@ export function createAgentCapabilities(
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
       const unitDiffers: { option: string; factor: string; value: unknown; declared_unit: string; sent_unit: string; detail: string }[] = [];
       const rangesNotRecorded: { option: string; factor: string; reason: string }[] = [];
+      const figuresLeftOut: FigureLeftOut[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -7429,8 +7447,17 @@ export function createAgentCapabilities(
         // A rejected range has no bearing on the ordinary level or its authorship.
         const userWrote = claimedByUser && (likelyRange !== undefined
           || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
-        if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
+        const collides = figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
+          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text);
+        if (statementOrigin(userWrote, collides, ctx.user_text_complete, i.user_stated === false) === 'unknown') {
+          // Olumi's declared estimate that is the same number the user wrote elsewhere: left out and asked (FIGURES_LEFT_OUT_NOTE).
+          if (i.user_stated === false && collides && !userWrote) {
+            const unit = String(factorUnitOf(g.raw, factor) ?? '');
+            const words = quoteOfFigure(raw, unit, ctx.unverified_user_text) ?? quoteOfFigure(raw, unit, g.brief_text);
+            figuresLeftOut.push({ option: option.label, option_id: option.id, factor: factor.label, factor_id: factor.id, value: raw, unit,
+              ...(words !== null ? { your_words: words } : {}) });
+            continue;
+          }
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         }
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
@@ -7575,6 +7602,8 @@ export function createAgentCapabilities(
         }
         return true;
       });
+      // Every figure left out for its origin and nothing else to set: the one refusal, as before (K3 rows).
+      if (changed.length === 0 && figuresLeftOut.length > 0) return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       if (changed.length === 0) {
         return {
           ok: false, mutated: false, refusal: unitDiffers.length > 0 ? 'unit_differs_from_declared' : 'nothing_to_set',
@@ -7655,6 +7684,7 @@ export function createAgentCapabilities(
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
         ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
+        ...(figuresLeftOut.length > 0 ? { figures_left_out: figuresLeftOut, figures_left_out_note: FIGURES_LEFT_OUT_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(rangesNotRecorded.length > 0 ? {
           ranges_not_recorded: rangesNotRecorded,
@@ -10946,7 +10976,8 @@ export function createAgentCapabilities(
         if (origin === 'unknown') {
           originUnknown = true;
           todayNotSet.push({ factor: label, value: t.value,
-            reason: `The retained source of ${shown} for "${label}" is not verified. Its origin stays unknown; nothing was prepared. Ask for its source rather than relabelling it as Olumi’s estimate.` });
+            reason: `Olumi cannot tell whether ${shown} for "${label}" is the user’s figure or its own estimate, so nothing was prepared. `
+              + 'Ask the user, in plain words, whether it is theirs; never relabel it as Olumi’s estimate, and never call this a source check, an origin or a verification.' });
           continue;
         }
         // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
