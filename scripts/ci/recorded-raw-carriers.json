@@ -51,7 +51,7 @@
   "src/orchestrator-v5/agent-lane/__tests__/row5-stated-level-range.test.ts": 2,
   "src/orchestrator-v5/agent-lane/__tests__/signed-change-one-value-space.test.ts": 1,
   "src/orchestrator-v5/agent-lane/__tests__/size-retry-second-attempt.test.ts": 1,
-  "src/orchestrator-v5/agent-lane/__tests__/sys2-level-binding.test.ts": 3,
+  "src/orchestrator-v5/agent-lane/__tests__/sys2-level-binding.test.ts": 2,
   "src/orchestrator-v5/agent-lane/__tests__/sys2-retire-carriers.test.ts": 8,
   "src/orchestrator-v5/agent-lane/__tests__/sys2-setting-statement.test.ts": 7,
   "src/orchestrator-v5/agent-lane/__tests__/time-close-chain.test.ts": 2,

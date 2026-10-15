@@ -128,7 +128,7 @@ export const TRUST_DRAFTER_STATEMENTS = true;
 
 /**
  * The drafter's statement that `subject`'s `field` is `value` (a point, or a range's own figure), trusted as filed: the quote is a
- * whole sentence of the brief and writes |value|. Its quote, or `undefined` when the drafter filed none. `raw` is
+ * whole sentence of the brief and writes |value| (and a range's own ends). Its quote, or `undefined` when the drafter filed none. `raw` is
  * `draftStatements(model)`. Pure.
  */
 export function drafterStatement(raw: unknown, brief: string, subject: DraftedSubject, field: StatementField, value: number): string | undefined {
@@ -141,7 +141,9 @@ export function drafterStatement(raw: unknown, brief: string, subject: DraftedSu
     if (r['negated'] === true || (r['form'] !== 'point' && r['form'] !== 'range') || r['value'] !== value) continue;
     const quote = typeof r['quote'] === 'string' ? r['quote'].trim() : '';
     if (quote === '' || !wholeStatementIn(brief, quote)) continue;
-    if (figuresWritten(quote).some((f) => f.low === Math.abs(value))) return quote;
+    const written = new Set(figuresWritten(quote).map((f) => f.low));
+    const ends = r['form'] === 'range' ? [r['low'], r['high']] : [];
+    if (written.has(Math.abs(value)) && ends.every((e) => typeof e === 'number' && written.has(Math.abs(e)))) return quote;
   }
   return undefined;
 }

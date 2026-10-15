@@ -57,10 +57,11 @@ describe('SYSTEM 2 step 3: an option\'s setting through its statement; a draft w
 
   it('EQUIVALENCE on served settings the verifier cannot credit (capacity e4ff6039, pricing 30d64bc7): the statement path says what the legacy one says', () => {
     expect(settingOk(legacyOnly(CAPACITY.raw), CAPACITY.brief, 'Add one specialist')).toBe(false);
-    expect(settingOk(CAPACITY.raw, CAPACITY.brief, 'Add one specialist')).toBe(false);
+    // S4 SHORTCUT (Paul 15 Oct 09:15Z): the drafter's setting statement is trusted as filed, so the statement path credits it.
+    expect(settingOk(CAPACITY.raw, CAPACITY.brief, 'Add one specialist')).toBe(true);
     const iv = optionOf(PRICING.raw, 'Raise Pro price to £59').interventions[0];
     const legacy = settingOk(PRICING.raw, PRICING.brief, 'Raise Pro price to £59');
     const viaStatement = settingOk({ ...PRICING.raw, statements: [statement('Raise Pro price to £59', iv.factor_label, iv.stated_evidence.quote, 59)] }, PRICING.brief, 'Raise Pro price to £59');
-    expect([legacy, viaStatement]).toEqual([false, false]);
+    expect([legacy, viaStatement]).toEqual([false, true]);
   });
 });
