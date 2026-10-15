@@ -261,11 +261,13 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
   }
 }
 function verified(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
-  const e = intervention.stated_evidence;
-  if (typeof brief !== 'string' || e == null) return false;
+  if (typeof brief !== 'string') return false;
+  // SYSTEM 2's whole-raw switch: a draft with statements[] gives the quote only through its verified statement.
+  const quote = carriesStatements(model) ? statedSettingQuote(model, option, intervention, brief) : intervention.stated_evidence?.quote ?? null;
+  if (quote === null) return false;
   const sentences = assertions(brief);
   // Only the unique normalized quote is model evidence. Every offset, including amount_start, is ignored.
-  const a = exactEvidence(brief, e.quote, sentences);
+  const a = exactEvidence(brief, quote, sentences);
   // A stated option setting is one ordinary sentence. Longer runs are refused before any per-amount reader runs, so
   // the shared binder below never sees an unbounded sentence (r2 buddy P0: 1,112 clauses scaled 10x from 5k to 20k).
   if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
@@ -799,7 +801,42 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
 
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
-  return labelBoundFactorLevel(model, factor, brief) || statementBindsFactorLevel(model, factor, brief);
+  return carriesStatements(model) ? statementBindsFactorLevel(model, factor, brief) : labelBoundFactorLevel(model, factor, brief);
+}
+
+/**
+ * ⭐ SYSTEM 2, THE WHOLE-RAW SWITCH (DL ruling 15 Oct ~02:1xZ): a draft that carries `statements[]` is read ONLY through its
+ * statements; the legacy carriers (`baseline_evidence`, `stated_evidence`) apply only to a draft with no `statements[]` at
+ * all (recorded before SYSTEM 2), never as a per-subject fallback. Both carriers retire together once fresh served raws exist.
+ */
+export function carriesStatements(model: CandidateModel): boolean {
+  return Array.isArray(Reflect.get(model, 'statements'));
+}
+
+/** A verified level statement for this factor that writes its figure: the user's words for it, whatever its role (origin only). */
+export function statementCitesLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  const value = factor.baseline_value;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return false;
+  const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
+  return (sourceMapOf(Reflect.get(model, 'statements'), brief).verified.get(key) ?? [])
+    .some((s) => s.negated !== true && (s.low === Math.abs(value) || s.high === Math.abs(value)));
+}
+
+/**
+ * The verified statement of an option's setting of a factor (`{option, factor_label}`, field level), as the one quote the
+ * setting's existing checks read: the sentence the user wrote, verified once, with exactly the setting's figure, and no
+ * other subject bound to that figure in it. Otherwise none: the setting is not the user's.
+ */
+function statedSettingQuote(model: CandidateModel, option: Option, intervention: Intervention, brief: string): string | null {
+  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const key = subjectKey({ kind: 'option', label: option.label, factor_label: intervention.factor_label }, 'level');
+  const quotes = [...new Set((map.verified.get(key) ?? [])
+    .filter((s) => s.form === 'point' && s.low === intervention.value && s.negated !== true).map((s) => s.quote))];
+  if (quotes.length !== 1) return null;
+  const quote = quotes[0]!;
+  const elsewhere = [...map.verified.entries()].some(([other, statements]) => other !== key
+    && statements.some((s) => s.quote === quote && (s.low === intervention.value || s.high === intervention.value)));
+  return elsewhere ? null : quote;
 }
 
 /** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
