@@ -1,8 +1,7 @@
 /**
- * ⭐ S7 PoC SWITCH (Paul 15 Oct 09:15Z via DL, SYSTEMS-REPLAN "PoC SHORTCUT RULE"): on a reply the AI wrote, the AI writes the
- * Run-turn coaching from the one Run-facts packet (`run_facts`, #3192) and the host appends no prose of its own: no screen
- * chance lines, no withheld `say`, no break-even line, no gate "why", no left-out correction, no reshaped face. Only the
- * egress CHECKS run (they drop what the engine did not produce; they add nothing). A host-written reply (the AI wrote none,
- * or failed) keeps the host's lines. One switch; deletion of the switched-off composers is post-PoC.
+ * B1: the AI writes Run/Explain coaching from one Run-facts packet. Host coaching additions are inactive;
+ * factual safeguards still supply an omitted chance/qualification or correction, and order chance evidence
+ * before a win share. A fact already shown in full on the bound card is not repeated in the reply.
+ * Host-written fallbacks retain their factual lines. Ordinary conversational turns keep their existing path.
  */
 export const AI_WRITES_RUN_TURN = true;

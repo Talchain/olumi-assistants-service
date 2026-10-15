@@ -82,7 +82,6 @@ import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWi
 import { chatRiskPreconditionFor } from '../../routing/chat-risk-precondition.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, SAY_SHOWN_NOTE, type GoalChanceWithheld } from '../goal-chance-withheld.js';
-import { AI_WRITES_RUN_TURN } from '../ai-writes-run-turn.js';
 import { guidedSizingProgressLine } from '../guided-sizing.js';
 import { runExplanationKeyForRecord } from '../run-explanation.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -469,7 +468,7 @@ function withIdentityCard(hint: { readonly available: true; readonly note: strin
 function withGoalChance(result: unknown, graph?: unknown, sayShown = false): { goal_chance?: GoalChanceWithheld } {
   const withheld = goalChanceWithheldForAgent(result, graph);
   if (withheld === undefined) return {};
-  return { goal_chance: sayShown && !AI_WRITES_RUN_TURN && !withheld.say.includes('?') ? { ...withheld, say_shown: SAY_SHOWN_NOTE } : withheld };
+  return { goal_chance: sayShown && !withheld.say.includes('?') ? { ...withheld, say_shown: SAY_SHOWN_NOTE } : withheld };
 }
 
 /** A raw graph-read body as the goal-certainty rule reads it: the same fields `readGraph` keeps. */

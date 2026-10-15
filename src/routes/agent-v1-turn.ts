@@ -126,7 +126,7 @@ import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizing
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed, checkScreenLineClaims } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -1160,8 +1160,8 @@ export function leavesProposalAwaitingApproval(
 }
 
 /** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
-function placeExplainCaveat(text: string, caveat: string, add = true): string {
-  if (!add) return withSentenceSaidOnce(text, caveat);
+function placeExplainCaveat(text: string, caveat: string, keepFirst = false): string {
+  if (keepFirst) return withB3LinesAtRest(withSentenceSaidOnce(text, caveat, true), [caveat]);
   return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
 }
 
@@ -3598,8 +3598,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // 2a: the interpret role's measured budget (Sol, effort low) and a deadline; the Run stands whatever happens here.
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
-          // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          // Execution and optional output-format restrictions precede the single consolidated coaching instruction.
+          instructions: `${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -5249,7 +5249,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
       && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
     const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, !aiRunTurn));
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, aiRunTurn));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
@@ -5412,7 +5412,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // user's model followed a reply about public evidence).
         // BYPASS1 keeps it: the gate appends its reason only when it cut a sentence, so the reply accounts for the cut.
         // SAY-SHOWN: where the AI was told `say` is shown, `say` gives the reason; the gate's own "why" would repeat it.
-        sayWhyWithheld: !aiRunTurn && fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis'))
+        sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis'))
           && !goalChanceSayPromisedThisTurn(result.tool_results),
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
         ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
@@ -5493,7 +5493,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // or explains the current Run keeps the line with the rest of the chance face (never-reask, one-reply-build rows).
     const chanceFaceTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis')
       || (fastPath === 'explain' && narrationStatus !== 'stale');
-    goalChanceOwed = aiRunTurn || stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn)
+    goalChanceOwed = stateFacts.current_state_unknown === true || (!sayPromised && !hostProse && !chanceFaceTurn)
       || (!sayPromised && cardShowsWithheld) ? null
       : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
         identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
@@ -5558,10 +5558,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Only a line the card displays IN FULL goes (Codex r1 on #3027): a face without the line's shortfall sentence
       // leaves the whole line said, so nothing the card does not show disappears.
       const onCard = new Set(screenLines.filter((l) => cardFaces.get(l.option_id) === l.chance).map((l) => l.option_id));
-      const suppliedChance = screenLines.some(l => String(wireBody.assistant_text).includes(l.chance)
-        || ownWordsLeadTexts(String(wireBody.assistant_text), l, sentencesOf).length > 0);
-      const ranged = aiRunTurn && (suppliedChance || cardBound) ? { text: checkScreenLineClaims(wireBody.assistant_text, screenLines), added: 0 }
-        : withScreenLinesOwed(wireBody.assistant_text, screenLines,
+      // Add only missing factual units: a partial card or one option's chance cannot stand for another's shortfall.
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
         goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent, cardDetail)
           .filter((note) => cardDetail === null || !cardDetail.has(note)), { onCard });
       if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
@@ -5752,7 +5750,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const runOrExplainTurn = ranAnalysisThisTurn || fastPath === 'explain';
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
-      const runWidenWords = runOrExplainTurn || firstAnalysisExists
+      const runWidenWords = faceContract === 'run' || firstAnalysisExists || chanceShownFor(chanceCells)
         ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult)) : {};
       const widenNote = chanceShownFor(chanceCells) && runWidenWords.saidByOwnLines !== true
         ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
