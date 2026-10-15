@@ -2212,7 +2212,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // S-E GOALS: a chance goal's ONE withhold speaks alone (Codex buddy r1 on #2742): no later goal-figure withhold is added.
     if (!chanceGoalWithheld) {
       const before = response;
-      response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id);
+      response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id, storedGoalRows);
       // Record the additional typed cause only AFTER the target gate has applied its original P1/P5 outcome rules.
       response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis, storedGoalRows);
       if (response !== before) {
@@ -2264,7 +2264,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // ⭐ Recovery Batch C (amendment 3): a target read more than one way is not tested until the user says which.
-    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id);
+    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id, (id) => ownTargetRowIds(storedGoalRows, id));
     // ⛔ AMEND item 2 (kept, DL 12 Oct): a level chance on Olumi's own estimate of the goal's level is refused by the licence;
     // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
     // ⭐ D3 (AIE #94 6128697025; recovery Batch D): a change target whose effects are not stated at the period's end (ruling
@@ -4046,7 +4046,14 @@ export function withholdGoalFiguresForChanceGoal<E>(response: E, graph: unknown)
   });
 }
 
-export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown, goalId?: unknown): E {
+/** The goal's OWN stated target row(s) (`role` = target on THIS node), by identity: the rows a goal-scoped withhold binds to. */
+export function ownTargetRowIds(storedConstraints: unknown, goalId: unknown): string[] {
+  return (Array.isArray(storedConstraints) ? storedConstraints : []).flatMap((r) => r !== null && typeof r === 'object'
+    && (r as Record<string, unknown>).role === GOAL_TARGET_ROLE && (r as Record<string, unknown>).node_id === goalId
+    && typeof (r as Record<string, unknown>).constraint_id === 'string' ? [(r as Record<string, unknown>).constraint_id as string] : []);
+}
+
+export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown, goalId?: unknown, storedConstraints?: unknown): E {
   const { scored, shown } = goalFigureOptions(response);
   // An earlier per-option withhold must not erase that option's own target reason beside the remaining figures.
   // Scope all scored options; a run an earlier withhold already emptied keeps that withhold's reason alone.
@@ -4079,9 +4086,14 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   const speech = ids.length < scored.length && verdict.failures.every(f => f.case === 'c')
     ? scopedTargetSpeech(graph, verdict, paths, ids, GOAL_FIGURES_TARGET_NOT_TESTABLE) : undefined;
   const { say: _say, first_ask: _ask, ...unspoken } = warning;
+  // ⭐ S9 (marketing widen5 bcdf70eb, judge items 2/5): the reading is about THIS goal's target, so it binds to that goal's own
+  // stated target row(s), as the missing-current-level withhold does. Unbound, the several-targets licence put conversion
+  // rate's "Does ‘conversion rate’ mean…" on the customer target's line. No stored target row: unbound, as before.
+  const ownTargets = ownTargetRowIds(storedConstraints, verdict.goal_id);
   const recorded = {
     ...(speech === undefined ? warning : unspoken),
     ...speech,
+    ...(ownTargets.length > 0 ? { constraint_ids: ownTargets } : {}),
     ...(accepted.length > 0 ? { rests_on_accepted_olumi: accepted } : {}),
     ...(Object.keys(perOption).length > 0 ? { per_option: perOption } : {}),
   };
@@ -4103,9 +4115,7 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
   const { scored } = goalFigureOptions(response);
   if (goal === undefined || scored.length === 0) return response;
   const label = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'The goal';
-  const ownTargets = (Array.isArray(storedConstraints) ? storedConstraints : []).flatMap((r) => r !== null && typeof r === 'object'
-    && (r as Record<string, unknown>).role === GOAL_TARGET_ROLE && (r as Record<string, unknown>).node_id === goal.id
-    && typeof (r as Record<string, unknown>).constraint_id === 'string' ? [(r as Record<string, unknown>).constraint_id as string] : []);
+  const ownTargets = ownTargetRowIds(storedConstraints, goal.id);
   // AIE MA1: a goal measured over the window from launch has no level today; the gap is that window's forecast.
   const launch = launchWindowOf(goal);
   return withholdOptionGoalFigures(response, new Set(scored), {

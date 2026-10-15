@@ -188,7 +188,13 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
  * option's claims AGAINST the target are withheld (the ordering stays, as for any untestable target), and the question is
  * the reason the user reads. Returns `envelope` itself when there is no open question. Pure.
  */
-export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, goalId: unknown): E {
+export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, goalId: unknown,
+  /**
+   * ⭐ S9 (marketing widen5 bcdf70eb, judge items 2/5): the goal's OWN stated target row(s). The question is about THIS goal's
+   * target, so the warning binds to them; unbound, the several-targets licence put "Does ‘conversion rate’ mean…" on the
+   * customer target's line. None given: unbound, as before.
+   */
+  ownTargetRowsOf: (goalId: unknown) => readonly string[] = () => []): E {
   if (!isRec(envelope)) return envelope;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -207,6 +213,7 @@ export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, go
   const out = withholdOptionGoalFigures(envelope, new Set(scored), {
     code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message, say: question,
     node_ids: [String(goalId)], option_ids: scored, detail: { reason: conditions ? 'conditions_not_kept' : 'target_reading_open' },
+    ...((rows) => (rows.length > 0 ? { constraint_ids: [...rows] } : {}))(ownTargetRowsOf(goalId)),
   }, { keepOutcome: true, keepOrdering: true });
   // ⛔ R5-5 (DL ruling): the conditions reason WINS. Sizing a link (the placeholder path's ask for today's level) cannot bring
   // this chance back while the reading is refused, so that ask is not offered as the reason here; the links stay unsized in

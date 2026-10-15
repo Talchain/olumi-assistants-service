@@ -43,7 +43,7 @@ describe('S4: a stated net loss is the user\'s own figure, read as its negative'
 
   it('GYM: "losing a net 15 members a month" is the user\'s −15, recorded on its factor', async () => {
     const n = node(await registered(GYM), 'Net monthly member change');
-    expect(n.observed_state).toMatchObject({ value: -15, source: 'brief_extraction', extractionType: 'explicit' });
+    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'brief_extraction', extractionType: 'explicit' });
     expect(n.observed_state.user_material_unverified).toBeUndefined();
     expect(levels(n)).toEqual([[LOSS, -15]]);
   });
@@ -58,7 +58,28 @@ describe('S4: a stated net loss is the user\'s own figure, read as its negative'
     const edit = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: gaining } : s)) });
     const n = node(await registered(GYM, edit, GYM.brief.replace(LOSS, gaining)), 'Net monthly member change');
     expect(levels(n)).toEqual([]);
-    expect(n.observed_state).toMatchObject({ value: -15, source: 'cee_inference', user_material_unverified: true });
+    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'cee_inference', user_material_unverified: true });
+  });
+
+  const GROSS = "Our community gym has 320 members, and we lose 15 members a month at the moment.";
+  const asGross = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => (s.quote === LOSS ? { ...s, quote: GROSS } : s)) });
+  it('AIE 6187351293: a GROSS loss ("we lose 15 members a month") never verifies −15 for a net change; it stays retained, unverified', async () => {
+    const n = node(await registered(GYM, asGross, GYM.brief.replace(LOSS, GROSS)), 'Net monthly member change');
+    expect(levels(n)).toEqual([]);
+    expect(n.observed_state).toMatchObject({ raw_value: -15, source: 'cee_inference', user_material_unverified: true });
+  });
+
+  it('CONTRAST: the same gross words keep their count: "Members lost per month" at 15 is the user\'s 15', async () => {
+    const asCount = (r: Rec): Rec => asGross({
+      ...r,
+      factors: r.factors.map((f: Rec) => (f.label === 'Net monthly member change' ? { ...f, label: 'Members lost per month', baseline_value: 15 } : f)),
+      links: r.links.map((l: Rec) => ({ ...l, from: l.from === 'Net monthly member change' ? 'Members lost per month' : l.from,
+        to: l.to === 'Net monthly member change' ? 'Members lost per month' : l.to })),
+      statements: r.statements.map((s: Rec) => (s.subject.label === 'Net monthly member change'
+        ? { ...s, subject: { ...s.subject, label: 'Members lost per month' }, value: 15 } : s)),
+    });
+    const n = node(await registered(GYM, asCount, GYM.brief.replace(LOSS, GROSS)), 'Members lost per month');
+    expect(levels(n)).toEqual([[GROSS, 15]]);
   });
 
   it('CONTROL: a count of losses keeps its magnitude: "Members lost per month" at 15 is still the user\'s 15', async () => {

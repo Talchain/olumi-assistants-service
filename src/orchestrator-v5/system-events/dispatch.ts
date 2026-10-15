@@ -4865,6 +4865,36 @@ export async function commitOptionStatusInProcess(input: CommitOptionStatusInput
 }
 
 /**
+ * ⭐ S5 (DL 15 Oct): the option-rename card's press, in-process, through the ONE durable label writer (`structural_rename`) with
+ * both of its gates: the analysis base hash and the label the card showed (`expected_label`; a rename landing in between refuses).
+ *   · `written`: the committed bytes hold the new label; `stale`: the base moved, nothing written;
+ *   · `refused`: the writer committed its honest refusal (another label is held); `unconfirmed`: no typed evidence either way.
+ */
+export interface CommitOptionRenameInput {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly node_id: string;
+  readonly expected_label: string;
+  readonly label: string;
+  readonly base_graph_hash: string;
+}
+export type CommitOptionRenameResult =
+  | { readonly status: 'written' } | { readonly status: 'stale' } | { readonly status: 'refused' } | { readonly status: 'unconfirmed' };
+
+export async function commitOptionRenameInProcess(input: CommitOptionRenameInput, requestId: string): Promise<CommitOptionRenameResult> {
+  const event = { kind: 'structural_rename' as const, node_id: input.node_id, expected_label: input.expected_label, label: input.label,
+    base_graph_hash: input.base_graph_hash } as Extract<SystemEventTurnPayload['event'], { kind: 'structural_rename' }>;
+  const payload = { kind: 'system_event', turn_id: input.turn_id, scenario_id: input.scenario_id, stage: 'frame', event } as SystemEventTurnPayload;
+  const r = await dispatchStructuralRename(payload, event, requestId, Date.now());
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
+  if (!r.commitPerformed || r.graph === null || r.graph === undefined) return { status: 'unconfirmed' };
+  return findStaleRenamedLabel(r.graph as Record<string, unknown>, input.node_id, input.label) === null ? { status: 'written' } : { status: 'refused' };
+}
+
+/**
  * `structural_add` — commit the new entry, verify it in the committed bytes.
  *
  * Same shape as its two siblings; two things differ, and both are derived from

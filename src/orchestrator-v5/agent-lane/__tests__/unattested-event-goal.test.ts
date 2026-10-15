@@ -268,6 +268,10 @@ describe('an unattested event is never saved as the goal; the one existing retry
     const brief = FX.brief.replace(EVENT_WORDS, 'We must launch the app by March 2027 with the current team.');
     const d = draft();
     d.goal = { ...d.goal, metric: 'Launch the app', deliverable: 'the app launch', source_quote: 'We must launch the app by March 2027 with the current team.' };
+    // The statement era (AIE 6184383302): the goal's own target statement, which holds its period ("by March 2027").
+    (d as unknown as { statements: unknown[] }).statements = [...(((d as unknown as { statements?: unknown[] }).statements) ?? []),
+      { quote: 'We must launch the app by March 2027 with the current team.', subject: { kind: 'goal', label: 'Launch the app', to_label: null, factor_label: null },
+        field: 'target', form: 'describes', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }];
     expect(briefAttestsEventByDate(brief, d.goal as never), 'PRECONDITION: attested').toBe(true);
     expect(unattestedEventGoal(d as unknown as CandidateModel, brief, false)).toBeNull();
     const { graph, result, calls } = await construct([JSON.stringify(d)], brief);

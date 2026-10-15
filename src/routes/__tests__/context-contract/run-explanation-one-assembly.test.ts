@@ -208,7 +208,7 @@ describe('Explain scoped assembly safety', () => {
       // S10 fix 1 + the AIE's EXACT links sentence (#94 6181933060, links' vocabulary per 6182232796): the host contract's links
       // clause only: 40,783 → 40,922 bytes (+139). Captured from the SENT body: staging's reproduces d6ce2c69… and 40,783 bytes, and with
       // exactly that clause swapped equals this head's byte for byte.
-      .toBe('571c6f9fb1408c2072658d131908e53c15de69e9ed3c8d450122453e51edad57');
+      .toBe('f76858b6f976e5f82d7550d5670feaa3965b187cea47e86d0ef40a0a3e0877fa');
   },60000);
 });
 

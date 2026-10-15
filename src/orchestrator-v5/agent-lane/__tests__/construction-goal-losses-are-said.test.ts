@@ -183,8 +183,17 @@ describe('a deadline the model cannot hold is asked where the user always sees i
     expect(qs.filter((q) => /within 18 months/.test(q))).toHaveLength(1);
   });
 
-  it('CONTROL: a goal with no deadline adds no deadline question', async () => {
+  it('CONTROL: a goal with no count typed adds no invented count; with no target statement, the brief\'s own words are asked with the missing reading (AIE 6184383302)', async () => {
     const r = await build(NO_DEADLINE);
-    expect((r.open_questions ?? []).filter((q) => /within \d+ months|no deadline/.test(q))).toHaveLength(0);
+    expect((r.open_questions ?? []).filter((q) => /within \d+ months/.test(q))).toHaveLength(0);
+    expect((r.open_questions ?? []).filter((q) => /no deadline/.test(q))).toEqual([
+      'Is "eighteen months" the period by which "New ARR" should be achieved? Your brief does not say, so the model holds no deadline for it.']);
+  });
+
+  it('CONTROL (statement era): the goal\'s own target statement holds the period, so nothing is asked about it', async () => {
+    const r = await build({ ...NO_DEADLINE, statements: [{ quote: 'Budget is £900k either way and we want to add £3m of new ARR within eighteen months.',
+      subject: { kind: 'goal', label: 'New ARR', to_label: null, factor_label: null }, field: 'target', form: 'describes',
+      value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }] });
+    expect((r.open_questions ?? []).filter((q) => /within \d+ months|no deadline|eighteen months/.test(q))).toHaveLength(0);
   });
 });
