@@ -6121,7 +6121,6 @@ export function createAgentCapabilities(
       };
     },
 
-    /** Propose the current-team duration from the Agent's reading of the user's words; a single time carries Olumi's assumed range. */
     /**
      * ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (M1). The user's own statement about ONE subject: its field's row reads it, it is bound
      * to that subject (its words, the selection, or the ask it answers; never by elimination) and verified as their whole words
@@ -6164,6 +6163,7 @@ export function createAgentCapabilities(
         note: DOOR_PROPOSED_NOTE + stillBlockedNote(preview) };
     },
 
+    /** Propose the current-team duration from the Agent's reading of the user's words; a single time carries Olumi's assumed range. */
     async proposeTeamTime(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       // S2: the user's statements, from any of their messages, through the one shared contract (`teamTimeFromStatements`).
