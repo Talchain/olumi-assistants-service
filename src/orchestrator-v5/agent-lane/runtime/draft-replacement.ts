@@ -324,7 +324,7 @@ export function revisedDraftBrief(storedBrief: string, typed: string | readonly 
   return [storedBrief, ...(typeof typed === 'string' ? [typed] : typed)].map((t) => t.trim()).join('\n\n');
 }
 
-export interface HeldRow { readonly node_id: string; readonly operator: string; readonly value: number; readonly unit: string }
+export interface HeldRow { readonly node_id: string; readonly operator: string; readonly value: number; readonly unit: string; readonly role?: 'goal_target' }
 const rowsOf = (raw: unknown): Rec[] => recs(rec(raw)?.goal_constraints);
 const goalIdsOf = (raw: unknown): Set<string> => new Set(recs(rec(raw)?.nodes)
   .filter((n) => n.kind === 'goal' && typeof n.id === 'string')
@@ -379,12 +379,14 @@ function asSavedNode(candidate: unknown, from: string, savedNode: Rec): Rec {
 export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: number, unit: string) => `${value} ${unit}`) {
   const limitIn = (raw: unknown) => {
     const goals = goalIdsOf(raw);
-    return (c: Rec): boolean => c.role !== 'goal_target' && !goals.has(String(c.node_id))
+    // An outcome's target is not the governing goal's own target. Carry it too, with its role/source/conditions intact;
+    // ignoring it in the qualitative-goal gate must never silently delete it from the proposed replacement.
+    return (c: Rec): boolean => !goals.has(String(c.node_id))
       && numeric(c) && ['<=', '>=', '<', '>'].includes(String(c.operator)) && c.deadline_metadata == null;
   };
   const limitsOf = (raw: unknown) => rowsOf(raw).filter(limitIn(raw));
   const rowOf = (c: Rec): HeldRow => ({ node_id: String(c.node_id), operator: String(c.operator_as_stated ?? c.operator),
-    value: c.value as number, unit: unitOf(c) });
+    value: c.value as number, unit: unitOf(c), ...(c.role === 'goal_target' ? { role: 'goal_target' as const } : {}) });
   /**
    * ⭐ THE SAME SENTENCE OF THE USER'S IS THE SAME LIMIT (DL 15 Oct 07:03Z; served widen4/widen3 on 87d5f90e): a redraft that
    * names a saved limit afresh ("Founder time on launch marketing" for the saved "Founder time on campaign") while citing the
@@ -404,6 +406,7 @@ export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: n
     const row = rowOf(c);
     const said = sentencesStating(base, c.node_id, row.value);
     const same = limitsOf(candidate).filter((t) => !savedIds.has(t.constraint_id) && !savedRowFor.has(t.constraint_id)
+      && (t.role === 'goal_target') === (c.role === 'goal_target')
       && String(t.operator_as_stated ?? t.operator) === row.operator && t.value === row.value
       && (t.value_frame ?? 'level') === (c.value_frame ?? 'level') && (unitOf(t) === row.unit || sameUnitAsEarlier(row.unit, unitOf(t)))
       && sameSentence(said, sentencesStating(candidate, t.node_id, row.value)));
@@ -427,6 +430,7 @@ export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: n
     const row = rowOf(c);
     const quantity = quantityOf(base, c);
     const sameFigure = (t: Rec) => String(t.operator_as_stated ?? t.operator) === row.operator
+      && (t.role === 'goal_target') === (c.role === 'goal_target')
       && t.value === row.value && figure(row.value, unitOf(t)) === figure(row.value, row.unit)
       && (t.value_frame ?? 'level') === (c.value_frame ?? 'level');
     if (theirs.some((t) => quantity !== null && quantityOf(candidate, t) === quantity && sameFigure(t))) {
@@ -444,6 +448,7 @@ export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: n
      */
     const sameId = theirs.find((t) => t.constraint_id === c.constraint_id);
     if (sameId !== undefined && quantity !== null && quantityOf(candidate, sameId) === quantity
+      && (sameId.role === 'goal_target') === (c.role === 'goal_target')
       && String(sameId.operator_as_stated ?? sameId.operator) === row.operator && sameId.value === row.value
       && (sameId.value_frame ?? 'level') === (c.value_frame ?? 'level')
       && sameUnitAsEarlier(row.unit, unitOf(sameId))) {
@@ -503,7 +508,8 @@ export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: n
  * sign-ups’, Paul's "20 new customers" was stored `explicit` on another entity. So every target row the candidate holds (each
  * `goal_target` row and the goal's own row, the rows `targetsHeldBy` reads, in any frame) is stored `inferred` until a
  * verifier proves the user's own words state it. The rows carried from the earlier draft are limits (`limitsKeptBy`) and keep
- * their origin; the user's typed goal stays the source on the operation. Applied to the replacement `limitsKeptBy` returns.
+ * their origin, as do carried targets on other outcomes; the user's typed goal stays the source on the operation.
+ * Applied to the replacement `limitsKeptBy` returns.
  */
 function targetsStoredInferred(rows: readonly Rec[], candidate: unknown, carried: ReadonlySet<Rec>): Rec[] {
   const goals = goalIdsOf(candidate);

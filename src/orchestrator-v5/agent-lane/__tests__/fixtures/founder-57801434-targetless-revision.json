@@ -1,0 +1,868 @@
+{
+  "source": "2026-10-15T201756Z-funding-verify-founder-57801434; saved rev 2; actual independent FAIL; recorded drafter replies replayed offline only",
+  "source_sha": "5780143483a924962d757da47996179360554290",
+  "scenario_id": "b1178344-6db5-49e9-ba10-e2f63ba9e435",
+  "brief_text": "I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.",
+  "graph": {
+    "edges": [
+      {
+        "to": "carry_on_as_now",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "funding_first",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "poc_first",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "recruitment_preparation_first",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_angel_funding",
+        "from": "funding_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_larger_fund",
+        "from": "funding_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_poc",
+        "from": "poc_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_job_specs",
+        "from": "recruitment_preparation_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_angel_funding",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_larger_fund",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_poc",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_job_specs",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "funding_secured",
+        "from": "founder_attention_angel_funding",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "larger_fund_secured",
+        "from": "founder_attention_larger_fund",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "funding_secured",
+        "from": "larger_fund_secured",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_completion",
+        "from": "founder_attention_poc",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "brief_extraction",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_completion",
+        "from": "ai_support_on_poc",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_not_investor_ready",
+        "from": "founder_attention_poc",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "funding_secured",
+        "from": "poc_not_investor_ready",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "funding_secured",
+        "from": "poc_completion",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "job_specs_published",
+        "from": "founder_attention_job_specs",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_completion",
+        "from": "job_specs_published",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "nodes": [
+      {
+        "id": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "ref": "D1",
+        "kind": "decision",
+        "label": "I need to determine what I should prioritise and how I should spend my time\u2026",
+        "provenance": "from_brief",
+        "description": "I need to determine what I should prioritise and how I should spend my time across these."
+      },
+      {
+        "id": "funding_secured",
+        "ref": "G1",
+        "kind": "goal",
+        "label": "Funding secured",
+        "provenance": "from_brief",
+        "user_statements": [
+          {
+            "field": "target",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "currency (unspecified)",
+                "quote": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "source": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "goal|funding secured|||target"
+                },
+                "qualifier": "urgently; both fast-paced angel and, eventually, a larger fund",
+                "qualifier_in_quote": false
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "goal|funding_secured|||target"
+          }
+        ],
+        "goal_threshold_unit": "currency (unspecified)",
+        "goal_threshold_frame": "level"
+      },
+      {
+        "id": "carry_on_as_now",
+        "ref": "O1",
+        "kind": "option",
+        "label": "Carry on as now",
+        "provenance": "ai_inferred",
+        "is_baseline": true
+      },
+      {
+        "id": "funding_first",
+        "ref": "O2",
+        "kind": "option",
+        "label": "Funding first",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "founder_attention_larger_fund": {
+            "unit": "% of founder time",
+            "value": 0.2,
+            "source": "cee_hypothesis",
+            "raw_value": 20,
+            "target_match": {
+              "node_id": "founder_attention_larger_fund",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_angel_funding": {
+            "unit": "% of founder time",
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 40,
+            "target_match": {
+              "node_id": "founder_attention_angel_funding",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "poc_first",
+        "ref": "O3",
+        "kind": "option",
+        "label": "PoC first",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "founder_attention_poc": {
+            "unit": "% of founder time",
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 40,
+            "target_match": {
+              "node_id": "founder_attention_poc",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "recruitment_preparation_first",
+        "ref": "O4",
+        "kind": "option",
+        "label": "Recruitment preparation first",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "founder_attention_job_specs": {
+            "unit": "% of founder time",
+            "value": 0.25,
+            "source": "cee_hypothesis",
+            "raw_value": 25,
+            "target_match": {
+              "node_id": "founder_attention_job_specs",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "founder_attention_angel_funding",
+        "ref": "F1",
+        "kind": "factor",
+        "label": "Founder attention: angel funding",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder time",
+          "value": 0.1,
+          "source": "cee_inference",
+          "raw_value": 10,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "measure",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "source": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "option|funding first||founder attention: angel funding|measure"
+                },
+                "qualifier": "fast-paced angel",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "factor|founder_attention_angel_funding||funding_first|measure"
+          }
+        ]
+      },
+      {
+        "id": "founder_attention_larger_fund",
+        "ref": "F2",
+        "kind": "factor",
+        "label": "Founder attention: larger fund",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder time",
+          "value": 0.1,
+          "source": "cee_inference",
+          "raw_value": 10,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "measure",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "source": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "option|funding first||founder attention: larger fund|measure"
+                },
+                "qualifier": "eventually, a larger fund",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "factor|founder_attention_larger_fund||funding_first|measure"
+          }
+        ]
+      },
+      {
+        "id": "founder_attention_poc",
+        "ref": "F3",
+        "kind": "factor",
+        "label": "Founder attention: PoC",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder time",
+          "value": 0.1,
+          "source": "cee_inference",
+          "raw_value": 10,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "measure",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I need to complete the PoC.",
+                "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|founder attention: poc|||measure"
+                }
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "factor|founder_attention_poc|||measure"
+          },
+          {
+            "field": "relation",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "link|founder attention: poc|poc completion||relation"
+                },
+                "qualifier": "the more time I spend testing and improving it, the better it is",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "link|founder_attention_poc|poc_completion||relation"
+          }
+        ]
+      },
+      {
+        "id": "founder_attention_job_specs",
+        "ref": "F4",
+        "kind": "factor",
+        "label": "Founder attention: job specs",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder time",
+          "value": 0.1,
+          "source": "cee_inference",
+          "raw_value": 10,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "measure",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I need to put job specs out for the resource we need.",
+                "source": "I need to put job specs out for the resource we need.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|founder attention: job specs|||measure"
+                },
+                "qualifier": "for the resource we need",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "factor|founder_attention_job_specs|||measure"
+          }
+        ]
+      },
+      {
+        "id": "ai_support_on_poc",
+        "ref": "F5",
+        "kind": "factor",
+        "label": "AI support on PoC",
+        "category": "observable",
+        "provenance": "unverified_brief",
+        "observed_state": {
+          "unit": "present (0/1)",
+          "value": 1,
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "user_material_unverified": true
+        },
+        "user_statements": [
+          {
+            "field": "holds_now",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "holds_now",
+                "unit": "",
+                "quote": "I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|ai support on poc|||holds_now"
+                },
+                "qualifier": "I don't need to be on it all of the time",
+                "conditions": "AI is working on the PoC",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-15T20:19:25.736Z",
+            "subject_key": "factor|ai_support_on_poc|||holds_now"
+          }
+        ]
+      },
+      {
+        "id": "poc_not_investor_ready",
+        "ref": "R1",
+        "kind": "risk",
+        "label": "PoC not investor-ready",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "investor_outreach_lacks_readiness",
+        "ref": "R2",
+        "kind": "risk",
+        "label": "Investor outreach lacks readiness",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "funding_first",
+            "kind": "option",
+            "label": "Funding first"
+          },
+          "affects": {
+            "id": "funding_secured",
+            "label": "Funding secured",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "founder_attention_angel_funding",
+            "label": "Founder attention: angel funding",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "having investor-ready outreach materials",
+          "watch_for": "Repeated requests for missing materials",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "poc_testing_delays_fund_process",
+        "ref": "R3",
+        "kind": "risk",
+        "label": "PoC testing delays fund process",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "poc_first",
+            "kind": "option",
+            "label": "PoC first"
+          },
+          "affects": {
+            "id": "funding_secured",
+            "label": "Funding secured",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "founder_attention_poc",
+            "label": "Founder attention: PoC",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "sequencing investor outreach after PoC work",
+          "watch_for": "Investor outreach remains unscheduled",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "job_specifications_lack_role_clarity",
+        "ref": "R4",
+        "kind": "risk",
+        "label": "Job specifications lack role clarity",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "recruitment_preparation_first",
+            "kind": "option",
+            "label": "Recruitment preparation first"
+          },
+          "affects": {
+            "id": "job_specs_published",
+            "label": "Job specs published",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "founder_attention_job_specs",
+            "label": "Founder attention: job specs",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "defining the required resource clearly",
+          "watch_for": "Unresolved responsibilities in job drafts",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "poc_completion",
+        "ref": "OC1",
+        "kind": "outcome",
+        "label": "PoC completion",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "job_specs_published",
+        "ref": "OC2",
+        "kind": "outcome",
+        "label": "Job specs published",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "larger_fund_secured",
+        "ref": "OC3",
+        "kind": "outcome",
+        "label": "Larger fund secured",
+        "provenance": "from_brief",
+        "scale_frame": 10
+      }
+    ],
+    "ref_high_water": {
+      "D": 1,
+      "F": 5,
+      "G": 1,
+      "O": 4,
+      "R": 4,
+      "OC": 3
+    },
+    "goal_constraints": [
+      {
+        "role": "goal_target",
+        "unit": "million (currency unspecified)",
+        "label": "Larger fund secured",
+        "value": 1.3,
+        "node_id": "larger_fund_secured",
+        "operator": ">=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:larger_fund_secured:>="
+      }
+    ]
+  },
+  "turns": [
+    {
+      "turn": 2,
+      "request": {
+        "kind": "message",
+        "turn_id": "a44727ad-4d1f-4fa6-b61d-a6d825228099",
+        "scenario_id": "b1178344-6db5-49e9-ba10-e2f63ba9e435",
+        "stage": "analyse",
+        "turn_class": "frame",
+        "message": "Once funding is secured, then that changes this question completely. Securing funding is an outcome that would result in a new decision, not influence this decision.",
+        "source": "composer"
+      },
+      "calls": [
+        {
+          "raw_text": "{\"goal\":{\"kind\":null,\"deliverable\":null,\"metric\":\"Progress on funding, PoC and hiring\",\"operator\":\">=\",\"target_stated\":false,\"value\":null,\"unit\":\"qualitative assessment\",\"horizon_months\":null,\"provenance\":\"inferred\",\"frame\":\"level\",\"baseline_known\":false,\"baseline_value\":null,\"baseline_provenance\":\"inferred\",\"scope\":null,\"quantity_frame\":\"level\",\"basis\":null,\"source_quote\":null,\"deadline_words\":null},\"constraints\":[],\"options\":[{\"label\":\"Carry on as now\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":true},{\"label\":\"Funding-led allocation\",\"provenance\":\"ai_proposed\",\"changes\":[\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"PoC-led allocation\",\"provenance\":\"ai_proposed\",\"changes\":[\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"Balanced allocation\",\"provenance\":\"ai_proposed\",\"changes\":[\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":null}],\"factors\":[{\"label\":\"Founder time on funding\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\",\"plausible_max\":100},{\"label\":\"Founder time on PoC\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\",\"plausible_max\":100},{\"label\":\"Founder time on job specifications\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\",\"plausible_max\":100},{\"label\":\"AI working on PoC\",\"role\":\"observable\",\"baseline_known\":true,\"baseline_value\":1,\"unit\":\"active/inactive\",\"provenance\":\"explicit\",\"plausible_max\":1}],\"risks\":[{\"label\":\"Unfilled resource need\",\"provenance\":\"ai_proposed\",\"unit\":null,\"plausible_max\":null,\"already_true_evidence\":null}],\"outcomes\":[{\"label\":\"Funding outreach progress\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null},{\"label\":\"PoC quality\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null},{\"label\":\"Hiring readiness\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null}],\"links\":[{\"from\":\"Founder time on funding\",\"to\":\"Funding outreach progress\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder time on PoC\",\"to\":\"PoC quality\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\"},{\"from\":\"AI working on PoC\",\"to\":\"PoC quality\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder time on job specifications\",\"to\":\"Hiring readiness\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Hiring readiness\",\"to\":\"Unfilled resource need\",\"direction\":\"negative\",\"provenance\":\"ai_proposed\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Funding outreach progress\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"PoC quality\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Hiring readiness\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Unfilled resource need\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"negative\",\"provenance\":\"ai_proposed\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null}],\"identities\":[],\"unknowns\":[\"What minimum near-term progress or deadline applies to funding outreach, the PoC and job specifications, so the time split can be assessed rather than merely compared qualitatively?\",\"What share of your current working time is already spent on funding, the PoC and job specifications?\",\"How should the model distinguish the urgent angel-funding work from the eventual larger fund raise, given that securing funding would create a new decision rather than determine this one?\"],\"decision_question\":\"I need to determine what I should prioritise and how I should spend my time across these.\",\"unknown_concerns\":[{\"unknown\":\"What minimum near-term progress or deadline applies to funding outreach, the PoC and job specifications, so the time split can be assessed rather than merely compared qualitatively?\",\"concerns\":[\"Funding outreach progress\",\"PoC quality\",\"Hiring readiness\",\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"]},{\"unknown\":\"What share of your current working time is already spent on funding, the PoC and job specifications?\",\"concerns\":[\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"]},{\"unknown\":\"How should the model distinguish the urgent angel-funding work from the eventual larger fund raise, given that securing funding would create a new decision rather than determine this one?\",\"concerns\":[\"Funding outreach progress\",\"Progress on funding, PoC and hiring\"]}],\"statements\":[{\"quote\":\"I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"Funding is described as urgent; the larger fund is eventual.\",\"conditions\":null},{\"quote\":\"I need to complete the PoC.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\",\"subject\":{\"kind\":\"factor\",\"label\":\"AI working on PoC\",\"to_label\":null,\"factor_label\":null},\"field\":\"holds_now\",\"form\":\"holds_now\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"The founder does not need to be on the PoC all of the time.\",\"conditions\":null},{\"quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\",\"subject\":{\"kind\":\"link\",\"label\":\"Founder time on PoC\",\"to_label\":\"PoC quality\",\"factor_label\":null},\"field\":\"effect\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"The more time spent testing and improving the PoC, the better it is.\",\"conditions\":null},{\"quote\":\"I need to put job specs out for the resource we need.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder time on job specifications\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"I need to determine what I should prioritise and how I should spend my time across these.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"measure\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"Once funding is secured, then that changes this question completely. Securing funding is an outcome that would result in a new decision, not influence this decision.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"Securing funding is an outcome that would result in a new decision, not influence this decision.\",\"conditions\":\"Once funding is secured.\"}]}",
+          "input_sha256": "017db5c1a9a6d4bd464618b128f6cd6c7bf7bae0b18441c1c5e9278c41d96c11",
+          "prompt_sha256": "0f783598ba06ccc58957732c928f50a83701279aa034724df8a40d35389332c4"
+        },
+        {
+          "raw_text": "{\"goal\":{\"kind\":null,\"deliverable\":null,\"metric\":\"Progress on funding, PoC and hiring\",\"operator\":\">=\",\"target_stated\":false,\"value\":null,\"unit\":\"qualitative assessment\",\"horizon_months\":null,\"provenance\":\"inferred\",\"frame\":\"level\",\"baseline_known\":false,\"baseline_value\":null,\"baseline_provenance\":\"inferred\",\"quantity_frame\":\"level\",\"basis\":null,\"scope\":null},\"constraints\":[],\"options\":[{\"label\":\"Carry on as now\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":true},{\"label\":\"Funding-led allocation\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Founder time on funding\",\"value\":60,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder time on PoC\",\"value\":25,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder time on job specifications\",\"value\":15,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"}],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"PoC-led allocation\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Founder time on funding\",\"value\":25,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder time on PoC\",\"value\":60,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder time on job specifications\",\"value\":15,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"}],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"Balanced allocation\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Founder time on funding\",\"value\":40,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder time on PoC\",\"value\":40,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder time on job specifications\",\"value\":20,\"value_kind\":\"absolute\",\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\"}],\"added_capacity\":null,\"is_status_quo\":null}],\"factors\":[{\"label\":\"Founder time on funding\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":33,\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\",\"plausible_max\":100},{\"label\":\"Founder time on PoC\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":34,\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\",\"plausible_max\":100},{\"label\":\"Founder time on job specifications\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":33,\"unit\":\"% of founder time\",\"provenance\":\"ai_proposed\",\"plausible_max\":100},{\"label\":\"AI working on PoC\",\"role\":\"observable\",\"baseline_known\":true,\"baseline_value\":1,\"unit\":\"active/inactive\",\"provenance\":\"explicit\",\"plausible_max\":1}],\"risks\":[{\"label\":\"Unfilled resource need\",\"provenance\":\"ai_proposed\",\"unit\":null,\"plausible_max\":null,\"already_true_evidence\":null}],\"outcomes\":[{\"label\":\"Funding outreach progress\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null},{\"label\":\"PoC quality\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null},{\"label\":\"Hiring readiness\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null}],\"links\":[{\"from\":\"Founder time on funding\",\"to\":\"Funding outreach progress\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder time on PoC\",\"to\":\"PoC quality\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\"},{\"from\":\"AI working on PoC\",\"to\":\"PoC quality\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder time on job specifications\",\"to\":\"Hiring readiness\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Hiring readiness\",\"to\":\"Unfilled resource need\",\"direction\":\"negative\",\"provenance\":\"ai_proposed\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Funding outreach progress\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"PoC quality\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Hiring readiness\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Unfilled resource need\",\"to\":\"Progress on funding, PoC and hiring\",\"direction\":\"negative\",\"provenance\":\"ai_proposed\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null}],\"identities\":[],\"unknowns\":[\"What minimum near-term progress or deadline applies to funding outreach, the PoC and job specifications, so the time split can be assessed rather than merely compared qualitatively?\",\"What share of your current working time is already spent on funding, the PoC and job specifications? Olumi has provisionally used a 33% / 34% / 33% split only to make the comparison calculable.\",\"How should the model distinguish the urgent angel-funding work from the eventual larger fund raise, given that securing funding would create a new decision rather than determine this one?\"],\"decision_question\":\"I need to determine what I should prioritise and how I should spend my time across these.\",\"unknown_concerns\":[{\"unknown\":\"What minimum near-term progress or deadline applies to funding outreach, the PoC and job specifications, so the time split can be assessed rather than merely compared qualitatively?\",\"concerns\":[\"Funding outreach progress\",\"PoC quality\",\"Hiring readiness\",\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"]},{\"unknown\":\"What share of your current working time is already spent on funding, the PoC and job specifications? Olumi has provisionally used a 33% / 34% / 33% split only to make the comparison calculable.\",\"concerns\":[\"Founder time on funding\",\"Founder time on PoC\",\"Founder time on job specifications\"]},{\"unknown\":\"How should the model distinguish the urgent angel-funding work from the eventual larger fund raise, given that securing funding would create a new decision rather than determine this one?\",\"concerns\":[\"Funding outreach progress\",\"Progress on funding, PoC and hiring\"]}],\"statements\":[{\"quote\":\"I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"Funding is described as urgent; the larger fund is eventual.\",\"conditions\":null},{\"quote\":\"I need to complete the PoC.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\",\"subject\":{\"kind\":\"factor\",\"label\":\"AI working on PoC\",\"to_label\":null,\"factor_label\":null},\"field\":\"holds_now\",\"form\":\"holds_now\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"The founder does not need to be on the PoC all of the time.\",\"conditions\":null},{\"quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\",\"subject\":{\"kind\":\"link\",\"label\":\"Founder time on PoC\",\"to_label\":\"PoC quality\",\"factor_label\":null},\"field\":\"effect\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"The more time spent testing and improving the PoC, the better it is.\",\"conditions\":null},{\"quote\":\"I need to put job specs out for the resource we need.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder time on job specifications\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"I need to determine what I should prioritise and how I should spend my time across these.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"measure\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"Once funding is secured, then that changes this question completely. Securing funding is an outcome that would result in a new decision, not influence this decision.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Progress on funding, PoC and hiring\",\"to_label\":null,\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"Securing funding is an outcome that would result in a new decision, not influence this decision.\",\"conditions\":\"Once funding is secured.\"}]}",
+          "input_sha256": "440bae2d9a5e4aafa8f6575ddfd321ea9769ad233a3665bc4a38e06f6b98773d",
+          "prompt_sha256": "4aa3bb0a4231c07c9a6ef71a00e3b221af9e1f337e8197396ada57d70c3d6da6"
+        }
+      ]
+    },
+    {
+      "turn": 10,
+      "request": {
+        "kind": "message",
+        "turn_id": "72431230-340b-4b52-bd71-0d34972c8730",
+        "scenario_id": "b1178344-6db5-49e9-ba10-e2f63ba9e435",
+        "stage": "analyse",
+        "turn_class": "frame",
+        "message": "If I could secure angel funding of even \u00a3250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.",
+        "source": "composer"
+      },
+      "calls": [
+        {
+          "raw_text": "{\"goal\":{\"kind\":null,\"deliverable\":null,\"metric\":\"Angel funding secured\",\"operator\":\">=\",\"target_stated\":false,\"value\":null,\"unit\":\"\u00a3\",\"horizon_months\":null,\"provenance\":\"explicit\",\"frame\":\"level\",\"baseline_known\":false,\"baseline_value\":null,\"baseline_provenance\":\"explicit\",\"scope\":null,\"quantity_frame\":\"level\",\"basis\":null,\"source_quote\":null,\"deadline_words\":null},\"constraints\":[],\"options\":[{\"label\":\"Continue current allocation\",\"provenance\":\"inferred\",\"changes\":[],\"interventions\":[],\"added_capacity\":null,\"is_status_quo\":true},{\"label\":\"Investor-led split\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Founder investor-outreach hours\",\"value\":36,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder PoC testing hours\",\"value\":18,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder job-specification hours\",\"value\":6,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"}],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"Balanced funding and PoC\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Founder investor-outreach hours\",\"value\":30,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder PoC testing hours\",\"value\":24,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder job-specification hours\",\"value\":6,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"}],\"added_capacity\":null,\"is_status_quo\":null},{\"label\":\"PoC-completion split\",\"provenance\":\"ai_proposed\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Founder investor-outreach hours\",\"value\":12,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder PoC testing hours\",\"value\":42,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"},{\"factor_label\":\"Founder job-specification hours\",\"value\":6,\"value_kind\":\"absolute\",\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\"}],\"added_capacity\":null,\"is_status_quo\":null}],\"factors\":[{\"label\":\"Founder working hours available\",\"role\":\"controllable\",\"baseline_known\":true,\"baseline_value\":60,\"unit\":\"founder hours/week\",\"provenance\":\"explicit\",\"plausible_max\":100},{\"label\":\"Founder investor-outreach hours\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":12,\"unit\":\"founder hours/week\",\"provenance\":\"ai_proposed\",\"plausible_max\":80},{\"label\":\"Founder PoC testing hours\",\"role\":\"controllable\",\"baseline_known\":true,\"baseline_value\":48,\"unit\":\"founder hours/week\",\"provenance\":\"inferred\",\"plausible_max\":80},{\"label\":\"Founder job-specification hours\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":0,\"unit\":\"founder hours/week\",\"provenance\":\"inferred\",\"plausible_max\":40},{\"label\":\"AI support on PoC\",\"role\":\"external\",\"baseline_known\":true,\"baseline_value\":1,\"unit\":\"AI support present (0/1)\",\"provenance\":\"explicit\",\"plausible_max\":1}],\"risks\":[{\"label\":\"PoC not ready for investor meeting\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null,\"already_true_evidence\":null},{\"label\":\"Angel funding lost to runway exhaustion\",\"provenance\":\"inferred\",\"unit\":\"\u00a3\",\"plausible_max\":500000,\"already_true_evidence\":{\"quote\":\"We have no funding. I cannot carry on as I am now.\"}}],\"outcomes\":[{\"label\":\"Investor conversations\",\"provenance\":\"inferred\",\"unit\":\"conversations\",\"plausible_max\":100},{\"label\":\"Investor-ready PoC\",\"provenance\":\"inferred\",\"unit\":null,\"plausible_max\":null},{\"label\":\"Job specifications published\",\"provenance\":\"inferred\",\"unit\":\"job specifications\",\"plausible_max\":10}],\"links\":[{\"from\":\"Founder working hours available\",\"to\":\"Angel funding secured\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder investor-outreach hours\",\"to\":\"Investor conversations\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder PoC testing hours\",\"to\":\"Investor-ready PoC\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\"},{\"from\":\"Founder PoC testing hours\",\"to\":\"PoC not ready for investor meeting\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder job-specification hours\",\"to\":\"Job specifications published\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Founder job-specification hours\",\"to\":\"Angel funding secured\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"AI support on PoC\",\"to\":\"Investor-ready PoC\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\"},{\"from\":\"Investor-ready PoC\",\"to\":\"Investor conversations\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Investor conversations\",\"to\":\"Angel funding secured\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"PoC not ready for investor meeting\",\"to\":\"Angel funding secured\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null},{\"from\":\"Angel funding lost to runway exhaustion\",\"to\":\"Angel funding secured\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":-1,\"effect_per_source_change\":1,\"effect_provenance\":\"inferred\",\"definitional\":true,\"basis\":\"Funding lost because the business cannot continue is funding the goal does not receive.\",\"source_quote\":null},{\"from\":\"Job specifications published\",\"to\":\"Angel funding secured\",\"direction\":\"positive\",\"provenance\":\"inferred\",\"effect_amount\":null,\"effect_per_source_change\":null,\"effect_provenance\":null,\"definitional\":null,\"basis\":null,\"source_quote\":null}],\"identities\":[],\"unknowns\":[\"How many investor conversations per week are realistically produced by each additional founder hour spent on outreach, and how quickly could the first conversations occur?\",\"What is the minimum PoC readiness needed for an investor meeting, and how many founder testing hours are needed to reach it with the existing AI support?\",\"Does publishing job specifications before angel funding materially improve the likelihood of angel funding, or is its main value to make recruitment possible after funding?\",\"The larger fund of at least 1.3 million is stated as an eventual ambition. Is it intentionally outside this immediate allocation decision, whose urgent aim is securing angel funding?\",\"The provisional current allocation assumes 60 working hours per week, 48 hours on the PoC, no current job-specification work, and 12 hours on investor outreach. What are the actual current investor-outreach hours?\",\"The proposed non-status-quo allocations are Olumi suggestions, not user-selected splits. Which split is feasible given the expected timing of investor meetings?\"],\"decision_question\":\"I need to determine what I should prioritise and how I should spend my time across these.\",\"unknown_concerns\":[{\"unknown\":\"How many investor conversations per week are realistically produced by each additional founder hour spent on outreach, and how quickly could the first conversations occur?\",\"concerns\":[\"Founder investor-outreach hours\",\"Investor conversations\",\"Investor conversations \u2192 Angel funding secured\"]},{\"unknown\":\"What is the minimum PoC readiness needed for an investor meeting, and how many founder testing hours are needed to reach it with the existing AI support?\",\"concerns\":[\"Founder PoC testing hours\",\"AI support on PoC\",\"Investor-ready PoC\",\"Investor-ready PoC \u2192 Investor conversations\"]},{\"unknown\":\"Does publishing job specifications before angel funding materially improve the likelihood of angel funding, or is its main value to make recruitment possible after funding?\",\"concerns\":[\"Founder job-specification hours\",\"Job specifications published\",\"Job specifications published \u2192 Angel funding secured\"]},{\"unknown\":\"The larger fund of at least 1.3 million is stated as an eventual ambition. Is it intentionally outside this immediate allocation decision, whose urgent aim is securing angel funding?\",\"concerns\":[\"Angel funding secured\"]},{\"unknown\":\"The provisional current allocation assumes 60 working hours per week, 48 hours on the PoC, no current job-specification work, and 12 hours on investor outreach. What are the actual current investor-outreach hours?\",\"concerns\":[\"Founder working hours available\",\"Founder PoC testing hours\",\"Founder job-specification hours\",\"Founder investor-outreach hours\"]},{\"unknown\":\"The proposed non-status-quo allocations are Olumi suggestions, not user-selected splits. Which split is feasible given the expected timing of investor meetings?\",\"concerns\":[\"Investor-led split\",\"Balanced funding and PoC\",\"PoC-completion split\",\"Investor conversations\"]}],\"statements\":[{\"quote\":\"I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Angel funding secured\",\"to_label\":null,\"factor_label\":null},\"field\":\"target\",\"form\":\"lower_bound\",\"value\":1.3,\"low\":null,\"high\":null,\"unit\":\"million (currency unspecified)\",\"qualifier\":\"eventually, for a larger fund; not adopted as the immediate angel-funding target\",\"conditions\":null},{\"quote\":\"I need to complete the PoC.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder PoC testing hours\",\"to_label\":null,\"factor_label\":null},\"field\":\"measure\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\",\"subject\":{\"kind\":\"link\",\"label\":\"Founder PoC testing hours\",\"to_label\":\"Investor-ready PoC\",\"factor_label\":null},\"field\":\"effect\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"AI is working on the PoC; more founder testing and improvement makes it better\",\"conditions\":null},{\"quote\":\"I need to put job specs out for the resource we need.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder job-specification hours\",\"to_label\":null,\"factor_label\":null},\"field\":\"measure\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":null,\"conditions\":null},{\"quote\":\"We have no funding. I cannot carry on as I am now.\",\"subject\":{\"kind\":\"risk\",\"label\":\"Angel funding lost to runway exhaustion\",\"to_label\":null,\"factor_label\":null},\"field\":\"holds_now\",\"form\":\"holds_now\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"no funding; cannot carry on as now\",\"conditions\":null},{\"quote\":\"I need to get funding as soon as possible.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Angel funding secured\",\"to_label\":null,\"factor_label\":null},\"field\":\"measure\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":\"\u00a3\",\"qualifier\":\"as soon as possible\",\"conditions\":null},{\"quote\":\"I probably need a PoC as soon as I have an interview/meeting with an investor, but I obviously need to get investors to ask to speak to me first.\",\"subject\":{\"kind\":\"link\",\"label\":\"Investor-ready PoC\",\"to_label\":\"Investor conversations\",\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"probably need a PoC by an investor interview or meeting; investors must first ask to speak\",\"conditions\":null},{\"quote\":\"I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder job-specification hours\",\"to_label\":null,\"factor_label\":null},\"field\":\"holds_now\",\"form\":\"holds_now\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"job specifications have not been started\",\"conditions\":null},{\"quote\":\"They need to be really good to attract talent, but the more time I spend on them, the less I can spend on other things.\",\"subject\":{\"kind\":\"link\",\"label\":\"Founder job-specification hours\",\"to_label\":\"Angel funding secured\",\"factor_label\":null},\"field\":\"relation\",\"form\":\"describes\",\"value\":null,\"low\":null,\"high\":null,\"unit\":null,\"qualifier\":\"more time on job specifications leaves less time for other work\",\"conditions\":null},{\"quote\":\"Let's assume 60 and possibly more if I needed to.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder working hours available\",\"to_label\":null,\"factor_label\":null},\"field\":\"level\",\"form\":\"point\",\"value\":60,\"low\":null,\"high\":null,\"unit\":\"founder hours/week\",\"qualifier\":\"possibly more if needed\",\"conditions\":null},{\"quote\":\"I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly. Or, if I was to complete it more slowly, I could spend less time on it.\",\"subject\":{\"kind\":\"factor\",\"label\":\"Founder PoC testing hours\",\"to_label\":null,\"factor_label\":null},\"field\":\"level\",\"form\":\"point\",\"value\":80,\"low\":null,\"high\":null,\"unit\":\"% of founder time\",\"qualifier\":\"probably; PoC is not complete\",\"conditions\":\"to complete it quickly\"},{\"quote\":\"If I could secure angel funding of even \u00a3250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.\",\"subject\":{\"kind\":\"goal\",\"label\":\"Angel funding secured\",\"to_label\":null,\"factor_label\":null},\"field\":\"level\",\"form\":\"point\",\"value\":250000,\"low\":null,\"high\":null,\"unit\":\"\u00a3\",\"qualifier\":\"conditional: even this amount would buy breathing space\",\"conditions\":\"if angel funding can be secured\"}]}",
+          "input_sha256": "7419adccdee452eb617fd8af266ccd2e4e1326d4fc8fe53ffa379e0514e0b6e4",
+          "prompt_sha256": "0f783598ba06ccc58957732c928f50a83701279aa034724df8a40d35389332c4"
+        }
+      ]
+    }
+  ]
+}
