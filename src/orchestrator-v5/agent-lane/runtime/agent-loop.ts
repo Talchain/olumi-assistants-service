@@ -488,8 +488,11 @@ export async function runAgentTurn(
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const withheld = new Set(input.withheldTools ?? []);
   const refusalCounts = new Map<string, number>();
+  /** Keyed by the CALL (`callIdentity` + writes so far), never the tool alone: a changed call is a new attempt (AIE-05). */
   const repeatLimitations = new Map<string, string>();
   const repeatedRefusals = new Map<string, ToolResult>();
+  /** Tools no longer offered this turn after a call to them was refused twice; a changed call that still names one runs. */
+  const repeatOffered = new Set<string>();
   // ⭐ Lane A A2 / AIE-05: this turn's cause basis, and the earlier turns' refusals with theirs (`refusedEarlier`).
   const retryBasis: RetryBasis = { model_revision: input.canonicalContext?.expectation.graph_revision ?? null,
     user_words: createHash('sha256').update(JSON.stringify(input.ctx.verified_user_messages ?? [])).digest('hex').slice(0, 16) };
@@ -633,7 +636,7 @@ export async function runAgentTurn(
       role: 'developer', content: [{ type: 'input_text', text }],
     }));
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
-      .filter((t) => !withheld.has(t.name));
+      .filter((t) => !withheld.has(t.name) && !repeatOffered.has(t.name));
     const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
       ? input.hostFirstCall : undefined;
     const forced = hop === 0 && hostCall === undefined && input.firstCallTool !== undefined && offered.some((t) => t.name === input.firstCallTool)
@@ -737,9 +740,10 @@ export async function runAgentTurn(
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
       const identity = callIdentity(String(call.name), call.arguments);
+      const repeatKey = `${identity}#${writesThisTurn}`;
       const unchanged = unchangedSince(identity);
-      const result: ToolResult = repeatLimitations.has(String(call.name))
-        ? { ...repeatedRefusals.get(String(call.name))!, detail: repeatLimitations.get(String(call.name)), repeat_withheld: true }
+      const result: ToolResult = repeatLimitations.has(repeatKey)
+        ? { ...repeatedRefusals.get(repeatKey)!, detail: repeatLimitations.get(repeatKey), repeat_withheld: true }
         // ⭐ Lane A A2: the same call an earlier turn had refused, on an unchanged cause, is not run again. A changed call still runs.
         : unchanged !== undefined ? { ...unchanged, ok: false, mutated: false, detail: repeatNarration(String(call.name), unchanged),
             refused_detail: typeof unchanged.refused_detail === 'string' ? unchanged.refused_detail : unchanged.detail, repeat_unchanged: true }
@@ -773,14 +777,14 @@ export async function runAgentTurn(
       if (result.ok === false && typeof result.refusal === 'string' && !withheld.has(String(call.name))) {
         // ⭐ AIE-05: identical means the same call (tool + arguments) refused for the same code since the last write, never only
         // the same refusal code: a changed-argument retry is a new attempt.
-        const key = `${identity}\u0000${result.refusal}#${writesThisTurn}`;
+        const key = `${repeatKey}\u0000${result.refusal}`;
         const count = (refusalCounts.get(key) ?? 0) + 1;
         refusalCounts.set(key, count);
-        // One corrected retry remains possible. Only the second identical refusal withholds the tool.
+        // One corrected retry remains possible. Only the second identical refusal withholds THAT call; the tool leaves the offer.
         if (count === 2) {
-          withheld.add(String(call.name));
-          repeatLimitations.set(String(call.name), repeatNarration(String(call.name), result));
-          repeatedRefusals.set(String(call.name), structuredClone(result));
+          repeatOffered.add(String(call.name));
+          repeatLimitations.set(repeatKey, repeatNarration(String(call.name), result));
+          repeatedRefusals.set(repeatKey, structuredClone(result));
         }
       }
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.

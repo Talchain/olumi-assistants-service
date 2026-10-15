@@ -94,6 +94,17 @@ describe('A2: a refusal is remembered across turns with its cause, and only an u
     expect(ok.dispatches).toBe(1);
     expect((await turn({ history: ok.result.items, revision: 'rev-1' })).dispatches).toBe(1);
   });
+  it('BUDDY-A B1 contrast A,A,B: after the same call is refused twice, a CHANGED call to that tool still runs and gets its own result', async () => {
+    const r = await turn({ calls: [argsA, argsA, argsB], codes: ['unit_differs_from_declared', 'unit_differs_from_declared', null] });
+    expect(r.dispatches, 'A twice, then the corrected B').toBe(3);
+    expect(r.result.tool_results[2]).toMatchObject({ ok: true, proposal_id: 'p1' });
+    expect(r.result.tool_results[2]).not.toHaveProperty('repeat_withheld');
+    // Control A,A,A: the unchanged call is still withheld on its third attempt, with the AIE-05 rule.
+    const same = await turn({ calls: [argsA, argsA, argsA], codes: ['unit_differs_from_declared'] });
+    expect(same.dispatches).toBe(2);
+    expect(same.result.tool_results[2]).toMatchObject({ ok: false, refusal: 'unit_differs_from_declared', repeat_withheld: true });
+    expect(String(same.result.tool_results[2]!.detail)).toContain(RULE);
+  });
   it('within one turn: the same refusal code on CHANGED arguments never withholds the tool (AIE-05)', async () => {
     const r = await turn({ calls: [argsA, argsB, argsA] });
     expect(r.dispatches, 'both changed-argument attempts and the first repeat run').toBe(3);
