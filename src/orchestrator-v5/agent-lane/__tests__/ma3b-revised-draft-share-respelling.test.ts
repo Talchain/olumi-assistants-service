@@ -33,9 +33,11 @@ vi.mock('../../drafter-raw/index.js', () => ({
 }));
 
 type Rec = Record<string, any>;
-const FX = JSON.parse(readFileSync(new URL('./fixtures/marketing-cohort-witness-served-base.json', import.meta.url), 'utf8')) as {
-  scenario_id: string; brief_text: string; graph_hash: string; graph: Rec; l20: { turn_id: string; message: string };
-};
+type Fixture = { scenario_id: string; brief_text: string; graph_hash: string; graph: Rec; l20: { turn_id: string; message: string } };
+const FX = JSON.parse(readFileSync(new URL('./fixtures/marketing-cohort-witness-served-base.json', import.meta.url), 'utf8')) as Fixture;
+/** The SECOND brief through the same branch (DL two-brief rule): served marketing-2992, 13 Oct (`GBP/year` → `£`, MA3's inputs). */
+const FX2 = JSON.parse(readFileSync(new URL('./fixtures/marketing-2992-served-base-04658ebe.json', import.meta.url), 'utf8')) as Fixture;
+const RAW2 = readFileSync(new URL('./fixtures/marketing-2992-drafter-raw-f81dfd89.json', import.meta.url), 'utf8');
 const RAW = readFileSync(new URL('./fixtures/marketing-cohort-witness-drafter-retry-d3cf1a2e.txt', import.meta.url), 'utf8');
 const SID = FX.scenario_id;
 const L20 = FX.l20.message;
@@ -43,14 +45,15 @@ const TIME_ID = 'agent-lane:founder_campaign_time:<=';
 const SPEND_ID = 'agent-lane:annual_campaign_spend:<=';
 const baseRow = (id: string): Rec => structuredClone((FX.graph.goal_constraints as Rec[]).find((r) => r.constraint_id === id)!);
 
-function server(graph0: Rec = FX.graph) {
+function server(graph0: Rec = FX.graph, fx: Fixture = FX) {
+  const SID = fx.scenario_id;
   let graph: Rec = structuredClone(graph0);
   const commits: string[] = [];
-  const ledger = { write_turn_ids: [registrationTurnId(SID, constructionOperationId(SID, FX.brief_text))],
-    user_message_turn_ids: ['brief-turn'], first_user_message: FX.brief_text.trim(), complete: true };
+  const ledger = { write_turn_ids: [registrationTurnId(SID, constructionOperationId(SID, fx.brief_text))],
+    user_message_turn_ids: ['brief-turn'], first_user_message: fx.brief_text.trim(), complete: true };
   const dispatch: InternalDispatch = async (path, body) => {
     if (path === `/assist/v1/scenarios/${SID}/graph`) {
-      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: FX.brief_text,
+      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: fx.brief_text,
         graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     }
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
@@ -80,8 +83,9 @@ function lane(s: ReturnType<typeof server>, raw: string = RAW) {
   return { caps, proposals, drafts: () => drafted };
 }
 
-const turn = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-l20', turn_id: FX.l20.turn_id,
-  user_turn_text: L20, user_text: `${FX.brief_text}\n${L20}` };
+const turnOf = (fx: Fixture) => ({ scenario_id: fx.scenario_id, authenticated_user_id: null, request_id: 'req-l20', turn_id: fx.l20.turn_id,
+  user_turn_text: fx.l20.message, user_text: `${fx.brief_text}\n${fx.l20.message}` });
+const turn = turnOf(FX);
 const conversion = { constraint_type: 'at_least', value: 15, unit: '%', measures: 'conversion rate', rationale: L20 };
 const customers = { constraint_type: 'at_least', value: 20, unit: 'customers', measures: 'new customers', rationale: L20 };
 const pressed = (proposalId: string) => ({ scenario_id: SID, authenticated_user_id: null, request_id: 'req-approve',
@@ -144,9 +148,9 @@ describe('MA3b: the served cohort-witness turn 02 — the founder limit re-spell
     expect(rows.filter((r) => r.constraint_id === SPEND_ID).map((r) => [r.value, r.unit])).toEqual([[100000, '£/year']]);
   });
 
-  it('NEGATIVE: a different stated base or a different figure on the same id still refuses — and says which saved limit and what to ask', async () => {
+  it('NEGATIVE: a redraft that STATES a different base ("% of my time", "% of revenue") or a different figure on the same id still refuses — and says which saved limit and what to ask', async () => {
     // (A drafted "percentage points" never reaches the carry: admission reads the limit in its factor's own unit first.)
-    for (const patch of [{ unit: '% of my time' }, { value: 20 }]) {
+    for (const patch of [{ unit: '% of my time' }, { unit: '% of revenue' }, { value: 20 }]) {
       const s = server();
       const a = await lane(s, withTimeRow(patch)).caps.proposeGoalTarget!(turn as never, conversion as never) as Rec;
       expect(a, `${JSON.stringify(patch)}: ${JSON.stringify(a)}`).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
@@ -154,5 +158,33 @@ describe('MA3b: the served cohort-witness turn 02 — the founder limit re-spell
       expect(a.detail).toContain('Ask the user whether that limit still holds as saved');
       expect(s.graph()).toEqual(FX.graph);
     }
+  });
+});
+
+describe('MA3b, the second brief through the same branch: served marketing-2992 (13 Oct), the budget re-spelled "£" on its id', () => {
+  const conv2 = { constraint_type: 'at_least', value: 15, unit: '%', measures: 'conversion rate', rationale: FX2.l20.message };
+  const spendId = 'agent-lane:annual_campaign_spend:<=';
+  const base2 = (): Rec => structuredClone((FX2.graph.goal_constraints as Rec[]).find((r) => r.constraint_id === spendId)!);
+
+  it('precondition: the saved budget is "GBP/year" and the recorded redraft wrote the same limit as "£"', () => {
+    expect(base2()).toMatchObject({ unit: 'GBP/year', value: 100000, operator: '<=' });
+    expect(((JSON.parse(RAW2) as Rec).constraints as Rec[]).find((c) => c.metric === 'Annual campaign spend')).toMatchObject({ unit: '£', value: 100000 });
+    expect(sameUnitAsEarlier('GBP/year', '£')).toBe(true);
+  });
+
+  it('GREEN through sameUnitAsEarlier: the card is offered, the budget carried as the earlier row once; CONTRAST: a stated other period refuses, naming the limit', async () => {
+    const s = server(FX2.graph, FX2);
+    const { caps, proposals } = lane(s, RAW2);
+    const a = await caps.proposeGoalTarget!(turnOf(FX2) as never, conv2 as never) as Rec;
+    expect(a, JSON.stringify(a)).toMatchObject({ ok: true, mutated: false });
+    const candidate = proposals.get(String(a.proposal_id))!.operations[0]!.value as Rec;
+    expect((candidate.candidate.goal_constraints as Rec[]).filter((r) => r.constraint_id === spendId)).toEqual([base2()]);
+    const raw = JSON.parse(RAW2) as Rec;
+    (raw.constraints as Rec[]).find((c) => c.metric === 'Annual campaign spend')!.unit = '£/month';
+    const s2 = server(FX2.graph, FX2);
+    const b = await lane(s2, JSON.stringify(raw)).caps.proposeGoalTarget!(turnOf(FX2) as never, conv2 as never) as Rec;
+    expect(b, JSON.stringify(b)).toMatchObject({ ok: false, mutated: false, refusal: 'revised_draft_not_prepared' });
+    expect(b.detail).toContain('the saved limit ‘Annual campaign spend’ at most');
+    expect(s2.graph()).toEqual(FX2.graph);
   });
 });
