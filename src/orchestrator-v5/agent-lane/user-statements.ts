@@ -12,9 +12,15 @@
 import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 
-/** `describes`: qualitative words about the quantity ("I'm not that experienced with marketing"), with no figure of the user's. */
-export type StatementForm = 'point' | 'range' | 'lower_bound' | 'upper_bound' | 'holds_now' | 'describes';
-export const STATEMENT_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now', 'describes'];
+/**
+ * `describes`: qualitative words about the quantity ("I'm not that experienced with marketing"), with no figure of the user's.
+ * `holds_in_window`: the user's own FORECAST that a condition will still hold during the goal's period ("Yes, I'll still be new
+ * to it then"), given only as their answer to Olumi's question about that period: never read from "holds now" (AIE 6178729504).
+ */
+export type StatementForm = 'point' | 'range' | 'lower_bound' | 'upper_bound' | 'holds_now' | 'holds_in_window' | 'describes';
+export const STATEMENT_FORMS: readonly StatementForm[] = ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now', 'holds_in_window', 'describes'];
+/** The figure-free forms: no number of the user's to check. */
+const FIGURE_FREE: ReadonlySet<StatementForm> = new Set(['holds_now', 'holds_in_window', 'describes']);
 
 /** What a quantity a statement is about: set by the tool that verifies it, never by the Agent's words. */
 export interface StatementSubject {
@@ -129,7 +135,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
     ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
   // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
-  if (form === 'holds_now' || form === 'describes') return { kind: 'verified', statement: base };
+  if (FIGURE_FREE.has(form)) return { kind: 'verified', statement: base };
   const stated = rules.figuresIn(quote);
   if (form === 'range') {
     const low = figure(given?.low, rules.allowsZero), high = figure(given?.high, rules.allowsZero);
@@ -179,7 +185,7 @@ export type CombinedEnds =
 
 /** The ends the statements give, hard apart from qualified. A negated statement ("not 7 months") gives no end. */
 export function combineStatementEnds(statements: readonly UserStatement[]): CombinedEnds {
-  const used = statements.filter((s) => s.negated !== true && s.form !== 'holds_now' && s.form !== 'describes');
+  const used = statements.filter((s) => s.negated !== true && !FIGURE_FREE.has(s.form));
   const isLow = (s: UserStatement): boolean => (s.form === 'lower_bound' || s.form === 'range') && s.low !== undefined;
   const isHigh = (s: UserStatement): boolean => (s.form === 'upper_bound' || s.form === 'range') && s.high !== undefined;
   const hard = (s: UserStatement): boolean => s.qualifier === undefined;
@@ -240,5 +246,6 @@ export function statementReadingWords(s: UserStatement, unit: string): string {
   if (s.form === 'upper_bound') return `a ${q}upper end of ${s.high} ${unit}`;
   if (s.form === 'range') return `a ${q}range of ${s.low}–${s.high} ${unit}`;
   if (s.form === 'point') return `${q}${s.low} ${unit}`;
-  return s.form === 'describes' ? 'your description' : 'a condition that holds now';
+  return s.form === 'describes' ? 'your description' : s.form === 'holds_in_window' ? 'your forecast that it holds during the period'
+    : 'a condition that holds now';
 }

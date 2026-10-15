@@ -1,6 +1,6 @@
 /**
  * ⭐ SYSTEM 2 step 1: the ONE construction source map (DL re-plan 14 Oct). The drafter is asked, once, for `statements[]`, and the
- * host verifies each against the brief with the one statement verifier; nothing reads the map yet (step 2 moves admission onto it).
+ * host verifies each against the brief with the one statement verifier; admission reads the map and construction records it.
  * The corpus is not the author's: Paul's served brief and the drafter's recorded answer to it (`served-c1494f4d.json`, `_source`),
  * through the real `buildModelFromBrief`. Whether the drafter fills `statements` well is AI behaviour, measured on the served raws.
  */
@@ -10,8 +10,10 @@ import { STATEMENTS_INSTRUCTION, buildModelFromBrief } from '../runtime/build-mo
 import { sourceMapOf, subjectKey } from '../construction-source-map.js';
 
 type Rec = Record<string, any>;
-/** The AIE's exact paragraph (#94 6180604131), copied from the comment: the text is bound by identity, never retyped. */
-const AIE_TEXT = readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8');
+/** The AIE's text (#94 6180604131) with its exact H0/H1 replacements applied (AIE 6183352754; the packet copied byte-identical). */
+const AIE_TEXT = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'utf8')) as { changes: { old: string; replacement: string }[] })
+  .changes.reduce((text, c) => { if (text.split(c.old).length !== 2) throw new Error(`AIE old text not found once: ${c.old.slice(0, 60)}`); return text.replace(c.old, c.replacement); },
+    readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8'));
 /** The served capacity brief (`_source`): "between 10 and 30" is a stated range only a clause check can attest. */
 const CAPACITY = JSON.parse(readFileSync('tests/fixtures/drafter-text-3/served-capacity-brief.json', 'utf8')) as { brief: string };
 const SERVED = JSON.parse(readFileSync('tests/fixtures/drafter-capacity-chain/served-c1494f4d.json', 'utf8')) as { brief: string; draft: Rec };
@@ -80,10 +82,14 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
     expect(map.verified.get(KEY)).toEqual([expect.objectContaining({ low: 25, high: 25 })]);
   });
 
-  it('nothing reads the map yet: the registered graph is the same with and without statements', async () => {
+  it('the map is RECORDED, nothing else moves: the graphs are equal but for the verified statement now held on its node (AIE 6183705670)', async () => {
     const without = await build(SERVED.draft);
     const withStatements = await build({ ...SERVED.draft, statements: [legacyLevel(), legacyLevel({ value: 15 })] });
-    expect(withStatements.graph).toEqual(without.graph);
+    const bare = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map(({ user_statements: _u, ...n }) => n) });
+    expect(bare(withStatements.graph)).toEqual(without.graph);
+    const held = (withStatements.graph.nodes as Rec[]).filter((n) => Array.isArray(n.user_statements));
+    expect(held.map((n) => [n.label, n.user_statements.map((r: Rec) => r.field)])).toEqual([[legacyLevel().subject.label, ['level']]]);
+    expect((without.graph.nodes as Rec[]).some((n) => n.user_statements !== undefined)).toBe(false);
   });
 
   it('two figures written side by side are not a range by themselves: "between 10 and 30" stays unknown, retained, until the clause check (step 2)', () => {

@@ -8,7 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BUILD_INSTRUCTIONS, buildModelFromBrief } from '../runtime/build-model.js';
+import { BUILD_INSTRUCTIONS, STATEMENTS_INSTRUCTION, buildModelFromBrief } from '../runtime/build-model.js';
 
 type Rec = Record<string, any>;
 const TEXT = JSON.parse(readFileSync('tests/fixtures/drafter-stated-figures/held-figures.json', 'utf8')) as { held_figures: string };
@@ -37,8 +37,9 @@ describe('#2923 (b): every current figure the brief states is held as the user\'
     expect(sentText.split(TEXT.held_figures)).toHaveLength(2);
     expect(sentText).toContain(`${GOAL_LEVEL_LINE} ${TEXT.held_figures}`);
     expect(BUILD_INSTRUCTIONS.split(TEXT.held_figures)).toHaveLength(2);
-    // Contrast in the same request: the evidence rule it points to is still sent.
-    expect(sentText).toContain('For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it');
+    // SYSTEM 2 retirement: the figure is verified through its statements[] entry; the retired evidence rule is not sent, the STATEMENTS paragraph is.
+    expect(sentText).not.toContain('give baseline_evidence.quote as the complete verbatim sentence that states it');
+    expect(sentText.split(STATEMENTS_INSTRUCTION)).toHaveLength(2);
   });
 
   it('what the rule asks for lands as the user\'s figure: the recorded "six mid-weight developers" factor with its quote', async () => {
