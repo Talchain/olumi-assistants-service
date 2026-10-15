@@ -119,7 +119,7 @@ it('OV0 ⭐ RED (Lane A A3(a)): the Outside View, which today\'s store cannot ho
   const kept: Obj[] = [];
   const w6 = await run('W6', { payload: { message, turn_id: randomUUID() }, storage: storeLike(kept) });
   expect(object(w6.response._agent).durability).toBe('recorded');
-  expect(kept.filter(r => r.response_emitted === true).map(r => Object.keys(object(r.agent_guidance).entries))).toEqual([['RC-WIDEN']]);
+  expect(kept.filter(r => r.response_emitted === true).map(r => Object.keys(object(object(r.agent_guidance).entries)))).toEqual([['RC-WIDEN']]);
 });
 it('OV1 a goal-path figure you gave with no range: the Outside View is the one carrier (typed signal, no keyword)', async () => {
   const ov = row('RC-OUTSIDE-VIEW');
