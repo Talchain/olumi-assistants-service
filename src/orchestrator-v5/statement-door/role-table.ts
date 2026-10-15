@@ -48,7 +48,9 @@ export interface RoleRow {
   readonly sourceOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
   /** Olumi's reading of the statement, as the card says it ("your estimate of about 30% that ‘X’ happens …"). */
   readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
-  /** Every Olumi assumption the reading rests on, each said once (a step, a convention, a part the user did not give). */
+  /** The card's ONE question, where the AIE's delivered card for this field words it otherwise ("Use this measurement reading?"). */
+  readonly question?: string;
+  /** Every SEPARATE Olumi assumption the reading rests on, each said once after the question (a convention, a part not given). */
   readonly assumptions: (statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string) => readonly string[];
   /** The receipt after a confirmed write and read-back ("Recorded your estimate: …"). */
   readonly recordedWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;

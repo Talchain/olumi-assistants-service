@@ -16,6 +16,7 @@ import { ProposalStore } from '../../agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { doorIssueArgs, typedDoorStatement } from '../door.js';
 import { DOOR_APPROVE } from '../card.js';
+import { userStatementFor } from '../statements.js';
 
 type Rec = Record<string, any>;
 const G = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-hiring-post3007-read01-20261014.json', 'utf8')) as Rec).body.graph as Rec;
@@ -33,7 +34,7 @@ const withAttrition = (): Rec => {
   return g;
 };
 const EFFECT = 'its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized';
-const CARD = `From your message: “${SAID}” Olumi reads this as your estimate of about 30% that ‘${LABEL}’ happens at least once within the next 3 months `
+const CARD = `From your words: “${SAID}” Olumi reads this as your estimate of about 30% that ‘${LABEL}’ happens at least once within the next 3 months `
   + `from today. Record this reading? How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}.`;
 const RECEIPT = `Recorded your estimate: about 30% that ‘${LABEL}’ happens at least once within the next 3 months from today. `
   + 'Its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized.';
@@ -65,8 +66,9 @@ const asks = (g: Rec, id = RISK): string[] => (((buildCanonicalAnalysisReadyFrom
   .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === id).map((i) => i.message as string);
 
 describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door (AIE 6179240850)', () => {
-  it('PRECONDITION: the risk asks its chance; a user statement sent through propose_assumptions is sent to the door', async () => {
-    expect(asks(G)[0]).toContain(riskOccurrenceAskWords(LABEL, 3));
+  it('PRECONDITION: Olumi’s unsized risk is not asked; a user statement sent through propose_assumptions is sent to the door', async () => {
+    // HIRING (DL 23:19Z): Olumi's unsized risk is left out of the Run, so readiness does not ask; the user's words still size it here.
+    expect(asks(G)).toEqual([]);
     const r = await world().caps.proposeAssumptions(ctx(SAID) as never, { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: '',
       user_stated: true, statements: [{ quote: SAID }] }] } as never) as Rec;
     expect(r).toMatchObject({ ok: false, refusal: 'use_propose_statement' });
@@ -82,8 +84,11 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     expect(w.commits()).toBe(0);
     expect(await press(w, card)).toMatchObject({ ok: true, applied: true, follow_up: RECEIPT });
     expect(riskOf(w.graph()).event_risk).toEqual(USERS);
-    expect(riskOf(w.graph()).occurrence_statement).toMatchObject({ speaker: 'user', quote: SAID, source: SAID, form: 'point', low: 30, high: 30,
-      qualifier: 'about', period: '3 months', subject: { quantity: 'risk_occurrence', node_id: RISK } });
+    // Their complete statement is the ONE door's durable record beside the block (source, speaker, qualifier, period).
+    expect(userStatementFor(w.graph(), { kind: 'risk', id: RISK, field: 'occurrence' })).toMatchObject({ field: 'occurrence',
+      statements: [{ speaker: 'user', quote: SAID, source: SAID, form: 'point', low: 30, high: 30, qualifier: 'about', period: '3 months',
+        subject: { quantity: 'risk_occurrence', node_id: RISK } }] });
+    expect(riskOf(w.graph())).not.toHaveProperty('occurrence_statement');
     expect(asks(w.graph())).toEqual([]);
     expect(w.commits()).toBe(1);
   });
@@ -122,11 +127,11 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     expect(r.detail).toContain('gives a chance of it happening, not a condition that holds now');
     const card = await w.caps.proposeStatement!(ctx(t1h) as never, door(t1h)) as Rec;
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true, statement: { field: 'occurrence' } });
-    expect(String(card.public_label)).toContain(`From your message: “${t1h}” Olumi reads this as your estimate of about 30%`);
+    expect(String(card.public_label)).toContain(`From your words: “${t1h}” Olumi reads this as your estimate of about 30%`);
     const now = 'Honestly, our code quality is already slipping.';
     const held = await world().caps.proposeStatement!(ctx(now) as never, door(now, 'holds_now')) as Rec;
     expect(held).toMatchObject({ ok: true, statement: { field: 'holds_now', quotes: [now] } });
-    expect(held.public_label).toBe(`From your message: “${now}” Olumi reads this as ‘${LABEL}’ already being true now. Record this reading? `
+    expect(held.public_label).toBe(`From your words: “${now}” Olumi reads this as ‘${LABEL}’ already being true now. Record this reading? `
       + `How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}.`);
   });
 
@@ -193,7 +198,7 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     const moved = structuredClone(w.graph());
     goalOf(moved).goal_target_basis = { ...goalOf(moved).goal_target_basis, period_months: 6 };
     expect(riskOccurrenceIsCurrent(riskOf(moved), moved)).toBe(false);
-    expect(riskOf(moved).occurrence_statement.quote).toBe(SAID);
+    expect(userStatementFor(moved, { kind: 'risk', id: RISK, field: 'occurrence' })?.statements[0]?.quote).toBe(SAID);
     expect(asks(moved)).toHaveLength(1);
     expect(riskOccurrenceIsCurrent(riskOf(w.graph()), w.graph())).toBe(true);
   });

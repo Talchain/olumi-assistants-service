@@ -102,15 +102,15 @@ function approvedFor(statement: UserStatement, subject: DoorSubject, graph: unkn
   const e = riskOccurrenceSubject(graph, subject.id);
   if (e.kind !== 'eligible' || block === undefined) return { refused: 'The model changed, so this reading can no longer be recorded. Nothing was prepared.' };
   return { risk_id: subject.id, event_risk: block, expected_node: structuredClone(e.node), goal_id: e.goal_id, expected_goal: structuredClone(e.goal),
-    ...(holdsNow ? { holds_now: statement } : { stated_occurrence: statement }) };
+    ...(holdsNow ? { holds_now: statement } : { stated_occurrence: statement }), recorded_at: new Date().toISOString() };
 }
 
 /** The read-back by identity: the risk holds exactly the card's node with its block, and the goal is still exactly as bound. */
 /** The stored payload as the member reads it (`approvedRiskOccurrenceOf`), or `undefined` if malformed. */
 export const approvedOf = (payload: unknown): ApprovedRiskOccurrence | undefined => (isRec(payload) && typeof payload.risk_id === 'string'
   ? approvedRiskOccurrenceOf({ path: payload.risk_id, value: payload }) : undefined);
-const holdsApproved = (payload: unknown, after: unknown): boolean => {
-  const approved = approvedOf(payload);
+const holdsApproved = (write: { readonly payload: unknown }, after: unknown): boolean => {
+  const approved = approvedOf(write.payload);
   if (approved === undefined) return false;
   const held = isRec(after) && Array.isArray(after.nodes) ? after.nodes.find((n) => isRec(n) && n.id === approved.risk_id) : undefined;
   return isDeepStrictEqual(held, riskOccurrencePostimageNode(approved)) && riskOccurrenceGoalHolds(approved, after);

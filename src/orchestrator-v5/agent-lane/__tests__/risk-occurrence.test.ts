@@ -297,7 +297,7 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toContain('‘Code quality deterioration’ is Olumi’s unsized risk suggestion');
     const card = await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
     expect(card).toMatchObject({ ok: true, statement: { subject: 'Code quality deterioration', field: 'holds_now', quotes: [SAID] } });
-    expect(card.public_label).toBe(`From your message: “${SAID}” Olumi reads this as ‘Code quality deterioration’ already being true now. Record this `
+    expect(card.public_label).toBe(`From your words: “${SAID}” Olumi reads this as ‘Code quality deterioration’ already being true now. Record this `
       + 'reading? How strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized.');
     expect(card.public_label).not.toMatch(/chance|likely|Olumi’s starting assumption/);
     // Card-only: the Agent's reading of a yes never applies it.
@@ -308,6 +308,9 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     expect(res).toMatchObject({ ok: true, applied: true, follow_up: 'Recorded from your words: ‘Code quality deterioration’ is already true now. '
       + 'How strongly it affects the model is still Olumi’s placeholder on its link.' });
     expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
+    // AIE 6178729504 / 6180193788: their words are durable beside it (`user_statements[]`), not only on the card and receipt.
+    expect(riskOf(w.graph()).user_statements).toEqual([expect.objectContaining({ subject_key: `risk|${RISK}|||holds_now`, field: 'holds_now',
+      statements: [expect.objectContaining({ speaker: 'user', quote: SAID, form: 'holds_now' })] })]);
     expect(asks(w.graph())).toEqual([]);
     expect(w.commits()).toBe(1);
   });
@@ -336,6 +339,8 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock })).toEqual({ kind: 'refused', reason: 'invalid_block' });
     const statement = { speaker: 'user', quote: SAID, source: SAID, subject: { quantity: 'risk_holds_now', node_id: RISK }, form: 'holds_now', unit: '', reading: 'olumi' } as never;
     expect(applyRiskOccurrenceEdit(G, { ...approved(), holds_now: statement })).toEqual({ kind: 'refused', reason: 'invalid_block' });
-    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock, holds_now: statement })).toMatchObject({ kind: 'mutated' });
+    // A user's statement is written only WITH its durable record (`user_statements[]`, dated by the door's writer).
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock, holds_now: statement })).toEqual({ kind: 'refused', reason: 'invalid_block' });
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock, holds_now: statement, recorded_at: '2026-10-15T00:00:00.000Z' })).toMatchObject({ kind: 'mutated' });
   });
 });

@@ -14,6 +14,8 @@ export type DoorWriteMember = 'levels' | 'values' | 'link_effects' | 'risk_occur
 export interface DoorWrite {
   readonly member: DoorWriteMember;
   readonly payload: unknown;
+  /** What the read-back must find beyond the payload (JSON), where the member's postimage is not the payload's alone. */
+  readonly expected?: unknown;
 }
 
 /**
@@ -22,8 +24,8 @@ export interface DoorWrite {
  */
 export interface FieldWriter {
   readonly approve: (reading: DoorReading, graph: unknown) => DoorWrite | { readonly refused: string };
-  /** True when `after` holds exactly this payload's write (the read-back by identity, and the verified no-op on a retry). */
-  readonly holds: (payload: unknown, after: unknown) => boolean;
+  /** True when `after` holds exactly this write (the read-back by identity, and the verified no-op on a retry). */
+  readonly holds: (write: DoorWrite, after: unknown) => boolean;
 }
 
 /** The ONE record writer and reader of the user's words (`statements.ts`), called by a row's writer in the same commit. */

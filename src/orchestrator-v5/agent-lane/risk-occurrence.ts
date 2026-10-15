@@ -16,6 +16,8 @@
  * Reached ONLY through the atomic level door's `risk_occurrence` member, alone in its commit, after the user pressed the
  * card (card-only, `hasCardOnlyOperations`). Pure.
  */
+import { userStatementOnNode, userStatementRecord, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -66,7 +68,28 @@ export interface ApprovedRiskOccurrence {
    * the goal's window, never rescaled and never given Olumi's spread. How strongly it acts stays on its link.
    */
   readonly stated_occurrence?: UserStatement;
+  /** When the user's statement is recorded (`user_statements[]`, the ONE door's durable store): set by the door's writer. */
+  readonly recorded_at?: string;
 }
+
+/**
+ * ⭐ SYSTEM 1 M1: the user's statement on this card as its durable record (`statement-door/statements.ts`): the subject (this risk,
+ * its chance or "holds now") and their verified words, kept on the risk's node beside the block, for reopen, read-back and the AI.
+ */
+function statementRecordOf(approved: ApprovedRiskOccurrence): { readonly subject: DoorSubject; readonly record: UserStatementRecord } | undefined {
+  const statement = approved.stated_occurrence ?? approved.holds_now;
+  if (statement === undefined || typeof approved.recorded_at !== 'string' || approved.recorded_at.trim() === '') return undefined;
+  const subject: DoorSubject = { kind: 'risk', id: approved.risk_id, field: approved.stated_occurrence !== undefined ? 'occurrence' : 'holds_now' };
+  return { subject, record: userStatementRecord(subject, [statement], approved.recorded_at) };
+}
+/** The node with the card's statement record written beside it (`withUserStatement`, the store's own writer). */
+function withStatementRecord(node: Rec, approved: ApprovedRiskOccurrence): Rec {
+  const r = statementRecordOf(approved);
+  return r === undefined ? node : (withUserStatement({ nodes: [node] }, r.record, r.subject)?.nodes[0] as Rec | undefined) ?? node;
+}
+/** The user's own chance for this risk, as its record holds it (`user_statements[]`), or `undefined`. */
+const statedChanceOf = (node: Rec): UserStatement | undefined => (typeof node.id === 'string'
+  ? userStatementOnNode(node, subjectKey({ kind: 'risk', id: node.id, field: 'occurrence' }))?.statements[0] : undefined);
 
 /**
  * ⭐ THE GOAL THE CARD'S WINDOW IS STATED OVER, exactly as it stood when the card was made (Codex r1 on #3013: binding the
@@ -101,7 +124,7 @@ export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
   // window). Any other block, valid or not, is held as it stands and is never overwritten here.
   const block = EventRiskV1.safeParse(node.event_risk);
   // The user's S2 estimate over a window the goal no longer has is retained but no level for the new window (AIE 6179240850).
-  const stated = userStatementOf(node.occurrence_statement) !== undefined;
+  const stated = statedChanceOf(node) !== undefined;
   return !(block.success && (block.data.occurrence.basis === 'olumi' || stated) && !riskOccurrenceIsCurrent(node, graph));
 }
 
@@ -117,7 +140,7 @@ export function riskOccurrenceIsCurrent(node: object, graph: unknown): boolean {
   if (!block.success) return false;
   // AIE 6179240850: a user's estimate recorded through the S2 card keeps its OWN window; after the goal's window moves it is
   // retained, never applied to the new analysis on `basis: 'user'` alone.
-  const statedOverItsWindow = userStatementOf((node as { occurrence_statement?: unknown }).occurrence_statement) !== undefined;
+  const statedOverItsWindow = statedChanceOf(node as Rec) !== undefined;
   return (block.data.occurrence.basis !== 'olumi' && !statedOverItsWindow) || block.data.horizon.months === riskOccurrenceWindowMonths(graph);
 }
 
@@ -273,9 +296,9 @@ export function riskEffectBasisWords(graph: unknown, riskId: string): string {
 export const riskStatedOccurrenceRecordedWords = (label: string, s: UserStatement, block: EventRiskV1T, effect: string): string =>
   `Recorded your estimate: ${chanceAsStated(s)} that ‘${label.trim()}’ happens at least once ${statedWindowWords(block)}. `
   + `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;
-/** The risk node as the S2 write leaves it: its block, and (for the user's estimate) their complete statement beside it. */
-export const riskOccurrencePostimageNode = (approved: ApprovedRiskOccurrence): Rec => ({ ...approved.expected_node, event_risk: approved.event_risk,
-  ...(approved.stated_occurrence !== undefined ? { occurrence_statement: JSON.parse(JSON.stringify(approved.stated_occurrence)) as Rec } : {}) });
+/** The risk node as the S2 write leaves it: its block, and (for the user's own statement) its durable record beside it. */
+export const riskOccurrencePostimageNode = (approved: ApprovedRiskOccurrence): Rec =>
+  withStatementRecord({ ...approved.expected_node, event_risk: approved.event_risk }, approved);
 /** The goal the window belongs to, by label (the card and receipt name it). */
 export const riskOccurrenceGoalLabel = (graph: unknown, goalId: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
   ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === goalId)?.label : undefined) ?? 'the goal');
@@ -315,11 +338,14 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   // The window the card said is still the goal's: a goal period moved since the card refuses.
   if (subject.window_months !== block.data.horizon.months) return { kind: 'refused', reason: 'risk_changed' };
 
+  // A user's statement is written with its durable record, or not at all (never a user block without its words).
+  if ((holdsNow || stated !== undefined) && statementRecordOf(approved) === undefined) return { kind: 'refused', reason: 'invalid_block' };
   const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
-  const risk = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.risk_id)!;
-  risk.event_risk = structuredClone(approved.event_risk);
-  // AIE 6179240850: the user's complete statement (source, speaker, qualifier, period) is kept beside their block, for reopen.
-  if (stated !== undefined) risk.occurrence_statement = JSON.parse(JSON.stringify(stated)) as Rec;
+  const at = graph.nodes.findIndex((n) => isRec(n) && n.id === approved.risk_id);
+  // AIE 6179240850 / 6180193788: the user's complete statement (source, speaker, qualifier, period) is kept beside their block,
+  // in the ONE door's store (`user_statements[]`), for reopen, read-back and the AI.
+  graph.nodes[at] = withStatementRecord({ ...(graph.nodes[at] as Rec), event_risk: structuredClone(approved.event_risk) }, approved);
+  const risk = graph.nodes[at] as Rec;
   const label = String(risk.label).trim();
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph',
@@ -356,7 +382,8 @@ export function approvedRiskOccurrenceOf(op: { readonly path: string; readonly v
   if (!isRec(v.event_risk) || !isRec(v.expected_node) || typeof v.goal_id !== 'string' || !isRec(v.expected_goal)) return undefined;
   return { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node, goal_id: v.goal_id, expected_goal: v.expected_goal,
     ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}),
-    ...(userStatementOf(v.stated_occurrence) !== undefined ? { stated_occurrence: userStatementOf(v.stated_occurrence)! } : {}) };
+    ...(userStatementOf(v.stated_occurrence) !== undefined ? { stated_occurrence: userStatementOf(v.stated_occurrence)! } : {}),
+    ...(typeof v.recorded_at === 'string' ? { recorded_at: v.recorded_at } : {}) };
 }
 
 /**

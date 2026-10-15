@@ -4196,7 +4196,7 @@ export function createAgentCapabilities(
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
     const v = (op.value ?? {}) as { event_risk?: unknown; expected_node?: unknown; goal_id?: unknown; expected_goal?: unknown; holds_now?: unknown;
-      stated_occurrence?: unknown };
+      stated_occurrence?: unknown; recorded_at?: unknown };
     if (!isPlainRecord(v.event_risk) || !isPlainRecord(v.expected_node) || typeof v.goal_id !== 'string' || !isPlainRecord(v.expected_goal)
       || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
@@ -4208,7 +4208,8 @@ export function createAgentCapabilities(
     const approved: ApprovedRiskOccurrence = { risk_id: op.path, event_risk: v.event_risk as EventRiskV1T, expected_node: v.expected_node,
       goal_id: v.goal_id, expected_goal: v.expected_goal, own_write_landed: ownWriteLanded,
       ...(userStatementOf(v.holds_now) !== undefined ? { holds_now: userStatementOf(v.holds_now)! } : {}),
-      ...(userStatementOf(v.stated_occurrence) !== undefined ? { stated_occurrence: userStatementOf(v.stated_occurrence)! } : {}) };
+      ...(userStatementOf(v.stated_occurrence) !== undefined ? { stated_occurrence: userStatementOf(v.stated_occurrence)! } : {}),
+      ...(typeof v.recorded_at === 'string' ? { recorded_at: v.recorded_at } : {}) };
     // The card's goal as bound (its dates, period and reading), by the rule the writer and the read-back also read: a goal
     // that moved since the card was made writes nothing, whatever the analysis hash says (Codex r1 on #3013).
     if (!riskOccurrenceGoalHolds(approved, before.raw)) {
@@ -6101,7 +6102,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'not_recordable', detail: write !== undefined && 'refused' in write ? write.refused : 'Nothing was prepared.' };
       }
       const card: DoorCard = { subject: resolved.subject, label: resolved.label, field: row.field, carrier: row.carrier,
-        statements: v.reading.statements, member: write.member, payload: write.payload };
+        statements: v.reading.statements, member: write.member, payload: write.payload, ...(write.expected !== undefined ? { expected: write.expected } : {}) };
       const operations: ProposalOperation[] = [doorOperation(card)];
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
         operations, provenance: { authored_by: 'model_proposed', basis: v.reading.statements[0]!.source },

@@ -37,9 +37,11 @@ export interface DoorReading {
   readonly subject: DoorSubject;
   readonly label: string;
   readonly statements: readonly UserStatement[];
-  /** Olumi's reading, and every Olumi assumption it rests on, in the table's words. */
+  /** Olumi's reading (with the details the reading itself states), and every SEPARATE Olumi assumption, in the table's words. */
   readonly reading: string;
   readonly assumptions: readonly string[];
+  /** The card's ONE question, in the row's words ("Record this reading?" unless the AIE's card for the field says otherwise). */
+  readonly question?: string;
   /** The user's own words a figure-free reading rests on (`DoorFigure.words`). */
   readonly words?: string;
 }
@@ -114,5 +116,6 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
   const missing = row.incomplete?.(statements, subject, graph, words);
   if (missing !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${missing} Nothing was prepared. ${KEEP}` };
   return { kind: 'read', reading: { subject, label, statements, reading: row.readingWords(statements, subject, label, graph, words),
-    assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}) } };
+    assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}),
+    ...(row.question !== undefined ? { question: row.question } : {}) } };
 }

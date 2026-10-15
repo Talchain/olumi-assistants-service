@@ -1,8 +1,8 @@
 /**
- * ⭐ SYSTEM 1: ONE card template for every user statement, in the shape of the AIE's delivered card (6179240850 item 1: "From your
- * message: “…”. Olumi reads this as … . Record this reading? {the separate assumption}"); each field's reading and assumptions are
- * SYSTEM 4's signed table words. The user's complete words, Olumi's reading of them, ONE question, then every Olumi assumption it
- * rests on, and ONE button that records what they said. Pure.
+ * ⭐ SYSTEM 1: ONE card template for every user statement, the shape the AIE's three delivered cards share (6179240850 chance,
+ * 6180193788 measurement and timing): "From your words: “…”. Olumi reads this as {the reading, with the details it states}.
+ * {ONE question}? {each separate assumption}". Each field's reading, question and assumptions are SYSTEM 4's signed table words.
+ * ONE button records what they said. Pure.
  */
 import type { DoorReading } from './read.js';
 
@@ -12,9 +12,10 @@ export const DOOR_APPROVE = { label: 'Record what you said', message: 'Yes, reco
 export function doorCardWords(r: DoorReading): string {
   const said = [...new Set(r.statements.map((s) => s.source))].map((s) => `“${s}”`).join(' and ');
   const assumptions = r.assumptions.map((a) => a.trim()).filter((a) => a !== '');
-  // A quoted sentence that ends its own statement takes no second full stop after the closing mark.
-  return `From your message: ${said}${/[.!?…]”$/.test(said) ? '' : '.'} Olumi reads this as ${r.reading}. Record this reading?`
-    + (assumptions.length > 0 ? ` ${assumptions.join(' ')}` : '');
+  // A quoted sentence, or a reading, that ends its own statement takes no second full stop.
+  const reading = r.reading.trim();
+  return `From your words: ${said}${/[.!?…]”$/.test(said) ? '' : '.'} Olumi reads this as ${reading}${/[.!?…]$/.test(reading) ? '' : '.'} `
+    + `${r.question ?? 'Record this reading?'}${assumptions.length > 0 ? ` ${assumptions.join(' ')}` : ''}`;
 }
 
 /**

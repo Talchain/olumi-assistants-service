@@ -27,6 +27,8 @@ export interface DoorCard {
   readonly statements: readonly UserStatement[];
   readonly member: DoorWriteMember;
   readonly payload: unknown;
+  /** The write's read-back expectation beyond its payload (`DoorWrite.expected`), as stored. */
+  readonly expected?: unknown;
 }
 
 /** The stored card, as its operation carries it, or `undefined` if malformed. */
@@ -41,7 +43,7 @@ export function doorCardOf(op: { readonly op: string; readonly value?: unknown }
   const subject: DoorSubject = { kind: s.kind as SubjectKind, id: s.id, field: s.field,
     ...(typeof s.to_id === 'string' ? { to_id: s.to_id } : {}), ...(typeof s.option_id === 'string' ? { option_id: s.option_id } : {}) };
   return { subject, label: v.label, field: v.field, carrier: v.carrier as DoorWriteMember, statements: statements as UserStatement[],
-    member: v.member as DoorWriteMember, payload: v.payload };
+    member: v.member as DoorWriteMember, payload: v.payload, ...(v.expected !== undefined ? { expected: v.expected } : {}) };
 }
 
 /** The row a stored card was read by, by its key (field, carrier). */
