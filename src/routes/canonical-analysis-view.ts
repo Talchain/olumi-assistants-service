@@ -14,7 +14,7 @@ import {
   goalChanceFactsForAgent, goalChanceDriversForAgent, goalChanceWithheldReasonsForAgent, STATUS_QUO_BY_ASSUMPTION,
   type GoalChanceRangeDisplay, type RecordedGoalChanceWithholdReason,
 } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
-import { sayDisplayedPct } from '../orchestrator-v5/goal-target/goal-targets-joint.js';
+import { notesAsShown, sayDisplayedPct } from '../orchestrator-v5/goal-target/goal-targets-joint.js';
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Rec : undefined;
@@ -240,7 +240,8 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const availability = goalChanceDriverAvailabilityForAgent(result);
   const driverStatus = new Map(availability?.options.map(row => [row.option_id, row]) ?? []);
   const cells = projectCanonicalAnalysisCells(result, input.graph, fact?.result.goal_certainty);
-  const goalChance = canonicalGoalChanceDetail(facts);
+  const summary = (result as { summary?: unknown } | null)?.summary;
+  const goalChance = canonicalGoalChanceDetail(facts, typeof summary === 'string' ? [summary] : []);
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
     ...(fact !== null && freshness === 'stale' ? { face_when_stale: RUN_AGAIN_FOR_CHANCE } : {}),
@@ -274,11 +275,15 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
 }
 
 /** Recovery Batch C: the stored licence's sentence parts, as the screen shows them (no calculation, no second licence). */
-function canonicalGoalChanceDetail(facts: ReturnType<typeof goalChanceFactsForAgent>): CanonicalGoalChanceDetail | undefined {
+function canonicalGoalChanceDetail(facts: ReturnType<typeof goalChanceFactsForAgent>, saidOnCard: readonly string[]): CanonicalGoalChanceDetail | undefined {
   const targets = facts.goal_targets;
   const detail: CanonicalGoalChanceDetail = {
     ...(facts.goal_chance_words !== undefined ? { chance_words: facts.goal_chance_words } : {}),
-    ...(facts.goal_chance_notes !== undefined ? { notes: facts.goal_chance_notes } : {}),
+    // Reply-face P2: each cause once on the card, never the card's own summary again (`notesAsShown`).
+    ...((): { notes?: string[] } => {
+      const shown = facts.goal_chance_notes === undefined ? [] : notesAsShown(facts.goal_chance_notes, targets?.note_groups, saidOnCard);
+      return shown.length > 0 ? { notes: shown } : {};
+    })(),
     ...(facts.goal_chance_status_quo !== undefined ? { status_quo: facts.goal_chance_status_quo } : {}),
     ...(targets !== undefined ? { targets: {
       joint: targets.joint.status === 'licensed' ? { status: 'licensed' as const, words: targets.joint.words }

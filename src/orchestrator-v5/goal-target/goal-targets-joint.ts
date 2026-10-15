@@ -23,7 +23,7 @@ import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-targe
 import { readGoalRecord } from './goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { displayedPctAt, displayRoundingFor, wilsonHalfWidthPoints, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
-import { unresolvedRetainedLimits, retainedLimitWithheldLine } from '../../graph/retained-limit.js';
+import { unresolvedRetainedLimits, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../graph/retained-limit.js';
 import type { PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { isOlumiEstimateValue } from '../../cee/provenance/provenance-of.js';
 import { cohortTargetsOf, rateQuartilesOf, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
@@ -370,7 +370,9 @@ export function goalTargetsBlockOf(args: {
       const note = `${c.clause}: ${reason}`;
       notes.push(note);
       limitNotes.add(note);
-      recordCause(c, note, verdict.reason, reason);
+      // A retained limit's cause is the retained-limit withhold itself, whatever the engine's per-limit code: so two retained
+      // limits are ONE cause and one line (reply-face P2; served marketing 7f5659fd said it once per limit).
+      recordCause(c, note, retainedIds.has(c.constraint_id) ? RETAINED_LIMIT_WITHHOLD_CODE : verdict.reason, reason);
     }
     if (c.role === 'target' && olumiBase.has(c.constraint_id)) {
       const reason = jointWithheldLine(Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2), 'olumi_base');
@@ -540,6 +542,27 @@ export function goalTargetsBlockOf(args: {
     ...(noteGroups.length > 0 ? { note_groups: noteGroups } : {}), per_target: perTarget, joint, ...(unsupported.length > 0 ? { unsupported_targets: unsupported } : {}),
     ...(forecastMode ? { basis: 'same_cohort_forecast' as const } : {}),
     ...(forecastMode && [...figures.values()].some((f) => f.forecast.author === 'olumi') ? { provisional: true as const } : {}) };
+}
+
+/**
+ * ⭐ Reply-face P2 (said once, on the result card): the licence's notes as a surface shows them. Notes that share one recorded
+ * cause are said as their ONE group line, and a note or group whose reason the same surface already says (the card's summary,
+ * e.g. the retained-limit withhold) is not said again. The licence keeps every original note; only the display joins.
+ */
+export function notesAsShown(notes: readonly string[], groups: GoalTargetsBlock['note_groups'], alreadySaid: readonly string[] = []): string[] {
+  const said = alreadySaid.map((t) => t.trim()).filter((t) => t !== '');
+  const repeats = (line: string): boolean => said.some((t) => line === t || line.endsWith(`: ${t}`));
+  const out: string[] = [];
+  const done = new Set<number>();
+  for (const note of notes) {
+    const at = (groups ?? []).findIndex((g) => g.source_notes.length > 1 && g.source_notes.includes(note));
+    if (at === -1) { if (!repeats(note) && !out.includes(note)) out.push(note); continue; }
+    if (done.has(at)) continue;
+    done.add(at);
+    const line = groups![at]!.line;
+    if (!repeats(line) && !out.includes(line)) out.push(line);
+  }
+  return out;
 }
 
 /** The stored block as a reader may use it, or `undefined` when it is malformed (a record at odds with itself speaks for nothing). */
