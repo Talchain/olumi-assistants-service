@@ -33,8 +33,7 @@ import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
-import { unitPhraseHead, unitPhraseTail } from '../unit-conflict.js';
-import { ratePeriodOf } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { sameUnitAsEarlier } from '../same-unit.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -361,6 +360,8 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
   /** The rows carried from the earlier draft, by identity: they keep their own origin (`targetsStoredInferred`). */
   const carriedRows = new Set<Rec>();
   let conflict = false;
+  /** The earlier limits a conflicting identity stops from being carried (named on the refusal, never overwritten). */
+  const conflicts: HeldRow[] = [];
   for (const c of limitsOf(base)) {
     const row = rowOf(c);
     const quantity = quantityOf(base, c);
@@ -372,22 +373,19 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
       continue;
     }
     /**
-     * ⛔ THE SAME ROW, RE-SPELLED WITHOUT ITS PERIOD (served marketing-2992, 13 Oct 23:04Z): the redraft wrote the budget's
-     * `GBP/year` as `£` on the SAME constraint id, so it was neither kept nor carriable (the id collides) and the whole card
-     * was refused. That row is carried UNCHANGED, the earlier row replacing the candidate's, only when the identity, the
-     * quantity, the stated comparator, the value and the frame are the same, the earlier unit is the currency over ONE period
-     * (`ratePeriodOf`, and nothing else after the currency: not "GBP/customer", a scaled unit or "GBP MRR/year"; Codex buddy),
-     * the candidate's unit has nothing after its currency, and the two figures say the same amount. `sameFigure` is NOT
-     * loosened: "£" never stands for a yearly limit by itself, and any other same-id difference still refuses.
+     * ⛔ THE SAME ROW, RE-SPELLED (served marketing-2992 13 Oct: `GBP/year` → `£`; served cohort witness 15 Oct on c1e944a4:
+     * `% of founder time` → `%`, cee_drafter_raw_responses 0d12d9ca): the redraft wrote the SAME constraint id in a unit
+     * that leaves a part unstated, so it was neither kept (`sameFigure` compares spellings) nor carriable (the id collides)
+     * and the whole card was refused. That row is carried UNCHANGED, the earlier row replacing the candidate's, only when
+     * the identity, the quantity, the stated comparator, the value and the frame are the same and the units name the same
+     * quantity through the unit reader once the redraft's unstated base or period is read as the earlier unit's
+     * (`sameUnitAsEarlier`). Any part both state that differs still refuses, as does any other same-id difference.
      */
     const sameId = theirs.find((t) => t.constraint_id === c.constraint_id);
-    const head = unitPhraseHead(row.unit);
-    if (sameId !== undefined && quantity !== null && quantityOf(candidate, sameId) === quantity && head !== null
+    if (sameId !== undefined && quantity !== null && quantityOf(candidate, sameId) === quantity
       && String(sameId.operator_as_stated ?? sameId.operator) === row.operator && sameId.value === row.value
       && (sameId.value_frame ?? 'level') === (c.value_frame ?? 'level')
-      && ratePeriodOf(row.unit) !== null && unitPhraseTail(row.unit).split(' ').filter((w) => w !== '' && w !== 'per').length === 1
-      && unitPhraseTail(unitOf(sameId)) === ''
-      && figure(row.value, unitOf(sameId)) === figure(row.value, head)) {
+      && sameUnitAsEarlier(row.unit, unitOf(sameId))) {
       const respelled = structuredClone(c);
       rows[rows.indexOf(sameId)] = respelled;
       carriedRows.add(respelled);
@@ -404,6 +402,7 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
     if (node === undefined || (existing !== undefined && quantityOf(candidate, c) !== quantity)
       || rows.some((r) => r.constraint_id === c.constraint_id)) {
       conflict = true;
+      conflicts.push(row);
       continue;
     }
     if (existing === undefined) nodes.push(structuredClone(node));
@@ -433,7 +432,7 @@ export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value:
     goal_constraints: targetsStoredInferred(rows, candidate, carriedRows) };
   // The card's limits are the candidate's own rows as they stand after the carry (a re-spelled row says its earlier unit).
   const candidateLimitIds = new Set(theirs.map((t) => t.constraint_id));
-  return { kept, dropped, carried, uncertain, conflict, limits: limitsOf(replacement).filter((r) => candidateLimitIds.has(r.constraint_id)).map(rowOf),
+  return { kept, dropped, carried, uncertain, conflict, conflicts, limits: limitsOf(replacement).filter((r) => candidateLimitIds.has(r.constraint_id)).map(rowOf),
     ...(unresolvedRetainedLimits(replacement).length > 0 ? { withheld: retainedLimitWithheldLine(replacement) } : {}), replacement };
 }
 
