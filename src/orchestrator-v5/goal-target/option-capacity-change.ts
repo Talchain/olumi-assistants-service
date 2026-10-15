@@ -7,10 +7,10 @@
  *    one this forecast holds unresolved, and the share is the one kept-out factor that option already changes;
  *  - Olumi's reading, named on the card, is that the time freed goes to the deliverable, so the team's capacity for it is
  *    (total − new share) ÷ (total − today's share). The press ADOPTS that reading as the declared relation; it stays Olumi's;
- *  - "from now" is Olumi's timing assumption, said as such;
+ *  - timing the words do not give stays UNRESOLVED (AIE 6182987896): no lead is held, never "from now";
  *  - the press adds one capacity carrier (the existing ratio mechanism, `ratio_source.complement_of`, so the live compiler
  *    re-derives it when the share is edited), its link to the goal and each option's switch, as one registered revision.
- * Pure: the capability does the I/O (`agent-capabilities.ts` `proposeOptionCapacityChange` / `applyOptionCapacityChange`).
+ * Pure: the capability does the I/O (the statement door's row `statement-door/fields/option-capacity.ts`; `agent-capabilities.ts` `applyOptionCapacityChange`).
  */
 import { isDeepStrictEqual } from 'node:util';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
@@ -19,11 +19,14 @@ import { deliverableOf, shareByDateGoalForChanceOf } from './share-by-date-run.j
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { coordinateClausesOf } from '../agent-lane/link-effect-option-statement.js';
 import { factorTheUserNamed } from '../agent-lane/stated-by-user.js';
-import { effectLeadWords, type EffectLead } from './effect-lead.js';
+import type { EffectLead } from './effect-lead.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** The option-capacity member's operation (the press's own write; the statement door delegates to it, `asMemberOp`). */
+export const SET_OPTION_CAPACITY_CHANGE_OP = 'set_option_capacity_change' as const;
 
 /** What the card offers and the press applies, byte for byte. */
 export interface ApprovedOptionCapacityChange {
@@ -44,7 +47,7 @@ export interface ApprovedOptionCapacityChange {
   readonly deadline: string;
   readonly reference_date: string;
   readonly statements: readonly UserStatement[];
-  /** The timing the user's words give (session 4's ONE lead reader, `effect-lead.ts`); absent = Olumi's "from now". */
+  /** The timing the user's words give (session 4's ONE lead reader, `effect-lead.ts`); absent = unresolved (no lead held; AIE 6182987896). */
   readonly lead?: EffectLead;
   /** The option's switches as stored when the card was made. */
   readonly expected_interventions: Rec;
@@ -180,9 +183,10 @@ export function withOptionCapacityChange(graph: unknown, a: ApprovedOptionCapaci
   g.nodes.push({ id: a.carrier_id, kind: 'factor', category: 'controllable', label: a.carrier_label, provenance: 'ai_inferred',
     observed_state: { value: 0, source: 'cee_inference', extra_share_by_date: {
       capacity_ratio: freedTimeRatio(a), unit: `% of ${a.deliverable} per month`,
-      // The timing the user's words gave, as session 4's reader holds it (whose each part is); else Olumi's "from now".
+      // The timing the user's words gave, as session 4's reader holds it (whose each part is). ⛔ AIE 6182987896: none given is
+      // UNRESOLVED, held as no lead at all (never L = 0); this option's deadline chance then waits for it (`share-by-date-run`).
       ...(a.lead !== undefined ? { lead_low: a.lead.lead_low, lead_high: a.lead.lead_high, lead_statements: a.lead.lead_statements.map((st) => structuredClone(st)),
-        lead_reading: structuredClone(a.lead.lead_reading) } : { lead_low: 0, lead_high: 0 }),
+        lead_reading: structuredClone(a.lead.lead_reading) } : {}),
       deadline: a.deadline, reference_date: a.reference_date,
       ratio_basis: { capacity: a.deliverable, relation: 'freed_time', source: { label: a.factor_label, unit: a.unit, today: a.today, withOption: a.to } },
       // `factor_ids` names this carrier, which holds no figure: a compiler without the freed-time branch (a revert) reads it as
@@ -209,7 +213,7 @@ export function optionCapacityChangeHeld(graph: unknown, a: ApprovedOptionCapaci
   const stored = (Array.isArray(c.statements) ? c.statements : []).map(userStatementOf);
   if (stored.length !== a.statements.length || !stored.every((s, i) => s !== undefined && isDeepStrictEqual(s, userStatementOf(a.statements[i])))) return false;
   if (a.lead !== undefined ? !(c.lead_low === a.lead.lead_low && c.lead_high === a.lead.lead_high && isDeepStrictEqual(c.lead_reading, a.lead.lead_reading))
-    : !(c.lead_low === 0 && c.lead_high === 0)) return false;
+    : !(c.lead_low === undefined && c.lead_high === undefined)) return false;
   if (!graph.edges.some((e: Rec) => e.from === a.carrier_id && e.to === a.goal_id)) return false;
   const options = graph.nodes.filter((n: Rec) => n.kind === 'option');
   return options.every((o: Rec) => o.interventions?.[a.carrier_id]?.value === (o.id === a.option_id ? 1 : 0)
@@ -228,16 +232,4 @@ export function optionCapacityChangeStillApplies(a: ApprovedOptionCapacityChange
     && target.reference_date === a.reference_date && share?.unit === a.unit && share?.total === a.total && share?.value === a.today
     && isDeepStrictEqual(rec(target.option.interventions) ? target.option.interventions : {}, a.expected_interventions)
     && !(graph as Rec).nodes.some((n: Rec) => n.id === a.carrier_id);
-}
-
-/** The one card, in plain words: the user's figure, Olumi's two assumptions and its timing, and what the model gains. */
-export function optionCapacityChangeCard(a: ApprovedOptionCapacityChange): string {
-  const quotes = a.statements.map((s) => `“${s.quote}”`).join(', then ');
-  const pct = Math.round(freedTimeRatio(a) * 100);
-  const unit = a.unit.startsWith('%') ? a.unit : ` ${a.unit}`;
-  const timing = a.lead !== undefined ? effectLeadWords(a.lead) : 'Olumi assumes this takes effect from now; say if it would start later.';
-  return `Use this for ‘${a.option_label}’? You said ${quotes}. Olumi reads this as: the option sets ‘${a.factor_label}’ to ${a.to}${unit} `
-    + `(${a.today}${unit} today). Olumi also assumes that all the rest of the team’s time (${a.total - a.today}% today) goes to ${a.deliverable}, `
-    + `so freeing ${a.today - a.to} points raises the team’s capacity for it to about ${pct}% of today’s. ${timing} `
-    + `The model gains one part, ‘${a.carrier_label}’, linked to the goal.`;
 }

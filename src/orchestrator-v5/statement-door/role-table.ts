@@ -15,6 +15,7 @@ import { MEASURE_ROW } from './fields/measure.js';
 import { TIMING_ROW } from './fields/goal-timing.js';
 import { RISK_HOLDS_NOW_ROW, RISK_OCCURRENCE_ROW } from './fields/risk.js';
 import { COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW } from './fields/cohort-relation.js';
+import { OPTION_CAPACITY_ROW } from './fields/option-capacity.js';
 
 /** A field reader's reading of one statement: the form, the figure's ends (absent for a figure-free form) and a qualifier. */
 export interface DoorFigure {
@@ -88,8 +89,8 @@ export interface RoleRow {
   readonly signed_by: string;
 }
 
-/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now"; M4 a cohort option's relation and the goal's same-people relation. */
-export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW];
+/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now"; M4 a cohort option's relation and the goal's same-people relation; M5 an option's new share of time. */
+export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW, OPTION_CAPACITY_ROW];
 export const rowKey = (r: Pick<RoleRow, 'field' | 'carrier'>): string => `${r.field}:${r.carrier}`;
 
 /** The ONE row for this subject: its field, and the one row whose `applies` holds. None, or more than one, is no row. */

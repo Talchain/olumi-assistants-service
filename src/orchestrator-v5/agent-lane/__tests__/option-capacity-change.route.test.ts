@@ -17,12 +17,13 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { unresolvedEventOptionIds } from '../../goal-target/event-by-date-model.js';
 import { unsupportedEventOptionWhy } from '../../goal-target/goal-chance-range.js';
 import { optionCapacityChangeStillApplies, shareFiguresFor, sharePercentsIn, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
-import { capacityRatioOutOfReach, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
+import { capacityRatioOutOfReach, OPTION_TIMING_UNRESOLVED, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { withoutAgentDirections } from '../write-outcome.js';
+import { asMemberOp, doorAsks } from '../../statement-door/door.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
@@ -66,8 +67,20 @@ function world(initial: Rec = JSON.parse(FX.graph_text) as Rec) {
   return { graph, registers, knobs, proposals,
     caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-14T21:30:00Z') }) };
 }
-const offer = async (w: ReturnType<typeof world>, args: unknown = ARGS, text = PAUL): Promise<Rec> =>
-  dispatchTool('propose_option_capacity_change', JSON.stringify(args), ctx(text) as never, w.caps) as Promise<Rec>;
+/**
+ * ⭐ SYSTEM 1 M5: the answer goes through the ONE statement door (`propose_statement`), the subject being the share with the option
+ * ({factor, option, level}), and the statement answering readiness's own ask for that subject (its exact words, `doorAsks`).
+ */
+const offer = async (w: ReturnType<typeof world>, args: { option_id: string; factor_id?: string; statements: readonly { quote: string }[] } = ARGS,
+  text = PAUL): Promise<Rec> => {
+  const subject = { kind: 'factor', id: args.factor_id ?? LEGACY_TIME, option_id: args.option_id, field: 'level' };
+  const ask = doorAsks(w.graph()).find((a) => a.subject.id === subject.id && a.subject.option_id === subject.option_id);
+  return dispatchTool('propose_statement', JSON.stringify({ subject, statements: args.statements.map((st) => ({ quote: st.quote,
+    ...(ask !== undefined ? { answering: ask.words } : {}) })) }), ctx(text) as never, w.caps) as Promise<Rec>;
+};
+/** Paul's answer with its timing stated (session 4's lead reader gives L = 3): the option's figures are then read. */
+const TIMED = 'in 3 months, cut legacy from 25% to 15%';
+const offerTimed = (w: ReturnType<typeof world>): Promise<Rec> => offer(w, { option_id: LEGACY, statements: [{ quote: TIMED }] }, TIMED);
 const press = (w: ReturnType<typeof world>, pid: string) =>
   w.caps.authoriseChange({ ...ctx('Yes, use this for the option.'), typed_approval_of: pid } as never, { proposal_id: pid }) as Promise<Rec>;
 
@@ -85,23 +98,31 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const w = world();
     const r = await offer(w);
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Use this for ‘Reduce legacy-fix time’? You said “it would cut legacy work from 25% to 15%”. Olumi reads this as: the option '
-      + 'sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today). Olumi also assumes that all the rest of the team’s time '
-      + '(75% today) goes to next feature launch, so freeing 10 points raises the team’s capacity for it to about 113% of today’s. Olumi assumes this takes '
-      + 'effect from now; say if it would start later. The model gains one part, ‘Reduce legacy-fix time frees time for next feature launch’, linked to the goal.');
+    // M5: the ONE door card (AIE 6181498097 template), with the AIE's exact M5 words (6182987896): the allocation-to-pace
+    // assumption with its real operands, the timing the words do not give said as unresolved (never "from now"), and the carrier
+    // with its number and window.
+    expect(r.public_label).toBe('From your message: “it would cut legacy work from 25% to 15%”. Olumi proposes this reading: ‘Reduce legacy-fix time’ '
+      + 'sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today). Olumi proposes treating all team time outside '
+      + '‘Legacy-code fixing time’ as time on ‘next feature launch’. Under that assumption, this change increases allocated time for the same work '
+      + 'from 75% of developer time to 85% of developer time, or about 113% of its previous amount. To model faster delivery, Olumi also assumes pace '
+      + 'changes in proportion to that allocated time. Your statement does not establish when the freed time becomes fully effective. That timing '
+      + 'remains unresolved. The model gains one part, ‘Reduce legacy-fix time frees time for next feature launch’: with this option, the team’s '
+      + 'capacity for ‘next feature launch’ is about 113% of today’s, counted once in the deadline forecast to 14 April 2027, and this option’s chance '
+      + 'waits for that timing. Record this reading?');
     expect(w.registers).toHaveLength(0); // nothing is written by the offer
-    const chips = approvalChipsFor([{ name: 'propose_option_capacity_change', ok: true, mutated: false, proposal_id: r.proposal_id }] as never,
+    const chips = approvalChipsFor([{ name: 'propose_statement', ok: true, mutated: false, proposal_id: r.proposal_id }] as never,
       (id: string) => ({ proposal: w.proposals.get(id), result: r }) as never);
     // A card-only card: its press carries the card's own words; the second chip changes it first.
-    expect(chips.map((c: Rec) => c.label), JSON.stringify(chips)).toEqual(['Use this', 'Change something first']);
+    expect(chips[0]!.label, JSON.stringify(chips)).toBe('Use this reading');
     expect(chips[0]!.detail).toBe(r.public_label);
 
     const done = await press(w, r.proposal_id);
     expect(done, JSON.stringify(done)).toMatchObject({ ok: true, applied: true, mutated: true });
     // ⛔ What the USER reads (served 7f5659fd: the Agent's direction was shown verbatim, the user's sentence dropped): the
     // fast path shows `follow_up` through `withoutAgentDirections`; the direction for the Agent rides in `note` only.
-    expect(withoutAgentDirections(String(done.follow_up)).text).toBe('‘Reduce legacy-fix time’ is saved: it now acts in the deadline '
-      + 'forecast through the time it frees, with your figure and Olumi’s assumptions kept distinct.');
+    // AIE 6182987896 (exact receipt): it promises no admitted chance.
+    expect(withoutAgentDirections(String(done.follow_up)).text).toBe('Saved ‘Reduce legacy-fix time’ with your stated share of time and the '
+      + 'shown Olumi assumptions kept distinct.');
     expect(String(done.follow_up)).not.toMatch(/speak only|state no chance|the user/i);
     expect(done.note).toBe('The analysis runs on the saved model; speak only to its result, and state no chance before it returns.');
     expect(w.registers).toHaveLength(1); // ONE compare-and-set registration
@@ -117,15 +138,16 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(unresolvedEventOptionIds(g)).toEqual([]);
     const extra = node(g, CARRIER).observed_state.extra_share_by_date;
     expect(extra.capacity_ratio).toBeCloseTo(85 / 75, 12);
-    expect(sharePartsForOption(g, LEGACY)?.ratio).toBeCloseTo(85 / 75, 12);
-    expect(g.edges.find((e: Rec) => e.from === CARRIER && e.to === 'event_goal').defaulted).toBeUndefined();
-    expect(shareOptionEstimateWords(g, LEGACY)).toBe('using your figure of 15% of developer time for ‘Legacy-code fixing time’ with this option '
-      + '(25% of developer time today), Olumi’s assumption that all the rest of the team’s time (75% today, 85% with this option) goes to ‘next feature '
-      + 'launch’, so the team’s capacity for it is about 113% of today’s, and Olumi’s provisional assumption that delivery pace changes in proportion to '
-      + 'that capacity from now');
-    // On his own 7–8 months the user's bound decides (PL 6135017311 item 1): out of reach, with the arithmetic, never a tail figure.
-    expect(shareChanceInputFailure(g, LEGACY)).toBeNull();
-    expect(capacityRatioOutOfReach(g, LEGACY)).toMatch(/^No chance is shown for this option: on your own soonest estimate it can’t reach 100% of next feature launch by 14 April 2027\. Even at 7 months, it gets about 97% done by then/);
+    // ⛔ AIE 6182987896: with no timing held, the carrier's deadline effect is not sized (never L = 0): its link stays defaulted
+    // and no part is read for this option until the timing is known (`offerTimed` rows below read it with L = 3).
+    expect(sharePartsForOption(g, LEGACY)?.ratio).toBeUndefined();
+    expect(g.edges.find((e: Rec) => e.from === CARRIER && e.to === 'event_goal').defaulted).toBe(true);
+    // ⛔ AIE 6182987896: his words give no timing, so none is held (never L = 0) and THIS option's deadline chance waits, with the
+    // AIE's sentence; the carry-on forecast keeps its own (the failing part is set aside for this option only).
+    expect(extra.lead_low).toBeUndefined();
+    expect(extra.lead_high).toBeUndefined();
+    expect(shareChanceInputFailure(g, LEGACY)).toBe(`Not shown. ${OPTION_TIMING_UNRESOLVED}`);
+    expect(shareOptionEstimateWords(g, LEGACY)).not.toMatch(/from now/);
     // ⛔ Served 7f5659fd (22:50Z, wrong author): carrying on as now said "rests on figures Olumi can’t yet confirm" and offered
     // a speed-up step, over HIS 7–8 months. Today's team (no part on, k = 1) gets the same bound reason, with its arithmetic.
     expect(capacityRatioOutOfReach(g, 'event_option_1')).toBe('No chance is shown for this option: on your own soonest estimate it can’t '
@@ -177,7 +199,8 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
 
   it('⭐ the live compiler: an edit to his 25% (→ 20%) re-derives r = 85/80 from the saved figure; his 15% stays his', async () => {
     const w = world();
-    await press(w, (await offer(w)).proposal_id);
+    // With its timing stated, so this option's figures are read (no timing = unresolved, row above).
+    await press(w, (await offerTimed(w)).proposal_id);
     const g = w.graph();
     Object.assign(node(g, LEGACY_TIME).observed_state, { raw_value: 20, value: 0.2 });
     const after = projectGraphForPersistence(g as never) as Rec;
@@ -187,7 +210,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
 
   it('⛔ rollback fails closed: without the freed-time branch, the carrier reads as unreadable (withheld), never r = 1', async () => {
     const w = world();
-    await press(w, (await offer(w)).proposal_id);
+    await press(w, (await offerTimed(w)).proposal_id);
     const g = w.graph();
     delete node(g, CARRIER).observed_state.extra_share_by_date.ratio_source.complement_of; // what a reverted compiler sees
     const after = projectGraphForPersistence(g as never) as Rec;
@@ -197,7 +220,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
 
   it('⭐ in reach (team time 5–7 months): the option shows its own licensed chance, with what it rests on', async () => {
     const w = world();
-    await press(w, (await offer(w)).proposal_id);
+    await press(w, (await offerTimed(w)).proposal_id);
     const g = w.graph();
     const edited = applyTeamShareEdit(g, { goal_id: 'event_goal', team_id: 'event_team', low_months: 5, high_months: 7,
       deadline: '2027-04-14', reference_date: '2026-10-14' } as never, computeAnalysisAffectingGraphHash(g as never)!);
@@ -219,7 +242,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     // CONTRAST: every numeral (the reading the PL found) would have taken the 3.
     expect([...SENTENCE.matchAll(/\d+/g)].map((m) => Number(m[0]))).toContain(3);
     const w = world();
-    const r = await offer(w, { option_id: LEGACY, statements: [{ quote: SENTENCE, form: 'point', value: 15 }] }, SENTENCE);
+    const r = await offer(w, { option_id: LEGACY, statements: [{ quote: SENTENCE }] }, SENTENCE);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.public_label).toContain('sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today)');
     expect(r.public_label).toContain('Full effect 3 months from now: your start in 3 months');
@@ -241,7 +264,8 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
   it('⛔ staleness is about MEANING: a changed deliverable, deadline, reference, unit or whole refreshes the card; nothing is written', async () => {
     const w = world();
     const r = await offer(w);
-    const a = w.proposals.get(r.proposal_id)!.operations[0]!.value as ApprovedOptionCapacityChange;
+    // The door card's write is the option-capacity member's own payload (`asMemberOp`), the card the meaning gate reads.
+    const a = asMemberOp(w.proposals.get(r.proposal_id)!.operations[0]!)!.value as ApprovedOptionCapacityChange;
     expect(optionCapacityChangeStillApplies(a, w.graph())).toBe(true);
     for (const [what, moved] of [['deliverable', { ...a, deliverable: 'a different launch' }], ['deadline', { ...a, deadline: '2027-06-30' }],
       ['reference', { ...a, reference_date: '2026-09-01' }], ['unit', { ...a, unit: '% of budget' }], ['whole', { ...a, total: 50 }]] as const) {
@@ -263,7 +287,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const budget = w.graph();
     node(budget, LEGACY_TIME).observed_state.unit = '% of budget';
     // CONTRAST: offered on a share of budget, no card is made at all (not a share of the team's time).
-    expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
+    expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_table_row' });
   });
 
   it('the share\'s percent family is the unit authority\'s (`classifyUnitScaleClass`): "percent of developer time" is a share; points never are', async () => {
@@ -271,17 +295,20 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(await offer(world(spelled('percent of developer time')))).toMatchObject({ ok: true });
     expect(await offer(world(spelled('percent')))).toMatchObject({ ok: true });
     // CONTRAST: the authority's prefix layer reads "percentage points" as percent; a change in points is not a share of time.
-    expect(await offer(world(spelled('percentage points')))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
+    expect(await offer(world(spelled('percentage points')))).toMatchObject({ ok: false, refusal: 'no_table_row' });
   });
 
   it.each([
     ['words the user never typed', { ...ARGS, statements: [{ quote: 'it would cut legacy work to 10%', form: 'point', value: 10 }] }, PAUL, 'statement_not_found'],
-    ['a higher share (frees no time)', { ...ARGS, statements: [{ quote: 'legacy work would go up to 30%', form: 'point', value: 30 }] }, 'legacy work would go up to 30%', 'not_lower'],
-    ['a different "today" from the model\'s 25%', { ...ARGS, statements: [{ quote: 'it would cut legacy work from 20% to 15%', form: 'point', value: 15 }] }, 'it would cut legacy work from 20% to 15%', 'not_today'],
-    ['an option that already acts (the hire)', { option_id: 'event_option_3', statements: ARGS.statements }, PAUL, 'option_not_unresolved'],
-  ] as const)('REFUSES %s: nothing is prepared', async (_name, args, text, refusal) => {
+    ['a higher share (frees no time)', { ...ARGS, statements: [{ quote: 'legacy work would go up to 30%', form: 'point', value: 30 }] }, 'legacy work would go up to 30%', 'not_this_field', 'is not below today\'s 25%'],
+    ['a different "today" from the model\'s 25%', { ...ARGS, statements: [{ quote: 'it would cut legacy work from 20% to 15%', form: 'point', value: 15 }] }, 'it would cut legacy work from 20% to 15%', 'not_this_field', 'holds ‘Legacy-code fixing time’ at 25% of developer time today'],
+    // M5: the door has no row for an option that already acts, so nothing is read for it.
+    ['an option that already acts (the hire)', { option_id: 'event_option_3', statements: ARGS.statements }, PAUL, 'no_table_row'],
+  ] as const)('REFUSES %s: nothing is prepared', async (_name, args, text, refusal, detail?: string) => {
     const w = world();
-    expect(await offer(w, args, text)).toMatchObject({ ok: false, refusal });
+    const out = await offer(w, args, text);
+    expect(out).toMatchObject({ ok: false, refusal });
+    if (detail !== undefined) expect(String(out.detail)).toContain(detail);
     expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
   });
 });
@@ -326,7 +353,7 @@ describe('an unsized deadline-forecast option is asked for its effect, never cal
     const subject = issues[0]!.statement_subject as Rec;
     const r = await offer(w, { option_id: subject.option_id, factor_id: subject.id, statements: ARGS.statements });
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
-    expect(String(r.public_label)).toContain(`You said “${PAUL}”`);
+    expect(String(r.public_label)).toContain(`From your message: “${PAUL}”`);
     expect(await press(w, String(r.proposal_id))).toMatchObject({ ok: true, applied: true, mutated: true });
     expect(w.registers).toHaveLength(1);
     const after = resolveRunAdmission(w.graph());
