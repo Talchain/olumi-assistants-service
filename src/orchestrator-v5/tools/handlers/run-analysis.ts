@@ -222,7 +222,7 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
-import { sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { assessRunQuestionScope, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2301,9 +2301,25 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
     // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
-    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
+    const evaluatedQuestionScope = typeof snapshot.goal_node_id === 'string'
+      ? assessRunQuestionScope(snapshot.rawPersistedGraph ?? graphForAnalysis, plotPayload, snapshot.goal_node_id) : undefined;
+    if (evaluatedQuestionScope?.status === 'invalid') {
+      const scopedIds = goalFigureOptions(response).scored;
+      response = withholdOptionGoalFigures(response, new Set(scopedIds), {
+        code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning',
+        message: 'This Run’s dispatched inputs do not match the saved target’s baseline, frame, units or comparator, so its goal chances are not shown.',
+        option_ids: scopedIds, node_ids: [snapshot.goal_node_id],
+        detail: { reason: 'EVALUATED_INPUTS_DO_NOT_MATCH_SAVED_QUESTION', missing_or_conflicting: evaluatedQuestionScope.reasons },
+      }, { keepOutcome: true, keepOrdering: true });
+    }
+    // The static level question is independent of an unsupported date question. No time capability is asserted.
+    if (evaluatedQuestionScope?.status !== 'supported_static') {
+      response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
+    }
     // M3c (AIE 6181933060): an option not fully in place at the target's month, on its own recorded lead, is withheld, never "no change".
-    response = withholdOptionsNotInPlaceAtPeriodEnd(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
+    if (evaluatedQuestionScope?.status !== 'supported_static') {
+      response = withholdOptionsNotInPlaceAtPeriodEnd(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
+    }
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -2941,9 +2957,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // 0 or 1 counts only where this Run earned it.
     const earnedGoalChance = (optionId: string, p: 0 | 1): boolean =>
       goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned);
-    // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
-    // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
-    // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
+    // The final dispatched request attests the selected threshold, frame and baseline; output summaries do not.
+    // Existing scientific consistency checks still decide which figures and qualifications may be shown.
     // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
     // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
     const sentRun = plotPayload;

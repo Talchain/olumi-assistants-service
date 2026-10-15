@@ -210,8 +210,9 @@ describe('Explain scoped assembly safety', () => {
       // exactly that clause swapped equals this head's byte for byte.
       // B1 buddy repair: standing safeguards prefix restored; consolidated RUN_FACTS_USE kept once.
       // AIE-04: the exact disclosure/comparison rules below, prefix safeguards retained.
-      // 44,530 UTF-8 bytes, SHA from captured Run-explanation/run2/1.sentBody.json; Claude challenge required.
-      .toBe('90ab1ef03feb171bc6b2a331159ccfa431466a281505c064794ac2ea0e6050d7');
+      // B2: evaluated-question scope sentence only; SENT instructions reverse byte-for-byte to AIE-04.
+      // 44906 UTF-8 bytes; Claude challenge required. LANE-B-B2-SENT-PIN-PROOF.json.
+      .toBe('8a4e5fda17989f710773af8b04618a32d4d4d131a29a922a490a63bcb73a69c8');
   },60000);
 });
 

@@ -1,4 +1,8 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
+import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
+import { assessRunQuestionScope } from './run-question.js';
+export { deriveRunQuestion, assessRunQuestionScope, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
+export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
@@ -515,6 +519,14 @@ export function goalChanceLicenceOf(
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
+  const evaluatedScope = typeof goalId === 'string' && constraints.sentRun !== undefined
+    ? assessRunQuestionScope(horizonGraph, constraints.sentRun, goalId) : undefined;
+  if (evaluatedScope?.status === 'invalid') return null;
+  const staticLevel = evaluatedScope?.status === 'supported_static' && sentThreshold?.frame === 'level';
+  const finalSent = sentGoalThresholdOf(undefined, undefined, goalId, undefined, constraints);
+  const capturedThreshold = sentThreshold !== undefined && finalSent !== undefined
+    && sentThreshold.value === finalSent.value && sentThreshold.field === finalSent.field && sentThreshold.frame === finalSent.frame
+    && sentThreshold.baseline === finalSent.baseline && sentThreshold.status_quo_option_id === finalSent.status_quo_option_id;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   const share = shareByDateGoalForChanceOf(graph);
@@ -779,7 +791,7 @@ export function goalChanceLicenceOf(
     ...(estimateLinks > 0 ? { olumi_estimate_link_count: estimateLinks } : {}),
     ...(estimates.values > 0 ? { olumi_estimate_value_count: estimates.values } : {}),
     ...(Object.keys(settingsByOption).length > 0 ? { olumi_estimate_settings_by_option: settingsByOption } : {}),
-    ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
+    ...(spread === undefined && Object.keys(shortfall).length === 0 && !capturedThreshold ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
@@ -787,6 +799,7 @@ export function goalChanceLicenceOf(
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit,
+      ...(staticLevel ? { frame: 'level' as const } : {}),
       ...(share !== null && share.goal.id === goalId ? { by_date: share.deadline } : {}) },
     ...(existence !== undefined ? { user_link_existence: existence } : {}),
     ...(priorOnPath ? { summary_withheld: { cause: 'olumi_existence_assumption' as const, form: summary as Exclude<GoalChanceForm, 'each'> } } : {}),
@@ -796,11 +809,11 @@ export function goalChanceLicenceOf(
     ...(conditional !== undefined ? { period_end_assumption: { origin: 'olumi' as const, period_months: conditional.basis.period_months,
       reference: conditional.basis.reference }, effects_timing: conditional.effects_timing, effects_timing_origin: 'olumi' as const } : {}),
     // ⭐ M3b (AIE 6180193788 §2): THIS Run's reading used the user's own current forecast that every effect is in place by the end.
-    ...(conditional === undefined && basis?.effects_at_period_end === true && typeof goalId === 'string'
+    ...(!staticLevel && conditional === undefined && basis?.effects_at_period_end === true && typeof goalId === 'string'
       && humanEffectsTimingOf(graph, goalId)?.kind === 'in_place' ? { effects_timing: 'in_place_by_period' as const, effects_timing_origin: 'user' as const } : {}),
   };
   const worded = withBatchCWords(single, {
-    envelope, graph, goal, goalLabel, basis, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
+    envelope, graph, goal, goalLabel, basis, staticLevel, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     periodEndNote: conditional?.note,
     sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
@@ -818,7 +831,7 @@ export function goalChanceLicenceOf(
   // L4 (DL conditions 2–3): a licensed capacity-ratio option says what its chance leaves out, and why no comparison is shown.
   const ratioLicensed = onShare && capacityRatioOptionIds(graph).some(id => licensed.includes(id));
   const rangeLines = rangeUses.flatMap(([id, xs]) => xs.map(u => likelyRangeLawWords(labelOfNode(nodes, id) ?? id, labelOfNode(nodes, u.factor_id) ?? u.factor_id, u)));
-  const notes = [...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
+  const notes = [...(staticLevel ? [STATIC_MODEL_SCOPE_NOTE] : []), ...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
     ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
     ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
   return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
@@ -842,6 +855,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   readonly estimates: GoalChanceEstimates; readonly jointEstimates: GoalChanceEstimates | undefined;
   /** G: the AIE's note, present only on the conditional reading ({@link periodEndConditionalOf}). */
   readonly periodEndNote?: string;
+  readonly staticLevel?: boolean;
 }): GoalChanceLicence {
   const { goalLabel, changeFrame } = c;
   // ⭐ R5 MEANING AT THE PRODUCER (DL 12 Oct): the target says its frame whenever Olumi's VALIDATED reading holds one — a
@@ -852,7 +866,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
     : { ...unframed, target: { ...unframed.target, frame: validatedFrame } };
   // A level target's period is said only on an at-period-end basis (ruling 12); otherwise today's words, unchanged.
   // G: the conditional reading says the same own-target words, at the period it assumes (its note says so).
-  const basis = c.basis !== undefined && (c.basis.effects_at_period_end || c.periodEndNote !== undefined) ? c.basis : undefined;
+  const basis = !c.staticLevel && c.basis !== undefined && (c.basis.effects_at_period_end || c.periodEndNote !== undefined) ? c.basis : undefined;
   const alsoRequired = c.basis?.also_required ?? [];
   // Amendment 7: any Olumi input (a starting value, an option setting or an effect size) on the path makes it provisional.
   // ⭐ LABEL, DON'T WITHHOLD (DL 12 Oct): an input whose origin is not established (R5-2) is shown too, never unlabelled —
@@ -886,7 +900,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   };
   // On the paths that say today's plain sentence, the line is added only where conditions were retained (unchanged otherwise).
   const plainCovers = goalLabel !== undefined && alsoRequired.length > 0 ? covers(goalLabel) : [];
-  if (goalLabel === undefined || (basis === undefined && changeFrame === undefined)) {
+  if (goalLabel === undefined || (basis === undefined && changeFrame === undefined && !c.staticLevel)) {
     // No stated basis: today's single-target sentence ("chance of meeting your goal"), with amendment 1's assumption and the
     // status quo's line where it is shown, and amendment 7's label; plus the several-targets block if the Run sent target rows.
     return withSeveralTargets({
@@ -1195,38 +1209,18 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
 }
 
 /**
- * One Run-input candidate must agree with every licensed option; ambiguity records nothing.
- * ⛔ Hiring row 3 (14 Oct): the licence it agrees with is the one the Run states, read with the Run's own inputs. A change goal
- * whose effects are not stated at the period end is licensed only on its conditional reading (`periodEndConditionalOf`: the
- * brief and Olumi's timing reading). With `sentRun` alone that licence was null, so no threshold was recorded and the shortfall
- * line (`shortfallNotesOf`) was never said for hiring.
+ * Record the threshold and frame on the FINAL dispatched request. Output percentiles and probability agreement cannot
+ * attest a scoring frame. Compatibility arguments are retained for callers; absent request evidence records nothing.
+ * A level conversion additionally requires its sent baseline and one explicit status-quo reference.
  */
 export function sentGoalThresholdOf(
-  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  _envelope: unknown, _graph: unknown, goalId: unknown, _earned?: (optionId: string, p: 0 | 1) => boolean,
   inputs: Pick<GoalChanceConstraintInputs, 'sentRun' | 'brief' | 'effects_timing'> = {},
 ): SentGoalThreshold | undefined {
-  const sentRun = inputs.sentRun;
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, undefined, graph, inputs);
-  if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
-  const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
-  const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
-  if (goal === undefined || !isRec(envelope)) return undefined;
-  const records = goalOwnConstraintChanceRecords(envelope, graph, goalId, readOptionResultSources(envelope).find(s => s.length > 0) ?? [], sentRun).records;
-  const candidates: SentGoalThreshold[] = [];
-  for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
-    const value = goal[field];
-    if (!finite(value)) continue;
-    const agrees = Object.keys(licence.pct_by_option).every(id => {
-      const record = records.find(r => (r.option_id ?? r.id) === id);
-      const outcome = isRec(record?.outcome) ? record.outcome : undefined;
-      return thresholdScaleAgrees(value, outcome?.p10, outcome?.p90, record?.probability_of_goal, licence.target.comparator);
-    });
-    if (agrees) candidates.push({ value, field, frame: 'delta' });
-  }
-  return candidates.length === 1 ? candidates[0] : undefined;
+  return readDispatchedGoalThreshold(inputs.sentRun, goalId);
 }
 
-/** The same percentile/chance agreement rules apply to candidate selection and the recorded scoring frame. */
+/** Scientific consistency check for disclosed spread/shortfall only; never evidence of the dispatched frame. */
 function thresholdScaleAgrees(t: number, low: unknown, high: unknown, p: unknown, comparator: GoalChanceComparator): boolean {
   if (!finite(low) || !finite(high) || !finite(p) || low > high || p < 0 || p > 1) return false;
   const upwards = comparator === 'at_least' || comparator === 'above';
