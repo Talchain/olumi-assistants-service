@@ -88,7 +88,6 @@
   "tests/fixtures/marketing-l20-revised-draft/served-015fbf08.json": 38,
   "tests/fixtures/size-retry/t5-d2-r1.json": 31,
   "tests/fixtures/size-retry/t5-d2-v3-retries.json": 92,
-  "tests/fixtures/sys2/served-capacity-e4ff6039.json": 4,
   "tests/fixtures/sys2/served-pricing-30d64bc7.json": 3
  }
 }
