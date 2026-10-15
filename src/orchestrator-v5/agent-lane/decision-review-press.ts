@@ -36,7 +36,7 @@ import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
 import { savedZeroRootIds, survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
-import { unsizedOlumiRiskIds, unsizedOlumiRiskLine, unsizedOlumiRisksUnnamedLine } from './unsized-risk.js';
+import { runOmittedRisks, unsizedOlumiRiskLineFor, unsizedOlumiRisksUnnamedLine } from './unsized-risk.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
 import { readFactorEnrichments, factorReviewSensitivity } from './factor-review.js';
 
@@ -219,11 +219,12 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
 
   // F1b (DL 15 Oct; AIE 6177505214): an unsized Olumi risk is left out of the Run's calculation, so the review says so in the
   // AIE's words (`unsizedOlumiRiskLine`), or counted in its label-free form.
-  // A saved Run that really treated the risk as zero keeps saying so (F1); the omission is said only of a Run that left it out.
+  // A saved Run that really treated the risk as zero keeps saying so (F1); the omission is said only of a Run that left it out:
+  // the risks THAT Run recorded leaving out, by their labels then (#3167 fix-forward), never today's model's set.
   let unnamedUnsized = 0;
   const savedZero = savedZeroRootIds(graph, analysisReady, analysisResult);
-  for (const id of [...unsizedOlumiRiskIds(graph)].filter((riskId) => !savedZero.has(riskId))) {
-    const line = unsizedOlumiRiskLine(graph, id, false);
+  for (const omitted of (runOmittedRisks(analysisResult) ?? []).filter((r) => !savedZero.has(r.node_id))) {
+    const line = unsizedOlumiRiskLineFor(omitted.label, false);
     if (line !== null && survivesReplyEditors(line, graph, analysisReady)) lines.push(line);
     else unnamedUnsized += 1;
   }

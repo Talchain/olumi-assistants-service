@@ -309,10 +309,29 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect(plotCalls[0]!.options.map((o) => o.option_id ?? o.id).sort()).toEqual(['keep_49_price', 'raise_to_59']);
   });
 
-  it('T4f: the original served reconstruction still withholds its unknown risk root', async () => {
+  // T4f re-pinned with #3167 (AIE 6177505214 T9; DL 15 Oct): the reconstruction's unvalued risk root ‘AI release delay’ is
+  // POSITIVELY Olumi's (the drafter's own `ai_inferred` tag → `authorshipOf` origin 'ai'), unsized and set by no option, so
+  // the Run leaves it out of its calculation and says so (`withoutUnsizedOlumiRisksRecorded`) instead of withholding.
+  // The withhold is kept wherever the root is not positively Olumi's: the CONTRAST row below.
+  it('T4f: the original served reconstruction leaves out its unsized Olumi risk root, and runs', async () => {
     const { graph } = await build(servedCandidate());
-    expect(blockers(graph)).toEqual(['MISSING_FACTOR_LEVEL']);
-    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    const delay = graph.nodes.find((n) => n.id === DELAY) as { provenance?: unknown } | undefined;
+    expect(delay?.provenance, 'PRECONDITION: the drafter tagged the risk as its own').toBe('ai_inferred');
+    expect(blockers(graph)).toEqual([]);
+    expect(resolveRunAdmission(graph).willProceed).toBe(true);
+  });
+
+  it('T4f CONTRAST: the same root tagged as the user\'s, or with no tag, still withholds its unknown risk root', async () => {
+    const { graph } = await build(servedCandidate());
+    for (const provenance of ['from_brief', 'unverified_brief', undefined]) {
+      const tagged = { ...graph, nodes: graph.nodes.map((n) => {
+        if (n.id !== DELAY) return n;
+        const { provenance: _drop, ...rest } = n as typeof n & { provenance?: unknown };
+        return (provenance === undefined ? rest : { ...rest, provenance }) as typeof n;
+      }) };
+      expect(blockers(tagged), String(provenance)).toEqual(['MISSING_FACTOR_LEVEL']);
+      expect(resolveRunAdmission(tagged).willProceed, String(provenance)).toBe(false);
+    }
   });
 
   it('RED (a): the loop is a construction issue for the ONE repair retry, naming the loop exactly', async () => {

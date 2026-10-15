@@ -13,6 +13,7 @@ import type { DoorSubject, StatementField } from './subject.js';
 import type { DoorWriteMember, FieldWriter } from './write.js';
 import { MEASURE_ROW } from './fields/measure.js';
 import { TIMING_ROW } from './fields/goal-timing.js';
+import { RISK_HOLDS_NOW_ROW, RISK_OCCURRENCE_ROW } from './fields/risk.js';
 
 /** A field reader's reading of one statement: the form, the figure's ends (absent for a figure-free form) and a qualifier. */
 export interface DoorFigure {
@@ -22,6 +23,8 @@ export interface DoorFigure {
   readonly qualifier?: string;
   /** A figure-free field's reading: the user's own words it rests on, inside the quote ("story points completed per sprint"). */
   readonly words?: string;
+  /** The span of the quote the figure governs (the shared reader's clause): the subject is bound by it, not by the whole quote. */
+  readonly clause?: string;
 }
 
 export interface RoleRow {
@@ -41,9 +44,11 @@ export interface RoleRow {
   readonly applies: (subject: DoorSubject, graph: unknown) => boolean;
   /** The adapter onto `carrier`: the verified reading → ONE write, or the reason the carrier cannot hold it. */
   readonly writer: FieldWriter;
+  /** A sentence the model already holds as this subject's ADMITTED source for this field (the brief's own words): bound by it. */
+  readonly sourceOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
   /** Olumi's reading of the statement, as the card says it ("your estimate of about 30% that ‘X’ happens …"). */
   readonly readingWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
-  /** Every Olumi assumption the reading rests on, each said once (a step, a convention, a part the user did not give). */
+  /** Every derived interpretation or separate Olumi assumption the reading rests on, each said once, before the card's question. */
   readonly assumptions: (statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string) => readonly string[];
   /** The receipt after a confirmed write and read-back ("Recorded your estimate: …"). */
   readonly recordedWords: (statements: readonly UserStatement[], subject: DoorSubject, label: string, graph: unknown, words?: string) => string;
@@ -58,14 +63,22 @@ export interface RoleRow {
    * `undefined` when the reading is complete.
    */
   readonly incomplete?: (statements: readonly UserStatement[], subject: DoorSubject, graph: unknown, words?: string) => string | undefined;
+  /** The quantity a verified statement records (its stored `subject.quantity`, read by the carrier's writer); default the field. */
+  readonly quantity?: string;
+  /** The period a statement of this subject is stated over, kept on it ("3 months"), where the field has one. */
+  readonly periodOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
+  /** True where the written postimage adds an Olumi derivation (its button is "Use this reading", AIE 6181498097). */
+  readonly derives?: boolean;
+  /** A stated 0 is a figure of this field, recorded as 0 (a chance of 0%, a level of none), never refused as missing. */
+  readonly allowsZero?: boolean;
   /** At most this many statements make one reading (a lead's start and its settling-in: 2). */
   readonly maxStatements: number;
   /** The AIE comment id that signed this row's meaning and words. */
   readonly signed_by: string;
 }
 
-/** The table. Each migration adds its signed row(s), one per (field, carrier). */
-export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW];
+/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now". */
+export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW];
 export const rowKey = (r: Pick<RoleRow, 'field' | 'carrier'>): string => `${r.field}:${r.carrier}`;
 
 /** The ONE row for this subject: its field, and the one row whose `applies` holds. None, or more than one, is no row. */

@@ -395,8 +395,8 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
 describe('S2: the user’s own chance for the risk root, through the real route', () => {
   const SAID = 'I’d say there’s about a 30% chance it slips within the next 3 months.';
   const ASKED = `The analysis can’t run yet. How likely is ‘${LABEL}’ to happen at least once within 3 months?`;
-  const USER_CARD = `From your message: “${SAID}”. Olumi reads this as your estimate of about 30% that ‘${LABEL}’ happens at least once within the next 3 months `
-    + 'from today. Record this reading? How strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized.';
+  const USER_CARD = `From your message: “${SAID}” Olumi proposes this reading: your estimate of about 30% that ‘${LABEL}’ happens at least once within the next 3 months `
+    + 'from today. How strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized. Record this reading?';
   const USERS = { version: 1, occurrence: { p_low: 0.3, p_high: 0.3, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } };
   const cardsOf = (body: Rec): Rec[] => ((body.suggested_actions ?? []) as Rec[]).filter((c) => String(c.id).startsWith('agent-approve'));
   const graphWrites = (w: { writes: Rec[] }): number => w.writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
@@ -416,8 +416,10 @@ describe('S2: the user’s own chance for the risk root, through the real route'
       .toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     const risk = riskOf(w.graph());
     expect(risk.event_risk).toEqual(USERS);
-    expect(risk.occurrence_statement).toMatchObject({ speaker: 'user', quote: SAID, qualifier: 'about', period: '3 months' });
-    const { event_risk: _e, occurrence_statement: _s, ...rest } = risk;
+    // SYSTEM 1 M1: their complete statement is the ONE door's durable record beside the block (`user_statements[]`).
+    expect(risk.user_statements).toEqual([expect.objectContaining({ subject_key: `risk|${risk.id}|||occurrence`, field: 'occurrence',
+      statements: [expect.objectContaining({ speaker: 'user', quote: SAID, qualifier: 'about', period: '3 months' })] })]);
+    const { event_risk: _e, user_statements: _s, ...rest } = risk;
     expect(rest).toEqual(riskOf(SERVED.graph));
     expect(levelAsks(w.graph())).toEqual([]);
     expect(buildCanonicalAnalysisReadyFromGraph(w.graph())).toMatchObject({ may_run: true });

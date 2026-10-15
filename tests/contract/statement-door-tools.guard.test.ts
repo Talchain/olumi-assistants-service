@@ -13,8 +13,8 @@ const proposeTools = [...new Set([...TOOLS.matchAll(/name: '(propose_[a-z_]+)'/g
 /** Bespoke USER-STATEMENT tools still to migrate onto the door. SHRINK ONLY: remove a name in the PR that deletes its tool. */
 const USER_STATEMENT_TOOLS = ['propose_cohort_forecast', 'propose_goal_current_level', 'propose_hiring_times', 'propose_link_effect',
   'propose_option_capacity_change', 'propose_team_time'];
-/** User-statement ARGUMENTS on `propose_assumptions` still to migrate (holds now; a statement confirming or describing a figure). */
-const USER_STATEMENT_ARGS = ['holds_now', 'statements'];
+/** User-statement ARGUMENTS on `propose_assumptions` still to migrate (a statement confirming or describing a factor's figure: M2). */
+const USER_STATEMENT_ARGS = ['statements'];
 /** Every other proposing tool: Olumi's proposals and structural changes, not a user's statement. A new name fails here (FREEZE). */
 const OTHER_TOOLS = ['propose_assumptions', 'propose_goal_deadline', 'propose_goal_target', 'propose_identity', 'propose_limit_change',
   'propose_link_strength', 'propose_link_strengths', 'propose_model_change', 'propose_new_factor', 'propose_new_limit', 'propose_new_option',
@@ -45,7 +45,7 @@ describe('SYSTEM 1: user-statement tools only shrink onto the ONE statement door
       .filter((a) => new RegExp(`\\b${a}:`).test(block));
     expect(args).toEqual(USER_STATEMENT_ARGS.filter((a) => args.includes(a)));
     expect(USER_STATEMENT_ARGS.filter((a) => !args.includes(a))).toEqual([]);
-    expect(USER_STATEMENT_ARGS.length).toBeLessThanOrEqual(2);
+    expect(USER_STATEMENT_ARGS.length).toBeLessThanOrEqual(1);
   });
 
   it('the door table has ONE row per (field, carrier), each signed by an AIE ruling (never a test row)', () => {

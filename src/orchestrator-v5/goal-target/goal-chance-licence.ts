@@ -1,4 +1,5 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
+import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -1384,8 +1385,12 @@ export function withGoalChanceLicence<E>(
   // Only a licensed chance rests on a reading; the readings are the ones THIS Run evaluated (its own identity_evaluations).
   const readings = Object.keys(licence.pct_by_option).length === 0 ? []
     : goalReadingsOf(graph, goalId, Array.isArray(checked.identity_evaluations) ? checked.identity_evaluations : undefined);
+  // #3167 fix-forward (AIE 6180618773 T9): the canonical licence carries what THIS Run recorded leaving out and the narrower
+  // scope its chances cover (typed; the reply says it once in the AIE's words). A Run that recorded none carries nothing.
+  const omitted = runOmittedRisks({ inference_warnings: warnings });
   return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked),
-    ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}) }] } as E;
+    ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}),
+    ...(omitted !== undefined ? { omitted_from_calculation: { scope: 'modelled_effects_only' as const, risks: omitted } } : {}) }] } as E;
 }
 
 /**

@@ -12,6 +12,7 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
+import { sourceMapOf, subjectKey } from './construction-source-map.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -742,14 +743,90 @@ export function verifiedFactorLevelValue(model: CandidateModel, factor: Factor, 
   return replacement !== null && replacement.baseline_value !== factor.baseline_value ? replacement : null;
 }
 
+/**
+ * ⭐ SYSTEM 2 step 2: A LEVEL STATEMENT BOUND BY ITS OWN CLAUSE (DL-adopted rule, 15 Oct ~00:3xZ; AIE "labels propose, never
+ * verify"). Served capacity (UI witness, CEE 880b35b4, drafter raw e4ff6039): "Our existing team resolves 80 tickets per
+ * week." for "Existing team support capacity" failed the label-word binder above (it needs the label's own words), so the
+ * user's 80 kept only an unverified role and the goal lost its level today. The drafter's statement PROPOSES the subject;
+ * the host ACCEPTS it only when all four hold, and never on the label alone:
+ *  (1) the whole sentence is verified against the brief (`sourceMapOf`, the one verifier), as this factor's level;
+ *  (2) the sentence writes exactly one figure in this factor's typed frame (`sameFrame`), and it is this level;
+ *  (3) the sentence writes a DISTINCTIVE word of this factor's label: one in this label and in no other drafted item's label
+ *      of the same frame (the goal, a factor, an outcome or a risk) ("existing team" for "Existing team support capacity"
+ *      beside "Weekly support capacity"; "legacy" for "Time on legacy fixes" beside "Time on feature work");
+ *  (4) no other verified statement binds that sentence's figure to another subject.
+ * Anything else stays as before: unknown role, retained, never Olumi's.
+ */
+export function statementBindsFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  try {
+    return boundByStatement(model, factor, brief);
+  } catch {
+    return false; // A malformed draft withholds credit, as the label binder does.
+  }
+}
+
+function boundByStatement(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  const value = factor.baseline_value;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return false;
+  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
+  const unit = JSON.stringify(readUnitParts(factor.unit));
+  if (unit === 'null') return false;
+  return (map.verified.get(key) ?? []).some((statement) => {
+    if (statement.form !== 'point' || statement.low !== value || statement.negated === true) return false;
+    const quote = statement.quote;
+    // L1 (as `factorLevelSpans`): a count unit that names nothing of its own ("headcount") takes its noun from the factor's
+    // whole label written beside the figure ("six mid-weight developers").
+    const name = words(currentQuantityLabel(factor.label)).map(singular);
+    const labelBeside = (amount: StatedAmount): boolean => countsItself(factor.unit) && name.length > 0
+      && words(quote.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular).join(' ') === name.join(' ');
+    const inFrame = findLinkEffectAmounts(quote).filter((amount) =>
+      sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount)));
+    if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
+    const stated = inFrame[0]!;
+    const label = (l: string): Set<string> => new Set(words(l).map(singular));
+    const own = label(factor.label);
+    const rivals = [{ label: model.goal.metric, unit: model.goal.unit }, ...model.factors.filter((f) => f !== factor), ...model.outcomes, ...model.risks]
+      .filter((r) => JSON.stringify(readUnitParts(r.unit)) === unit).map((r) => label(r.label));
+    if (!words(quote).map(singular).some((w) => !grammar(w) && own.has(w) && !rivals.some((r) => r.has(w)))) return false;
+    if ([...map.verified.entries()].some(([other, statements]) => other !== key
+      && statements.some((s) => s.quote === quote && (s.low === value || s.high === value)))) return false;
+    // The four tests only settle WHICH subject; the sentence must still be this factor's current level in context.
+    return levelInContext(model, factor, brief, quote, (text) => (text === quote
+      ? { start: stated.index, end: stated.index + stated.matchedText.length } : null));
+  });
+}
+
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  return labelBoundFactorLevel(model, factor, brief) || statementBindsFactorLevel(model, factor, brief);
+}
+
+/** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
+function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  return factor?.baseline_evidence != null && levelInContext(model, factor, brief, factor.baseline_evidence.quote, (text) => {
+    const matches = factorLevelSpans(model, factor, text);
+    if (matches.length !== 1) return null;
+    const span = matches[0]!;
+    return ownsFactorLevel(text.slice(0, span.start), factor) || ownCurrentClause(text, span, factor) ? span : null;
+  });
+}
+
+/**
+ * Everything that makes a figure this factor's CURRENT level, apart from how the clause names the factor (`bind`): the whole
+ * located sentence, one factor of that label, never the target's sentence or a limit's figure, not inside a quotation, a
+ * current-level role (never past, future, conditional, target or limit), and no correction, bound, attribution or repeat
+ * around it (`safeNeighbours`). AIE 6181498097: the statement binder's four tests are ambiguity checks ONLY; these meanings
+ * are kept for both binders.
+ */
+function levelInContext(model: CandidateModel, factor: Factor, brief: string | undefined, quote: unknown,
+  bind: (text: string) => { start: number; end: number } | null): boolean {
   try {
     const value = factor.baseline_value;
-    if (typeof brief !== 'string' || factor.baseline_evidence == null
+    if (typeof brief !== 'string' || typeof quote !== 'string'
       || typeof value !== 'number' || !Number.isFinite(value)) return false;
     const sentences = assertions(brief);
-    const a = exactEvidence(brief, factor.baseline_evidence.quote, sentences);
+    const a = exactEvidence(brief, quote, sentences);
     if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
     if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
     // The sentence holding the goal target cannot also attest a current level, even for a differently named factor
@@ -757,12 +834,10 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     if (typeof model.goal.value === 'number' && [...findLinkEffectAmounts(a.text).map(n => n.magnitude),
       ...words(a.text).flatMap(w => { const n = figure(w); return n === null ? [] : [n]; })].includes(model.goal.value)) return false;
     if (model.constraints.some(c => c.value === value && metricNamesLabel(c.metric, factor.label))) return false;
-    const matches = factorLevelSpans(model, factor, a.text);
-    if (matches.length !== 1) return false;
-    const span = matches[0]!;
+    const span = bind(a.text);
+    if (span === null) return false;
     if (insideQuotation(brief, a, span)) return false;
-    if (!(ownsFactorLevel(a.text.slice(0, span.start), factor) || ownCurrentClause(a.text, span, factor))
-      || !currentLevelRole(a.text, { span, unit: factor.unit })) return false;
+    if (!currentLevelRole(a.text, { span, unit: factor.unit })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
       if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
       // An elliptical bound, correction, retraction or attributed sentence remains ambiguous.

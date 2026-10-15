@@ -283,7 +283,7 @@ describe('set_factor_value — a user-authored value withdraws the producer\'s e
     // 'inferred' }` — two carriers contradicting each other in one object.
     // ONE PROVENANCE AUTHORITY: the Agent is also told whose it is — the person's.
     // S10 fix 1: only the authority's answer reaches the Agent.
-    expect.soft(projectEntity(node as never).value_provenance).toEqual({ whose: 'yours' });
+    expect.soft(projectEntity(node as never).value_provenance).toEqual({ whose: 'yours', origin: 'user' });
 
     // CONTROL (not discriminating by design): the authorship authority reads
     // `source` FIRST, so it answered `user_stated` before the fix and must
