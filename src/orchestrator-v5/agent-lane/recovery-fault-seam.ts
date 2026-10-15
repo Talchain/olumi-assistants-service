@@ -1,4 +1,4 @@
-import { getRuntimeEnvResolution, recoveryFaultSeamSwitchOn } from '../../config/env-resolver.js';
+import { getRuntimeEnvResolution, isProductionDeployment, recoveryFaultSeamSwitchOn } from '../../config/env-resolver.js';
 
 /**
  * ⭐ THE RECOVERY FAULT SEAM (DL 20:10Z 15 Oct, for Paul's A6 served recovery proof; map: e2e/verify/RECOVERY-SEAMS.md). Nothing
@@ -12,7 +12,8 @@ import { getRuntimeEnvResolution, recoveryFaultSeamSwitchOn } from '../../config
  *
  * ⛔ IMPOSSIBLE IN PRODUCTION, OFF BY DEFAULT. Armed only when ALL hold:
  *   1. the process is POSITIVELY identified as staging (`env-resolver`: `staging` from a DISCRIMINATING source, never the
- *      NODE_ENV fallback that cannot tell the staging service from production);
+ *      NODE_ENV fallback that cannot tell the staging service from production) AND is not the declared production deployment
+ *      (`isProductionDeployment`, OLUMI_DEPLOYMENT=production wins over any staging label: BUDDY-A #3262 B1);
  *   2. `CEE_RECOVERY_FAULT_SEAM` is exactly `on` (unset everywhere by default);
  *   3. the request body carries `_recovery_fault: { scenario_id, point }` naming THIS request's own scenario and a known point
  *      (the browser proxy forwards the body and no custom header, so the verifier's harness adds it to the one request it means
@@ -35,7 +36,7 @@ export function armedRecoveryFault(body: Record<string, unknown>, scenarioId: st
   const field = body[RECOVERY_FAULT_FIELD];
   if (field === undefined) return undefined;
   const resolution = getRuntimeEnvResolution();
-  if (resolution.env !== 'staging' || !resolution.discriminating || !recoveryFaultSeamSwitchOn()) return undefined;
+  if (isProductionDeployment() || resolution.env !== 'staging' || !resolution.discriminating || !recoveryFaultSeamSwitchOn()) return undefined;
   if (field === null || typeof field !== 'object' || Array.isArray(field)) return undefined;
   const { scenario_id: armedFor, point } = field as { scenario_id?: unknown; point?: unknown };
   if (scenarioId === '' || armedFor !== scenarioId) return undefined;

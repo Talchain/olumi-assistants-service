@@ -23,7 +23,7 @@ const STATE = { run_state: { kind: 'complete_current', computed_at: AT }, readin
   leader_claim: { permitted: true, separation: 'separated' }, robustness: {}, usable_for_prose: true, usable_for_chips: true,
   usable_for_followup: true, requires_rerun: false, blocked_unusable: false, contradictions: [] };
 
-const ENV_KEYS = ['OLUMI_ENV', 'RENDER_SERVICE_NAME', 'NODE_ENV', 'CEE_RECOVERY_FAULT_SEAM'] as const;
+const ENV_KEYS = ['OLUMI_ENV', 'RENDER_SERVICE_NAME', 'NODE_ENV', 'CEE_RECOVERY_FAULT_SEAM', 'OLUMI_DEPLOYMENT'] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const setEnv = (e: Partial<Record<typeof ENV_KEYS[number], string>>) => {
   for (const k of ENV_KEYS) { if (k === 'NODE_ENV') continue; delete process.env[k]; }
@@ -41,6 +41,9 @@ describe('the recovery fault seam is impossible in production and off by default
     ['staging with the switch unset', { OLUMI_ENV: 'staging' }],
     ['staging with the switch not exactly "on"', { OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'true' }],
     ['local/test', { CEE_RECOVERY_FAULT_SEAM: 'on' }],
+    // BUDDY-A #3262 B1: the declared production deployment never arms, whatever its environment label says.
+    ['the declared production deployment labelled staging', { OLUMI_DEPLOYMENT: 'production', OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }],
+    ['the declared production deployment with a staging Render name', { OLUMI_DEPLOYMENT: 'production', RENDER_SERVICE_NAME: 'olumi-assistants-service-staging', CEE_RECOVERY_FAULT_SEAM: 'on' }],
   ];
   it.each(inert)('INERT: %s', (_name, env) => {
     setEnv(env);
@@ -50,6 +53,9 @@ describe('the recovery fault seam is impossible in production and off by default
     } finally { if (env.NODE_ENV !== undefined) process.env.NODE_ENV = saved.NODE_ENV; }
   });
   it('ARMED only on a positively identified staging process with the switch on, for its own scenario and a known point', () => {
+    // Control for B1: a genuine staging deployment (declared staging, or no deployment declared) still arms.
+    setEnv({ OLUMI_DEPLOYMENT: 'staging', OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' });
+    expect(armedRecoveryFault(armed('after_write'), SCENARIO)).toBe('after_write');
     setEnv({ RENDER_SERVICE_NAME: 'olumi-assistants-service-staging', CEE_RECOVERY_FAULT_SEAM: 'on' });
     expect(armedRecoveryFault(armed('after_run'), SCENARIO)).toBe('after_run');
     expect(armedRecoveryFault(armed('before_write'), SCENARIO)).toBe('before_write');
