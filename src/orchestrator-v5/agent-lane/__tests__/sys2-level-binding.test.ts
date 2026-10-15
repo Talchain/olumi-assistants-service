@@ -79,22 +79,26 @@ describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s leve
     expect(node(g, 'existing_team_support_capacity').observed_state).toMatchObject({ source: 'brief_extraction', extractionType: 'explicit' });
   });
 
-  it('the four tests, each a contrast: frame, distinctive word, and one subject per figure', () => {
+  // S4 SHORTCUT (Paul 15 Oct 09:15Z; DL): admission TRUSTS the drafter's statement as filed. The four tests and the context roles
+  // (rival label word, one subject per figure, frame, the goal-target sentence, neighbours) are switched off; what stays is
+  // the quote check: a whole sentence of the brief that writes the figure, on the drafter's own subject and field.
+  it('S4 SHORTCUT: the drafter\'s statement binds as filed; the ambiguity and context checks are off', () => {
     const factor = RAW.factors.find((f: Rec) => f.label === 'Existing team support capacity');
     expect(statementBindsFactorLevel(RAW as never, factor, SERVED.brief)).toBe(true);
-    // (3) a same-frame rival whose label also says "existing team": no distinctive word, so unknown.
     const rival = { ...RAW, outcomes: [...RAW.outcomes, { label: 'Existing team overtime', provenance: 'inferred', unit: 'tickets per week' }] };
-    expect(statementBindsFactorLevel(rival as never, factor, SERVED.brief)).toBe(false);
-    // (4) the same sentence's 80 also bound to another subject (the goal's level): unknown.
-    const twice = { ...RAW, statements: [...RAW.statements, { ...RAW.statements.find((s: Rec) => s.quote === EIGHTY), subject: { kind: 'goal', label: 'Weekly support capacity', to_label: null, factor_label: null } }] };
-    expect(statementBindsFactorLevel(twice as never, factor, SERVED.brief)).toBe(false);
-    // (2) the sentence bound to a factor of another frame (tickets per week PER SPECIALIST): unknown.
-    const per = RAW.factors.find((f: Rec) => f.label === 'Tickets resolved per additional specialist');
-    const misbound = { ...RAW, statements: [{ ...RAW.statements.find((s: Rec) => s.quote === EIGHTY), subject: { kind: 'factor', label: per.label, to_label: null, factor_label: null } }] };
-    expect(statementBindsFactorLevel(misbound as never, { ...per, baseline_value: 80 }, SERVED.brief)).toBe(false);
-    // AIE 6181498097: the four tests are ambiguity checks ONLY; the existing context checks still hold. A sentence that also
-    // writes the goal's target figure never attests a current level, however uniquely it names the factor.
-    expect(statementBindsFactorLevel({ ...RAW, goal: { ...RAW.goal, value: 80 } } as never, factor, SERVED.brief)).toBe(false);
+    expect(statementBindsFactorLevel(rival as never, factor, SERVED.brief)).toBe(true);
+    expect(statementBindsFactorLevel({ ...RAW, goal: { ...RAW.goal, value: 80 } } as never, factor, SERVED.brief)).toBe(true);
+  });
+
+  it('S4 SHORTCUT, kept negatives: no statement, a quote not in the brief, a quote not writing the figure, or another figure is never bound', () => {
+    const factor = RAW.factors.find((f: Rec) => f.label === 'Existing team support capacity');
+    const eighty = RAW.statements.find((s: Rec) => s.quote === EIGHTY);
+    const only = (s: Rec): Rec => ({ ...RAW, statements: [s] });
+    expect(statementBindsFactorLevel({ ...RAW, statements: [] } as never, factor, SERVED.brief)).toBe(false);
+    expect(statementBindsFactorLevel(only({ ...eighty, quote: 'Our existing team resolves 80 tickets per week, roughly.' }) as never, factor, SERVED.brief)).toBe(false);
+    expect(statementBindsFactorLevel(only({ ...eighty, value: 90 }) as never, { ...factor, baseline_value: 90 }, SERVED.brief)).toBe(false);
+    expect(statementBindsFactorLevel(only(eighty) as never, { ...factor, baseline_value: 70 }, SERVED.brief)).toBe(false);
+    expect(statementBindsFactorLevel(only({ ...eighty, negated: true }) as never, factor, SERVED.brief)).toBe(false);
   });
 
   it('SECOND BRIEF (Paul\'s served hiring brief post3007, served labels): "six mid-weight developers" binds 6 to "Mid-weight developers"', () => {
@@ -102,12 +106,8 @@ describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s leve
       field: 'level', form: 'point', value, low: null, high: null, unit, qualifier: null, conditions: null });
     const devs = HIRING.draft.factors.find((f: Rec) => f.label === 'Mid-weight developers');
     expect(statementBindsFactorLevel({ ...HIRING.draft, statements: [stmt(devs.label, devs.baseline_evidence.quote, 6, 'developers')] } as never, devs, HIRING.brief)).toBe(true);
-    // CONTRAST, same brief: bound to another same-frame-free factor ("Tech lead hires", people) the frame test refuses it.
-    const leads = HIRING.draft.factors.find((f: Rec) => f.label === 'Tech lead hires');
-    expect(statementBindsFactorLevel({ ...HIRING.draft, statements: [stmt(leads.label, devs.baseline_evidence.quote, 6, 'people')] } as never, { ...leads, baseline_value: 6 }, HIRING.brief)).toBe(false);
-    // CONTEXT KEPT (AIE 6181498097), Paul's legacy brief c1494f4d: the same sentence there sits beside "the next SIX months", a
-    // repeated figure in its paragraph, so the existing neighbour check holds it unknown, however uniquely it names the factor.
+    // S4 SHORTCUT: the drafter's own subject is trusted, so the legacy brief's neighbour check no longer holds it unknown.
     const lDevs = LEGACY.draft.factors.find((f: Rec) => f.label === 'Mid-weight developers');
-    expect(statementBindsFactorLevel({ ...LEGACY.draft, statements: [stmt(lDevs.label, lDevs.baseline_evidence.quote, 6, 'developers')] } as never, lDevs, LEGACY.brief)).toBe(false);
+    expect(statementBindsFactorLevel({ ...LEGACY.draft, statements: [stmt(lDevs.label, lDevs.baseline_evidence.quote, 6, 'developers')] } as never, lDevs, LEGACY.brief)).toBe(true);
   });
 });

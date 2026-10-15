@@ -50,20 +50,22 @@ describe('a point the user states inside a range is theirs (DL 05:46Z, capacity 
     expect(n.observed_state.user_material_unverified).toBeUndefined();
   });
 
-  it('CONTROL: a correction as the next sentence still refuses the point', () => {
+  // S4 SHORTCUT (Paul 15 Oct 09:15Z; DL): the drafter's statement is trusted as filed; the neighbour, definition and frame
+  // controls below are switched off. A correction is the drafter's to file (its own statement), never the host's word reading.
+  it('S4 SHORTCUT: a correction as the next sentence no longer refuses the drafter\'s point', () => {
     const brief = SERVED.brief.replace(DEFINITION, 'Actually it is at most 25 tickets per week per specialist.');
-    expect(verifiedFactorLevel(RAW as never, factor(RAW), brief)).toBe(false);
-    expect(node(RAW, brief).observed_state.source).not.toBe('brief_extraction');
+    expect(verifiedFactorLevel(RAW as never, factor(RAW), brief)).toBe(true);
+    expect(node(RAW, brief).observed_state.source).toBe('brief_extraction');
   });
 
-  it('CONTROL: a range whose ends are not the ones the brief pairs is not anchored', () => {
+  it('CONTROL (kept): a range whose ends the quote does not write is not trusted', () => {
     const r = { ...RAW, statements: RAW.statements.map((s: Rec) => (s.subject.label === LABEL ? { ...s, low: 5 } : s)) };
     expect(verifiedFactorLevel(r as never, factor(r), SERVED.brief)).toBe(false);
   });
 
-  it('CONTROL: a definition the map holds as about THIS factor is no exemption', () => {
+  it('S4 SHORTCUT: a definition the map holds as about this factor no longer withholds the drafter\'s level', () => {
     const r = { ...RAW, statements: RAW.statements.map((s: Rec) => (s.field === 'relation' ? { ...s, subject: { ...s.subject, label: LABEL } } : s)) };
-    expect(verifiedFactorLevel(r as never, factor(r), SERVED.brief)).toBe(false);
+    expect(verifiedFactorLevel(r as never, factor(r), SERVED.brief)).toBe(true);
   });
 
   it('D3r1 (second brief): "£20 per customer per month" is theirs; "10–20% churn" is a different-frame repeat, the goal sentence is about the goal', () => {
@@ -71,15 +73,15 @@ describe('a point the user states inside a range is theirs (DL 05:46Z, capacity 
     expect(D3.brief).toContain('could cause 10–20% churn');
     const nodes = admitCandidateModel(raw as never, {}, D3.brief).nodes as unknown as Rec[];
     expect(nodes.find((n) => n.label === 'Monthly price')?.observed_state).toMatchObject({ raw_value: 20, source: 'brief_extraction' });
-    // A real same-frame rival ("Paying customers at month 3") and no distinctive word: the 400 stays unconfirmed (ambiguity check).
-    expect(nodes.find((n) => n.label === 'Paying customers today')?.provenance).toBe('unverified_brief');
+    // S4 SHORTCUT: the ambiguity check is off; the drafter's own statement of today's 400 is the user's.
+    expect(nodes.find((n) => n.label === 'Paying customers today')?.provenance).toBe('from_brief');
   });
 
-  it('CONTROL (D3r1): a SAME-frame repeat still refuses the £20', () => {
+  it('S4 SHORTCUT (D3r1): a same-frame repeat no longer refuses the drafter\'s £20', () => {
     const raw = JSON.parse(D3.call2_text) as Rec;
     const brief = D3.brief.replace('could cause 10–20% churn', 'could cause churn even at £20 per customer per month');
     const price = raw.factors.find((f: Rec) => f.label === 'Monthly price') as never;
     expect(verifiedFactorLevel(raw as never, price, D3.brief)).toBe(true);
-    expect(verifiedFactorLevel(raw as never, price, brief)).toBe(false);
+    expect(verifiedFactorLevel(raw as never, price, brief)).toBe(true);
   });
 });

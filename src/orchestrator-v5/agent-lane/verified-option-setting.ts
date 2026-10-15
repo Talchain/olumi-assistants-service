@@ -12,7 +12,7 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
-import { draftStatements, sourceMapOf, subjectKey } from './construction-source-map.js';
+import { draftStatements, drafterStatement, sourceMapOf, subjectKey, TRUST_DRAFTER_STATEMENTS } from './construction-source-map.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -262,6 +262,11 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
 }
 function verified(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
   if (typeof brief !== 'string') return false;
+  // S4 SHORTCUT: the drafter's statement of this setting is trusted as filed (`drafterStatement`).
+  if (TRUST_DRAFTER_STATEMENTS && carriesStatements(model)) {
+    return drafterStatement(draftStatements(model), brief, { kind: 'option', label: option.label, factor_label: intervention.factor_label },
+      'level', intervention.value) !== undefined;
+  }
   // SYSTEM 2's whole-raw switch: a draft with statements[] gives the quote only through its verified statement.
   const quote = carriesStatements(model) ? statedSettingQuote(model, option, intervention, brief) : recordedRawSettingQuote(model, intervention) ?? null;
   if (quote === null) return false;
@@ -745,6 +750,12 @@ export function verifiedGoalLevel(model: CandidateModel, brief: string | undefin
     if (typeof value !== 'number' || !Number.isFinite(value)) return false;
     const unit = readUnitParts(goal.unit);
     if (unit === null) return false;
+    // S4 SHORTCUT: the drafter's own statement of the goal's level, trusted as filed, or a factor level of that figure and unit.
+    if (TRUST_DRAFTER_STATEMENTS && carriesStatements(model) && typeof brief === 'string') {
+      return drafterStatement(draftStatements(model), brief, { kind: 'goal', label: goal.metric }, 'level', value) !== undefined
+        || model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
+          && verifiedFactorLevel(model, f, brief));
+    }
     if (sentencesWritingFigure({ label: goal.metric, baseline_value: value, unit: goal.unit } as Factor, brief).length === 0) return false;
     return model.factors.some(f => f.baseline_value === value && JSON.stringify(readUnitParts(f.unit)) === JSON.stringify(unit)
       && verifiedFactorLevel(model, f, brief));
@@ -801,6 +812,8 @@ export function statementBindsFactorLevel(model: CandidateModel, factor: Factor,
 function boundByStatement(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   const value = factor.baseline_value;
   if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value === 0) return false;
+  // S4 SHORTCUT: the drafter's level statement is trusted as filed; the four tests and the context roles below are off.
+  if (TRUST_DRAFTER_STATEMENTS) return drafterStatement(draftStatements(model), brief, { kind: 'factor', label: factor.label }, 'level', value) !== undefined;
   const map = sourceMapOf(draftStatements(model), brief);
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
   const unit = JSON.stringify(readUnitParts(factor.unit));
