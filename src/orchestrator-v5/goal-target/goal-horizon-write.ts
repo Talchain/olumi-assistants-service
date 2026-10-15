@@ -29,7 +29,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { goalDeadlineFromRecord } from './goal-kind.js';
 import { admitStructuralGoalAccumulation } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from './goal-record.js';
-import { sayDate } from './deadline-date.js';
+import { readStatedDeadline, sayDate } from './deadline-date.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -172,4 +172,35 @@ export function goalHorizonLandedWriteIsScoped(expected: unknown, actual: unknow
     && (ownedIds.has(e.from) || ownedIds.has(e.to)));
   return isDeepStrictEqual(ownedNodes(expected), ownedNodes(actual))
     && isDeepStrictEqual(ownedEdges(expected), ownedEdges(actual));
+}
+
+/**
+ * ⭐ S7 B2 (hiring e2e c1e944a4/2c43f563, judge item 6): WHO SET THE DATE. A deadline held with the month count the user stated
+ * (`goal_horizon_stated_months`, written only by `applyGoalHorizonEdit` above, after the user's Yes on the card) is Olumi's
+ * reading of the user's words, counted from the recorded reference date, and approved by the user: the date itself is not
+ * the user's. Served: the card said "Olumi's interpretation" of "three months", the user approved it, and a later reply listed
+ * "a 15 January 2027 deadline" under "What you supplied". Approval never changes authorship. `undefined` for any other date.
+ */
+export interface ApprovedDeadlineReading {
+  readonly origin: 'olumi_reading';
+  readonly approved_by_user: true;
+  /** The user's own words the date was read from, verbatim, when the goal holds them. */
+  readonly from_words?: string;
+  readonly months: number;
+  /** The date the months were counted from, in British words. */
+  readonly counted_from: string;
+}
+
+export function approvedDeadlineReadingOf(graph: unknown, goalId: string): ApprovedDeadlineReading | undefined {
+  const goal = isRec(graph) && Array.isArray(graph.nodes)
+    ? graph.nodes.find((n): n is Rec => isRec(n) && n.kind === 'goal' && n.id === goalId) : undefined;
+  const record = readGoalRecord(graph, goalId)?.horizon;
+  const months = goal?.goal_horizon_stated_months;
+  const reference = goal?.goal_horizon_reference_date;
+  if (record?.deadline === undefined || typeof months !== 'number' || !Number.isInteger(months) || months < 1 || !isCalendarDate(reference)) return undefined;
+  // The construction's stated words only where they read to THIS date (served funding run 3: "12 months" held beside an
+  // approved 6): otherwise the words the user approved are not known here, and none are quoted.
+  const words = record.as_stated !== undefined && readStatedDeadline(record.as_stated, reference, { leadWordsOnly: true })?.date === record.deadline
+    ? { from_words: record.as_stated } : {};
+  return { origin: 'olumi_reading', approved_by_user: true, ...words, months, counted_from: sayDate(reference) };
 }
