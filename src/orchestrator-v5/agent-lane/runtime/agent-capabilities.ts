@@ -3970,11 +3970,11 @@ export function createAgentCapabilities(
     const draftStated = statedOf(candidate, draftGoalNode);
     const stillStated = savedStated !== null && draftStated !== null && draftStated.value === savedStated.value
       && (draftStated.unit ?? '') === (savedStated.unit ?? '');
-    // ⭐ Lane A A1 (DL spec): the user's LATER statement supersedes the earlier one and stays the user's. A revision's new goal
-    // figure counts only when the user TYPED it after the brief (`typedSince`, by identity); a figure only the drafter holds never does.
-    const restatedByUser = correction && draftStated !== null && !stillStated
-      && typedSince.some((m) => figureTheUserWrote(draftStated.value, draftStated.unit, m));
-    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated && !restatedByUser) {
+    // ⛔ BUDDY-A B1 (#3252 r1): a number in a later message proves neither its subject nor its role ("The advertising budget is
+    // £250,000 per year", "my earlier £250,000 target is withdrawn"; the statement verifier accepts each). A correction therefore
+    // never replaces the saved target by figure presence: a new target goes through the goal contract (propose_goal_target), whose
+    // redraft row is Olumi's reading (`limitsKeptBy`: inferred) on ONE card, and only the user's press saves it.
+    if (correction && held.length === 0 && event === null && targetsHeldBy(g.raw).length === 0 && savedStated !== null && !stillStated) {
       // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
       return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
         + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `
@@ -3983,8 +3983,7 @@ export function createAgentCapabilities(
         + 'question. Do not offer or save a candidate that contradicts the user\'s explicit correction.');
     }
     /** A correction with no target ROW: the goal stays qualitative, or keeps its own stated figure exactly. */
-    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0
-      && (restatedByUser || (savedStated === null ? draftStated === null : stillStated));
+    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0 && (savedStated === null ? draftStated === null : stillStated);
     if (held.length === 0 && event === null && !qualitativeKept) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : NO_TARGET_DETAIL);
@@ -4031,9 +4030,6 @@ export function createAgentCapabilities(
     const card = (qualitativeKept
       ? `Replace the early draft with a revised one built from your brief and ${builtFrom}. Its goal, ${goalWords}, `
         + (draftStated === null ? 'has no numeric target, as before. '
-          : restatedByUser ? `takes the target you gave later: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
-            + `${targetFigure(draftStated.value, draftStated.unit ?? '')}`
-            + (savedStated === null ? '. ' : `, in place of ${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}. `)
           : `keeps the target you stated: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
             + `${draftStated.value}${draftStated.unit !== undefined ? ` ${draftStated.unit}` : ''}, as before. `)
       : held.length > 0

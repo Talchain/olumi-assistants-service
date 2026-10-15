@@ -1475,25 +1475,29 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(inputs[0]).not.toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: CHIP }));
   });
 
-  it('⭐ A1 RED: the user\'s LATER typed target (\u00a3250,000) supersedes the saved 1.3 million: offered as theirs → press → reopen holds it', async () => {
-    const s = server({ graph: withRawTarget() });
-    const { caps } = lane(s, new ProposalStore(), at250k);
-    const offer = await changeAs(caps, typedTurn([TYPED_60, TYPED_250K]));
-    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect(String(offer.public_label)).toContain('built from your brief and what you have said since. ');
-    expect(String(offer.public_label)).toContain('takes the target you gave later: at least ');
-    expect(String(offer.public_label)).toContain(', in place of 1.3 million (currency unspecified). ');
-    s.said('corr-a1-0001');
-    expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
-    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
-    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
-    expect([goal.goal_threshold_raw, goal.goal_threshold_unit]).toEqual([250000, '\u00a3']);
-  });
+  /** A redraft that draws the user's current aim as its own quantity, with the goal-contract target row (Olumi's reading). */
+  const angelRow = (base: () => Rec = qualitative): Rec => {
+    const c = base();
+    const like = (c.factors as Rec[]).find((f) => f.label === 'Conversion rate')!;
+    const link = (c.links as Rec[]).find((l) => l.to === 'Conversion rate')!;
+    c.factors = [...c.factors, { ...like, label: 'Angel funding secured', unit: '\u00a3', baseline_value: 0, plausible_max: 1000000 }];
+    c.links = [...c.links, { ...link, from: 'Angel funding secured', to: 'Larger fund secured' }];
+    c.constraints = [...c.constraints, { metric: 'Angel funding secured', operator: '>=', value: 250000, unit: '\u00a3', provenance: 'explicit', frame: 'level', role: 'target' }];
+    return c;
+  };
 
-  it('CONTRAST A1: the same \u00a3250,000 held only by the DRAFTER (the user never typed it) → refused; the saved 1.3 million stays', async () => {
+  /**
+   * ⛔ BUDDY-A B1 (#3252 r1): a correction never replaces the saved target because a figure appears in a later message. The
+   * statement verifier accepts each of these sentences (probe 15 Oct), so presence is not binding: each stays refused.
+   */
+  it.each([
+    ['the drafter alone holds it (the user never typed it)', [TYPED_60]],
+    ['it is an advertising budget', ['Keep the fundraising target at 1.3 million. The advertising budget is \u00a3250,000 per year.']],
+    ['it was withdrawn', ['My earlier \u00a3250,000 target is withdrawn; keep the original target.']],
+  ] as const)('CONTRAST A1: a correction whose redraft swaps the saved 1.3 million for \u00a3250,000 when %s → refused; nothing saved', async (_why, typed) => {
     const s = server({ graph: withRawTarget() });
     const { caps } = lane(s, new ProposalStore(), at250k);
-    const out = await changeAs(caps, typedTurn([TYPED_60]));
+    const out = await changeAs(caps, typedTurn(typed));
     expect(out).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
     // AIE-06: the refusal names the drafting limit and never asks again for what the user already said.
     expect(String(out.detail)).toContain('Do not ask again if that relationship is already stated.');
@@ -1529,7 +1533,7 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
       + 'I need to complete the PoC. I have AI working on it, so I don\'t need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\n'
       + 'I need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.';
     const EVENTUAL = 'I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.';
-    const currentAim = (): Rec => { const c = at250k(); c.statements = [
+    const currentAim = (): Rec => { const c = angelRow(); c.statements = [
       { quote: TYPED_250K, subject: { kind: 'goal', label: 'Larger fund secured', to_label: null, factor_label: null }, field: 'target', form: 'lower_bound',
         value: 250000, low: null, high: null, unit: '\u00a3', qualifier: 'even', conditions: null },
       { quote: EVENTUAL, subject: { kind: 'goal', label: 'Larger fund secured', to_label: null, factor_label: null }, field: 'relation', form: 'describes',
@@ -1547,12 +1551,13 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(String(sent[0]!.instructions)).toContain('The goal carries the user\'s CURRENT governing aim and the target, if any, that actually belongs to it.');
     expect(String(sent[0]!.input)).toContain(REVISION_LEAD);
     expect(String(sent[0]!.input)).toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: TYPED_250K }));
-    expect(String(offer.public_label)).toContain(', in place of 1.3 million (currency unspecified). ');
     s.said('corr-a1-0011');
     expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
     const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
     const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
-    expect([goal.goal_threshold_raw, goal.goal_threshold_unit], 'the operative target is the current aim').toEqual([250000, '\u00a3']);
+    const targets = ((reopened.graph.goal_constraints ?? []) as Rec[]).filter((r) => r.role === 'goal_target');
+    // The current aim is the operative target, as the drafter's reading of the user's words (inferred), approved by the press.
+    expect(targets.map((r) => [r.value, r.unit, r.provenance]), 'the operative target is the current aim').toEqual([[250000, '\u00a3', 'inferred']]);
     expect(JSON.stringify(goal.user_statements ?? []), 'the eventual 1.3 million is kept, as the user\'s own words').toContain('eventually, a larger fund of at least 1.3 million');
   });
 
