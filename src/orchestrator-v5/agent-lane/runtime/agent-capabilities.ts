@@ -10,7 +10,7 @@ import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
-import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
 import { userStatementsOn } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
@@ -1551,6 +1551,9 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
+      // ⭐ S7 B2 (hiring e2e c1e944a4 item 6): a date Olumi read from the user's words, which the user approved, says so:
+      // approval is not authorship, so it is never "what you supplied" (`approvedDeadlineReadingOf`).
+      ...((reading) => (deadline === undefined || reading === undefined ? {} : { deadline_set_by: reading }))(approvedDeadlineReadingOf(g.raw, n.id)),
       // ⭐ M3a (AIE 6180193788 §1): the user's recorded statements about the goal, verbatim, and the measure one of them defines,
       // so THIS working input and a cold reopen hold the user's definition apart from Olumi's reading.
       ...((): Record<string, unknown> => {
@@ -3820,7 +3823,11 @@ export function createAgentCapabilities(
     const sayRow = (raw: unknown, r: { node_id: string; operator: string; value: number; unit: string }): string =>
       `\u2018${labelIn(raw, r.node_id)}\u2019 ${TARGET_COMPARATOR_WORDS[r.operator] ?? r.operator} ${targetFigure(r.value, r.unit)}`;
     if (limits.conflict) {
-      return notOffered('revised_draft_not_prepared', 'An earlier limit could not be carried forward unchanged because its saved identity conflicts with the revised draft. Nothing was offered or changed.');
+      // A real conflict refuses, and says which saved limit and what to ask (DL 15 Oct: never silently; coach the next step).
+      const named = limits.conflicts.map((r) => sayRow(g.raw, r)).join('; ');
+      return notOffered('revised_draft_not_prepared', `The revised draft holds a different version of the saved limit ${named}, so it could not `
+        + 'be carried forward unchanged. Nothing was offered or changed. Ask the user whether that limit still holds as saved, '
+        + 'in their own words; do not choose between the two versions for them.');
     }
     Object.assign(candidate, limits.replacement);
     // What the user set is carried by identity, with its own stamp; a node it needs that the revision lacks → nothing offered.
@@ -9731,7 +9738,9 @@ export function createAgentCapabilities(
         structure: structuralFacts(after.nodes, after.edges, limitNodeIdsOf(after.raw)),
         // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
         // get_canonical_state, so the first reply never contradicts the Run control.
-        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
+        // ⭐ S7 B2 (capacity e2e c1e944a4 turn 01, judge item 4): the risks the Run leaves out, WITH their typed reason, as
+        // get_canonical_state gives them. Without it the build turn's AI saw `relies_on` and no reason, and invented one.
+        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness', 'left_out_of_run']),
         // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
         ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),

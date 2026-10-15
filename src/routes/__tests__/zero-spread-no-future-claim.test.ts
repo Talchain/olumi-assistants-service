@@ -11,8 +11,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { projectCanonicalAnalysisCells } from '../canonical-analysis-view.js';
+import { runFactsOf } from '../../orchestrator-v5/agent-lane/run-facts.js';
 import {
-  GOAL_CHANCE_LICENSED, goalChanceLicenceForAgent, goalChanceLicenceOf, ZERO_SPREAD_LINE, ZERO_SPREAD_NEEDS_MONTHLY_CHANGES,
+  GOAL_CHANCE_LICENSED, goalChanceLicenceForAgent, goalChanceLicenceOf, ZERO_SPREAD_FIXED_BASELINE_LINE, ZERO_SPREAD_LINE,
+  ZERO_SPREAD_NEEDS_MONTHLY_CHANGES,
 } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
 
 type Rec = Record<string, any>;
@@ -68,11 +70,17 @@ describe('capacity post3010 row 3: a zero-spread cell says no future event', () 
     const envelope = structuredClone(READ.analysis_result.enrichment) as Rec;
     (envelope.option_comparison as Rec[]).find((r) => r.option_id === KEEP)!.probability_of_goal = 0;
     const licence = goalChanceLicenceOf(envelope, READ.graph, 'weekly_support_capacity');
-    expect(licence?.withheld_reason_by_option?.[KEEP]).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
+    // ⭐ S7 B2 (capacity e2e c1e944a4 judge item 3, the same served capacity brief): 'Keep current staffing' is the status quo
+    // holding every factor at today's value, so its line says so, typed `fixed_baseline`, beside the AIE's measured-spread words.
+    expect(licence?.withheld_reason_by_option?.[KEEP]).toEqual({ reason: 'zero_spread', side: 'falls_short',
+      line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' });
     expect(JSON.stringify(licence)).not.toMatch(FUTURE);
     expect(ZERO_SPREAD_LINE).toBe(LINE);
+    expect(ZERO_SPREAD_FIXED_BASELINE_LINE).toContain('this result reports a very narrow central range or a very small spread. That alone does not establish certainty.');
     // AIE 281e8b3d: no claim of equality or zero variance the predicate's std arm does not prove.
-    expect(LINE).not.toMatch(/\bsame\b|every run|no (spread|uncertainty|variance)/i);
+    for (const line of [LINE, ZERO_SPREAD_FIXED_BASELINE_LINE]) {
+      expect(line).not.toMatch(/\bsame\b|every run|no (spread|uncertainty|variance)|does not vary/i);
+    }
   });
 
   it('PRODUCER (the std arm, Codex r1’s reproduction): an option whose deciles differ inside the noise tolerance gets the same line, true for it too', () => {
@@ -85,5 +93,24 @@ describe('capacity post3010 row 3: a zero-spread cell says no future event', () 
     expect(add.outcome.p10).not.toBe(add.outcome.p90);
     const licence = goalChanceLicenceOf(envelope, READ.graph, 'weekly_support_capacity');
     expect(licence?.withheld_reason_by_option?.[ADD]).toEqual(expect.objectContaining({ reason: 'zero_spread', line: LINE }));
+    // S7 B2 CONTRAST: an option that intervenes is never the fixed baseline, whatever its spread.
+    expect(licence?.withheld_reason_by_option?.[ADD]).not.toHaveProperty('basis');
+  });
+
+  it('⭐ S7 B2 (capacity e2e c1e944a4 item 3): run_facts types WHY each zero-spread chance is not shown — the fixed status quo vs a measured spread', () => {
+    const envelope = structuredClone(READ.analysis_result.enrichment) as Rec;
+    (envelope.option_comparison as Rec[]).find((r) => r.option_id === KEEP)!.probability_of_goal = 0;
+    const ADD = 'add_one_specialist';
+    const add = (envelope.option_comparison as Rec[]).find((r) => r.option_id === ADD)!;
+    add.probability_of_goal = 0;
+    Object.assign(add.outcome, { p10: 0.1599999995, p50: 0.16, p90: 0.1600000005, mean: 0.16, std: 5e-10 });
+    const licence = goalChanceLicenceOf(envelope, READ.graph, 'weekly_support_capacity')!;
+    const result = { type: 'analysis_result', enrichment: { ...envelope, inference_warnings: [licence] } };
+    const facts = runFactsOf(result, READ.graph, true);
+    expect(facts.zero_spread).toEqual([{ option_id: KEEP, basis: 'fixed_baseline' }, { option_id: ADD, basis: 'measured_spread' }]);
+    // A Run that is not current carries none (never read as this model's result).
+    expect(runFactsOf(result, READ.graph, false)).not.toHaveProperty('zero_spread');
+    // And the read's cell says the fixed baseline's own line (the face the user sees).
+    expect(cells(result).find((c) => c.option_id === KEEP)!.cell).toMatchObject({ kind: 'withheld', why: ZERO_SPREAD_FIXED_BASELINE_LINE });
   });
 });

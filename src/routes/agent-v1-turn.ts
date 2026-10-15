@@ -147,7 +147,7 @@ import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipelin
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf, noLeaderBecauseSentences } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
-import { goalHorizonReplyLead } from '../orchestrator-v5/goal-target/goal-horizon-detail.js';
+import { goalHorizonNextStep, goalHorizonReplyLead } from '../orchestrator-v5/goal-target/goal-horizon-detail.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDerivedAnswerText, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
@@ -2728,8 +2728,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // §(ad) amended (AIE #94 6178106849): where the card carries the horizon marker, the reply led with the goal's own lead.
       const horizonCell = replayChanceCells.find((cell): cell is Extract<OptionChanceCell, { kind: 'withheld' }> => cell.kind === 'withheld'
         && cell.reasons.some(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED'));
+      // S7 B2: a reply composed since then leads with the lead AND its one next step (`goalHorizonNextStep`); an older one, the lead.
+      const horizonFace = ((lead, step) => lead === null ? undefined : step !== null && replayText.split('\n\n')[0] === `${lead} ${step}` ? `${lead} ${step}` : lead)(
+        goalHorizonReplyLead(state.graph), goalHorizonNextStep(state.graph));
       const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText,
-        horizonCell?.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES ? goalHorizonReplyLead(state.graph) ?? undefined : horizonCell?.face) : null;
+        horizonCell?.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES ? horizonFace : horizonCell?.face) : null;
       const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
         && replayChanceCells.some(cell => cell.kind === 'withheld')
         ? composedCandidate : null);

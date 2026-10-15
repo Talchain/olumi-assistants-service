@@ -4,6 +4,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
+import { runFactsOf } from '../run-facts.js';
 import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent, whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import {
   GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
@@ -145,6 +146,21 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(JSON.stringify(read)).toContain('"code":"GOAL_CHANCE_RANGE"');
     expect(JSON.stringify(views[1])).not.toContain('"code":"GOAL_CHANCE_RANGE"');
     expect(read).toEqual(before);
+  });
+  // ⭐ S7 B2 (SESSION4 05:29Z): a range shown WITHOUT a point is still a chance on screen, so the licence's disclosures reach the
+  // AI with it (and so `run_facts.must_say`). RED before: the notes went only with a point display or several targets.
+  it('(7e) a range-only display carries the licence notes on both doors and in run_facts.must_say', async () => {
+    const notes = ['This range rests on Olumi\u2019s estimates of how strongly these factors are linked.'];
+    const read = fixture([{ ...licence, notes }, rangeRecord]);
+    for (const view of [await saved(read), await run(read)]) {
+      expect(view).not.toHaveProperty('goal_chance_display');
+      expect(view.goal_chance_range_display).toEqual(expectedRanges);
+      expect(view.goal_chance_notes).toEqual(notes);
+    }
+    expect(runFactsOf(read.analysis_result, read.graph, true).must_say).toEqual(notes);
+    // CONTRAST: no range and no point (the range record removed) carries no notes, so nothing is said beside nothing.
+    const bare = fixture([{ ...licence, notes, pct_by_option: {}, display_rounding_by_option: {} }]);
+    for (const view of [await saved(bare), await run(bare)]) expect(view).not.toHaveProperty('goal_chance_notes');
   });
   // Codex AMEND (#87 6028220756): a REAL range sits beside the withhold that made it (PR-S1 writes one only there). RED at
   // b0955242: the point predicate barred both codes, so the range never reached the chat.
