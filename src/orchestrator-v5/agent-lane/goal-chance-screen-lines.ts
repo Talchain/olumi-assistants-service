@@ -432,7 +432,7 @@ function withScreenLinesOwedOnly(text: string, lines: readonly GoalChanceScreenL
     // ⭐ S7 B1 (DL 15 Oct): the leader gate now keeps the AI's own sentence for this option's licensed figure. Where it lacks
     // the line's disclosures, it BECOMES the canonical line in place (one copy, every disclosure), never a second figure.
     // By the gate's own rule (`isLicensedChanceLine`), for THIS option and its own licensed figure only.
-    const mine = { options: [{ label: l.label, figures: figuresIn(l.figure) }] };
+    const mine = { options: [{ label: l.label, figures: figuresIn(l.figure), displays: [l.figure] }] };
     const own = l.shortfall_note !== undefined ? undefined : body.split('\n')
       .map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '')).flatMap((row) => sentencesOf(row))
       .find((sentence) => !l.chance.includes(sentence) && (chanceInOwnWords(sentence, l)

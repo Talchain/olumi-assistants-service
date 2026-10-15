@@ -77,7 +77,7 @@ describe('S7 B1: one option’s licensed chance line is not a ranking (the gate 
   });
 
   it('a stated window is kept only when it is the goal’s own (month three kept at a three-month goal; month six dropped)', () => {
-    const chances = { options: [{ label: 'Hire a tech lead', figures: [38] }], periodMonths: 3 };
+    const chances = { options: [{ label: 'Hire a tech lead', figures: [38], displays: ['about 38%'] }], periodMonths: 3 };
     const labels = ['Hire a tech lead', 'Hire two developers'];
     expect(isLicensedChanceLine('By month three, Hire a tech lead has about 38% chance of meeting the goal.', chances, labels)).toBe(true);
     expect(isLicensedChanceLine('Within 3 months, Hire a tech lead has about 38% chance of meeting the goal.', chances, labels)).toBe(true);
@@ -90,5 +90,41 @@ describe('S7 B1: one option’s licensed chance line is not a ranking (the gate 
       'Hire a tech lead wins about 38% of runs, its chance of meeting the goal.']) {
       expect(isLicensedChanceLine(share, chances, labels), share).toBe(false);
     }
+  });
+
+  // ⭐ PL 04:05Z on #3197: the exemption is bound to the licensed DISPLAY (point vs range) and to its event/target; one row
+  // per counterexample, on the served Runs, through the REAL wire gate.
+  it('B3 (a licensed RANGE): one endpoint said as a point is not the licensed chance, so the gate still drops it', () => {
+    const [id] = licensedIds(B3);
+    const label = (B3.graph.nodes as Json[]).find((n) => n.id === id)!.label as string;
+    const ends = goalChanceFactsForAgent(B3.analysis_result, B3.graph, true).goal_chance_range_display![id!]!.range.match(/\d+%/g)!;
+    expect(ends).toHaveLength(2);
+    for (const end of ends) {
+      const point = `In this model, ${label} has about ${end} chance of meeting your goal.`;
+      expect(gate(B3, point), point).not.toContain(point);
+    }
+    const whole = ownLine(B3, id!);
+    expect(gate(B3, whole)).toContain(whole);
+  });
+
+  it('T1B (a licensed POINT): the right figure beside the wrong event or the wrong target is not the licensed chance', () => {
+    const [id] = licensedIds(T1B);
+    const line = ownLine(T1B, id!);
+    for (const wrong of [
+      line.replace('meeting the goal', 'losing customers'),
+      line.replace('meeting the goal', 'reaching 50 new subscribers'),
+      line.replace('meeting the goal', 'reaching the goal of £20,000 MRR'),
+    ]) {
+      expect(gate(T1B, wrong), wrong).not.toContain(wrong);
+    }
+    expect(gate(T1B, line)).toContain(line);
+  });
+
+  it('the licence’s own chance words are a valid event; another number beside them is not', () => {
+    const chances = { options: [{ label: 'Hire a tech lead', figures: [38], displays: ['about 38%'] }], periodMonths: 3,
+      chanceWords: 'reaching at least 10% higher productivity' };
+    const labels = ['Hire a tech lead', 'Hire two developers'];
+    expect(isLicensedChanceLine('Hire a tech lead has about 38% chance of reaching at least 10% higher productivity.', chances, labels)).toBe(true);
+    expect(isLicensedChanceLine('Hire a tech lead has about 38% chance of reaching at least 15% higher productivity.', chances, labels)).toBe(false);
   });
 });
