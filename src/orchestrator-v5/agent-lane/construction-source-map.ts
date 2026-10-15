@@ -111,7 +111,20 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
     return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
   });
   const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
-  return amounts.map((a) => ({ low: a.magnitude, high: a.magnitude }));
+  return amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
+    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]);
+}
+
+/**
+ * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z, unseen brief R4): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15:
+ * the same figure with the opposite direction word. The drafter's −15 was refused as no figure of the quote, so the user's own
+ * net loss was admitted as Olumi's unverified, unscaled guess and blocked every Run. A figure written straight after a loss
+ * direction is also stated as its negative; with no such words a negative stays refused, as before. Which reading a subject
+ * takes (a net change at −15, or a count of losses at 15) is the binder's, never this list's.
+ */
+const LOSS_BEFORE = /\b(?:losing|lose|loses|lost|(?:net )?loss of|deficit of|outflow of|down(?: by)?)(?: a net| net)?(?: (?:about|around|roughly|nearly|almost|some|over))?\s*$/iu;
+export function statesLossBefore(quote: string, index: number): boolean {
+  return LOSS_BEFORE.test(quote.slice(0, index));
 }
 
 /** The drafter's `statements`, each verified once against the brief. Anything malformed, unverified or unchecked is retained whole as unknown. */

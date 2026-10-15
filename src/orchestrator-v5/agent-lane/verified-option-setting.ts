@@ -12,7 +12,7 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
-import { sourceMapOf, subjectKey } from './construction-source-map.js';
+import { sourceMapOf, statesLossBefore, subjectKey } from './construction-source-map.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -769,7 +769,7 @@ export function statementBindsFactorLevel(model: CandidateModel, factor: Factor,
 
 function boundByStatement(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   const value = factor.baseline_value;
-  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return false;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value === 0) return false;
   const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
   const unit = JSON.stringify(readUnitParts(factor.unit));
@@ -784,7 +784,9 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
       && words(quote.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular).join(' ') === name.join(' ');
     const inFrame = findLinkEffectAmounts(quote).filter((amount) =>
       sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount)));
-    if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
+    // S4: a net loss binds as its negative only where the words before its figure state the loss (`statesLossBefore`).
+    if (inFrame.length !== 1 || inFrame[0]!.magnitude !== Math.abs(value)
+      || (value < 0 && !statesLossBefore(quote, inFrame[0]!.index))) return false;
     const stated = inFrame[0]!;
     const label = (l: string): Set<string> => new Set(words(l).map(singular));
     const own = label(factor.label);
