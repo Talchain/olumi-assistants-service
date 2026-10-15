@@ -111,7 +111,20 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
     return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
   });
   const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
-  return amounts.map((a) => ({ low: a.magnitude, high: a.magnitude }));
+  return amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
+    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]);
+}
+
+/**
+ * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z, unseen brief R4): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15:
+ * the same figure with the opposite direction word. The drafter's −15 was refused as no figure of the quote, so the user's own
+ * net loss was admitted as Olumi's unverified, unscaled guess and blocked every Run. A figure written straight after a loss
+ * direction is also stated as its negative; with no such words a negative stays refused, as before. Which reading a subject
+ * takes (a net change at −15, or a count of losses at 15) is the binder's, never this list's.
+ */
+const LOSS_BEFORE = /\b(?:losing|lose|loses|lost|(?:net )?loss of|deficit of|outflow of|down(?: by)?)(?: a net| net)?(?: (?:about|around|roughly|nearly|almost|some|over))?\s*$/iu;
+export function statesLossBefore(quote: string, index: number): boolean {
+  return LOSS_BEFORE.test(quote.slice(0, index));
 }
 
 /** The drafter's `statements`, each verified once against the brief. Anything malformed, unverified or unchecked is retained whole as unknown. */
@@ -179,4 +192,32 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     out = (withUserStatement(out, userStatementRecord(subject, statements, recordedAt, CONSTRUCTION_ATTEST), subject) ?? out) as G & Record<string, unknown>;
   }
   return out;
+}
+
+const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound', '<': 'upper_bound', '>=': 'lower_bound', '>': 'lower_bound' };
+/**
+ * ⭐ A draft's statements, as every reader takes them (DL 15 Oct, marketing e2e S4): a statement the drafter filed as a POINT level
+ * of a subject for which the SAME draft declares a limit (`constraints[]`, role limit) with that exact figure is that limit's
+ * bound, never today's level: "Our budget for the year is £100,000." beside the limit `Total annual campaign spend <= 100000`
+ * is the level's upper bound. The role comes from the draft's own declared limit (the shared constraint contract: role and
+ * operator), never from the sentence's words. Every other entry is returned as given. Pure.
+ */
+export function draftStatements(model: unknown): unknown {
+  const m = model !== null && typeof model === 'object' ? model as Record<string, unknown> : {};
+  const raw = m['statements'];
+  if (!Array.isArray(raw)) return raw;
+  const limits = (Array.isArray(m['constraints']) ? m['constraints'] : []).flatMap((c: unknown) => {
+    const r = c !== null && typeof c === 'object' ? c as Record<string, unknown> : {};
+    const form = typeof r['operator'] === 'string' ? BOUND_FORM[r['operator']] : undefined;
+    return r['role'] === 'limit' && form !== undefined && typeof r['metric'] === 'string' && typeof r['value'] === 'number'
+      ? [{ metric: norm(r['metric']), value: r['value'], form }] : [];
+  });
+  if (limits.length === 0) return raw;
+  return raw.map((entry: unknown) => {
+    const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
+    const subject = subjectOf(r?.['subject']);
+    if (r === undefined || subject === undefined || r['field'] !== 'level' || r['form'] !== 'point' || subject.factor_label !== undefined) return entry;
+    const limit = limits.find((l) => l.metric === norm(subject.label) && l.value === r['value']);
+    return limit === undefined ? entry : { ...r, form: limit.form };
+  });
 }

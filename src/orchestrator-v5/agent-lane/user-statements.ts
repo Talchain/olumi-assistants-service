@@ -144,7 +144,10 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
   }
-  const value = figure(given?.value, rules.allowsZero);
+  // A negative is a figure only where the quote's own words state it as one (`figuresIn`: a net loss, S4); never the Agent's sign.
+  const signed = typeof given?.value === 'number' && given.value < 0 && stated.some((r) => r.low === given.value && r.high === given.value)
+    ? given.value : undefined;
+  const value = figure(given?.value, rules.allowsZero) ?? signed;
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };

@@ -72,7 +72,10 @@ describe('AIE 6183705670: construction statements are recorded on their subjects
     expect((g.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);
     const unbound = (r: Rec): Rec => ({ ...r, statements: r.statements.map((s: Rec) => ({ ...s, subject: { ...s.subject, label: 'Not in this model' } })) });
     expect(((await registered(D5, unbound)).nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);
+    // The records alone move no analysis hash: the same build with and without them.
     const withRecords = await registered(D3);
-    expect(computeAnalysisAffectingGraphHash(withRecords as never)).toBe(computeAnalysisAffectingGraphHash(g as never));
+    const bare = { ...withRecords, nodes: (withRecords.nodes as Rec[]).map(({ user_statements: _u, ...n }) => n) };
+    expect((withRecords.nodes as Rec[]).some((n) => n.user_statements !== undefined)).toBe(true);
+    expect(computeAnalysisAffectingGraphHash(withRecords as never)).toBe(computeAnalysisAffectingGraphHash(bare as never));
   });
 });

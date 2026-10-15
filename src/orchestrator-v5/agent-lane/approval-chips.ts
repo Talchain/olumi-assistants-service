@@ -55,6 +55,13 @@ const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message
  * statement; where its postimage adds an Olumi derivation (`DoorCard.derives`), "Use this reading".
  */
 const recordsUsersStatement = (op: { readonly op: string }): boolean => op.op === RECORD_STATEMENT_OP;
+/**
+ * ⭐ C2 (AIE 6180618773 row 2, DL ruling A): a level card that carries the user's range rests on Olumi's quartile assumption
+ * (`statedRangeAssumptionWords`), so its press adopts a reading: "Use this reading" (AIE 6181498097), never "Record".
+ */
+const carriesRangeAssumption = (proposal: { readonly operations: readonly { readonly op: string; readonly value?: unknown }[] } | undefined): boolean =>
+  proposal?.operations.some((o) => o.op === 'set_option_intervention' && o.value !== null && typeof o.value === 'object'
+    && (o.value as { likely_range?: unknown }).likely_range !== undefined) === true;
 const doorButtonOf = (op: { readonly value?: unknown }): { readonly label: string; readonly message: string } =>
   (op.value !== null && typeof op.value === 'object' && (op.value as { derives?: unknown }).derives === true ? DOOR_DERIVED_APPROVE : DOOR_APPROVE);
 /** The user's own cohort forecast (science PR-4b): recorded from their words, so the button says record, never "use Olumi's". */
@@ -249,7 +256,8 @@ export function approvalChipsFor(
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
       message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : usersStatement !== undefined ? doorButtonOf(usersStatement).message
         : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message
-        : cohortForecast ? COHORT_FORECAST_APPROVE.message : approve.message,
+        : cohortForecast ? COHORT_FORECAST_APPROVE.message
+        : carriesRangeAssumption(stored) ? DOOR_DERIVED_APPROVE.message : approve.message,
       detail: stored!.public_label }, AMEND_CHIP];
   }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
@@ -673,6 +681,7 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const ops = proposal.operations;
   // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
   if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
+  if (carriesRangeAssumption(proposal)) return DOOR_DERIVED_APPROVE.label;
   // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
   if (ops.length === 1 && recordsUsersStatement(ops[0]!)) return doorButtonOf(ops[0]!).label;
   if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;

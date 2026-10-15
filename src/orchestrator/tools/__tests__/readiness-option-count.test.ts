@@ -8,7 +8,8 @@ function graph(optionCount: number) {
     { id: 'goal', kind: 'goal', label: 'Capacity' },
     ...(optionCount > 0 ? [{ id: 'decision', kind: 'decision', label: 'Staffing' },
       { id: 'staff', kind: 'factor', label: 'Staff', category: 'controllable', observed_state: { value: 1, source: 'brief_extraction' } }] : []),
-    { id: 'budget', kind: 'factor', label: 'Budget', observed_state: { value: 10, source: 'brief_extraction' } },
+    // A level the Run can place needs its range: a bare 10 with none is refused at the Run (`baseline_scale_unresolved`).
+    { id: 'budget', kind: 'factor', label: 'Budget', observed_state: { value: 10, cap: 20, source: 'brief_extraction' } },
     ...options,
   ], edges: [
     ...(optionCount > 0 ? [{ from: 'staff', to: 'goal' }] : []),

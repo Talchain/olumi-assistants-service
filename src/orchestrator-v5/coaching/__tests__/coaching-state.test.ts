@@ -266,7 +266,12 @@ describe('deriveCoachingState — readiness blockers', () => {
     // Canonical whole-status enumerates both the structural model defects and
     // the unresolved option input; coaching projects both typed remedies from
     // that one record.
-    const state = base({ freshness: FRESH, persistedGraph: buildD1Fixture() });
+    // D1's 'Headcount' (12 people) holds no range, which the Run refuses (`baseline_scale_unresolved`); this row is about the
+    // structural defects and the option input, so its level gets the range the Run needs.
+    const graph = buildD1Fixture();
+    const ranged = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'f-uncapped'
+      ? { ...n, observed_state: { ...(n.observed_state as Record<string, unknown>), cap: 50 } } : n)) };
+    const state = base({ freshness: FRESH, persistedGraph: ranged });
     const blockers = state.signals.filter((s) => s.kind === 'readiness_blocker');
     const reasons = blockers.map((s) => s.reason_code).sort();
     expect(reasons).toEqual([

@@ -867,9 +867,15 @@ export function framedObservedState(f: {
   // only genuinely unusable cases are a missing/non-finite cap, a cap that is not
   // strictly above 1, a NEGATIVE baseline (which a 0..cap frame cannot express),
   // and a baseline above the cap.
-  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw < 0 || raw > cap) {
+  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw > cap || -raw > cap) {
     return { value: raw, ...base };
   }
+  // ⭐ S4 NET LOSS (DL ruling 15 Oct): a stated NEGATIVE level ("losing a net 15 members a month", −15) is the edit writer's
+  // framed pair on the same range (`normalise-factor-value.ts`, FRAMED: value = raw / frame, no clamp), never a cap, which
+  // has no negative. Its frame travels as the node's `scale_frame` (written below, because no cap is), and the Run's scale
+  // gate reads the pair against that stored frame. Measured on ISL staging a5725a15: the same model as a magnitude (15 lost,
+  // link −) gives the same goal chance within 0.006.
+  if (raw < 0) return { value: raw / cap, raw_value: raw, ...base };
   return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
 }
 
