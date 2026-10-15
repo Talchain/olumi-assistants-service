@@ -1,5 +1,5 @@
 {
-  "source_sha": "f3a0a6bbe8a46077477370f4977d260b42a0ebe5",
+  "source_sha": "76d80c0b44400fca1876800ba336ba5f7bda1e83",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -240,7 +240,7 @@
       "src/schemas/value-warrant-guard.ts": 4
     },
     "goal_level_reading": {
-      "src/orchestrator-v5/agent-lane/admit-model.ts": 6,
+      "src/orchestrator-v5/agent-lane/admit-model.ts": 7,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 6,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/coaching/goal-reading-disclosure.ts": 1,
@@ -832,7 +832,7 @@
     "goal_direction": 100,
     "goal_horizon": 51,
     "goal_horizon_months": 43,
-    "goal_level_reading": 19,
+    "goal_level_reading": 20,
     "goal_node_id": 289,
     "goal_period": 4,
     "goal_scope": 48,
@@ -856,7 +856,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2482,
+  "total_references": 2483,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
