@@ -23,6 +23,7 @@ import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { withoutAgentDirections } from '../write-outcome.js';
+import { asMemberOp, doorAsks } from '../../statement-door/door.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
@@ -66,8 +67,17 @@ function world(initial: Rec = JSON.parse(FX.graph_text) as Rec) {
   return { graph, registers, knobs, proposals,
     caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { now: () => new Date('2026-10-14T21:30:00Z') }) };
 }
-const offer = async (w: ReturnType<typeof world>, args: unknown = ARGS, text = PAUL): Promise<Rec> =>
-  dispatchTool('propose_option_capacity_change', JSON.stringify(args), ctx(text) as never, w.caps) as Promise<Rec>;
+/**
+ * ⭐ SYSTEM 1 M5: the answer goes through the ONE statement door (`propose_statement`), the subject being the share with the option
+ * ({factor, option, level}), and the statement answering readiness's own ask for that subject (its exact words, `doorAsks`).
+ */
+const offer = async (w: ReturnType<typeof world>, args: { option_id: string; factor_id?: string; statements: readonly { quote: string }[] } = ARGS,
+  text = PAUL): Promise<Rec> => {
+  const subject = { kind: 'factor', id: args.factor_id ?? LEGACY_TIME, option_id: args.option_id, field: 'level' };
+  const ask = doorAsks(w.graph()).find((a) => a.subject.id === subject.id && a.subject.option_id === subject.option_id);
+  return dispatchTool('propose_statement', JSON.stringify({ subject, statements: args.statements.map((st) => ({ quote: st.quote,
+    ...(ask !== undefined ? { answering: ask.words } : {}) })) }), ctx(text) as never, w.caps) as Promise<Rec>;
+};
 const press = (w: ReturnType<typeof world>, pid: string) =>
   w.caps.authoriseChange({ ...ctx('Yes, use this for the option.'), typed_approval_of: pid } as never, { proposal_id: pid }) as Promise<Rec>;
 
@@ -85,15 +95,17 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const w = world();
     const r = await offer(w);
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Use this for ‘Reduce legacy-fix time’? You said “it would cut legacy work from 25% to 15%”. Olumi reads this as: the option '
-      + 'sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today). Olumi also assumes that all the rest of the team’s time '
+    // M5: the ONE door card (AIE 6181498097 template): the user's words, Olumi's reading, each assumption once, then the question.
+    expect(r.public_label).toBe('From your message: “it would cut legacy work from 25% to 15%”. Olumi proposes this reading: ‘Reduce legacy-fix time’ '
+      + 'sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today). Olumi assumes that all the rest of the team’s time '
       + '(75% today) goes to next feature launch, so freeing 10 points raises the team’s capacity for it to about 113% of today’s. Olumi assumes this takes '
-      + 'effect from now; say if it would start later. The model gains one part, ‘Reduce legacy-fix time frees time for next feature launch’, linked to the goal.');
+      + 'effect from now; say if it would start later. The model gains one part, ‘Reduce legacy-fix time frees time for next feature launch’, linked to the goal. '
+      + 'Record this reading?');
     expect(w.registers).toHaveLength(0); // nothing is written by the offer
-    const chips = approvalChipsFor([{ name: 'propose_option_capacity_change', ok: true, mutated: false, proposal_id: r.proposal_id }] as never,
+    const chips = approvalChipsFor([{ name: 'propose_statement', ok: true, mutated: false, proposal_id: r.proposal_id }] as never,
       (id: string) => ({ proposal: w.proposals.get(id), result: r }) as never);
     // A card-only card: its press carries the card's own words; the second chip changes it first.
-    expect(chips.map((c: Rec) => c.label), JSON.stringify(chips)).toEqual(['Use this', 'Change something first']);
+    expect(chips[0]!.label, JSON.stringify(chips)).toBe('Use this reading');
     expect(chips[0]!.detail).toBe(r.public_label);
 
     const done = await press(w, r.proposal_id);
@@ -241,7 +253,8 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
   it('⛔ staleness is about MEANING: a changed deliverable, deadline, reference, unit or whole refreshes the card; nothing is written', async () => {
     const w = world();
     const r = await offer(w);
-    const a = w.proposals.get(r.proposal_id)!.operations[0]!.value as ApprovedOptionCapacityChange;
+    // The door card's write is the option-capacity member's own payload (`asMemberOp`), the card the meaning gate reads.
+    const a = asMemberOp(w.proposals.get(r.proposal_id)!.operations[0]!)!.value as ApprovedOptionCapacityChange;
     expect(optionCapacityChangeStillApplies(a, w.graph())).toBe(true);
     for (const [what, moved] of [['deliverable', { ...a, deliverable: 'a different launch' }], ['deadline', { ...a, deadline: '2027-06-30' }],
       ['reference', { ...a, reference_date: '2026-09-01' }], ['unit', { ...a, unit: '% of budget' }], ['whole', { ...a, total: 50 }]] as const) {
@@ -263,7 +276,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     const budget = w.graph();
     node(budget, LEGACY_TIME).observed_state.unit = '% of budget';
     // CONTRAST: offered on a share of budget, no card is made at all (not a share of the team's time).
-    expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
+    expect(await offer(world(budget))).toMatchObject({ ok: false, refusal: 'no_table_row' });
   });
 
   it('the share\'s percent family is the unit authority\'s (`classifyUnitScaleClass`): "percent of developer time" is a share; points never are', async () => {
@@ -271,17 +284,20 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     expect(await offer(world(spelled('percent of developer time')))).toMatchObject({ ok: true });
     expect(await offer(world(spelled('percent')))).toMatchObject({ ok: true });
     // CONTRAST: the authority's prefix layer reads "percentage points" as percent; a change in points is not a share of time.
-    expect(await offer(world(spelled('percentage points')))).toMatchObject({ ok: false, refusal: 'no_share_to_change' });
+    expect(await offer(world(spelled('percentage points')))).toMatchObject({ ok: false, refusal: 'no_table_row' });
   });
 
   it.each([
     ['words the user never typed', { ...ARGS, statements: [{ quote: 'it would cut legacy work to 10%', form: 'point', value: 10 }] }, PAUL, 'statement_not_found'],
-    ['a higher share (frees no time)', { ...ARGS, statements: [{ quote: 'legacy work would go up to 30%', form: 'point', value: 30 }] }, 'legacy work would go up to 30%', 'not_lower'],
-    ['a different "today" from the model\'s 25%', { ...ARGS, statements: [{ quote: 'it would cut legacy work from 20% to 15%', form: 'point', value: 15 }] }, 'it would cut legacy work from 20% to 15%', 'not_today'],
-    ['an option that already acts (the hire)', { option_id: 'event_option_3', statements: ARGS.statements }, PAUL, 'option_not_unresolved'],
-  ] as const)('REFUSES %s: nothing is prepared', async (_name, args, text, refusal) => {
+    ['a higher share (frees no time)', { ...ARGS, statements: [{ quote: 'legacy work would go up to 30%', form: 'point', value: 30 }] }, 'legacy work would go up to 30%', 'not_this_field', 'is not below today\'s 25%'],
+    ['a different "today" from the model\'s 25%', { ...ARGS, statements: [{ quote: 'it would cut legacy work from 20% to 15%', form: 'point', value: 15 }] }, 'it would cut legacy work from 20% to 15%', 'not_this_field', 'holds ‘Legacy-code fixing time’ at 25% of developer time today'],
+    // M5: the door has no row for an option that already acts, so nothing is read for it.
+    ['an option that already acts (the hire)', { option_id: 'event_option_3', statements: ARGS.statements }, PAUL, 'no_table_row'],
+  ] as const)('REFUSES %s: nothing is prepared', async (_name, args, text, refusal, detail?: string) => {
     const w = world();
-    expect(await offer(w, args, text)).toMatchObject({ ok: false, refusal });
+    const out = await offer(w, args, text);
+    expect(out).toMatchObject({ ok: false, refusal });
+    if (detail !== undefined) expect(String(out.detail)).toContain(detail);
     expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
   });
 });
@@ -326,7 +342,7 @@ describe('an unsized deadline-forecast option is asked for its effect, never cal
     const subject = issues[0]!.statement_subject as Rec;
     const r = await offer(w, { option_id: subject.option_id, factor_id: subject.id, statements: ARGS.statements });
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
-    expect(String(r.public_label)).toContain(`You said “${PAUL}”`);
+    expect(String(r.public_label)).toContain(`From your message: “${PAUL}”`);
     expect(await press(w, String(r.proposal_id))).toMatchObject({ ok: true, applied: true, mutated: true });
     expect(w.registers).toHaveLength(1);
     const after = resolveRunAdmission(w.graph());

@@ -10,7 +10,7 @@
  *  - "from now" is Olumi's timing assumption, said as such;
  *  - the press adds one capacity carrier (the existing ratio mechanism, `ratio_source.complement_of`, so the live compiler
  *    re-derives it when the share is edited), its link to the goal and each option's switch, as one registered revision.
- * Pure: the capability does the I/O (`agent-capabilities.ts` `proposeOptionCapacityChange` / `applyOptionCapacityChange`).
+ * Pure: the capability does the I/O (the statement door's row `statement-door/fields/option-capacity.ts`; `agent-capabilities.ts` `applyOptionCapacityChange`).
  */
 import { isDeepStrictEqual } from 'node:util';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';

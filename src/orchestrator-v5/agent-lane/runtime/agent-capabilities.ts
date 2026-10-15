@@ -6440,50 +6440,6 @@ export function createAgentCapabilities(
      * and the share are set from graph identity; Olumi's freed-time reading and "from now" are said on the card as Olumi's.
      * Nothing is written here.
      */
-    async proposeOptionCapacityChange(ctx, args): Promise<ToolResult> {
-      if (readOnly) return refuseReadOnly();
-      const refuse = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
-      const g = await readGraph(ctx.scenario_id);
-      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const optionId = typeof args?.option_id === 'string' ? args.option_id : '';
-      const factorId = typeof args?.factor_id === 'string' && args.factor_id !== '' ? args.factor_id : undefined;
-      const target = optionCapacityTarget(g.raw, optionId, factorId);
-      if (target.kind === 'refused') return refuse(target.refusal, target.detail);
-      const texts = { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text };
-      const share = target.factor.observed_state as { unit: string };
-      const verdict = verifyStatements(args?.statements, texts,
-        { subject: { quantity: 'share_of_time', node_id: String(target.factor.id), option_id: optionId }, unit: '%', forms: ['point'],
-          figuresIn: shareFiguresFor(String(target.factor.label), share.unit, otherSharesOf(g.raw as Record<string, unknown>, String(target.factor.id))) });
-      if (verdict.kind === 'refused') return refuse(verdict.refusal, verdict.detail);
-      // ⛔ PL (14 Oct): a timing in the same words ("in 3 months, …") is the option's LEAD, read by session 4's ONE lead reader
-      // (`effect-lead.ts`), never a figure of the share. A timing it cannot read prepares nothing and keeps its ask.
-      const quotes = verdict.statements.map((st) => st.quote);
-      const timed = quotes.some((q) => /\b(?:days?|weeks?|months?|years?)\b/i.test(q));
-      const lead = timed ? effectLeadFromStatements(texts, optionId, quotes) : undefined;
-      if (lead?.kind === 'refused') return refuse(lead.refusal, lead.detail);
-      const plan = planOptionCapacityChange(g.raw as Record<string, unknown>, target, verdict.statements, lead?.lead);
-      if (plan.kind === 'refused') return refuse(plan.refusal, plan.detail);
-      const a = plan.approved;
-      // The postimage must hold exactly what the card says before it is offered, never only after the press.
-      if (!optionCapacityChangeHeld(withOptionCapacityChange(g.raw, a), a)) {
-        return refuse('option_capacity_unusable', `Olumi couldn't apply this figure to ‘${a.option_label}’ as the model stands, so nothing was prepared. Say so plainly.`);
-      }
-      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
-        base_graph_identity_hash: g.graph_hash, operations: [{ op: SET_OPTION_CAPACITY_CHANGE, path: optionId, value: a }],
-        // The figure is the user's; the relation and timing on the card are Olumi's reading, which the press adopts.
-        provenance: { authored_by: 'model_proposed', basis: a.statements.map(st => st.quote).join(' | ') },
-        validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: optionCapacityChangeCard(a) });
-      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
-        const op = proposals.get(pending.proposal_id)?.operations[0];
-        if (op?.op === SET_OPTION_CAPACITY_CHANGE && op.path === optionId) proposals.discard(pending.proposal_id);
-      }
-      proposals.put(proposal);
-      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
-        note: 'Nothing has changed yet. The change is ready for review on ONE card. Tell the user what the card says, in its words; never the ids. '
-          + 'Call authorise_change only for the approval bound to this card; a typed ‘yes’ alone is not that approval.' };
-    },
-
     async proposeModelChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);

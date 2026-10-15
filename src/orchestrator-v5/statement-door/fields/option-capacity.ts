@@ -96,9 +96,11 @@ export const OPTION_CAPACITY_ROW: RoleRow = {
     const today = Number(target.factor.observed_state.raw_value);
     const figures = shareFiguresFor(String(target.factor.label), String(target.factor.observed_state.unit), otherSharesOf(graph as Rec, String(target.factor.id)))(quote);
     const fresh = [...new Set(figures.map((f) => f.low))].filter((v) => v !== today);
+    // "from 20% to 15%": the figure the words move the share TO is the new one; the other is checked against today's by the plan.
+    const to = fresh.length > 1 ? [...quote.matchAll(/\bto\s+(\d{1,3}(?:\.\d+)?)\s*(?:%|per ?cent\b)/gi)].map((m) => Number(m[1])).filter((v) => fresh.includes(v)) : fresh;
     if (fresh.length === 0) return { refused: `“${quote}” gives no new figure for ‘${String(target.factor.label)}’.` };
-    if (fresh.length > 1) return { refused: `“${quote}” gives more than one new figure for ‘${String(target.factor.label)}’ (${fresh.join(' and ')}). Ask which one ‘${String(target.option.label)}’ would set it to.` };
-    return { form: 'point', low: fresh[0]!, high: fresh[0]! };
+    if (to.length !== 1) return { refused: `“${quote}” gives more than one new figure for ‘${String(target.factor.label)}’ (${fresh.join(' and ')}). Ask which one ‘${String(target.option.label)}’ would set it to.` };
+    return { form: 'point', low: to[0]!, high: to[0]! };
   },
   readingWords: (statements, subject, _label, graph) => {
     const a = planned(subject, graph, statements);
