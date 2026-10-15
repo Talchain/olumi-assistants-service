@@ -66,7 +66,7 @@ const PERSISTED_GRAPH = {
       kind: 'factor',
       label: FACTOR_LABEL,
       category: 'external',
-      observed_state: { value: 95000, unit: '£', source: 'user_edited' },
+      observed_state: { value: 95000, unit: '£', cap: 150000, source: 'user_edited' },
     },
     {
       id: CONTROLLED_FACTOR_ID,
@@ -387,7 +387,7 @@ function claimedRunAnalysisMutationRegistry() {
         node.id === FACTOR_ID
           ? {
               ...node,
-              observed_state: { value: 100000, unit: '£', source: 'user_edited' },
+              observed_state: { value: 100000, unit: '£', cap: 150000, source: 'user_edited' },
             }
           : node,
       ),

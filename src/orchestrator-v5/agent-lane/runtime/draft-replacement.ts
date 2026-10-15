@@ -34,6 +34,7 @@ import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
 import { sameUnitAsEarlier } from '../same-unit.js';
+import { userStatementsOn } from '../../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -339,24 +340,83 @@ const quantityOf = (raw: unknown, c: Rec): string | null => {
 const numeric = (c: Rec): c is Rec & { value: number } => typeof c.value === 'number' && Number.isFinite(c.value);
 const unitOf = (c: Rec): string => (typeof c.unit === 'string' ? c.unit.trim() : '');
 
+/** The user's own verified sentences on a node that state `value`: the sentence (source line + quote; the quote is in its line) and its unit. */
+const sentencesStating = (raw: unknown, nodeId: unknown, value: number): { key: string; unit: string }[] =>
+  userStatementsOn(recs(rec(raw)?.nodes).find((n) => n.id === nodeId)).flatMap((r) => r.statements)
+    .filter((s) => s.speaker === 'user' && s.quote.trim() !== '' && s.source.includes(s.quote) && (s.high === value || s.low === value))
+    .map((s) => ({ key: `${s.source.trim()}\u0000${s.quote.trim()}`, unit: (s.unit ?? '').trim() }));
+/** The same sentence, read in the same unit (a redraft's unstated base or period is the earlier reading's: `sameUnitAsEarlier`). */
+const sameSentence = (earlier: readonly { key: string; unit: string }[], later: readonly { key: string; unit: string }[]): boolean =>
+  later.some((l) => earlier.some((e) => e.key === l.key && (e.unit === l.unit || sameUnitAsEarlier(e.unit, l.unit))));
+
+/**
+ * The candidate with its node `from` given the saved node's identity: every reference to `from` by id (edges, option
+ * interventions, rows) names the saved id, and the node takes the saved label and the saved record of the user's words. The
+ * redraft's links and option settings on the quantity are kept; its row for the limit is replaced by the saved row (below).
+ */
+function asSavedNode(candidate: unknown, from: string, savedNode: Rec): Rec {
+  const to = String(savedNode.id);
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return v === from ? to : v;
+    if (Array.isArray(v)) return v.map(walk);
+    const r = rec(v);
+    return r === undefined ? v : Object.fromEntries(Object.entries(r).map(([k, x]) => [k === from ? to : k, walk(x)]));
+  };
+  const out = walk(candidate) as Rec;
+  const { user_statements: _drafted, ...rest } = recs(out.nodes).find((n) => n.id === to) ?? {};
+  out.nodes = recs(out.nodes).map((n) => (n.id === to ? { ...rest, label: savedNode.label,
+    ...(savedNode.user_statements !== undefined ? { user_statements: structuredClone(savedNode.user_statements) } : {}) } : n));
+  return out;
+}
+
 /**
  * Match quantity, stated comparator, figure and frame; the caller supplies the existing figure formatter to
  * recognise unit spelling. Never infer quantity equivalence from a shared figure. Unmatched rows are carried
  * verbatim, together with their node if absent. The result is prepared before the card and its hash are built.
  * A conflicting node/row identity cannot safely carry an unchanged row and is reported, never overwritten.
  */
-export function limitsKeptBy(base: unknown, candidate: unknown, figure = (value: number, unit: string) => `${value} ${unit}`) {
-  const limitsOf = (raw: unknown) => rowsOf(raw).filter((c) => c.role !== 'goal_target' && !goalIdsOf(raw).has(String(c.node_id))
-    && numeric(c) && ['<=', '>=', '<', '>'].includes(String(c.operator)) && c.deadline_metadata == null);
+export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: number, unit: string) => `${value} ${unit}`) {
+  const limitIn = (raw: unknown) => {
+    const goals = goalIdsOf(raw);
+    return (c: Rec): boolean => c.role !== 'goal_target' && !goals.has(String(c.node_id))
+      && numeric(c) && ['<=', '>=', '<', '>'].includes(String(c.operator)) && c.deadline_metadata == null;
+  };
+  const limitsOf = (raw: unknown) => rowsOf(raw).filter(limitIn(raw));
   const rowOf = (c: Rec): HeldRow => ({ node_id: String(c.node_id), operator: String(c.operator_as_stated ?? c.operator),
     value: c.value as number, unit: unitOf(c) });
-  const theirs = limitsOf(candidate);
+  /**
+   * ⭐ THE SAME SENTENCE OF THE USER'S IS THE SAME LIMIT (DL 15 Oct 07:03Z; served widen4/widen3 on 87d5f90e): a redraft that
+   * names a saved limit afresh ("Founder time on launch marketing" for the saved "Founder time on campaign") while citing the
+   * SAME verified sentence of the user's (same quote and source line, read in the same unit), with the same comparator, figure
+   * and frame and the same row unit through the unit reader, holds the saved limit: its id and bindings are kept, and nothing is
+   * asked. Exactly one row must match. A limit from a different sentence, a unit both state differently, or a saved limit with
+   * no recorded sentence of the user's takes the paths below (it asks).
+   */
+  let candidate: unknown = drafted;
+  /** The redraft's row for a same-sentence limit (by its constraint id) → the saved row that replaces it. */
+  const savedRowFor = new Map<unknown, Rec>();
+  const savedIds = new Set(limitsOf(base).map((c) => c.constraint_id));
+  for (const c of limitsOf(base)) {
+    const savedNode = recs(rec(base)?.nodes).find((n) => n.id === c.node_id);
+    if (savedNode === undefined || limitsOf(candidate).some((t) => t.constraint_id === c.constraint_id)
+      || recs(rec(candidate)?.nodes).some((n) => n.id === c.node_id)) continue;
+    const row = rowOf(c);
+    const said = sentencesStating(base, c.node_id, row.value);
+    const same = limitsOf(candidate).filter((t) => !savedIds.has(t.constraint_id) && !savedRowFor.has(t.constraint_id)
+      && String(t.operator_as_stated ?? t.operator) === row.operator && t.value === row.value
+      && (t.value_frame ?? 'level') === (c.value_frame ?? 'level') && (unitOf(t) === row.unit || sameUnitAsEarlier(row.unit, unitOf(t)))
+      && sameSentence(said, sentencesStating(candidate, t.node_id, row.value)));
+    if (same.length !== 1) continue;
+    candidate = asSavedNode(candidate, String(same[0]!.node_id), savedNode);
+    savedRowFor.set(same[0]!.constraint_id, c);
+  }
+  const rows = rowsOf(candidate).map((r) => (savedRowFor.has(r.constraint_id) ? structuredClone(savedRowFor.get(r.constraint_id)!) : r));
+  const theirs = rows.filter(limitIn(candidate));
   const kept: HeldRow[] = [];
   const dropped: HeldRow[] = [];
   const carried: HeldRow[] = [];
   const uncertain: { previous: HeldRow; proposed: HeldRow[] }[] = [];
   const nodes = [...recs(rec(candidate)?.nodes)];
-  const rows = [...rowsOf(candidate)];
   /** The rows carried from the earlier draft, by identity: they keep their own origin (`targetsStoredInferred`). */
   const carriedRows = new Set<Rec>();
   let conflict = false;

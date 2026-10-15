@@ -215,3 +215,31 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
   }
   return out;
 }
+
+const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound', '<': 'upper_bound', '>=': 'lower_bound', '>': 'lower_bound' };
+/**
+ * ⭐ A draft's statements, as every reader takes them (DL 15 Oct, marketing e2e S4): a statement the drafter filed as a POINT level
+ * of a subject for which the SAME draft declares a limit (`constraints[]`, role limit) with that exact figure is that limit's
+ * bound, never today's level: "Our budget for the year is £100,000." beside the limit `Total annual campaign spend <= 100000`
+ * is the level's upper bound. The role comes from the draft's own declared limit (the shared constraint contract: role and
+ * operator), never from the sentence's words. Every other entry is returned as given. Pure.
+ */
+export function draftStatements(model: unknown): unknown {
+  const m = model !== null && typeof model === 'object' ? model as Record<string, unknown> : {};
+  const raw = m['statements'];
+  if (!Array.isArray(raw)) return raw;
+  const limits = (Array.isArray(m['constraints']) ? m['constraints'] : []).flatMap((c: unknown) => {
+    const r = c !== null && typeof c === 'object' ? c as Record<string, unknown> : {};
+    const form = typeof r['operator'] === 'string' ? BOUND_FORM[r['operator']] : undefined;
+    return r['role'] === 'limit' && form !== undefined && typeof r['metric'] === 'string' && typeof r['value'] === 'number'
+      ? [{ metric: norm(r['metric']), value: r['value'], form }] : [];
+  });
+  if (limits.length === 0) return raw;
+  return raw.map((entry: unknown) => {
+    const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
+    const subject = subjectOf(r?.['subject']);
+    if (r === undefined || subject === undefined || r['field'] !== 'level' || r['form'] !== 'point' || subject.factor_label !== undefined) return entry;
+    const limit = limits.find((l) => l.metric === norm(subject.label) && l.value === r['value']);
+    return limit === undefined ? entry : { ...r, form: limit.form };
+  });
+}
