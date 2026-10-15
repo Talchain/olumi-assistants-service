@@ -3490,7 +3490,7 @@ export type CommitOptionLevelsInput = {
    * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
-  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number };
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number; readonly answers_question?: string };
   /**
    * #3024: the deadline card's bound goal (`still-applies.ts`) and whether THIS proposal's own write already landed, read by the
    * store-reading writer. Kept out of the request identity: a retry is the same request.
@@ -3638,8 +3638,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.statement_record !== undefined && !('node_id' in input.statement_record) && input.statement_record.length > 0
       ? { rangeLaws: input.statement_record } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
-    ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
-      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months,
+    // The approved horizon whole (its type is exactly the writer's fields, `answers_question` included), plus the card's bound goal.
+    ...(input.goal_horizon !== undefined ? { goalHorizon: { ...input.goal_horizon,
       ...(input.deadline_card !== undefined ? { expected_goal: input.deadline_card.expected_goal, own_write_landed: input.deadline_card.own_write_landed } : {}) } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) {

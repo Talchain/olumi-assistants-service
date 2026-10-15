@@ -4485,7 +4485,8 @@ export function createAgentCapabilities(
       levels: [],
       goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
         reference_date: (op.value as { reference?: string }).reference,
-        stated_months: (op.value as { stated_months?: number }).stated_months },
+        stated_months: (op.value as { stated_months?: number }).stated_months,
+        ...((op.value as { answers_question?: string }).answers_question !== undefined ? { answers_question: (op.value as { answers_question?: string }).answers_question } : {}) },
       // The store-reading writer reads the same rule on the base it writes (Codex r1 on #3024).
       ...((op.value as { expected_goal?: unknown }).expected_goal !== undefined
         ? { deadline_card: { expected_goal: (op.value as { expected_goal?: unknown }).expected_goal, own_write_landed: ownWriteLanded } } : {}),
@@ -4493,7 +4494,8 @@ export function createAgentCapabilities(
     // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
     if ((res.status === 'committed' || res.status === 'unconfirmed') ) {
       const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
-        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference, stated_months: (op.value as { stated_months?: number }).stated_months });
+        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference, stated_months: (op.value as { stated_months?: number }).stated_months,
+        ...((op.value as { answers_question?: string }).answers_question !== undefined ? { answers_question: (op.value as { answers_question?: string }).answers_question } : {}) });
       const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
       if (postimage !== undefined) proposals.markPartial(parent.proposal_id, {
         revision: computeAnalysisAffectingGraphHash(postimage as never)!, landed: [op.path], receipts: [], expected_postimage: postimage,
@@ -4502,7 +4504,7 @@ export function createAgentCapabilities(
     if (res.status === 'unconfirmed') {
       const reread = await readGraph(ctx.scenario_id);
       if (reread !== null && goalDeadlineFromRecord(reread.raw, op.path) === v.deadline
-        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference ?? null, (op.value as { stated_months?: number }).stated_months)) {
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference ?? null, (op.value as { stated_months?: number }).stated_months, (op.value as { answers_question?: string }).answers_question)) {
         proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
       }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
@@ -4520,7 +4522,8 @@ export function createAgentCapabilities(
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
     const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
-      reference_date: (op.value as { reference?: string }).reference, stated_months: (op.value as { stated_months?: number }).stated_months });
+      reference_date: (op.value as { reference?: string }).reference, stated_months: (op.value as { stated_months?: number }).stated_months,
+      ...((op.value as { answers_question?: string }).answers_question !== undefined ? { answers_question: (op.value as { answers_question?: string }).answers_question } : {}) });
     const expectedGraph = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : null;
     const holds = expectedGraph !== null && check !== null && isDeepStrictEqual(check.raw, expectedGraph);
     if (!holds) {
@@ -4894,8 +4897,18 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'already_held',
           detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
       }
-      const approved = { goal_id: goal.id, deadline: stated.date, expected_deadline: held ?? null, reference_date: reference,
+      // ⭐ DL 15 Oct (hiring 62e94f27, URGENT): where the goal's reading was stored AWAITING its period, its open question is the
+      // one this date answers: the card shows it, whole, with Olumi's reading of the target, and the press answers it (by identity).
+      const storedBasis = (goal as { goal_target_basis?: unknown }).goal_target_basis as { period_months?: unknown; open_question?: unknown } | undefined;
+      const awaitedQuestion = storedBasis !== undefined && storedBasis !== null && typeof storedBasis === 'object' && storedBasis.period_months === undefined
+        && typeof storedBasis.open_question === 'string' && storedBasis.open_question.trim() !== '' ? storedBasis.open_question : undefined;
+      const plainApproved = { goal_id: goal.id, deadline: stated.date, expected_deadline: held ?? null, reference_date: reference,
         ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) };
+      // Olumi's reading of the target as it stands once this date supplies its period (the write's own postimage).
+      const withPeriod = awaitedQuestion === undefined ? undefined : applyGoalHorizonEdit(g.raw, plainApproved);
+      const awaitedReading = withPeriod?.kind === 'mutated' ? goalReadingWords(goalReadingProjectionOf(withPeriod.mutatedGraph, String(goal.id))) : undefined;
+      const answersQuestion = awaitedReading === undefined ? undefined : awaitedQuestion;
+      const approved = { ...plainApproved, ...(answersQuestion !== undefined ? { answers_question: answersQuestion } : {}) };
       const dry = applyGoalHorizonEdit(g.raw, approved);
       if (dry.kind === 'refused') return { ok: false, mutated: false, refusal: dry.reason,
         detail: deadlineRefusalDetail.horizon_not_modelled };
@@ -4924,10 +4937,12 @@ export function createAgentCapabilities(
             // lapse and at the writer (`still-applies.ts`), so an unrelated change never lapses the card and any goal change does.
             ...(deadlineCardSubjectOf(g.raw, goal.id) !== undefined ? { expected_goal: deadlineCardSubjectOf(g.raw, goal.id) } : {}),
             ...(reference !== undefined ? { reference } : {}),
-            ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
+            ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}),
+            ...(answersQuestion !== undefined ? { answers_question: answersQuestion } : {}) } }],
         provenance: { authored_by: authoredBy, basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”${quoted}.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`,
+        public_label: `${question}${replaces} ${userWords ? "Your words" : "Olumi’s wording"}: “${stated.words}”${quoted}.${authoredBy === 'model_proposed' ? " Olumi’s interpretation; check the date and reference before approving." : ''}${sourceDetail}`
+          + (answersQuestion !== undefined ? ` Approving this date also answers the open question on Olumi’s reading of your target (${awaitedReading}): “${answersQuestion.trim()}”` : ''),
       });
       proposals.put(proposal);
       return {
@@ -6434,7 +6449,14 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineFromRecord(g.raw, part.goal.id);
       const reference = todayInLondon((opts.now ?? (() => new Date()))());
-      if (part === null || deadline === undefined || reference >= deadline) {
+      // ⛔ Served hiring 62e94f27 turn 07: a model with no team part (a productivity target, not people finishing a deliverable) was
+      // refused `deadline_not_held` beside a held, approved deadline, and the AI said "Nothing was saved". The truthful reason, and
+      // the door that records each option's timing for such a model (`OPTION_LEAD_ROW`, through propose_statement).
+      if (part === null) {
+        return refuse('not_a_team_model', 'This model has no team part to time, so hiring start times do not apply here. Record when each '
+          + 'option\'s effect is fully in place with propose_statement (subject the option, field lead), quoting the user\'s own words.');
+      }
+      if (deadline === undefined || reference >= deadline) {
         return refuse('deadline_not_held', 'The deadline must be confirmed before these timings can be applied. Keep the supplied timings and prepare them once the deadline is confirmed.');
       }
       const goalId = String(part.goal.id), planned: PlannedOption[] = [];

@@ -1,0 +1,1337 @@
+{
+ "_source": "Served hiring timing diagnosis, CEE 62e94f27 (15 Oct 2026, run 2026-10-15T075211Z-hiring-timing-62e94f27): the stored graph read before and after the deadline card press (reads/01-02-before-approve.json, reads/02-02-after-approve.json), graph only; sha256 of each read file below. Turn 07 (user): \"The tech lead could start in month 1 and would lift productivity from month 2; each developer from month 2.\" was refused propose_hiring_times deadline_not_held.",
+ "reads": {
+  "before_approve": {
+   "file": "01-02-before-approve.json",
+   "sha256": "4661f6c63c9e6c5df7c41258a5b1563ab2fba962b14ffd59e3d0f342ff6c66dd",
+   "graph": {
+    "edges": [
+     {
+      "to": "hire_a_tech_lead",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_two_developers",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "continue_as_now",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_one_developer",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hiring_spend",
+      "from": "hire_a_tech_lead",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "tech_leads_hired",
+      "from": "hire_a_tech_lead",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hiring_spend",
+      "from": "hire_two_developers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "developers_hired",
+      "from": "hire_two_developers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hiring_spend",
+      "from": "hire_one_developer",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "developers_hired",
+      "from": "hire_one_developer",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "tech_leads_hired",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "developers_hired",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "productivity",
+      "from": "current_mid_weight_developers",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity",
+      "from": "tech_leads_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity",
+      "from": "developers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "code_quality_deterioration",
+      "from": "developers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity",
+      "from": "code_quality_deterioration",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "nodes": [
+     {
+      "id": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Should I hire a Tech lead or two developers to increase productivity by at…",
+      "provenance": "from_brief",
+      "description": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?"
+     },
+     {
+      "id": "productivity",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "Productivity",
+      "provenance": "from_brief",
+      "goal_direction": ">=",
+      "goal_threshold": 0.1,
+      "quantity_frame": "change",
+      "user_statements": [
+       {
+        "field": "target",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "low": 10,
+          "form": "lower_bound",
+          "unit": "%",
+          "quote": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "goal|productivity|||target"
+          },
+          "qualifier": "while maintaining code quality",
+          "conditions": "We have an urgent launch date in the next three months.",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "goal|productivity|||target"
+       },
+       {
+        "field": "measure",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "form": "describes",
+          "unit": "",
+          "quote": "We have an urgent launch date in the next three months.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "goal|productivity|||measure"
+          },
+          "qualifier": "urgent",
+          "conditions": "launch date in the next three months",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "goal|productivity|||measure"
+       }
+      ],
+      "threshold_source": "brief_extraction",
+      "goal_target_basis": {
+       "source": "olumi_reading",
+       "reference": "today",
+       "target_raw": 10,
+       "denominator": "today’s productivity",
+       "effect_unit": "% of today’s productivity",
+       "period_kind": "at_end",
+       "target_frame": "change_abs",
+       "also_required": [
+        "maintaining code quality",
+        "an urgent launch date in the next three months"
+       ],
+       "open_question": "Does the 10% productivity target need to be achieved by the launch date, or is the launch timing context rather than the target’s measurement deadline?",
+       "quantity_frame": "change",
+       "effects_at_period_end": false
+      },
+      "goal_threshold_cap": 100,
+      "goal_threshold_raw": 10,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "change_abs",
+      "goal_deadline_as_stated": "three months",
+      "goal_threshold_cap_provenance": "metric_scale"
+     },
+     {
+      "id": "hire_a_tech_lead",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire a Tech lead",
+      "provenance": "from_brief",
+      "interventions": {
+       "tech_leads_hired": {
+        "unit": "people",
+        "value": 0.2,
+        "source": "brief_extraction",
+        "raw_value": 1,
+        "target_match": {
+         "node_id": "tech_leads_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "hire_two_developers",
+      "ref": "O2",
+      "kind": "option",
+      "label": "Hire two developers",
+      "provenance": "from_brief",
+      "interventions": {
+       "developers_hired": {
+        "unit": "people",
+        "value": 0.2,
+        "source": "brief_extraction",
+        "raw_value": 2,
+        "target_match": {
+         "node_id": "developers_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "continue_as_now",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Continue as now",
+      "provenance": "ai_inferred",
+      "is_baseline": true
+     },
+     {
+      "id": "hire_one_developer",
+      "ref": "O4",
+      "kind": "option",
+      "label": "Hire one developer",
+      "provenance": "ai_inferred",
+      "proposed_by": "olumi",
+      "interventions": {
+       "developers_hired": {
+        "unit": "people",
+        "value": 0.1,
+        "source": "cee_hypothesis",
+        "raw_value": 1,
+        "target_match": {
+         "node_id": "developers_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "current_mid_weight_developers",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Current mid-weight developers",
+      "category": "external",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 20,
+       "unit": "developers",
+       "value": 0.3,
+       "source": "brief_extraction",
+       "raw_value": 6,
+       "declared_scale": "unit_interval",
+       "extractionType": "explicit"
+      },
+      "user_statements": [
+       {
+        "field": "level",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "low": 6,
+          "form": "point",
+          "high": 6,
+          "unit": "developers",
+          "quote": "We currently have six mid-weight developers, so we're lacking leadership.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "factor|current mid-weight developers|||level"
+          },
+          "qualifier": "currently; mid-weight",
+          "qualifier_in_quote": false
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|current_mid_weight_developers|||level"
+       }
+      ]
+     },
+     {
+      "id": "tech_leads_hired",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "Tech leads hired",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 5,
+       "unit": "people",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      },
+      "user_statements": [
+       {
+        "field": "holds_now",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "form": "holds_now",
+          "unit": "",
+          "quote": "We currently have six mid-weight developers, so we're lacking leadership.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "factor|tech leads hired|||holds_now"
+          },
+          "qualifier": "we're lacking leadership",
+          "conditions": "currently have six mid-weight developers",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|tech_leads_hired|||holds_now"
+       }
+      ]
+     },
+     {
+      "id": "developers_hired",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "Developers hired",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 10,
+       "unit": "people",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      },
+      "user_statements": [
+       {
+        "field": "level",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "low": 2,
+          "form": "point",
+          "high": 2,
+          "unit": "people",
+          "quote": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "option|hire two developers||developers hired|level"
+          },
+          "conditions": "hire two developers"
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|developers_hired||hire_two_developers|level"
+       }
+      ]
+     },
+     {
+      "id": "hiring_spend",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Hiring spend",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "scale_frame": 300000,
+      "user_statements": [
+       {
+        "field": "target",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "form": "upper_bound",
+          "high": 200000,
+          "unit": "£",
+          "quote": "Our budget is £200,000, but we'd like to spend less.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "factor|hiring spend|||target"
+          },
+          "qualifier": "we'd like to spend less",
+          "conditions": "Our budget is £200,000.",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|hiring_spend|||target"
+       }
+      ]
+     },
+     {
+      "id": "code_quality_deterioration",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "Code quality deterioration",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "hiring_delays_launch_contribution",
+      "ref": "R2",
+      "kind": "risk",
+      "label": "Hiring delays launch contribution",
+      "provenance": "ai_inferred",
+      "proposed_by": "olumi",
+      "draft_widening": {
+       "hits": {
+        "id": "hire_a_tech_lead",
+        "kind": "option",
+        "label": "Hire a Tech lead"
+       },
+       "affects": {
+        "id": "productivity",
+        "label": "Productivity",
+        "direction": "negative"
+       },
+       "through": {
+        "id": "tech_leads_hired",
+        "label": "Tech leads hired",
+        "direction": "negative"
+       },
+       "mechanism": "relies_on",
+       "relies_on": "filling the Tech lead role before launch",
+       "watch_for": "Shortlist remains unconfirmed",
+       "provenance": "ai_suggested_widen"
+      },
+      "analysis_participation": "retained_excluded"
+     },
+     {
+      "id": "onboarding_absorbs_developer_capacity",
+      "ref": "R3",
+      "kind": "risk",
+      "label": "Onboarding absorbs developer capacity",
+      "provenance": "ai_inferred",
+      "proposed_by": "olumi",
+      "draft_widening": {
+       "hits": {
+        "id": "hire_two_developers",
+        "kind": "option",
+        "label": "Hire two developers"
+       },
+       "affects": {
+        "id": "productivity",
+        "label": "Productivity",
+        "direction": "negative"
+       },
+       "through": {
+        "id": "developers_hired",
+        "label": "Developers hired",
+        "direction": "positive"
+       },
+       "mechanism": "drives",
+       "relies_on": "Experienced developers available to onboard hires",
+       "watch_for": "Mentoring displaces planned work",
+       "provenance": "ai_suggested_widen"
+      },
+      "analysis_participation": "retained_excluded"
+     }
+    ],
+    "ref_high_water": {
+     "D": 1,
+     "F": 4,
+     "G": 1,
+     "O": 4,
+     "R": 3
+    },
+    "goal_constraints": [
+     {
+      "unit": "£",
+      "label": "Hiring spend",
+      "value": 200000,
+      "node_id": "hiring_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "value_frame": "level",
+      "constraint_id": "agent-lane:hiring_spend:<="
+     }
+    ]
+   }
+  },
+  "after_approve": {
+   "file": "02-02-after-approve.json",
+   "sha256": "420d82a366cdf4e00937356358d7d5c1d9c48d907be77039d2718c3043938602",
+   "graph": {
+    "edges": [
+     {
+      "to": "hire_a_tech_lead",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_two_developers",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "continue_as_now",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_one_developer",
+      "from": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hiring_spend",
+      "from": "hire_a_tech_lead",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "tech_leads_hired",
+      "from": "hire_a_tech_lead",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hiring_spend",
+      "from": "hire_two_developers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "developers_hired",
+      "from": "hire_two_developers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hiring_spend",
+      "from": "hire_one_developer",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "developers_hired",
+      "from": "hire_one_developer",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "tech_leads_hired",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "developers_hired",
+      "from": "continue_as_now",
+      "origin": "repair",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis",
+       "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "productivity",
+      "from": "current_mid_weight_developers",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity",
+      "from": "tech_leads_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity",
+      "from": "developers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "code_quality_deterioration",
+      "from": "developers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "productivity",
+      "from": "code_quality_deterioration",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis",
+       "magnitude": "olumi_placeholder",
+       "mean_projected": true
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "nodes": [
+     {
+      "id": "should_i_hire_a_tech_lead_or_two_developers_to_increase_productivity_by_at_least_10_while_maintainin",
+      "ref": "D1",
+      "kind": "decision",
+      "label": "Should I hire a Tech lead or two developers to increase productivity by at…",
+      "provenance": "from_brief",
+      "description": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?"
+     },
+     {
+      "id": "productivity",
+      "ref": "G1",
+      "kind": "goal",
+      "label": "Productivity",
+      "provenance": "from_brief",
+      "goal_horizon": {
+       "deadline": "2027-01-15"
+      },
+      "goal_direction": ">=",
+      "goal_threshold": 0.1,
+      "quantity_frame": "change",
+      "user_statements": [
+       {
+        "field": "target",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "low": 10,
+          "form": "lower_bound",
+          "unit": "%",
+          "quote": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "goal|productivity|||target"
+          },
+          "qualifier": "while maintaining code quality",
+          "conditions": "We have an urgent launch date in the next three months.",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "goal|productivity|||target"
+       },
+       {
+        "field": "measure",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "form": "describes",
+          "unit": "",
+          "quote": "We have an urgent launch date in the next three months.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "goal|productivity|||measure"
+          },
+          "qualifier": "urgent",
+          "conditions": "launch date in the next three months",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "goal|productivity|||measure"
+       }
+      ],
+      "threshold_source": "brief_extraction",
+      "goal_target_basis": {
+       "source": "olumi_reading",
+       "reference": "today",
+       "target_raw": 10,
+       "denominator": "today’s productivity",
+       "effect_unit": "% of today’s productivity",
+       "period_kind": "at_end",
+       "target_frame": "change_abs",
+       "also_required": [
+        "maintaining code quality",
+        "an urgent launch date in the next three months"
+       ],
+       "open_question": "Does the 10% productivity target need to be achieved by the launch date, or is the launch timing context rather than the target’s measurement deadline?",
+       "quantity_frame": "change",
+       "effects_at_period_end": false
+      },
+      "goal_threshold_cap": 100,
+      "goal_threshold_raw": 10,
+      "goal_horizon_months": 3,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "change_abs",
+      "goal_deadline_as_stated": "three months",
+      "goal_horizon_stated_months": 3,
+      "goal_horizon_reference_date": "2026-10-15",
+      "goal_threshold_cap_provenance": "metric_scale"
+     },
+     {
+      "id": "hire_a_tech_lead",
+      "ref": "O1",
+      "kind": "option",
+      "label": "Hire a Tech lead",
+      "provenance": "from_brief",
+      "interventions": {
+       "tech_leads_hired": {
+        "unit": "people",
+        "value": 0.2,
+        "source": "brief_extraction",
+        "raw_value": 1,
+        "target_match": {
+         "node_id": "tech_leads_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "hire_two_developers",
+      "ref": "O2",
+      "kind": "option",
+      "label": "Hire two developers",
+      "provenance": "from_brief",
+      "interventions": {
+       "developers_hired": {
+        "unit": "people",
+        "value": 0.2,
+        "source": "brief_extraction",
+        "raw_value": 2,
+        "target_match": {
+         "node_id": "developers_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "continue_as_now",
+      "ref": "O3",
+      "kind": "option",
+      "label": "Continue as now",
+      "provenance": "ai_inferred",
+      "is_baseline": true
+     },
+     {
+      "id": "hire_one_developer",
+      "ref": "O4",
+      "kind": "option",
+      "label": "Hire one developer",
+      "provenance": "ai_inferred",
+      "proposed_by": "olumi",
+      "interventions": {
+       "developers_hired": {
+        "unit": "people",
+        "value": 0.1,
+        "source": "cee_hypothesis",
+        "raw_value": 1,
+        "target_match": {
+         "node_id": "developers_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "current_mid_weight_developers",
+      "ref": "F1",
+      "kind": "factor",
+      "label": "Current mid-weight developers",
+      "category": "external",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 20,
+       "unit": "developers",
+       "value": 0.3,
+       "source": "brief_extraction",
+       "raw_value": 6,
+       "declared_scale": "unit_interval",
+       "extractionType": "explicit"
+      },
+      "user_statements": [
+       {
+        "field": "level",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "low": 6,
+          "form": "point",
+          "high": 6,
+          "unit": "developers",
+          "quote": "We currently have six mid-weight developers, so we're lacking leadership.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "factor|current mid-weight developers|||level"
+          },
+          "qualifier": "currently; mid-weight",
+          "qualifier_in_quote": false
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|current_mid_weight_developers|||level"
+       }
+      ]
+     },
+     {
+      "id": "tech_leads_hired",
+      "ref": "F2",
+      "kind": "factor",
+      "label": "Tech leads hired",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 5,
+       "unit": "people",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      },
+      "user_statements": [
+       {
+        "field": "holds_now",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "form": "holds_now",
+          "unit": "",
+          "quote": "We currently have six mid-weight developers, so we're lacking leadership.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "factor|tech leads hired|||holds_now"
+          },
+          "qualifier": "we're lacking leadership",
+          "conditions": "currently have six mid-weight developers",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|tech_leads_hired|||holds_now"
+       }
+      ]
+     },
+     {
+      "id": "developers_hired",
+      "ref": "F3",
+      "kind": "factor",
+      "label": "Developers hired",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 10,
+       "unit": "people",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval",
+       "extractionType": "inferred"
+      },
+      "user_statements": [
+       {
+        "field": "level",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "low": 2,
+          "form": "point",
+          "high": 2,
+          "unit": "people",
+          "quote": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality?",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "option|hire two developers||developers hired|level"
+          },
+          "conditions": "hire two developers"
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|developers_hired||hire_two_developers|level"
+       }
+      ]
+     },
+     {
+      "id": "hiring_spend",
+      "ref": "F4",
+      "kind": "factor",
+      "label": "Hiring spend",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "scale_frame": 300000,
+      "user_statements": [
+       {
+        "field": "target",
+        "attest": {
+         "recorded_by": "construction"
+        },
+        "statements": [
+         {
+          "form": "upper_bound",
+          "high": 200000,
+          "unit": "£",
+          "quote": "Our budget is £200,000, but we'd like to spend less.",
+          "source": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+          "reading": "olumi",
+          "speaker": "user",
+          "subject": {
+           "quantity": "factor|hiring spend|||target"
+          },
+          "qualifier": "we'd like to spend less",
+          "conditions": "Our budget is £200,000.",
+          "qualifier_in_quote": true
+         }
+        ],
+        "recorded_at": "2026-10-15T07:53:16.593Z",
+        "subject_key": "factor|hiring_spend|||target"
+       }
+      ]
+     },
+     {
+      "id": "code_quality_deterioration",
+      "ref": "R1",
+      "kind": "risk",
+      "label": "Code quality deterioration",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "hiring_delays_launch_contribution",
+      "ref": "R2",
+      "kind": "risk",
+      "label": "Hiring delays launch contribution",
+      "provenance": "ai_inferred",
+      "proposed_by": "olumi",
+      "draft_widening": {
+       "hits": {
+        "id": "hire_a_tech_lead",
+        "kind": "option",
+        "label": "Hire a Tech lead"
+       },
+       "affects": {
+        "id": "productivity",
+        "label": "Productivity",
+        "direction": "negative"
+       },
+       "through": {
+        "id": "tech_leads_hired",
+        "label": "Tech leads hired",
+        "direction": "negative"
+       },
+       "mechanism": "relies_on",
+       "relies_on": "filling the Tech lead role before launch",
+       "watch_for": "Shortlist remains unconfirmed",
+       "provenance": "ai_suggested_widen"
+      },
+      "analysis_participation": "retained_excluded"
+     },
+     {
+      "id": "onboarding_absorbs_developer_capacity",
+      "ref": "R3",
+      "kind": "risk",
+      "label": "Onboarding absorbs developer capacity",
+      "provenance": "ai_inferred",
+      "proposed_by": "olumi",
+      "draft_widening": {
+       "hits": {
+        "id": "hire_two_developers",
+        "kind": "option",
+        "label": "Hire two developers"
+       },
+       "affects": {
+        "id": "productivity",
+        "label": "Productivity",
+        "direction": "negative"
+       },
+       "through": {
+        "id": "developers_hired",
+        "label": "Developers hired",
+        "direction": "positive"
+       },
+       "mechanism": "drives",
+       "relies_on": "Experienced developers available to onboard hires",
+       "watch_for": "Mentoring displaces planned work",
+       "provenance": "ai_suggested_widen"
+      },
+      "analysis_participation": "retained_excluded"
+     }
+    ],
+    "ref_high_water": {
+     "D": 1,
+     "F": 4,
+     "G": 1,
+     "O": 4,
+     "R": 3
+    },
+    "goal_constraints": [
+     {
+      "unit": "£",
+      "label": "Hiring spend",
+      "value": 200000,
+      "node_id": "hiring_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "value_frame": "level",
+      "constraint_id": "agent-lane:hiring_spend:<="
+     }
+    ]
+   }
+  }
+ }
+}
