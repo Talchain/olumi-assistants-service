@@ -420,7 +420,9 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
     const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
     const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
-    expect(b.assistant_text, 'server-authored, whatever the model said').toContain(missing);
+    // S6 (#3237): the AI-written reply is shaped like any other, so the ask may sit in its own bullet; every sentence of the
+    // server's missing step is still said, word for word.
+    for (const sentence of missing.split(/(?<=[.?!])\s+/)) expect(b.assistant_text, 'server-authored, whatever the model said').toContain(sentence);
     // The gap is Olumi's to fill (Option B's level: `olumi_can_offer`, nothing owed by the user), so the repair chip is
     // the specific one, "Suggest starting assumptions" (DL item 5, #2367), in place of the general next step.
     const ids = b.suggested_actions.map((c) => c.id);
@@ -598,7 +600,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
     expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
     expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
-    expect(b.assistant_text.split('Questions this model does not answer yet:'), 'the host’s surviving questions line, once').toHaveLength(2);
+    // S6 (#3237): on the AI-written reply the AI decides what to ask; the host's build questions line is not added.
+    expect(b.assistant_text, 'no host questions line on the AI’s reply').not.toContain('Questions this model does not answer yet:');
     expect(b._answer_shape, 'shaped').toBeDefined();
     expect(b.assistant_text).toBe(deriveAnswerTextFromShapeOf(b._answer_shape!));
     expect(prose.startsWith(b._answer_shape!.headline), 'the narrator’s first sentence leads').toBe(true);
@@ -774,12 +777,15 @@ describe('AX2: the build turn does not explain an absence nobody asked about', (
     expect(AGENT_NO_LEADER_SENTENCES.some((s) => b.assistant_text.includes(s)), b.assistant_text).toBe(true);
   });
 
-  it('COMPLETE: the build turn carries every parked question on the wire, and the reply shows at most two', async () => {
+  // S6 (#3237): the AI decides what to ask from the build result it is handed; on its reply the host adds no questions line
+  // and no wire list. COMPLETE now means the model was handed every parked question.
+  it('COMPLETE (S6): the AI is handed every parked question; its reply carries no host questions line or wire list', async () => {
     const b = await buildTurn(app) as Body & { _agent: { open_questions?: string[] } };
-    const qs = b._agent.open_questions;
-    expect(Array.isArray(qs) && qs.length > 0, JSON.stringify(b._agent)).toBe(true);
-    expect(b.assistant_text).toContain(qs![0]!);
-    for (const q of qs!.slice(2)) expect(b.assistant_text).not.toContain(q);
+    const qs = buildOutputSeenByModel()?.open_questions as string[] | undefined;
+    expect(Array.isArray(qs) && qs.length > 0, 'the build output the AI answers from holds the parked questions').toBe(true);
+    expect(b._agent.open_questions, 'no host list rides beside the AI’s reply').toBeUndefined();
+    expect(b.assistant_text).not.toContain('Questions this model does not answer yet:');
+    for (const q of qs!) expect(b.assistant_text, 'the host restates none of them').not.toContain(q);
   });
 });
 
