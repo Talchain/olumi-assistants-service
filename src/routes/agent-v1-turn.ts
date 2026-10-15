@@ -74,6 +74,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
@@ -699,14 +700,14 @@ function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
 }
 
 /** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
-function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
+function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[], omitted?: readonly RunOmittedRisk[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
   if (!chanceShownFor(cells)) return {};
   const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
   const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
     && node.draft_widening?.provenance === 'ai_suggested_widen') : [];
   // Each added risk's own line already says its option's chance leaves it out: the generic note and its marker would say
   // the same omission again (capacity e2e 57687e86 turn 01, judge row 4). Said once, by the line that names the risk.
-  const ownLines = risksSaidLeftOutOfTheChance(graph, cells);
+  const ownLines = risksSaidLeftOutOfTheChance(graph, cells, omitted);
   if (addedRisks.length > 0 && addedRisks.every(risk => ownLines.has(String(risk.id)))) return { saidByOwnLines: true };
   const note = widenedRiskNote({ options: 0, risks: addedRisks.length });
   const marker = widenedRiskMarker(addedRisks);
@@ -1232,7 +1233,7 @@ export const INTERPRET_ONLY_CONSTRAINT =
   + 'so never promise one or describe one as made. If the analysis did not run, say in plain words what it still '
   + 'needs; the user can ask you to suggest it.';
 
-export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, make no claim about investigation priority. Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty. If a sensitivity was not measured, say so rather than infer a decisive driver or an untested numerical effect.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
+export const INTERPRETER_V02_BANKED: string = "Explain what THIS saved model and licensed Run mean for the user's actual purpose. Remain read-only: no tools, writes, new Run or promised proposal. Use the supplied output format and current canonical identities, permissions and precomputed comparison.\n\nStart with the useful model-relative finding. Where licensed, state each relevant option's chance of the actual target and which is most likely to meet it; preserve uncertainty, conditions and exclusions. If a chance is withheld, explain the actual named blocker and what can still be learned. A target-only chance is not the full goal when a mandatory condition or limit is unscored. A share of simulations is not goal chance, an effect size is not a probability, and a narrow central range is not certainty.\n\nExplain WHY in the user's context: connect the actual option change to its supplied causal mechanism and outcome, and name the human estimate, Olumi assumption, evidence gap or disagreement the finding rests on. Distinguish a conditional model implication from verified evidence about the world. Avoid a generic warning when the supplied facts permit a concrete explanation. Do not call an unmeasured link the main driver, diagnose bias or rank investigations merely because the link is close to the goal or first tested.\n\nFor a compatible supplied before/after comparison, say what actually changed and what the recorded delta implies. Use only precomputed deltas; preserve quantities, units, strict comparators, options and reference/window. No new arithmetic, annualisation or invented attribution. Missing preceding Run removes comparison only. Explain a restored revision from its own Run; historical coaching remains historical. A failed, stale, unreadable or unverified current result cannot borrow an older success.\n\nGive at most one useful next reasoning step when justified by the actual limitation, uncertainty or disagreement. It can check evidence, clarify a missing binding or compare interpretations; it need not demand another number. Reuse retained answers and full qualifications. Do not ask the user to repeat a supplied point, range, timing or definition, erase uncertainty, or perform an unavailable action. If the next step concerns an engine capability gap, state that gap rather than imply an input will unlock the calculation. If no priority is established, explain why the proposed step could help without claiming it matters most.\n\nKeep human, external, Olumi and unknown origins distinct; approval does not change authorship. Keep latent probability versus realised rate/count, sampling precision versus assumption uncertainty, perturbation/sensitivity versus causal effect and marginal comparison versus paired/joint claims distinct. One tested flip establishes only that tested flip, not general stability or validation priority; repeated identical inputs do not add evidence. Scope all conclusions to included options and actual measured/licensed facts.\n\nWrite compact plain British English: finding, its concrete basis and limitations, then the one next step if useful. Say material guidance once. Never choose for the user or use best, winner, go with, recommend or recommendation. Do not invent exercise horizons, ranges, thresholds, uncertainty laws, missing business dimensions or method applicability. Olumi helps the team understand and improve its reasoning; the team owns conclusions and action.";
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
 /**
@@ -2523,7 +2524,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const waitingId = executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph);
           const atRest = { awaitingApproval: waitingId !== undefined && !isSteadyCardProposal(waitingId), builtOrRan: true,
-            chanceCells: replayChanceCells };
+            chanceCells: replayChanceCells, omittedRisks: runOmittedRisks(state.analysisResult) };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
             goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText),
@@ -2715,7 +2716,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
-          ...widenedRunWordsOf(state.graph, replayChanceCells),
+          ...widenedRunWordsOf(state.graph, replayChanceCells, runOmittedRisks(state.analysisResult)),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}),
@@ -5229,6 +5230,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : owed.filter((line) => !owedHeldByAi.has(line));
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
+      // #3167 fix-forward: the risks the Run on screen recorded leaving out, never today's predicate.
+      omittedRisks: runOmittedRisks(analysisResult),
       // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
       // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
       awaitingApproval: offeredNow.some(a => { const id = typedApprovalOf({ chip: { id: a.id } }); return id !== undefined && !isSteadyCardProposal(id); })
@@ -5686,7 +5689,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
-        ? widenedRunWordsOf(readbackGraph, chanceCells) : {};
+        ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult)) : {};
       const widenNote = chanceShownFor(chanceCells) && runWidenWords.saidByOwnLines !== true
         ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
       // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.

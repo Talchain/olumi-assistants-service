@@ -30,7 +30,9 @@ const B1_SENTENCE = 'Sensitivity was not measured, so investigation priority is 
 const LIMIT = 'Investigation priority is not established yet.';
 // ⛔ CHANGED EXPECTATION (prompt P17, AIE one-pass packet 94ad9c8f…): the screen-driver deferral is replaced by the packet's driver
 // sentence; the investigation-priority prohibition stays. The behaviour rows below (the limit said only where true) are unchanged.
-const CLAUSE = 'make no claim about investigation priority. Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty. If a sensitivity was not measured, say so rather than infer a decisive driver or an untested numerical effect.';
+// ⛔ CHANGED EXPECTATION (C0, AIE packet AIE-GENERATION-COACHING-CANDIDATE-20261015-v1, ADOPTED 15 Oct 00:34Z): the prohibition stays,
+// in the packet's words. Was: "make no claim about investigation priority. Use the supplied current driver and sensitivity data …".
+const CLAUSE = 'Do not call an unmeasured link the main driver, diagnose bias or rank investigations merely because the link is close to the goal or first tested.';
 const RETIRED_CLAUSE = "beyond the screen's own driver lines";
 const withResult = (read: Read, edit: (r: Json) => void): Read => {
   const r = structuredClone(read.analysis_result);

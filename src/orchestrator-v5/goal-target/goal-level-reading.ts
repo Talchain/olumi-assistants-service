@@ -48,7 +48,11 @@ export function goalLevelReadingWords(graph: unknown, goalNodeId: unknown): stri
   if (!num(os.raw_value) || os.raw_value !== reading.level) return null;
   const unit = typeof os.unit === 'string' ? os.unit : '';
   if (unit !== reading.level_unit) return null;
-  if (valueClassOf(os) === 'user_stated') return null;
+  // A level the user states or edits since replaces the reading. The one exception is a DERIVED reading (SYSTEM 2, AIE
+  // 6181498097) over the level it derived from the user's figures, which keeps only the brief's stamp (`brief_extraction`, no
+  // explicit extraction type): the reading still says how it was derived, and no reader takes it for a measured total.
+  const derivedHolds = reading.derived === true && os.source === 'brief_extraction' && os.extractionType === undefined;
+  if (valueClassOf(os) === 'user_stated' && !derivedHolds) return null;
   // ⛔ AIQ 5895590866 (3) nit: while Olumi's level still feeds the model, the reading SPEAKS even when the target is no
   // longer a change (edited to a level frame, or removed): the lead alone, with no target clause to compose.
   const leadAlone = `${reading.lead}.`;

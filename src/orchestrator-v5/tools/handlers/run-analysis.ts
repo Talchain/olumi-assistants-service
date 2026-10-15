@@ -68,7 +68,7 @@ export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-ho
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
-import { withoutUnsizedOlumiRisks } from '../../agent-lane/unsized-risk.js';
+import { unsizedOlumiRiskOmissionWarning, withoutUnsizedOlumiRisksRecorded } from '../../agent-lane/unsized-risk.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -870,7 +870,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // PLoT cannot return a driver, sensitivity or worth-checking row for a risk it never receives. Project BEFORE the
     // remaining compute readers; the snapshot and persisted graph (including the stamp) are untouched.
     // An unsized Olumi risk is left out the same way, and said once by the host (`unsizedOlumiRiskIds`, readiness's own rule).
-    let graphForAnalysis = withoutUnsizedOlumiRisks(withoutPreconditionRisks(participation.graph, snapshot.graph), snapshot.graph);
+    // #3167 fix-forward: exactly the risks this projection removes are recorded with THIS Run (below), never re-derived later.
+    const unsizedProjection = withoutUnsizedOlumiRisksRecorded(withoutPreconditionRisks(participation.graph, snapshot.graph), snapshot.graph);
+    let graphForAnalysis = unsizedProjection.graph;
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately
@@ -2009,6 +2011,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         },
       );
     }
+
+    // #3167 fix-forward (PL 6135017311): THIS Run's omitted Olumi risks, recorded in its own result for every later reader.
+    if (unsizedProjection.omitted.length > 0) response = appendInferenceWarning(response, unsizedOlumiRiskOmissionWarning(unsizedProjection.omitted));
 
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.

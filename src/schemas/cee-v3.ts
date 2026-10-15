@@ -404,6 +404,11 @@ export const NodeV3 = z.object({
     lead: z.string().min(1).max(300),
     /** The drafter's comparator as read at construction; a comparator the user holds (`goal_direction`) speaks first. */
     bound: z.enum(['<=', '<', '>=', '>']).optional(),
+    /**
+     * SYSTEM 2 (AIE 6181498097): the level is DERIVED from the user's own figures by their own definition ("80 + 0"), not
+     * Olumi's reading of one figure and not an explicitly measured total. The reading keeps speaking while the level holds.
+     */
+    derived: z.literal(true).optional(),
   }).optional().catch(undefined),
   /**
    * ⭐ RECOVERY BATCH C — WHAT THE GOAL'S TARGET IS MEASURED AGAINST (goal nodes only; Batch 0 change-goal decision rulings

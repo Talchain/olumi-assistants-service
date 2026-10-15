@@ -1,5 +1,7 @@
 /**
  * ⭐ SCIENCE PR-4b — THE USER'S COHORT FORECAST, CAPTURED (AIE same-cohort law; AIE #94 6174707160: no automatic percentile).
+ * M4-cohort (15 Oct): captured through the ONE statement door (`propose_statement`): the goal's same-people answer first, then each
+ * option's forecast; the bespoke `propose_cohort_forecast` is retired. The same negatives hold on the door.
  * Marketing's two targets are scored together only on one cohort: the people an option reaches over the window and the user's
  * own two estimates of its underlying conversion rate, one chance in four below and one in four above (AIE 6176433015). These rows run the real capabilities, the real atomic
  * batch writer and a store, on the saved marketing model after L20 (`tests/fixtures/marketing-withheld-once/run-08.json`,
@@ -23,7 +25,8 @@ import type { SessionTurnWrite } from '../../session/store.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { targetForecastWireOf } from '../cohort-forecast.js';
-import { applyCohortForecastEdit, cohortQuartileQuestion, percentRangesIn, peopleFiguresIn, storedTargetRowsOf } from '../cohort-forecast-write.js';
+import { applyCohortForecastEdit, cohortForecastAskWords, cohortQuartileQuestion, percentRangesIn, peopleFiguresIn, sameCohortStatementOf, storedTargetRowsOf } from '../cohort-forecast-write.js';
+import { goalTargetBasisOf, periodWords } from '../goal-target-basis.js';
 import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../../admission/target-testability.js';
 
 type Rec = Record<string, any>;
@@ -61,7 +64,8 @@ function world(start: Rec = plain(F.graph)) {
   const commit = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     const out = await executeOptionInterventionBatch({ scenarioId: SID, turnId: input.turn_id, requestId: 'cf', requestHash: `cf:${input.turn_id}`,
       stage: 'frame', freshness: 'fresh', hasExistingAnalysis: false, expectedGraphHash: input.base_graph_hash, targets: [],
-      cohortForecast: input.cohort_forecast }, store);
+      ...(input.cohort_forecast !== undefined ? { cohortForecast: input.cohort_forecast } : {}),
+      ...(input.goal_relation !== undefined ? { goalRelation: input.goal_relation } : {}) }, store);
     if (out.kind === 'refused') return { status: 'refused', reason: out.reason };
     if (out.kind === 'unchanged') return { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(graph() as never)!, receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
     if (out.kind !== 'committed') return { status: 'unconfirmed' };
@@ -79,16 +83,25 @@ function world(start: Rec = plain(F.graph)) {
 }
 const ctx = (turn: string = RANGE, conversation: string = CONVERSATION): Rec =>
   ({ scenario_id: SID, authenticated_user_id: null, request_id: 'cf', user_text: conversation, user_turn_text: turn });
-const args = (over: Rec = {}): Rec => ({
-  option_label: 'Hire marketing manager',
-  people: { quote: PEOPLE, value: 500 },
-  conversion: { quote: RANGE, low: 12, high: 18, answering: Q },
-  same_cohort: { quote: SAME },
-  ...over,
-});
+const SAME_Q = 'Do your ‘New customers in first 3 months’ come from the same people your ‘Conversion rate’ is measured on?';
+const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
+const askFor = (label: string): string => cohortForecastAskWords(label, periodWords(goalTargetBasisOf(goalOf(plain(F.graph)))!), WINDOW);
+const ASK = askFor('Hire marketing manager');
+/** The door's card for the goal's same-people answer. */
+const sameArgs = (over: Rec = {}): Rec => ({ subject: { kind: 'goal', label: goalOf(plain(F.graph)).label, field: 'relation' },
+  statements: [{ quote: SAME, answering: SAME_Q }], ...over });
+/** The door's card for one option's forecast: the people it reaches, and their answer to the one-in-four question. */
+const args = (people: Rec = { quote: PEOPLE, answering: ASK }, conversion: Rec = { quote: RANGE, answering: ASK }, label = 'Hire marketing manager'): Rec =>
+  ({ subject: { kind: 'option', label, field: 'relation' }, statements: [people, conversion] });
 const option = (g: Rec): Rec => g.nodes.find((n: Rec) => n.id === 'hire_marketing_manager');
 const press = (w: ReturnType<typeof world>, id: string) =>
   w.caps.authoriseChange({ ...ctx(PRESS), typed_approval_of: id, typed_approval_words: PRESS } as never, { proposal_id: id }) as Promise<Rec>;
+/** The same-people answer, recorded on the goal through its own card and press. */
+async function sameRecorded(w: ReturnType<typeof world>): Promise<void> {
+  const card = await w.caps.proposeStatement!(ctx(SAME, SAME) as never, sameArgs() as never) as Rec;
+  expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+  expect(await press(w, card.proposal_id), 'the same-people press').toMatchObject({ ok: true, applied: true });
+}
 
 describe("the user's cohort forecast: their words → one card → their press → the option holds it → the Run sends it", () => {
   it('PRECONDITION: the saved marketing model holds both targets and no forecast', () => {
@@ -97,87 +110,97 @@ describe("the user's cohort forecast: their words → one card → their press �
     expect(option(g)).not.toHaveProperty('cohort_forecast');
   });
 
-  it('RED: the card records their answer as their one-in-four estimates in the AIE\'s words, says the Beta curve is Olumi\'s, writes nothing until pressed; the press records it as theirs', async () => {
+  it('RED (the whole chain on the door): the same-people answer is recorded on the goal; then the option card records their answer as their one-in-four estimates with C4\'s scenario words, writes nothing until pressed; the press records it as theirs and the Run sends it', async () => {
     const w = world();
+    const start = JSON.stringify(w.graph());
+    // 1. The goal's same-people question, answered and pressed once: recorded on the goal, as theirs.
+    await sameRecorded(w);
+    expect(sameCohortStatementOf(w.graph())?.quote).toBe(SAME);
+    expect(option(w.graph())).toEqual(option(JSON.parse(start)));
+    // 2. The option's forecast card.
     const before = JSON.stringify(w.graph());
-    const card = await w.caps.proposeCohortForecast!(ctx() as never, args() as never) as Rec;
-    expect(card).toMatchObject({ ok: true, mutated: false });
+    const card = await w.caps.proposeStatement!(ctx() as never, args() as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false, statement: { subject: 'Hire marketing manager', field: 'relation', quotes: [PEOPLE, RANGE] } });
     expect(Q).toBe('For ‘Hire marketing manager’, among the people it reaches during the first three months after launch, what lower and upper '
       + 'estimates of the underlying conversion rate would leave, in your judgement, about a one-in-four chance that the rate is below the lower '
       + 'estimate and a one-in-four chance that it is above the upper estimate?');
-    expect(String(card.public_label).split('\n')).toEqual([
-      `From your answer to the question about one chance in four below and one chance in four above: “${RANGE}”. Record your estimates as about `
-        + 'one chance in four below 12% and one chance in four above 18% for ‘Hire marketing manager’, among the people it reaches, during the first '
-        + 'three months after launch? These are your estimates, not a minimum and maximum.',
-      `From your messages: ‘${PEOPLE}’ · ‘${SAME}’. Your forecast is that it reaches 500 people during the first three months after launch, and `
-        + '‘New customers in first 3 months’ counts the people who convert among those same people, as you said.',
-      // AIE 6180618773 C4: holding the reach fixed is Olumi's explicit conditional scenario, on the card the press adopts.
-      'Olumi’s scenario, not yours: the chance is worked out as if exactly 500 people are reached during the first three months after launch; '
-        + 'how many it actually reaches may differ, and that uncertainty is not included.',
-      'Olumi’s approximation, not yours: the underlying ‘Conversion rate’ is treated as a smooth curve (a Beta distribution) through your two '
-        + 'estimates, and each person converts or not at that same chance. If no such curve fits them, no chance is given for this option.',
-    ]);
-    expect(card.public_label).not.toMatch(/as likely to fall inside|even chance|middle half/);
+    const label = String(card.public_label);
+    expect(label).toContain('your estimates as about one chance in four below 12% and one chance in four above 18% for the underlying conversion rate of '
+      + '‘Hire marketing manager’, among the people it reaches, during the first three months after launch. These are your estimates, not a minimum and maximum');
+    expect(label).toContain('your forecast that ‘Hire marketing manager’ reaches 500 people during the first three months after launch');
+    // AIE 6180618773 C4: holding the reach fixed is Olumi's explicit conditional scenario, on the card the press adopts.
+    expect(label).toContain('Olumi’s scenario, not yours: the chance is worked out as if exactly 500 people are reached during the first three months after launch; '
+      + 'how many it actually reaches may differ, and that uncertainty is not included.');
+    expect(label).toContain('Olumi’s approximation, not yours: the underlying ‘Conversion rate’ is treated as a smooth curve (a Beta distribution) through your two '
+      + 'estimates, and each person converts or not at that same chance.');
+    expect(label).not.toMatch(/as likely to fall inside|even chance|middle half/);
     expect(JSON.stringify(w.graph())).toBe(before);
     // Card-only: a typed yes the Agent reads is not the press.
     expect(await w.caps.authoriseChange(ctx('Yes') as never, { proposal_id: card.proposal_id })).toMatchObject({ ok: false, refusal: 'approval_required' });
     expect(JSON.stringify(w.graph())).toBe(before);
     const res = await press(w, card.proposal_id);
-    expect(res).toMatchObject({ ok: true, applied: true });
+    expect(res, JSON.stringify(res)).toMatchObject({ ok: true, applied: true });
     expect(res.follow_up).toBe('Recorded from your words: your forecast that ‘Hire marketing manager’ reaches 500 people, with about one chance in four that its '
       + 'underlying conversion rate is below 12% and one in four that it is above 18%.');
     expect(option(w.graph()).cohort_forecast).toEqual({ people_reached: 500, conversion_middle_half_pct: [12, 18],
       same_cohort: { rate_target_node_id: 'conversion_rate', count_target_node_id: 'new_customers_in_first_3_months', stated_by: 'user' }, author: 'user' });
-    // Only that option changed; the targets and limits are as saved.
+    // Their words are durable beside it, on the option (`user_statements`), in the same commit.
+    expect((option(w.graph()).user_statements as Rec[]).map((r) => r.statements.map((x: Rec) => x.quote))).toEqual([[PEOPLE, RANGE]]);
+    // Only that option and the goal's words changed; the targets and limits are as saved.
     expect(storedTargetRowsOf(w.graph())).toEqual(storedTargetRowsOf(plain(F.graph)));
     // #3103's Run wire reads the stored option: ISL gets the user's own figures, in its units.
     expect(targetForecastWireOf(option(w.graph()), storedTargetRowsOf(w.graph()))).toEqual({ law: 'same_cohort_beta_binomial', exposure: 500,
       rate_quartiles: [0.12, 0.18], conditions: [{ constraint_id: CONV, quantity: 'rate', threshold: 0.15 }, { constraint_id: CUST, quantity: 'count', threshold: 20 }] });
+    // 3. Readiness then asks the NEXT option's forecast, never the same-people question again.
+    const step = targetBlockerOf(untestableTargetParts(w.graph(), targetTestabilityOf(w.graph()))!);
+    expect(step).toEqual({ kind: 'missing_input', ask: askFor('Carry on as now') });
   });
 
-  it('CONTRAST: a range that is not their answer, this turn, to the one-in-four question for THIS option is never read as quartiles: refused, nothing held', async () => {
+  it('CONTRAST: a range that is not their answer, this turn, to the one-in-four question for THIS option is never read as quartiles: refused with the coaching, nothing held', async () => {
     const w = world();
-    const { answering: _a, ...plainRange } = args().conversion;
+    await sameRecorded(w);
     const cases: [Rec, Rec][] = [
-      [ctx(), args({ conversion: plainRange })],
+      [ctx(), args(undefined, { quote: RANGE })],
       // #3115's even-chance answer is 50% coverage, not the quartiles: never relabelled (AIE 6176433015).
-      [ctx(), args({ conversion: { ...args().conversion, answering: EVEN_CHANCE } })],
-      // The question asked for another option, cohort or window is not this option's.
-      [ctx(), args({ conversion: { ...args().conversion, answering: cohortQuartileQuestion('Carry on as now', WINDOW) } })],
-      [ctx(), args({ conversion: { ...args().conversion, answering: cohortQuartileQuestion('Hire marketing manager', 'the first six months after launch') } })],
+      [ctx(), args(undefined, { quote: RANGE, answering: EVEN_CHANCE })],
+      // The question asked for another option is not this option's.
+      [ctx(), args(undefined, { quote: RANGE, answering: askFor('Carry on as now') })],
       // Their range from an earlier message is kept as they said it; only the message that answers the question binds.
       [ctx(SAME), args()],
     ];
     for (const [c, a] of cases) {
-      const r = await w.caps.proposeCohortForecast!(c as never, a as never) as Rec;
-      expect(r).toMatchObject({ ok: false, refusal: 'quartiles_not_asked' });
-      expect(r.detail).toContain(Q);
-      expect(r.detail).toContain('comparable past campaign');
+      const r = await w.caps.proposeStatement!(c as never, a as never) as Rec;
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: false });
+      expect(r.mutated).toBe(false);
     }
-    expect(w.proposals.outstanding(SID, null)).toEqual([]);
-    // Same question, other quote marks and spacing: still the question asked.
-    const ok = await w.caps.proposeCohortForecast!(ctx() as never, args({ conversion: { ...args().conversion, answering: `  ${Q.replace(/[‘’]/g, "'")} ` } }) as never) as Rec;
+    // The two that name this option's question but fail on timing or wording carry the AIE coaching.
+    const late = await w.caps.proposeStatement!(ctx(SAME) as never, args() as never) as Rec;
+    expect(late).toMatchObject({ ok: false, refusal: 'not_answered_now' });
+    expect(late.detail).toContain(Q);
+    expect(late.detail).toContain('comparable past campaign');
+    expect(w.proposals.outstanding(SID, null).filter((p) => p.public_label?.includes('one chance in four'))).toEqual([]);
+    // Their answer typed in THIS turn, to this option's question, binds.
+    const ok = await w.caps.proposeStatement!(ctx() as never, args() as never) as Rec;
     expect(ok).toMatchObject({ ok: true });
   });
 
-  it('CONTRAST: a figure the quote does not state, words the user never typed, or no same-cohort answer → refused', async () => {
+  it('CONTRAST: words the user never typed, a figure-bearing same-people answer, or an option the model does not hold → refused', async () => {
     const w = world();
-    const cases: [Rec, string][] = [
-      [args({ people: { quote: PEOPLE, value: 600 } }), 'figure_not_in_quote'],
-      [args({ conversion: { ...args().conversion, low: 10 } }), 'figure_not_in_quote'],
-      [args({ people: { quote: 'It would reach about 500 people.', value: 500 } }), 'statement_not_found'],
-      [args({ same_cohort: { quote: 'They are the same people.' } }), 'statement_not_found'],
-      [args({ option_label: 'Hire a marketing person' }), 'option_not_found'],
-    ];
-    for (const [a, refusal] of cases) {
-      expect([refusal, (await w.caps.proposeCohortForecast!(ctx() as never, a as never) as Rec).refusal]).toEqual([refusal, refusal]);
-    }
+    expect(await w.caps.proposeStatement!(ctx() as never, args({ quote: 'It would reach about 500 people.', answering: ASK }) as never))
+      .toMatchObject({ ok: false, refusal: 'statement_not_found' });
+    expect(await w.caps.proposeStatement!(ctx('They are the same 500 people.', 'They are the same 500 people.') as never,
+      sameArgs({ statements: [{ quote: 'They are the same 500 people.', answering: SAME_Q }] }) as never)).toMatchObject({ ok: false, refusal: 'not_this_field' });
+    expect(await w.caps.proposeStatement!(ctx() as never, args(undefined, undefined, 'Hire a marketing person') as never))
+      .toMatchObject({ ok: false, refusal: 'subject_not_found' });
+    // No same-people answer recorded and none given: the forecast card is not prepared.
+    expect(await w.caps.proposeStatement!(ctx() as never, args() as never)).toMatchObject({ ok: false, refusal: 'not_recordable' });
     expect(w.proposals.outstanding(SID, null)).toEqual([]);
   });
 
   it('CONTRAST: a target changed after the card (15% → 14%) → the press writes nothing', async () => {
     const w = world();
-    const card = await w.caps.proposeCohortForecast!(ctx() as never, args() as never) as Rec;
+    await sameRecorded(w);
+    const card = await w.caps.proposeStatement!(ctx() as never, args() as never) as Rec;
     const moved = w.graph();
     moved.goal_constraints.find((r: Rec) => r.constraint_id === CONV).value = 14;
     w.replace(moved);

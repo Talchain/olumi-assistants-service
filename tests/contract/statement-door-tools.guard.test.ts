@@ -11,7 +11,7 @@ const TOOLS = readFileSync('src/orchestrator-v5/agent-lane/runtime/agent-tools.t
 const proposeTools = [...new Set([...TOOLS.matchAll(/name: '(propose_[a-z_]+)'/g)].map((m) => m[1]!))].sort();
 
 /** Bespoke USER-STATEMENT tools still to migrate onto the door. SHRINK ONLY: remove a name in the PR that deletes its tool. */
-const USER_STATEMENT_TOOLS = ['propose_cohort_forecast', 'propose_goal_current_level', 'propose_hiring_times', 'propose_link_effect',
+const USER_STATEMENT_TOOLS = ['propose_goal_current_level', 'propose_hiring_times', 'propose_link_effect',
   'propose_option_capacity_change', 'propose_team_time'];
 /** User-statement ARGUMENTS on `propose_assumptions` still to migrate (a statement confirming or describing a factor's figure: M2). */
 const USER_STATEMENT_ARGS = ['statements'];
@@ -35,8 +35,8 @@ describe('SYSTEM 1: user-statement tools only shrink onto the ONE statement door
 
   it('the user-statement list is exactly the bespoke tools still present: a deleted tool leaves the list in the same PR', () => {
     expect(USER_STATEMENT_TOOLS.filter((t) => !proposeTools.includes(t))).toEqual([]);
-    // SHRINK ONLY: 6 on 14 Oct (PR-0). Lower this number as each migration deletes its tool; never raise it.
-    expect(USER_STATEMENT_TOOLS.length).toBeLessThanOrEqual(6);
+    // SHRINK ONLY: 6 on 14 Oct (PR-0); 5 on 15 Oct (M4-cohort retired propose_cohort_forecast). Lower it as each migration deletes its tool; never raise it.
+    expect(USER_STATEMENT_TOOLS.length).toBeLessThanOrEqual(5);
   });
 
   it('the user-statement arguments on propose_assumptions only shrink, and no new one is added there', () => {
