@@ -17,11 +17,18 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 export interface LicensedChance {
   readonly label: string;
   readonly figures: readonly number[];
+  /**
+   * ⭐ PL 04:05Z on #3197 (a ranking exemption is never a scientific licence): the option's EXACT licensed display strings (the
+   * point display, or the range display). A kept sentence states one of them whole, so a range endpoint said as a point fails.
+   */
+  readonly displays: readonly string[];
 }
 export interface LicensedChances {
   readonly options: readonly LicensedChance[];
   /** The goal's own window, in months, when it has one; a sentence's stated window must be this. */
   readonly periodMonths?: number;
+  /** The licence's own words for what the chance is a chance OF (`goal_chance_words`), when it carries them. */
+  readonly chanceWords?: string;
 }
 
 const PCT = /(?<![\w.])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent\b)/gi;
@@ -40,17 +47,25 @@ export function licensedChancesOf(analysisResult: unknown, graph: unknown, curre
   const ids = new Set([...Object.keys(facts.goal_chance_display ?? {}), ...Object.keys(facts.goal_chance_range_display ?? {})]);
   const options = [...ids].flatMap((id): LicensedChance[] => {
     const label = labelOf(id);
-    const figures = [...figuresIn(facts.goal_chance_display?.[id] ?? ''), ...figuresIn(facts.goal_chance_range_display?.[id]?.range ?? '')];
-    return label === undefined || figures.length === 0 ? [] : [{ label, figures }];
+    const displays = [facts.goal_chance_range_display?.[id]?.range, facts.goal_chance_display?.[id]]
+      .filter((d): d is string => typeof d === 'string' && d.trim() !== '');
+    const figures = displays.flatMap(figuresIn);
+    return label === undefined || figures.length === 0 ? [] : [{ label, figures, displays }];
   });
   if (options.length === 0) return undefined;
   const goal = nodes.find((n) => n.kind === 'goal');
   const period = goalTargetBasisOf(goal)?.period_months;
-  return { options, ...(typeof period === 'number' ? { periodMonths: period } : {}) };
+  return { options, ...(typeof period === 'number' ? { periodMonths: period } : {}),
+    ...(typeof facts.goal_chance_words === 'string' && facts.goal_chance_words.trim() !== '' ? { chanceWords: facts.goal_chance_words } : {}) };
 }
 
 const key = (s: string): string => s.replace(/[‘’']/g, "'").replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 const CHANCE = /\b(?:chance|likel(?:y|ihood)|probab(?:ility|le|ly))\b/i;
+/** The goal itself as the event ("of meeting your goal", "to reach the target"): any other event needs the licence's own words. */
+const GOAL_EVENT = /\b(?:meet(?:s|ing)?|reach(?:es|ing)?|achiev(?:e|es|ing)|hit(?:s|ting)?)\s+(?:your|the|its)\s+(?:goal|target)\b/i;
+/** Every number a text states (figures, counts, amounts), as numbers; digit groups joined. */
+const numbersIn = (text: string): number[] => [...text.matchAll(/(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g)]
+  .map((m) => Number(m[0]!.replace(/,/g, '')));
 const SHARE = /\b(?:of\s+(?:the\s+)?(?:runs|simulations|draws|samples)|share|shares|wins?|won|winning|on\s+top|out\s+on\s+top)\b/i;
 const WORD_MONTHS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
   eleven: 11, twelve: 12, eighteen: 18, 'twenty-four': 24 };
@@ -73,8 +88,20 @@ export function isLicensedChanceLine(sentence: string, chances: LicensedChances 
   if (optionLabels.some((l) => { const lk = key(l); return lk.length > 0 && lk !== own && !own.includes(lk) && k.includes(lk); })) return false;
   // The option's own label may hold a percentage ("Raise prices 10%"): only the figures outside it are the chance.
   const labelRe = new RegExp(named[0]!.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[‘’']/g, "['‘’]"), 'gi');
-  const figures = figuresIn(sentence.replace(labelRe, ' '));
+  // The licence's own chance words may hold figures of their own ("10% higher productivity"): set aside like the label.
+  const wordsRe = chances.chanceWords === undefined ? undefined
+    : new RegExp(chances.chanceWords.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[‘’']/g, "['‘’]").replace(/\s+/g, '\\s+'), 'gi');
+  const ownWords = wordsRe !== undefined && wordsRe.test(sentence);
+  const rest = sentence.replace(labelRe, ' ').replace(wordsRe ?? /$^/, ' ');
+  const figures = figuresIn(rest);
   if (figures.length === 0 || !figures.every((f) => named[0]!.figures.includes(f))) return false;
+  // Point vs range: the sentence states one of THIS option's licensed displays whole.
+  if (!named[0]!.displays.some((d) => key(rest).includes(key(d)))) return false;
+  // The event and target: the goal itself, or the licence's own chance words; any other number is another target.
+  if (!ownWords && !GOAL_EVENT.test(sentence)) return false;
+  const allowed = new Set([...named[0]!.displays.flatMap(numbersIn), ...numbersIn(chances.chanceWords ?? ''),
+    ...(chances.periodMonths !== undefined ? [chances.periodMonths] : [])]);
+  if (!numbersIn(rest).every((n) => allowed.has(n))) return false;
   if (!CHANCE.test(sentence) || SHARE.test(sentence)) return false;
   if (DATE.test(sentence)) return false;
   for (const m of MONTH_WINDOWS.flatMap((re) => [...sentence.matchAll(re)])) {

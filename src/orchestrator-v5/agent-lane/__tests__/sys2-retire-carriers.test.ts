@@ -6,7 +6,7 @@
  * Corpus: the served capacity raw e4ff6039 (md5 = the DB's), which still carries both retired carriers.
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCandidateSchema, buildModelFromBrief, strictForTheDrafter } from '../runtime/build-model.js';
 import { recordedRawLevelQuote, recordedRawSettingQuote } from '../verified-option-setting.js';
 import { sourceMapOf } from '../construction-source-map.js';
@@ -15,6 +15,9 @@ type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync('tests/fixtures/sys2/served-capacity-e4ff6039.json', 'utf8')) as { brief: string; raw_text: string };
 const RAW = JSON.parse(SERVED.raw_text) as Rec;
 const sid = '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a';
+// Two builds are compared whole: construction records its statements with the build's time (AIE 6183705670), so the clock is pinned.
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-15T03:00:00.000Z')); });
+afterEach(() => { vi.useRealTimers(); });
 async function registered(draft: Rec): Promise<Rec> {
   let graph: Rec | undefined;
   const result = await buildModelFromBrief(sid, SERVED.brief, (async (path: string, body: Rec) => {

@@ -18,6 +18,8 @@
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { STATEMENT_FORMS, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
+import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
+import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -142,4 +144,39 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
     verified.set(key, [...(verified.get(key) ?? []), ...v.statements]);
   });
   return { verified, refused };
+}
+
+/**
+ * ⭐ AIE 6183705670 (1), the admission first loss: a draft's verified statements are RECORDED on their subjects at construction,
+ * as the statement door records a press (`user_statements`, one record per subject, `withUserStatement`), so the saved model, a
+ * cold reopen and the AI's working input hold the user's own sentences, not only the authorship they decided. Each entry is
+ * verified on its own, exactly as `sourceMapOf` does, and bound to a graph subject ONLY by the door's resolver (ids, else one
+ * exact label; never guessed). An option's setting of a factor is the door's `{factor, option_id}`. An entry whose subject does
+ * not resolve, or that is refused, records nothing and stays in the map, unknown (never Olumi's). Pure.
+ */
+export function withConstructionStatements<G extends { nodes: unknown[] }>(graph: G, raw: unknown, brief: string, recordedAt: string): G {
+  const entries = (Array.isArray(raw) ? raw : []).slice(0, MAX);
+  const groups = new Map<string, { subject: DoorSubject; statements: UserStatement[] }>();
+  for (const entry of entries) {
+    const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+    const drafted = subjectOf(r['subject']);
+    const field = STATEMENT_FIELDS.find((f) => f === r['field']);
+    if (drafted === undefined || field === undefined) continue;
+    const verified = [...sourceMapOf([entry], brief).verified.values()].flat();
+    if (verified.length === 0) continue;
+    const ref = drafted.kind === 'option' && drafted.factor_label !== undefined
+      ? { kind: 'factor', label: drafted.factor_label, option_label: drafted.label, field }
+      : { kind: drafted.kind, label: drafted.label, ...(drafted.to_label !== undefined ? { to_label: drafted.to_label } : {}), field };
+    const resolved = resolveSubject(graph, ref);
+    if (resolved.kind !== 'resolved') continue;
+    const key = doorSubjectKey(resolved.subject);
+    const group = groups.get(key) ?? { subject: resolved.subject, statements: [] };
+    group.statements.push(...verified);
+    groups.set(key, group);
+  }
+  let out = graph as G & Record<string, unknown>;
+  for (const { subject, statements } of groups.values()) {
+    out = (withUserStatement(out, userStatementRecord(subject, statements, recordedAt, CONSTRUCTION_ATTEST), subject) ?? out) as G & Record<string, unknown>;
+  }
+  return out;
 }

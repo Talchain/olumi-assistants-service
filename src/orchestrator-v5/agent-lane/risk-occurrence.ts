@@ -16,7 +16,7 @@
  * Reached ONLY through the atomic level door's `risk_occurrence` member, alone in its commit, after the user pressed the
  * card (card-only, `hasCardOnlyOperations`). Pure.
  */
-import { userStatementOnNode, userStatementRecord, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { pressedRecord, userStatementOnNode, userStatementRecord, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -89,7 +89,7 @@ function withStatementRecord(node: Rec, approved: ApprovedRiskOccurrence): Rec {
 }
 /** The user's own chance for this risk, as its record holds it (`user_statements[]`), or `undefined`. */
 const statedChanceOf = (node: Rec): UserStatement | undefined => (typeof node.id === 'string'
-  ? userStatementOnNode(node, subjectKey({ kind: 'risk', id: node.id, field: 'occurrence' }))?.statements[0] : undefined);
+  ? pressedRecord(userStatementOnNode(node, subjectKey({ kind: 'risk', id: node.id, field: 'occurrence' })))?.statements[0] : undefined);
 
 /**
  * ⭐ THE GOAL THE CARD'S WINDOW IS STATED OVER, exactly as it stood when the card was made (Codex r1 on #3013: binding the

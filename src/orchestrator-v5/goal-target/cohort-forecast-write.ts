@@ -25,7 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
-import { holdsUserStatement, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
@@ -328,7 +328,7 @@ export function statementRecordPostimageIsScoped(before: unknown, after: unknown
 export function sameCohortStatementOf(graph: unknown): UserStatement | undefined {
   const goals = (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : []).filter((n): n is Rec => isRec(n) && n.kind === 'goal');
   if (goals.length !== 1 || typeof goals[0]!.id !== 'string') return undefined;
-  const record = userStatementFor(graph, { kind: 'goal', id: goals[0]!.id, field: 'relation' });
+  const record = pressedRecord(userStatementFor(graph, { kind: 'goal', id: goals[0]!.id, field: 'relation' }));
   return record?.statements.length === 1 && record.statements[0]!.form === 'holds_now' ? record.statements[0] : undefined;
 }
 

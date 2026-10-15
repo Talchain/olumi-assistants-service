@@ -48,6 +48,16 @@ export function userStatementRecordOf(v: unknown): UserStatementRecord | undefin
     ...(attest !== undefined ? { attest } : {}) };
 }
 
+/**
+ * A record construction wrote from the brief (AIE 6183705670 (1)): the user's own sentence, kept for the saved model, a reopen and
+ * the AI, but never a PRESS. A reader whose meaning is "the user approved this on its card" (the same-people answer, a stated
+ * chance) reads only `pressedRecord`; a later press for the same subject replaces it.
+ */
+export const CONSTRUCTION_ATTEST: StatementAttest = { recorded_by: 'construction' };
+export function pressedRecord(record: UserStatementRecord | undefined): UserStatementRecord | undefined {
+  return record?.attest?.recorded_by === CONSTRUCTION_ATTEST.recorded_by ? undefined : record;
+}
+
 /** The node a subject's record lives on: its own node; a link's `from` node. */
 const nodeIdOf = (subject: DoorSubject): string => subject.id;
 const nodeOf = (graph: unknown, id: string): Rec | undefined =>
