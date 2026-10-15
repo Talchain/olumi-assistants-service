@@ -10,10 +10,12 @@ import { readFileSync } from 'node:fs';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot, type ScenarioReader } from '../run-analysis.js';
+import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot, type ScenarioReader, setHostLicenceStages } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { diffRunInputs } from '../../../coaching/run-input-changes.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 const happyFixture = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf-8')) as V2RunResponseEnvelope;
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';

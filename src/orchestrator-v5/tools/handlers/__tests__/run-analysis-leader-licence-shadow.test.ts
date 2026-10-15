@@ -49,13 +49,15 @@ import { createRegistry, resolveHandler } from '../../registry.js';
 import { config } from '../../../../config/index.js';
 import { GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../../orchestrator/context/option-result-source.js';
 import { leaderLicenceVerdict, storedResultRecords, type LeaderLicenceVerdictInput } from '../../../compose/leader-licence-verdict.js';
-import { readResultRecords } from '../run-analysis.js';
+import { readResultRecords, setHostLicenceStages } from '../run-analysis.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT, WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT, WITHHELD_GOAL_SCOPE_UNRESOLVED,
   WITHHELD_LEADER_CAUSE_UNRECORDED, WITHHELD_NEAR_TIE, WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN, WITHHELD_RUN_IDENTITY_CONFLICT, WITHHELD_RUN_IDENTITY_UNCONFIRMED,
   WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_UNREQUESTED_ANALYSIS,
 } from '../../../compose/analysis-state-v1.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const FA027 = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';

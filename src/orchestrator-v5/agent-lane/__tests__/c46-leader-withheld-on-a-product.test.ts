@@ -41,7 +41,7 @@ import type { SessionStore } from '../../session/store.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT,
@@ -63,6 +63,8 @@ import { ALLOWED_NODE_FIELD_ROOTS } from '../../graph-management/field-safety.js
 import { transformNodeToV3 } from '../../../cee/transforms/schema-v3.js';
 import { readMayNameLeadingOptionVerdictForFact } from '../../context/claim-safety-read.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../withheld-leader-fail-closed.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 const SCENARIO = '46464646-4646-4646-8646-464646464646';
 const REQUEST_ID = 'req-mg-c46-stage1';

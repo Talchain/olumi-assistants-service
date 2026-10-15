@@ -48,13 +48,15 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accumulation-identity.js';
 import { sayFigureAsWritten } from '../say-figure.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 import { timeClassOf, unsupportedTimeSentence } from '../../goal-target/time-class.js';
 import { limitsKeptBy } from '../runtime/draft-replacement.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const SID = '550e8400-e29b-41d4-a716-4466554400c6';

@@ -20,6 +20,9 @@ import { readMayNameLeadingOptionVerdictForFact, readMayNameLeadingOptionVerdict
 import { finaliseV5Response } from '../../../response-finaliser.js';
 import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
 import { buildAnalysisResultBlock } from '../../../compose.js';
+import { setHostLicenceStages } from '../run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type R = Record<string, any>;
 const brief = readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');

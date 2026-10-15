@@ -78,6 +78,9 @@ vi.mock('../../session/index.js', async original => ({
 }));
 import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js';
 import { runTurnExecutor } from '../../turn-executor.js';
+import { setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const SCENARIO = 'd9e3f4a5-b6c7-4d8e-9f0a-1b2c3d4e5f60';

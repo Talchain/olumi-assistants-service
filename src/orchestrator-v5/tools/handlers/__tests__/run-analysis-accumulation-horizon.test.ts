@@ -10,8 +10,10 @@ import { GOAL_HORIZON_NOT_TESTED, withUntestedHorizonWarning } from '../../../ag
 import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../../../orchestrator/context/option-result-source.js';
 import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const served = JSON.parse(readFileSync(new URL('../../../../../tests/fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')).graph as Rec;

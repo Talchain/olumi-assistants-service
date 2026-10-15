@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { runP0Graph } from './mc-p0-run-helper.js';
 import { unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+import { setHostLicenceStages } from '../run-analysis.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-r0-1f9d769.json', import.meta.url), 'utf8'));
 function sized(includeUnmarked: boolean) {
   const g = structuredClone(F.graph);

@@ -31,10 +31,12 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import { sentDigest } from '../../tools/handlers/run-input-snapshot.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 // The drafter-raw recorder writes its own table; it is a recorder, not logic, so it passes the build straight through.
 vi.mock('../../drafter-raw/index.js', () => ({

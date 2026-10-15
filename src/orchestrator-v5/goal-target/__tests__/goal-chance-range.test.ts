@@ -14,11 +14,13 @@ import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../../agent-lane/decision-input-ask.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
-import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Json = Record<string, any>;
 const clone = <T>(v: T): T => structuredClone(v);

@@ -12,12 +12,14 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot } from '../../../../../src/orchestrator-v5/tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot, setHostLicenceStages } from '../../../../../src/orchestrator-v5/tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../../../../src/orchestrator-v5/tools/registry.js';
 import type { PLoTClient } from '../../../../../src/orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../../src/orchestrator/types.js';
 
 import minimalFixture from '../../../../fixtures/plot/v2-run-golden-minimal.json';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../../../../fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')) as { goal_node_id: string; graph: Rec };

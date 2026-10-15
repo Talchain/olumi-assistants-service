@@ -26,8 +26,10 @@ import { composeAnalysisStateV1, readRawRobustnessFromResponseBody } from '../..
 import { mayPresentLeaderClaimForFact } from '../../../compose/unrequested-analysis-confinement.js';
 import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, setHostLicenceStages } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+// S12 shortcut (#3238): this spec pins a host withhold stage that is switched off by default; it runs it explicitly (post-PoC deletion).
+setHostLicenceStages(true);
 
 type Json = Record<string, any>;
 type Served = { _provenance: { brief_text: string | null }; graph: Json; plot_body: Json };

@@ -403,3 +403,29 @@ export function appendInferenceWarning<E>(envelope: E, warning: Record<string, u
     ...(Array.isArray(current.inference_warnings) ? current.inference_warnings : []), warning,
   ] } as E;
 }
+
+/**
+ * ⭐ S12 SHORTCUT (Paul 09:15Z 15 Oct): `run` as it stands, with each reason a host stage gave in `staged` (its run on a copy)
+ * carried as a disclosure: `HOST_CAVEAT`, its own code in `caveat_code`, severity info, and ONLY its structural fields (ids,
+ * reason, source). The stage's sentences ("Not shown…", "…is withheld") are never carried: the figure IS shown, and the AI
+ * words the caveat from its code and data.
+ */
+export const HOST_CAVEAT_CODE = 'HOST_CAVEAT';
+const CAVEAT_FIELDS = new Set(['node_ids', 'option_ids', 'constraint_ids', 'reason', 'source', 'links', 'field']);
+const warningsOf = (r: unknown): Record<string, unknown>[] => {
+  const e = r !== null && typeof r === 'object' && !Array.isArray(r) ? r as Record<string, unknown> : {};
+  const nested = e.enrichment !== null && typeof e.enrichment === 'object' ? (e.enrichment as Record<string, unknown>).inference_warnings : undefined;
+  return [...(Array.isArray(e.inference_warnings) ? e.inference_warnings : []), ...(Array.isArray(nested) ? nested : [])]
+    .filter((w): w is Record<string, unknown> => w !== null && typeof w === 'object' && !Array.isArray(w));
+};
+export function withHostCaveats<E>(run: E, staged: E): E {
+  const seen = new Set(warningsOf(run).map((w) => JSON.stringify(w)));
+  let shown = run;
+  for (const w of warningsOf(staged)) {
+    if (seen.has(JSON.stringify(w))) continue;
+    seen.add(JSON.stringify(w));
+    const fields = Object.fromEntries(Object.entries(w).filter(([k]) => CAVEAT_FIELDS.has(k)));
+    shown = appendInferenceWarning(shown, { ...fields, code: HOST_CAVEAT_CODE, caveat_code: w.code, severity: 'info' });
+  }
+  return shown;
+}
