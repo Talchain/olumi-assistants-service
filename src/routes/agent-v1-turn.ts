@@ -130,8 +130,9 @@ import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue, identityReadingOf } from '../orchestrator-v5/agent-lane/identity-card.js';
-import { briefHoldsNowArgs, briefHoldsNowToIssue, heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
-import { precedingAssistantText, typedOccurrenceArgs, typedOccurrenceToIssue } from '../orchestrator-v5/agent-lane/risk-occurrence-statement.js';
+import { heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
+import { precedingAssistantText } from '../orchestrator-v5/statement-door/ask.js';
+import { doorIssueArgs } from '../orchestrator-v5/statement-door/door.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -4733,32 +4734,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         tool_results: [...result.tool_results, issued] };
       log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: confirm card for the user\'s own figure issued by the route after the Run');
     }
-    // ⭐ S2 THE USER'S OWN OCCURRENCE (DL 21:15Z 14 Oct): when THIS turn's typed words state one chance for the one risk it is
-    // about ("I'd say there's about a 30% chance it slips before launch") and nothing was offered, the route issues the card
-    // itself, quoting their statement: the SAME tool, once, writing nothing; the door re-verifies it and only the press records it.
-    const typedOccurrence = fastPath === 'approve' || readbackGraph == null || typedNow === null || !typedOccurrenceToIssue({ toolCalls: result.tool_calls,
-      mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 })
-      ? undefined : typedOccurrenceArgs(readbackGraph, typedNow, { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
-        ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) });
-    if (typedOccurrence !== undefined) {
-      const issued = await dispatchTool('propose_assumptions', JSON.stringify(typedOccurrence), toolCtx, capabilities, mode);
+    /**
+     * ⭐ SYSTEM 1: THE ONE ROUTE ISSUER (the harness contract: its card's button is "Record what you said", quoting the turn).
+     * When the Agent offered nothing, a statement THIS turn's typed words give (a risk's chance, bound and verified), else the
+     * brief's own sentence the model holds for a risk (`already_true_quote`), gets its door card: the SAME tool, once, writing
+     * nothing; the door re-verifies it and only the press records it.
+     */
+    const doorArgs = fastPath === 'approve' || readbackGraph == null ? undefined : doorIssueArgs(readbackGraph, typedNow,
+      { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
+        ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) },
+      { toolCalls: result.tool_calls, mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
+        heldWaiting: liveHolds.length > 0 });
+    if (doorArgs !== undefined) {
+      const issued = await dispatchTool('propose_statement', JSON.stringify({ subject: doorArgs.subject,
+        statements: doorArgs.quotes.map((quote) => ({ quote })) }), toolCtx, capabilities, mode);
       result = { ...result,
-        tool_calls: [...result.tool_calls, { name: 'propose_assumptions', ok: issued.ok === true, mutated: false,
+        tool_calls: [...result.tool_calls, { name: 'propose_statement', ok: issued.ok === true, mutated: false,
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
         tool_results: [...result.tool_results, issued] };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: card for the user\'s own risk chance issued by the route');
-    }
-    // ⭐ S2 holds now, from the brief (DL 14 Oct, marketing de659cfd): a risk the brief already says holds gets S2-B's card,
-    // quoting the brief's own sentence (`already_true_quote`), on a turn that proposed and approved nothing: the SAME tool, once.
-    const briefHoldsNow = fastPath === 'approve' || readbackGraph == null || !briefHoldsNowToIssue({ toolCalls: result.tool_calls,
-      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 }) ? undefined : briefHoldsNowArgs(readbackGraph);
-    if (briefHoldsNow !== undefined) {
-      const issued = await dispatchTool('propose_assumptions', JSON.stringify(briefHoldsNow), toolCtx, capabilities, mode);
-      result = { ...result,
-        tool_calls: [...result.tool_calls, { name: 'propose_assumptions', ok: issued.ok === true, mutated: false,
-          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
-        tool_results: [...result.tool_results, issued] };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: holds-now card from the brief issued by the route');
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, field: doorArgs.subject.field },
+        'agent-lane: statement door card issued by the route');
     }
     const results = result.tool_results;
     const chipApprovals = fastPath === 'approve'

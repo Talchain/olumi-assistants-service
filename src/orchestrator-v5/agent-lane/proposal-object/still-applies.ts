@@ -27,6 +27,7 @@ import { optionCapacityChangeStillApplies, type ApprovedOptionCapacityChange } f
 import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { goalReadingProjectionOf } from '../../goal-target/goal-reading-write.js';
 import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurrence.js';
+import { asMemberOp } from '../../statement-door/door.js';
 import { cohortForecastCardHolds, SET_COHORT_FORECAST_OP } from '../../goal-target/cohort-forecast-write.js';
 
 type Rec = Record<string, unknown>;
@@ -67,7 +68,8 @@ export function deadlineGoalStillBound(graph: unknown, goalId: string, expectedD
 export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
   if (teamTimeReadHolds(p, graph)) return true;
   if (p.operations.length !== 1) return false;
-  const op = p.operations[0]!;
+  // A card through the ONE statement door is judged by its carrier member's own rule (`asMemberOp`).
+  const op = asMemberOp(p.operations[0]!) ?? p.operations[0]!;
   if (op.op === 'set_hiring_times') return hiringTimesStillApply(op.value as ApprovedHiringTimes, graph);
   if (op.op === 'set_option_capacity_change') return optionCapacityChangeStillApplies(op.value as ApprovedOptionCapacityChange, graph);
   if (op.op === 'set_goal_deadline') return deadlineSubjectHolds(op, graph) === true;
@@ -85,7 +87,7 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
  */
 export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
   if (p.operations.length !== 1) return false;
-  const op = p.operations[0]!;
+  const op = asMemberOp(p.operations[0]!) ?? p.operations[0]!;
   if (op.op === SET_RISK_OCCURRENCE_OP) return !riskOccurrenceCardHolds(op, graph);
   if (op.op === SET_COHORT_FORECAST_OP) return !cohortForecastCardHolds(op, graph);
   return op.op === 'set_goal_deadline' && deadlineSubjectHolds(op, graph) === false;

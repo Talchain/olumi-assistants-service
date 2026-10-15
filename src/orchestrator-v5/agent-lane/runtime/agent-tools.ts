@@ -315,8 +315,6 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           // S2 (DL 14 Oct, pricing r2): a figure the user already wrote, confirmed from their own statement, never asked again.
           statements: { type: 'array', minItems: 1, maxItems: 1, description: 'The user\u2019s complete statement about this factor, copied exactly from their brief or a message. (a) A figure they already WROTE that the model holds as unverified (for example "from £49 to £59 per month" for today\u2019s price): form "point" with that figure as value, user_stated true and the same figure as value; approval records it as theirs and never changes it. (b) Words that DESCRIBE the factor without a figure (for example "I\u2019m not that experienced with marketing"): form "describes", with user_stated false, your own estimate as value and your reading as basis; the card quotes their words and the figure stays your estimate. Omit it otherwise.',
             items: obj({ quote: { type: 'string' }, form: { type: 'string', enum: ['point', 'describes'] }, value: { type: 'number' } }, ['quote', 'form']) },
-          // S2 (SCIENCE 16:49Z; AIE #94 6173489813): a risk the user says is already true now.
-          holds_now: { ...obj({ quote: { type: 'string' } }, ['quote']), description: 'For an existing RISK the user says is ALREADY TRUE NOW (for example "I\u2019m not that experienced with marketing" for \u2018Limited marketing experience\u2019): their complete statement, copied exactly from one of their messages. Give it with user_stated true, alone in the call; value and unit are not used. Olumi records that the risk holds now, never a chance of it happening; how strongly it acts stays on its link. Omit it otherwise.' },
           // AIE packet 6e52e896 `event_risk.occurrence_range_description`, byte for byte (hiring path (a)).
           occurrence_range: { ...obj({
             low_percent: { type: 'number' },
@@ -528,6 +526,33 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
       }, ['value', 'unit']),
     }, ['constraint_type', 'value', 'unit', 'rationale']),
+  },
+  {
+    // ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (M1). Tool text: AIE 6181498097, exact.
+    type: 'function',
+    name: 'propose_statement',
+    description: 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
+      + 'field, and the complete statement with its actual speaker/source, qualifications, negation, conditions, reference and window; reuse '
+      + 'a retained applicable statement rather than asking for it again. This door currently supports a risk\u2019s occurrence estimate and '
+      + 'its current-condition reading. Olumi proposes the interpretation; a complete quote or matching label alone does not verify it. Do not '
+      + 'supply an Olumi estimate here or substitute a different event, quantity or time window. If the meaning or current carrier is '
+      + 'unsupported, retain the original statement and explain that exact gap. This tool prepares one card and changes nothing. Only the '
+      + 'bound approval records its complete shown postimage; a successful committed change then follows the existing automatic analysis '
+      + 'and contextual SAME-Run coaching flow, with no duplicate Run.',
+    parameters: obj({
+      subject: obj({
+        kind: { type: 'string', enum: ['goal', 'factor', 'option', 'risk', 'link'] },
+        label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it.' },
+        to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
+        option_label: { type: 'string', description: 'Only when the statement is about what an option sets: that option\u2019s exact label.' },
+        field: { type: 'string', enum: ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation'] },
+      }, ['kind', 'label', 'field']),
+      statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({
+        quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
+        answering: { type: 'string', description: 'Only when the statement answers a question you asked: that question, copied exactly from your reply.' },
+        reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place): the user\u2019s own words that say it, copied from the quote.' },
+      }, ['quote']) },
+    }, ['subject', 'statements']),
   },
   {
     type: 'function', name: 'propose_team_time',
@@ -938,7 +963,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_option_capacity_change', 'propose_cohort_forecast', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -1020,6 +1045,8 @@ export interface AgentCapabilities {
     /** What the figure is a figure OF, in the user's words: a quantity the draft lacks may get a revised-draft card (B). */
     measures?: string;
   }): Promise<ToolResult>;
+  /** SYSTEM 1: the user's own statement about ONE subject, read, bound and verified by the ONE door, as ONE card. */
+  proposeStatement?(ctx: AgentToolContext, args: { subject?: unknown; statements?: unknown }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months?: number; high_months?: number; statements?: readonly StatementArgs[] }): Promise<ToolResult>;
   proposeCohortForecast?(ctx: AgentToolContext, args: { option_label?: unknown; people?: unknown; conversion?: unknown; same_cohort?: unknown }): Promise<ToolResult>;
@@ -1197,6 +1224,8 @@ async function dispatchToolUnbounded(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_statement':
+      return caps.proposeStatement !== undefined ? caps.proposeStatement(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_team_time':
       return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_cohort_forecast':

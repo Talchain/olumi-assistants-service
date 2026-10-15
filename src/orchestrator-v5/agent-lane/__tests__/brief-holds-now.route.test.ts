@@ -25,7 +25,10 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { briefHoldsNowArgs } from '../held-figure-confirm.js';
+import { doorIssueArgs } from '../../statement-door/door.js';
+import { readStatement } from '../../statement-door/read.js';
+import { approvedOf, RISK_HOLDS_NOW_ROW } from '../../statement-door/fields/risk.js';
+import { applyRiskOccurrenceEdit } from '../risk-occurrence.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -90,9 +93,30 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
     expect(asks(SERVED.graph).join(' ')).toContain(OCCURRENCE);
   });
 
+  it('marketing 0dac5dcc (its ONE blocker is this risk): the holds-now card comes first, and its press lets the Run go (DL AMEND, AIE 6181498097)', () => {
+    const at = (JSON.parse(readFileSync(new URL('./fixtures/marketing-e2e-0dac5dcc-read02-after-approve.json', import.meta.url), 'utf8')) as Rec).body as Rec;
+    const g = fromToday(withQuote(at)).graph;
+    // Never silently left out: his reading holds the Run until he confirms it, and its card is the route's first offer.
+    expect((buildCanonicalAnalysisReadyFromGraph(g) as Rec).may_run).toBe(false);
+    expect(doorIssueArgs(g, null, {}, { toolCalls: [], mutated: false, proposalOffered: false, heldWaiting: false }))
+      .toEqual({ subject: { kind: 'risk', id: RISK, field: 'holds_now' }, quotes: [SENTENCE] });
+    const subject = { kind: 'risk' as const, id: RISK, field: 'holds_now' as const };
+    const v = readStatement(g, subject, LABEL, [SENTENCE], { now: String(at.brief_text) });
+    expect(v.kind, JSON.stringify(v)).toBe('read');
+    if (v.kind !== 'read') return;
+    const w = RISK_HOLDS_NOW_ROW.writer.approve(v.reading, g);
+    if ('refused' in w) throw new Error(w.refused);
+    const written = applyRiskOccurrenceEdit(g, approvedOf(w.payload)!);
+    if (written.kind !== 'mutated') throw new Error(JSON.stringify(written));
+    expect(riskOf(written.mutatedGraph).event_risk.occurrence).toMatchObject({ p_low: 1, p_high: 1, basis: 'user' });
+    expect((buildCanonicalAnalysisReadyFromGraph(written.mutatedGraph) as Rec).may_run).toBe(true);
+  });
+
   it('the route issues the holds-now card only over a window from today (its own gate, before the capability’s)', () => {
-    expect(briefHoldsNowArgs(fromToday(withQuote(SERVED)).graph)).toEqual({ assumptions: [expect.objectContaining({ factor_label: LABEL, holds_now: { quote: SENTENCE } })] });
-    expect(briefHoldsNowArgs(withQuote(SERVED).graph)).toBeUndefined();
+    // SYSTEM 1 M1: the ONE door issuer, from the brief's own sentence the model holds for the risk.
+    const turn = { toolCalls: [], mutated: false, proposalOffered: false, heldWaiting: false };
+    expect(doorIssueArgs(fromToday(withQuote(SERVED)).graph, null, {}, turn)).toEqual({ subject: { kind: 'risk', id: RISK, field: 'holds_now' }, quotes: [SENTENCE] });
+    expect(doorIssueArgs(withQuote(SERVED).graph, null, {}, turn)).toBeUndefined();
   });
 });
 
@@ -160,9 +184,14 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     const said = await turn({ message: SERVED.brief_text, source: 'composer' });
     const cards = approvals(said);
     expect(cards, JSON.stringify(said.suggested_actions)).toHaveLength(1);
-    // S2-B's own card, quoting the message that holds his sentence.
-    expect(String(cards[0]!.detail ?? cards[0]!.label)).toBe(`From your message: ‘${SERVED.brief_text}’ Do you want to record that ‘${LABEL}’ is already true now? `
-      + 'How strongly it affects the model is a separate question, still Olumi’s placeholder on its link.');
+    // The ONE door's card (AIE 6181498097's template, 6178729504's reading), quoting the message that holds his sentence. Its write
+    // adds Olumi's derivation (true now → at least once within a window from today), so its button is "Use this reading".
+    expect(cards[0]).toMatchObject({ label: 'Use this reading', message: 'Yes, use this reading.' });
+    const card = String(cards[0]!.detail);
+    expect(card.startsWith('From your message: “')).toBe(true);
+    expect(card).toContain(SENTENCE);
+    expect(card).toContain(`Olumi proposes this reading: ‘${LABEL}’ already being true now. How strongly it affects ‘New customers’ is a separate assumption:`);
+    expect(card.endsWith('Record this reading?')).toBe(true);
     expect(graphWrites(w), 'nothing before the press').toBe(0);
     const pressed = await turn({ message: cards[0]!.message, source: 'chip_click', chip: { id: cards[0]!.id } });
     expect((pressed._agent?.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change'), JSON.stringify(pressed._agent?.tool_calls))

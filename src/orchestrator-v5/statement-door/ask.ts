@@ -31,3 +31,15 @@ export function askedSubjects(preceding: string | undefined, asks: readonly Stat
   for (const a of asks) if (a.words.trim() !== '' && preceding.includes(a.words)) seen.set(subjectKey(a.subject), a.subject);
   return [...seen.values()];
 }
+
+/** Olumi's last reply in this conversation (its question, if it asked one), from the session's held items. */
+export function precedingAssistantText(items: readonly unknown[] | undefined): string | undefined {
+  for (const raw of [...(items ?? [])].reverse()) {
+    const i = raw as { role?: unknown; type?: unknown; content?: unknown } | null;
+    if (i?.role !== 'assistant' && !(i?.type === 'message' && i.role === undefined)) continue;
+    const text = typeof i.content === 'string' ? i.content : Array.isArray(i.content)
+      ? i.content.map((p: { text?: unknown }) => (typeof p.text === 'string' ? p.text : '')).join('') : '';
+    if (text.trim() !== '') return text;
+  }
+  return undefined;
+}
