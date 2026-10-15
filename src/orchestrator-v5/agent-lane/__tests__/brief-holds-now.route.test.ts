@@ -41,7 +41,16 @@ const LABEL = 'Limited marketing experience';
 const SENTENCE = 'I can\'t spend more than 25% of my time on this, and I\'m not that experienced with marketing.';
 const OCCURRENCE = 'How likely is ‘Limited marketing experience’ to happen at least once within 3 months?';
 const ROUTE_MS = 60_000;
-const WINDOW_ASK = 'Will ‘Limited marketing experience’ still be true during your goal’s period, the first 3 months after the launch?';
+// AIE 6183711560's safe question.
+const WINDOW_ASK = 'Do you expect ‘Limited marketing experience’ to hold at any point during your goal’s period, the first 3 months after the launch? '
+  + 'Keep any timing or other qualifications in your answer.';
+// AIE 6183711560's safe card for a plain yes: his forecast with its scope and window, then the derived occurrence as Olumi's reading.
+const WINDOW_CARD = 'your forecast that ‘Limited marketing experience’ would hold at some point during your goal’s period, the first 3 months '
+  + 'after the launch, with no qualifications in your answer';
+const DERIVED = 'For this conditional reading, Olumi represents that condition as true at least once in the first 3 months after the launch: '
+  + 'occurrence 100%. This is a derived reading of your forecast, not a numerical probability you stated. It does not establish persistence '
+  + 'throughout the window or the condition’s effect.';
+const DERIVED_BLOCK = { version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: 3 } };
 const ANSWER = 'Yes, I’ll still be new to marketing then.';
 const riskOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.id === RISK)!;
 /** The served model with the drafter's reading, as admission keeps it. */
@@ -88,8 +97,7 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
       + '‘New customers’ is a separate assumption.']);
     // Served: his goal's 3 months count from the LAUNCH. True now does not show it holds then; no card is named: he is asked ONE
     // question about that period (DL 15 Oct), whose answer alone is his forecast for it.
-    expect(asks(withQuote(SERVED).graph)).toEqual([`${READING} ${WINDOW_ASK} If you expect it will, say so: Olumi records that as your `
-      + 'forecast for that period. Or ask Olumi to suggest a starting estimate for you to review.']);
+    expect(asks(withQuote(SERVED).graph)).toEqual([`${READING} ${WINDOW_ASK} Or ask Olumi to suggest a starting estimate for you to review.`]);
     const noPeriod = withQuote(SERVED); delete goalOf(noPeriod.graph).goal_target_basis;
     expect(asks(noPeriod.graph)).toEqual([`${READING} To use it in the analysis, your goal needs one clear time period first.`]);
     for (const b of [fromToday(withQuote(SERVED)), withQuote(SERVED), noPeriod]) expect(asks(b.graph).join(' ')).not.toMatch(/How likely|can’t run the numbers/);
@@ -126,8 +134,9 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
 /**
  * ⭐ THE LAUNCH PERIOD (DL 15 Oct, on SESSION4's miss: M1's marketing row ran on a from-today window): Paul's goal counts its 3 months
  * from the LAUNCH, so his "I'm not that experienced with marketing" (true NOW) is never read forward (AIE 6178729504). Readiness asks
- * ONE question about that period, and only his own plain yes to it is his forecast that it still holds then: written as his block
- * (at least once within the period, basis user), never an observed certainty. A no, a hedge or a condition keeps his words, writes nothing.
+ * ONE question about that period, and only his own plain yes to it is his forecast that it holds then. AIE 6183711560: that qualitative
+ * forecast is never his number. The card shows Olumi's derived occurrence 100% before the press, and it is written as OLUMI'S block
+ * (`basis: 'olumi'`) beside his record of what he said. A no, a hedge or a condition keeps his words and writes nothing.
  */
 describe('the launch period: his answer to its ONE question is his forecast for it', () => {
   const holdsNow = { kind: 'risk' as const, id: RISK, field: 'holds_now' as const };
@@ -135,22 +144,40 @@ describe('the launch period: his answer to its ONE question is his forecast for 
   const launch = withQuote(SERVED).graph as Rec;
   it('PRECONDITION: the served goal counts from the launch; readiness asks the question in the words the door binds', () => {
     expect(windowHoldsAskOf(launch, RISK)).toBe(WINDOW_ASK);
-    expect(asks(launch).join(' ')).toContain(`${WINDOW_ASK} If you expect it will, say so`);
+    expect(asks(launch).join(' ')).toContain(`${WINDOW_ASK} Or ask Olumi to suggest`);
     expect(asks(launch)).toHaveLength(1);
   });
-  it('RED (marketing de659cfd, launch window): his yes to THAT question is his forecast for the period; the write is his block, and its ask is gone', () => {
+  it('RED (marketing de659cfd, launch window): his yes to THAT question is his forecast; the write is Olumi’s derived block beside his words, and its ask is gone', () => {
     const v = readStatement(launch, holdsNow, LABEL, [{ quote: ANSWER, answering: WINDOW_ASK }], { now: ANSWER }, { asks: doorAsks(launch) });
     expect(v.kind, JSON.stringify(v)).toBe('read');
     if (v.kind !== 'read') return;
     expect(v.reading.statements[0]).toMatchObject({ form: 'holds_in_window', quote: ANSWER, answering: WINDOW_ASK });
-    expect(v.reading.reading).toBe('your forecast that ‘Limited marketing experience’ would still be true during your goal’s period, the first 3 months after the launch');
-    expect(v.reading.assumptions[0]).toBe('Olumi reads that as it happening at least once in that period.');
+    expect(v.reading.reading).toBe(WINDOW_CARD);
+    expect(v.reading.assumptions[0]).toBe(DERIVED);
     const w = RISK_HOLDS_NOW_ROW.writer.approve(v.reading, launch);
     if ('refused' in w) throw new Error(w.refused);
     const written = applyRiskOccurrenceEdit(launch, approvedOf(w.payload)!);
     if (written.kind !== 'mutated') throw new Error(JSON.stringify(written));
-    expect(riskOf(written.mutatedGraph).event_risk.occurrence).toEqual({ p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' });
+    // AIE 6183711560: the 100% is Olumi's derived reading, never his number; his words are kept as his, with the question they answer.
+    expect(riskOf(written.mutatedGraph).event_risk).toEqual(DERIVED_BLOCK);
+    expect(riskOf(written.mutatedGraph).user_statements).toEqual([expect.objectContaining({ field: 'holds_now',
+      statements: [expect.objectContaining({ form: 'holds_in_window', quote: ANSWER, answering: WINDOW_ASK })] })]);
     expect(asks(written.mutatedGraph)).toEqual([]);
+  });
+  it('CONTRAST: the writer refuses his forecast written as HIS block (basis user), and the from-today "now" written as Olumi’s', () => {
+    const v = readStatement(launch, holdsNow, LABEL, [{ quote: ANSWER, answering: WINDOW_ASK }], { now: ANSWER }, { asks: doorAsks(launch) });
+    if (v.kind !== 'read') throw new Error(JSON.stringify(v));
+    const w = RISK_HOLDS_NOW_ROW.writer.approve(v.reading, launch);
+    if ('refused' in w) throw new Error(w.refused);
+    const asHis = { ...approvedOf(w.payload)!, event_risk: { ...DERIVED_BLOCK, occurrence: { ...DERIVED_BLOCK.occurrence, basis: 'user' } } };
+    expect(applyRiskOccurrenceEdit(launch, asHis as never)).toEqual({ kind: 'refused', reason: 'invalid_block' });
+    const today = fromToday(withQuote(SERVED)).graph as Rec;
+    const nowRead = readStatement(today, holdsNow, LABEL, [SENTENCE], { now: String(SERVED.brief_text) });
+    if (nowRead.kind !== 'read') throw new Error(JSON.stringify(nowRead));
+    const nowWrite = RISK_HOLDS_NOW_ROW.writer.approve(nowRead.reading, today);
+    if ('refused' in nowWrite) throw new Error(nowWrite.refused);
+    expect(approvedOf(nowWrite.payload)!.event_risk.occurrence.basis, 'true NOW over a window from today stays his').toBe('user');
+    expect(applyRiskOccurrenceEdit(today, { ...approvedOf(nowWrite.payload)!, event_risk: DERIVED_BLOCK } as never)).toEqual({ kind: 'refused', reason: 'invalid_block' });
   });
   it('CONTRAST (from today): there is no period question, so the same words "answering" it bind nothing and write nothing', () => {
     const today = fromToday(withQuote(SERVED)).graph as Rec;
@@ -172,11 +199,16 @@ describe('the launch period: his answer to its ONE question is his forecast for 
     'CONTRAST: “%s” keeps his words as his answer and writes nothing', (said) => {
       const v = readStatement(launch, holdsNow, LABEL, [{ quote: said, answering: WINDOW_ASK }], { now: said }, { asks: doorAsks(launch) });
       expect(v.kind, JSON.stringify(v)).toBe('refused');
-      if (v.kind === 'refused') expect(v.detail).toContain('is the user’s own answer: keep it as theirs');
+      if (v.kind === 'refused') {
+        expect(v.detail).toContain('is the user’s own answer: keep it as theirs, with its qualifications');
+        // AIE 6183711560: its effect is a different quantity; never asked instead, nor an unconditional answer pressed for.
+        expect(v.detail).not.toMatch(/affect that period/);
+        expect(v.detail).toContain('Do not ask about its effect instead, and do not press for an unconditional answer.');
+      }
     });
   it('the route issues the card from his typed answer only when Olumi’s preceding reply asked THAT question', () => {
     const turn = { toolCalls: [], mutated: false, proposalOffered: false, heldWaiting: false };
-    expect(doorIssueArgs(launch, ANSWER, { preceding_ask: `Here is where things stand. ${WINDOW_ASK} If you expect it will, say so.` }, turn))
+    expect(doorIssueArgs(launch, ANSWER, { preceding_ask: `Here is where things stand. ${WINDOW_ASK}` }, turn))
       .toEqual({ subject: holdsNow, quotes: [{ quote: ANSWER, answering: WINDOW_ASK }] });
     expect(doorIssueArgs(launch, ANSWER, {}, turn)).toBeUndefined();
     // Olumi's last reply asked something else: a yes answers THAT, never the period question.
@@ -272,13 +304,13 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     expect(approvals(await turn({ message: SERVED.brief_text, source: 'composer' }))).toEqual([]);
     expect(graphWrites(w)).toBe(0);
     expect(riskOf(w.graph())).not.toHaveProperty('event_risk');
-    expect(asks(w.graph()).join(' ')).toContain(`${READING} ${WINDOW_ASK} If you expect it will, say so: Olumi records that as your forecast for that period.`);
+    expect(asks(w.graph()).join(' ')).toContain(`${READING} ${WINDOW_ASK} Or ask Olumi to suggest a starting estimate for you to review.`);
   }, ROUTE_MS);
 
-  it('RED→GREEN (launch period, DL 15 Oct): the period question → his typed yes → ONE card → the press → his forecast for the period', async () => {
+  it('RED→GREEN (launch period, DL 15 Oct; AIE 6183711560): the period question → his typed yes → ONE card showing Olumi’s derived 100% → the press → Olumi’s block beside his words', async () => {
     const w = world({ ...withQuote(SERVED), scenario_id: randomUUID() });
     // Olumi's reply asks readiness's ONE question about the period (the words the door binds an answer to).
-    const turn = await route(w, `Here is your model. ${WINDOW_ASK} If you expect it will, say so.`);
+    const turn = await route(w, `Here is your model. ${WINDOW_ASK}`);
     expect(asks(w.graph()).join(' '), 'readiness asks the period question').toContain(WINDOW_ASK);
     const first = await turn({ message: SERVED.brief_text, source: 'composer' });
     expect(approvals(first)).toEqual([]);
@@ -287,12 +319,15 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     const cards = approvals(answered);
     expect(cards, JSON.stringify(answered.suggested_actions)).toHaveLength(1);
     expect(cards[0]).toMatchObject({ label: 'Use this reading', message: 'Yes, use this reading.' });
-    expect(String(cards[0]!.detail)).toContain(`From your message: “${ANSWER}” Olumi proposes this reading: your forecast that ‘${LABEL}’ would still be `
-      + 'true during your goal’s period, the first 3 months after the launch. Olumi reads that as it happening at least once in that period.');
+    // The derived number is SHOWN before the press.
+    expect(String(cards[0]!.detail)).toContain(`From your message: “${ANSWER}” Olumi proposes this reading: ${WINDOW_CARD}. ${DERIVED}`);
     expect(graphWrites(w), 'nothing before the press').toBe(0);
     const pressed = await turn({ message: cards[0]!.message, source: 'chip_click', chip: { id: cards[0]!.id } });
     expect((pressed._agent?.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change')).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
-    expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
+    expect(riskOf(w.graph()).event_risk).toEqual(DERIVED_BLOCK);
+    // The receipt keeps his forecast his and the 100% Olumi's.
+    expect(JSON.stringify(pressed)).toContain('Recorded your forecast: ‘Limited marketing experience’ would hold at some point during your goal’s period, '
+      + 'the first 3 months after the launch. Olumi uses it as occurrence 100% in that period, a derived reading, not a probability you stated.');
     expect(asks(w.graph())).toEqual([]);
   }, ROUTE_MS);
 

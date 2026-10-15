@@ -1403,8 +1403,7 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
     if (eventPath?.kind === 'eligible') {
       // Now is never read forward (AIE 6178729504): the user is asked ONE question about the launch period, and only their own
       // answer to it is their forecast for that period (the holds-now row's `holds_in_window`, DL 15 Oct).
-      return `${reading} ${riskWindowHoldsAskWords(gap.label, eventPath.window_months)} If you expect it will, say so: Olumi records that `
-        + 'as your forecast for that period. Or ask Olumi to suggest a starting estimate for you to review.';
+      return `${reading} ${riskWindowHoldsAskWords(gap.label, eventPath.window_months)} Or ask Olumi to suggest a starting estimate for you to review.`;
     }
     if (eventPath?.kind === 'ineligible' && eventPath.reason === 'no_window') {
       return `${reading} To use it in the analysis, your goal needs one clear time period first.`;

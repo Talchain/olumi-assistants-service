@@ -11,7 +11,7 @@ import type { UserStatement } from '../../agent-lane/user-statements.js';
 import {
   alreadyTrueQuoteOf, applyRiskOccurrenceEdit, approvedRiskOccurrenceOf, chanceAsStated, riskEffectBasisWords, riskHoldsNowRecordedWords, riskOccurrenceGoalHolds,
   riskOccurrenceGoalLabel, riskOccurrencePostimageNode, riskOccurrenceSubject, RISK_OCCURRENCE_QUANTITY, statedWindowMonthsWords, riskOccurrenceWindowFromToday, riskStatedOccurrenceRecordedWords, riskWindowHoldsAskWords,
-  userHoldsNowBlock, userOccurrenceBlock, type ApprovedRiskOccurrence,
+  derivedWindowHoldsBlock, userHoldsNowBlock, userOccurrenceBlock, type ApprovedRiskOccurrence,
 } from '../../agent-lane/risk-occurrence.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { DoorFigure, RoleRow } from '../role-table.js';
@@ -32,6 +32,10 @@ const KEEP = 'Keep the user’s words exactly as they said them and do not ask t
 const windowSaid = (months: number): string => (months === 1 ? 'a month' : `${months} months`);
 /** "the first {…} after the launch": the same words `riskWindowHoldsAskWords` says. */
 const firstPeriod = (months: number): string => (months === 1 ? 'month' : `${months} months`);
+/** AIE 6183711560's derived-occurrence sentence ("scenario" said as "reading": Paul's 14 Oct vocabulary). */
+const derivedWindowWords = (months: number): string => `For this conditional reading, Olumi represents that condition as true at least once in `
+  + `the first ${firstPeriod(months)} after the launch: occurrence 100%. This is a derived reading of your forecast, not a numerical probability `
+  + 'you stated. It does not establish persistence throughout the window or the condition’s effect.';
 const percent = (p: number): number => Number((p * 100).toFixed(6));
 const labelOf = (graph: unknown, id: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
   ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === id)?.label : undefined) ?? id).trim();
@@ -122,8 +126,11 @@ function readHoldsNow(quote: string, subject: DoorSubject, graph: unknown, _word
   const windowAsk = windowHoldsAskOf(graph, subject.id);
   if (windowAsk !== undefined && typeof answering === 'string' && answering.trim() === windowAsk) {
     if (ANSWER_YES.test(quote) && !ANSWER_NO.test(quote) && !HEDGED.test(quote) && !CONDITIONAL.test(quote)) return { form: 'holds_in_window' };
-    return { refused: `“${quote}” is the user’s own answer: keep it as theirs. It does not say plainly that ‘${labelOf(graph, subject.id)}’ will still `
-      + `be true during the goal’s period, so nothing is written as a figure. ${KEEP} Ask how likely it is to affect that period instead.` };
+    // AIE 6183711560: a hedge, condition or no keeps its meaning; never ask about its effect instead (a different quantity), nor
+    // press for an unconditional answer.
+    return { refused: `“${quote}” is the user’s own answer: keep it as theirs, with its qualifications. It does not say plainly that `
+      + `‘${labelOf(graph, subject.id)}’ will hold at some point during the goal’s period, so nothing is written as a figure. ${KEEP} `
+      + 'Do not ask about its effect instead, and do not press for an unconditional answer.' };
   }
   const blocked = notRecordable(subject, graph, true);
   return blocked !== undefined ? { refused: blocked } : { form: 'holds_now' };
@@ -198,18 +205,28 @@ export const RISK_HOLDS_NOW_ROW: RoleRow = {
   // The brief's own sentence, which admission kept for this risk (`already_true_quote`): bound by it.
   sourceOf: (subject, graph) => alreadyTrueQuoteOf((isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [])
     .find((n) => isRec(n) && n.id === subject.id)),
+  // AIE 6183711560's safe card: the forecast with its scope, window and qualifications, then the derived occurrence SHOWN before
+  // the press as Olumi's reading, never a probability the user stated.
   readingWords: (s, subject, label, graph) => s[0]?.form === 'holds_in_window'
-    ? `your forecast that ‘${label.trim()}’ would still be true during your goal’s period, the first ${firstPeriod(windowOf(graph, subject))} after the launch`
+    ? `your forecast that ‘${label.trim()}’ would hold at some point during your goal’s period, the first ${firstPeriod(windowOf(graph, subject))} `
+      + 'after the launch, with no qualifications in your answer'
     : `‘${label.trim()}’ already being true now`,
-  assumptions: (s, subject, graph) => [...(s[0]?.form === 'holds_in_window' ? ['Olumi reads that as it happening at least once in that period.'] : []),
+  assumptions: (s, subject, graph) => [...(s[0]?.form === 'holds_in_window' ? [derivedWindowWords(windowOf(graph, subject))] : []),
     effectAssumption(subject, graph)],
-  recordedWords: (s, subject, label, graph) => s[0]?.form === 'holds_in_window'
-    ? `Recorded your forecast: ‘${label.trim()}’ would still be true during your goal’s period, the first ${firstPeriod(windowOf(graph, subject))} after the `
-      + 'launch. How strongly it affects the model is still Olumi’s placeholder on its link.'
-    : riskHoldsNowRecordedWords(label),
+  // Said after the write, so its period is the block the risk now holds (the risk is no longer eligible for a new one).
+  recordedWords: (s, subject, label, graph) => {
+    if (s[0]?.form !== 'holds_in_window') return riskHoldsNowRecordedWords(label);
+    const held = EventRiskV1.safeParse((isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [])
+      .find((n): n is Rec => isRec(n) && n.id === subject.id)?.event_risk);
+    return held.success ? `Recorded your forecast: ‘${label.trim()}’ would hold at some point during your goal’s period, the first `
+      + `${firstPeriod(held.data.horizon.months)} after the launch. Olumi uses it as occurrence 100% in that period, a derived reading, not a `
+      + 'probability you stated. How strongly it affects the model is still Olumi’s placeholder on its link.'
+      : `Recorded your forecast for ‘${label.trim()}’.`;
+  },
   writer: {
     approve: (r, graph) => {
-      const approved = approvedFor(r.statements[0]!, r.subject, graph, userHoldsNowBlock(windowOf(graph, r.subject)), true);
+      const block = r.statements[0]?.form === 'holds_in_window' ? derivedWindowHoldsBlock(windowOf(graph, r.subject)) : userHoldsNowBlock(windowOf(graph, r.subject));
+      const approved = approvedFor(r.statements[0]!, r.subject, graph, block, true);
       if ('refused' in approved) return approved;
       return writes(approved, graph) ? { member: 'risk_occurrence', payload: JSON.parse(JSON.stringify(approved)) as unknown }
         : { refused: `‘${r.label}’ cannot hold this reading as written. Nothing was prepared. ${KEEP}` };

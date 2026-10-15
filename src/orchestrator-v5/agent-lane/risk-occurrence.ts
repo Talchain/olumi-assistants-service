@@ -218,6 +218,18 @@ export function userHoldsNowBlock(windowMonths: number): EventRiskV1T | undefine
 }
 const isHoldsNowBlock = (block: EventRiskV1T): boolean =>
   block.occurrence.basis === 'user' && block.occurrence.p_low === 1 && block.occurrence.p_high === 1 && block.mitigations === undefined;
+/**
+ * ⭐ The user's forecast that a condition holds at some point during a launch period (`holds_in_window`), as a block: occurrence 1
+ * there is OLUMI'S derived reading of that qualitative forecast, never a probability they stated (AIE 6183711560), so its basis is
+ * `olumi` and it is bound to that window. Their words stay theirs, in the statement record beside it.
+ */
+export function derivedWindowHoldsBlock(windowMonths: number): EventRiskV1T | undefined {
+  const parsed = EventRiskV1.safeParse({ version: 1,
+    occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: windowMonths } });
+  return parsed.success ? parsed.data : undefined;
+}
+const isDerivedWindowHoldsBlock = (block: EventRiskV1T): boolean =>
+  block.occurrence.basis === 'olumi' && block.occurrence.p_low === 1 && block.occurrence.p_high === 1 && block.mitigations === undefined;
 
 const share = (percent: number): number => Number((percent / 100).toFixed(6));
 /**
@@ -273,7 +285,9 @@ export const riskOccurrenceAskWords = (label: string, windowMonths: number): str
  * period only when it answers exactly them (`answering`).
  */
 export const riskWindowHoldsAskWords = (label: string, windowMonths: number): string =>
-  `Will ‘${label.trim()}’ still be true during your goal’s period, the first ${windowMonths === 1 ? 'month' : `${windowMonths} months`} after the launch?`;
+  // AIE 6183711560's safe question: it asks whether the CONDITION holds at any point (never its effect, nor that it persists).
+  `Do you expect ‘${label.trim()}’ to hold at any point during your goal’s period, the first ${windowMonths === 1 ? 'month' : `${windowMonths} months`} `
+  + 'after the launch? Keep any timing or other qualifications in your answer.';
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
 /** S2 "holds now": the receipt (the card is the ONE statement door's, `statement-door/card.ts`). */
@@ -325,12 +339,14 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   const block = EventRiskV1.safeParse(approved.event_risk);
   // Olumi's range, the user's "holds now", or the user's own stated chance, each with its verified statement: no other block
   // is ever written here, and one card never carries two statements.
-  // "Holds now" over a window from today, or the user's forecast that it holds during a launch period (`holds_in_window`): both
-  // the same "at least once within the window" block, each with its own statement.
+  // "Holds now" over a window from today is the user's block; their forecast that it holds during a launch period
+  // (`holds_in_window`) gets Olumi's derived block (AIE 6183711560). Both say "at least once within the window", each with its statement.
   const holdsNow = approved.holds_now !== undefined && (approved.holds_now.form === 'holds_now' || approved.holds_now.form === 'holds_in_window');
+  const derived = approved.holds_now?.form === 'holds_in_window';
   const stated = approved.stated_occurrence;
   if (!block.success || (holdsNow && stated !== undefined)
-    || (holdsNow ? !isHoldsNowBlock(block.data) : stated !== undefined ? !isStatedBlock(block.data, stated, approved.risk_id) : block.data.occurrence.basis !== 'olumi')
+    || (holdsNow ? !(derived ? isDerivedWindowHoldsBlock(block.data) : isHoldsNowBlock(block.data))
+      : stated !== undefined ? !isStatedBlock(block.data, stated, approved.risk_id) : block.data.occurrence.basis !== 'olumi')
     || !isDeepStrictEqual(block.data, approved.event_risk)) {
     return { kind: 'refused', reason: 'invalid_block' };
   }
