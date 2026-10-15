@@ -3982,7 +3982,7 @@ export function createAgentCapabilities(
     // £250,000 per year", "my earlier £250,000 target is withdrawn"; the statement verifier accepts each). A correction therefore
     // never replaces the saved target by figure presence: a new target goes through the goal contract (propose_goal_target), whose
     // redraft row is Olumi's reading (`limitsKeptBy`: inferred) on ONE card, and only the user's press saves it.
-    if (correction && draftedTargets.length === 0 && event === null && savedGoalTargets.length === 0 && savedStated !== null && !stillStated) {
+    if (correction && draftGoalTargets.length === 0 && event === null && savedGoalTargets.length === 0 && savedStated !== null && !stillStated) {
       // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
       return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
         + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `

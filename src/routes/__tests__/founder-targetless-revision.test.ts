@@ -105,6 +105,27 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     expect(reopened.goal_constraints).toContainEqual(expect.objectContaining(eventual));
   });
 
+  it('BUDDY raw stated governing target may not be masked by an unrelated drafted outcome target', async () => {
+    const graph = structuredClone(FX.graph);
+    Object.assign(graph.nodes.find((n: Rec) => n.id === GOAL), { goal_threshold_raw: 1.3, goal_threshold_unit: 'million (currency unspecified)' });
+    expect(readGoalRecord(graph, GOAL)?.target).toMatchObject({ raw: 1.3, unit: 'million (currency unspecified)' });
+    expect(graph.goal_constraints.filter((r: Rec) => r.node_id === GOAL)).toHaveLength(0);
+    const raw = FX.turns[0].calls.map((c: Rec) => {
+      const draft = JSON.parse(c.raw_text);
+      draft.outcomes.push({ label: 'Larger fund secured', provenance: 'explicit', unit: 'million (currency unspecified)', plausible_max: null });
+      draft.constraints.push({ metric: 'Larger fund secured', operator: '>=', value: 1.3,
+        unit: 'million (currency unspecified)', provenance: 'explicit', frame: 'level', role: 'target' });
+      return draft;
+    });
+    const s = await harness(graph, raw);
+    const offer = await s.revise('Keep the fundraising target at 1.3 million. The advertising budget is £250,000 per year.');
+    expect(offer, 'a separate outcome target cannot license losing the stated governing goal target')
+      .toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    expect(offer.proposal_id).toBeUndefined();
+    expect(s.writes).toHaveLength(0);
+    expect(s.graph()).toEqual(graph);
+  });
+
   it('never-revised goal target dropped by the drafter → refused, even with a separate eventual outcome target', async () => {
     const graph = structuredClone(FX.graph);
     graph.goal_constraints.push({ constraint_id: 'current-funding-target', node_id: GOAL, role: 'goal_target',
