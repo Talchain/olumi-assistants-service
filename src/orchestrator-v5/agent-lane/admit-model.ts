@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { statusQuoStatesZero, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -141,6 +141,8 @@ export interface CandidateModel {
   readonly goal: {
     metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
     kind?: 'event_by_date' | null;
+    /** HOST-WRITTEN, never drafted: the goal's level today is DERIVED from the user's figures (`goalLevelOfStatedSum`). */
+    level_derivation?: { readonly quote: string; readonly lead: string };
     deliverable?: string | null;
     /**
      * `false` means the brief named a DIRECTION and no number. Optional because the
@@ -543,7 +545,7 @@ export interface AdmittedNode {
    * AIQ (b) 5894808343 (1): Olumi's reading of the brief's figure as a change goal's today level (`briefGoalLevel`),
    * keyed to the level it read; `NodeV3.goal_level_reading`. Never the user's; its words are said.
    */
-  goal_level_reading?: { level: number; level_unit: string; quote: string; lead: string; bound?: '<=' | '<' | '>=' | '>' };
+  goal_level_reading?: { level: number; level_unit: string; quote: string; lead: string; bound?: '<=' | '<' | '>=' | '>'; derived?: true };
   /** Recovery Batch C: Olumi's validated reading of the target's semantics (`goal-target-basis.ts`); `NodeV3.goal_target_basis`. */
   goal_target_basis?: GoalTargetBasis | GoalTargetBasisAwaitingPeriod;
   /**
@@ -2983,22 +2985,18 @@ export function goalLevelOfStatedSum(model: CandidateModel, brief: string | unde
   const quote = sums.length === 1 ? sums[0]!.evidence?.quote : undefined;
   if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return model;
   const unitOf = (u: unknown): string => String(u ?? '').trim().toLowerCase();
-  // ⭐ SYSTEM 2 step 2 (DL 15 Oct): a part may be an OUTCOME the brief defines as a product whose level today is 0 because the
-  // status quo explicitly sets one of its factors to 0 (`statusQuoStatesZero`): "80 + 0, by your definition". Any other
-  // outcome part leaves the goal's level as it was; there is no default 0.
-  const zeroOutcome = (label: string): CandidateModel['factors'][number] | undefined => {
-    if (!model.outcomes.some((o) => o.label === label)) return undefined;
-    const products = (model.identities ?? []).filter((d) => d?.operation === 'product' && d.outcome === label);
-    if (products.length !== 1) return undefined;
-    const operands = products[0]!.factors.map((l) => model.factors.filter((f) => f.label === l));
-    if (operands.some((m) => m.length !== 1)) return undefined;
-    return operands.some((m) => statusQuoStatesZero(model, m[0]!, brief))
-      ? { label, role: 'observable', baseline_known: true, baseline_value: 0, unit: goal.unit, provenance: 'explicit' } : undefined;
-  };
+  // ⭐ SYSTEM 2 step 2 (DL 15 Oct; AIE 6181498097): a part may be an OUTCOME the user's own definition names as ADDITIONAL
+  // ("the existing 80 tickets per week plus the additional specialist capacity"): by that definition it counts only what is
+  // added, so it is absent at today's reference: 0 today. Never read from an option's setting, and no default 0.
+  const definition = quote.toLowerCase();
+  const additionalToday = (label: string): boolean => /^additional\s/iu.test(label.trim()) && model.outcomes.some((o) => o.label === label)
+    && definition.includes(label.trim().toLowerCase());
+  const zeroParts = new Set<string>();
   const matches = sums[0]!.factors.map((label) => {
     const own = model.factors.filter((f) => f.label === label);
-    const zero = own.length === 0 ? zeroOutcome(label) : undefined;
-    return zero !== undefined ? [zero] : own;
+    if (own.length !== 0 || !additionalToday(label)) return own;
+    zeroParts.add(label);
+    return [{ label, role: 'observable' as const, baseline_known: true, baseline_value: 0, unit: goal.unit, provenance: 'explicit' }];
   });
   if (matches.length < 2 || matches.some((m) => m.length !== 1)) return model;
   const parts = matches.map((m) => m[0]!);
@@ -3007,7 +3005,16 @@ export function goalLevelOfStatedSum(model: CandidateModel, brief: string | unde
   const stated = parts.filter((f) => f.baseline_value !== 0);
   if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return model;
   const total = parts.reduce((sum, f) => sum + (f.baseline_value as number), 0);
-  return Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)) ? { ...model, goal: { ...goal, baseline_provenance: 'explicit' } } : model;
+  if (!(Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)))) return model;
+  if (zeroParts.size === 0) return { ...model, goal: { ...goal, baseline_provenance: 'explicit' } };
+  // ⭐ AIE 6181498097: the total is DERIVED from the user's figures, never an explicitly measured total. It is carried as the
+  // goal's level reading (`goal_level_reading`), which the Run's reply and the licence's readings say; the level itself keeps
+  // only the brief's stamp, never the explicit one.
+  const said = (f: CandidateModel['factors'][number]): string => (zeroParts.has(f.label)
+    ? `‘${f.label}’ is none today, because it counts only what is added` : `‘${f.label}’ is ${f.baseline_value} ${goal.unit}`);
+  const lead = `Today’s level of ‘${goal.metric}’ is derived from your figures, by your definition: ${parts.map(said).join('; ')}`;
+  return lead.length > 300 || quote.trim().length > 160 ? model
+    : { ...model, goal: { ...goal, baseline_provenance: 'explicit', level_derivation: { quote: quote.trim(), lead } } };
 }
 
 /**
@@ -4026,6 +4033,7 @@ function admitOnce(
          */
         const baselineRaw = model.goal.baseline_value;
         let observed_state: AdmittedNode['observed_state'];
+        let derivedReading: { level: number; level_unit: string; quote: string; lead: string; derived: true } | undefined;
         const withheld = (reason: string): void => {
           loss.push({
             field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
@@ -4072,7 +4080,10 @@ function admitOnce(
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, verifiedGoalLevel(model, brief));
+            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap,
+              model.goal.level_derivation === undefined && verifiedGoalLevel(model, brief));
+            derivedReading = model.goal.level_derivation === undefined ? undefined
+              : { level: baselineRaw, level_unit: model.goal.unit ?? '', quote: model.goal.level_derivation.quote, lead: model.goal.level_derivation.lead, derived: true };
           } else {
             withheld(verdict.reason);
           }
@@ -4103,6 +4114,7 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
+          ...(observed_state !== undefined && derivedReading !== undefined ? { goal_level_reading: derivedReading } : {}),
           ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis }
             : levelRefusal !== undefined ? { goal_target_basis: levelRefusal } : {}),
         };

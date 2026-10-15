@@ -13,11 +13,15 @@ import { projectEntity } from '../runtime/agent-capabilities.js';
 import { statementBindsFactorLevel } from '../verified-option-setting.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { valueProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { goalLevelIsOlumisEstimate } from '../../goal-target/goal-chance-licence.js';
+import { goalReadingsOf } from '../../coaching/goal-reading-disclosure.js';
 
 type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync('tests/fixtures/sys2/served-capacity-e4ff6039.json', 'utf8')) as { brief: string; raw_text: string };
 const RAW = JSON.parse(SERVED.raw_text) as Rec;
 const LEGACY = JSON.parse(readFileSync('tests/fixtures/drafter-capacity-chain/served-c1494f4d.json', 'utf8')) as { brief: string; draft: Rec };
+const HIRING = { brief: (JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007.json', 'utf8')) as Rec).brief as string,
+  draft: JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007-draft.json', 'utf8')) as Rec };
 const EIGHTY = 'Our existing team resolves 80 tickets per week.';
 const sid = '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a';
 
@@ -33,36 +37,46 @@ async function registered(draft: Rec): Promise<Rec> {
 const node = (g: Rec, id: string): Rec => g.nodes.find((n: Rec) => n.id === id);
 const asksForToday = (g: Rec): boolean => JSON.stringify(targetTestabilityOf(g)).includes('missing_goal_baseline');
 const withoutStatusQuoZero = (): Rec => ({ ...RAW, statements: RAW.statements.filter((s: Rec) => s.quote !== 'Keep current staffing adds no specialist.') });
+const DERIVED = 'Today’s level of ‘Weekly support capacity’ is derived from your figures, by your definition: ‘Existing team support capacity’ is 80 tickets per week; ‘Additional specialist capacity’ is none today, because it counts only what is added';
 
-describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s level today is "80 + 0, by your definition"', () => {
-  it('RED (served raw): the user\'s 80 and the goal\'s level today are recorded as the user\'s', async () => {
+describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s level today is DERIVED from their figures (80 + 0)', () => {
+  it('RED (served raw): the user\'s 80 is theirs; the goal\'s level today is derived from their figures, never a measured total', async () => {
     const g = await registered(RAW);
     expect(node(g, 'existing_team_support_capacity').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction', extractionType: 'explicit' });
     expect(node(g, 'existing_team_support_capacity').observed_state.user_material_unverified).toBeUndefined();
-    expect(node(g, 'weekly_support_capacity').observed_state).toMatchObject({ raw_value: 80, baseline: 0.16, source: 'brief_extraction', extractionType: 'explicit' });
+    const goal = node(g, 'weekly_support_capacity');
+    expect(goal.observed_state).toMatchObject({ raw_value: 80, baseline: 0.16, source: 'brief_extraction' });
+    expect(goal.observed_state.extractionType).toBeUndefined(); // never presented as an explicitly measured total
+    expect(goal.goal_level_reading).toEqual({ level: 80, level_unit: 'tickets per week', lead: DERIVED, derived: true,
+      quote: 'Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.' });
   });
 
-  it('CONSUMERS read the same recorded level: the licence\'s provenance authority, readiness (no re-ask) and the AI\'s goal context', async () => {
+  it('CONSUMERS use it: the licence (not Olumi\'s estimate; its readings say "derived"), readiness (no re-ask), the Run\'s words and the AI\'s goal', async () => {
     const g = await registered(RAW);
     const goal = node(g, 'weekly_support_capacity');
+    expect(goalLevelIsOlumisEstimate(g, 'weekly_support_capacity')).toBe(false);
     expect(valueProvenanceOf(goal.observed_state).origin).toBe('human');
+    // The licence's typed readings (the UI says them beside the chance) and the Run reply's tail are this one list.
+    expect(goalReadingsOf(g, 'weekly_support_capacity')).toEqual([{ kind: 'level', node_id: 'weekly_support_capacity', words: `${DERIVED}.` }]);
     expect(asksForToday(g)).toBe(false);
-    expect(projectEntity(goal as Parameters<typeof projectEntity>[0])).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { source: 'brief_extraction', extraction_type: 'explicit' } });
+    const entity = projectEntity(goal as Parameters<typeof projectEntity>[0]);
+    expect(entity).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { source: 'brief_extraction' } });
+    expect((entity.value_provenance as Rec).extraction_type).toBeUndefined();
   });
 
-  it('CONTRAST (no default 0): without the status quo\'s "adds no specialist", the goal keeps no level and readiness still asks', async () => {
+  it('the 0 is by the user\'s DEFINITION ("additional"), never the status quo\'s setting: without "adds no specialist" it still holds', async () => {
     const g = await registered(withoutStatusQuoZero());
+    expect(node(g, 'weekly_support_capacity').goal_level_reading?.lead).toBe(DERIVED);
+  });
+
+  it('CONTRAST (no default 0): a part the definition does not name as additional gives no level, and readiness still asks', async () => {
+    const rename = (v: unknown): unknown => (typeof v === 'string' ? v.split('Additional specialist capacity').join('Specialist capacity') : v);
+    const swap = (x: Rec): Rec => JSON.parse(JSON.stringify(x), (_k, v) => rename(v));
+    const g = await registered({ ...swap(RAW), statements: RAW.statements });
     expect(node(g, 'weekly_support_capacity').observed_state).toBeUndefined();
     expect(asksForToday(g)).toBe(true);
     // The factor's own 80 is still the user's: it never depended on the zero.
     expect(node(g, 'existing_team_support_capacity').observed_state).toMatchObject({ source: 'brief_extraction', extractionType: 'explicit' });
-  });
-
-  it('CONTRAST: a status quo that sets the factor to another figure gives no explicit zero', async () => {
-    const quoSets = { ...RAW, options: RAW.options.map((o: Rec) => (o.is_status_quo === true
-      ? { ...o, interventions: [{ factor_label: 'Additional specialists', value: 1, value_kind: 'absolute', unit: 'specialists', provenance: 'explicit' }] } : o)) };
-    const g = await registered(quoSets);
-    expect(node(g, 'weekly_support_capacity').observed_state).toBeUndefined();
   });
 
   it('the four tests, each a contrast: frame, distinctive word, and one subject per figure', () => {
@@ -78,18 +92,22 @@ describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s leve
     const per = RAW.factors.find((f: Rec) => f.label === 'Tickets resolved per additional specialist');
     const misbound = { ...RAW, statements: [{ ...RAW.statements.find((s: Rec) => s.quote === EIGHTY), subject: { kind: 'factor', label: per.label, to_label: null, factor_label: null } }] };
     expect(statementBindsFactorLevel(misbound as never, { ...per, baseline_value: 80 }, SERVED.brief)).toBe(false);
+    // AIE 6181498097: the four tests are ambiguity checks ONLY; the existing context checks still hold. A sentence that also
+    // writes the goal's target figure never attests a current level, however uniquely it names the factor.
+    expect(statementBindsFactorLevel({ ...RAW, goal: { ...RAW.goal, value: 80 } } as never, factor, SERVED.brief)).toBe(false);
   });
 
-  it('SECOND BRIEF (Paul\'s legacy c1494f4d, served labels): "six mid-weight developers" binds 6 to "Mid-weight developers"', () => {
+  it('SECOND BRIEF (Paul\'s served hiring brief post3007, served labels): "six mid-weight developers" binds 6 to "Mid-weight developers"', () => {
     const stmt = (label: string, quote: string, value: number, unit: string): Rec => ({ quote, subject: { kind: 'factor', label, to_label: null, factor_label: null },
       field: 'level', form: 'point', value, low: null, high: null, unit, qualifier: null, conditions: null });
-    const devs = LEGACY.draft.factors.find((f: Rec) => f.label === 'Mid-weight developers');
-    const devQuote = devs.baseline_evidence.quote;
-    expect(statementBindsFactorLevel({ ...LEGACY.draft, statements: [stmt(devs.label, devQuote, 6, 'developers')] } as never, devs, LEGACY.brief)).toBe(true);
-    // CONTRAST, same brief: "25% of THEIR time" does not write the factor's frame ("% of development time"), so the frame test
-    // (2) holds it unknown, retained, however the drafter labels it: the rule never binds by the label alone.
-    const legacy = LEGACY.draft.factors.find((f: Rec) => f.label === 'Time on legacy fixes');
-    const legacyQuote = legacy.baseline_evidence.quote;
-    expect(statementBindsFactorLevel({ ...LEGACY.draft, statements: [stmt(legacy.label, legacyQuote, 25, '% of development time')] } as never, legacy, LEGACY.brief)).toBe(false);
+    const devs = HIRING.draft.factors.find((f: Rec) => f.label === 'Mid-weight developers');
+    expect(statementBindsFactorLevel({ ...HIRING.draft, statements: [stmt(devs.label, devs.baseline_evidence.quote, 6, 'developers')] } as never, devs, HIRING.brief)).toBe(true);
+    // CONTRAST, same brief: bound to another same-frame-free factor ("Tech lead hires", people) the frame test refuses it.
+    const leads = HIRING.draft.factors.find((f: Rec) => f.label === 'Tech lead hires');
+    expect(statementBindsFactorLevel({ ...HIRING.draft, statements: [stmt(leads.label, devs.baseline_evidence.quote, 6, 'people')] } as never, { ...leads, baseline_value: 6 }, HIRING.brief)).toBe(false);
+    // CONTEXT KEPT (AIE 6181498097), Paul's legacy brief c1494f4d: the same sentence there sits beside "the next SIX months", a
+    // repeated figure in its paragraph, so the existing neighbour check holds it unknown, however uniquely it names the factor.
+    const lDevs = LEGACY.draft.factors.find((f: Rec) => f.label === 'Mid-weight developers');
+    expect(statementBindsFactorLevel({ ...LEGACY.draft, statements: [stmt(lDevs.label, lDevs.baseline_evidence.quote, 6, 'developers')] } as never, lDevs, LEGACY.brief)).toBe(false);
   });
 });

@@ -13,7 +13,6 @@ import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
 import { sourceMapOf, subjectKey } from './construction-source-map.js';
-import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -776,52 +775,25 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
   return (map.verified.get(key) ?? []).some((statement) => {
     if (statement.form !== 'point' || statement.low !== value || statement.negated === true) return false;
     const quote = statement.quote;
+    // L1 (as `factorLevelSpans`): a count unit that names nothing of its own ("headcount") takes its noun from the factor's
+    // whole label written beside the figure ("six mid-weight developers").
+    const name = words(currentQuantityLabel(factor.label)).map(singular);
+    const labelBeside = (amount: StatedAmount): boolean => countsItself(factor.unit) && name.length > 0
+      && words(quote.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular).join(' ') === name.join(' ');
     const inFrame = findLinkEffectAmounts(quote).filter((amount) =>
-      sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount));
+      sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount)));
     if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
+    const stated = inFrame[0]!;
     const label = (l: string): Set<string> => new Set(words(l).map(singular));
     const own = label(factor.label);
     const rivals = [{ label: model.goal.metric, unit: model.goal.unit }, ...model.factors.filter((f) => f !== factor), ...model.outcomes, ...model.risks]
       .filter((r) => JSON.stringify(readUnitParts(r.unit)) === unit).map((r) => label(r.label));
     if (!words(quote).map(singular).some((w) => !grammar(w) && own.has(w) && !rivals.some((r) => r.has(w)))) return false;
-    return ![...map.verified.entries()].some(([other, statements]) => other !== key
-      && statements.some((s) => s.quote === quote && (s.low === value || s.high === value)));
-  });
-}
-
-/**
- * ⭐ SYSTEM 2 step 2: THE STATUS QUO'S EXPLICIT ZERO (DL ruling 15 Oct ~00:4xZ; AIE 6180618773 retains explicit zeros, 6148410878
- * forbids a default 0). "Keep current staffing adds no specialist." states that carrying on as now sets "Additional
- * specialists" to 0, but it writes no numeral, so the verifier (figures > 0) cannot hold it. It counts as the user's 0 ONLY
- * inside this binding: a level statement of 0 on {the one status-quo option, this factor}; its sentence a whole statement of
- * the brief that names the option verbatim, writes "no", "none", "zero" or "0", and a word of this factor's label; and the
- * option sets nothing else on this factor. Otherwise the 0 stays unknown: never a default.
- */
-export function statusQuoStatesZero(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
-  try {
-    return zeroStatedByStatusQuo(model, factor, brief);
-  } catch {
-    return false; // A malformed draft gives no zero: unknown, never a default.
-  }
-}
-
-function zeroStatedByStatusQuo(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
-  if (typeof brief !== 'string' || factor.baseline_value !== 0) return false;
-  const quo = model.options.filter((o) => (o as { is_status_quo?: unknown }).is_status_quo === true);
-  if (quo.length !== 1) return false;
-  const option = quo[0]!;
-  if ((option.interventions ?? []).some((iv) => iv.factor_label === factor.label && iv.value !== 0)) return false;
-  const raw = Reflect.get(model, 'statements');
-  const own = new Set(words(factor.label).map(singular));
-  return (Array.isArray(raw) ? raw : []).some((entry: unknown) => {
-    const r = entry !== null && typeof entry === 'object' ? entry as Record<string, unknown> : {};
-    const subject = r['subject'] !== null && typeof r['subject'] === 'object' ? r['subject'] as Record<string, unknown> : {};
-    const quote = typeof r['quote'] === 'string' ? r['quote'].trim() : '';
-    return r['field'] === 'level' && r['form'] === 'point' && r['value'] === 0 && subject['kind'] === 'option'
-      && subject['label'] === option.label && subject['factor_label'] === factor.label
-      && quote !== '' && wholeStatementIn(brief, quote) && quote.includes(option.label)
-      && words(quote).some((w) => w === 'no' || w === 'none' || w === 'zero' || w === '0')
-      && words(quote).map(singular).some((w) => !grammar(w) && own.has(w));
+    if ([...map.verified.entries()].some(([other, statements]) => other !== key
+      && statements.some((s) => s.quote === quote && (s.low === value || s.high === value)))) return false;
+    // The four tests only settle WHICH subject; the sentence must still be this factor's current level in context.
+    return levelInContext(model, factor, brief, quote, (text) => (text === quote
+      ? { start: stated.index, end: stated.index + stated.matchedText.length } : null));
   });
 }
 
@@ -832,12 +804,29 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
 
 /** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
 function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  return factor?.baseline_evidence != null && levelInContext(model, factor, brief, factor.baseline_evidence.quote, (text) => {
+    const matches = factorLevelSpans(model, factor, text);
+    if (matches.length !== 1) return null;
+    const span = matches[0]!;
+    return ownsFactorLevel(text.slice(0, span.start), factor) || ownCurrentClause(text, span, factor) ? span : null;
+  });
+}
+
+/**
+ * Everything that makes a figure this factor's CURRENT level, apart from how the clause names the factor (`bind`): the whole
+ * located sentence, one factor of that label, never the target's sentence or a limit's figure, not inside a quotation, a
+ * current-level role (never past, future, conditional, target or limit), and no correction, bound, attribution or repeat
+ * around it (`safeNeighbours`). AIE 6181498097: the statement binder's four tests are ambiguity checks ONLY; these meanings
+ * are kept for both binders.
+ */
+function levelInContext(model: CandidateModel, factor: Factor, brief: string | undefined, quote: unknown,
+  bind: (text: string) => { start: number; end: number } | null): boolean {
   try {
     const value = factor.baseline_value;
-    if (typeof brief !== 'string' || factor.baseline_evidence == null
+    if (typeof brief !== 'string' || typeof quote !== 'string'
       || typeof value !== 'number' || !Number.isFinite(value)) return false;
     const sentences = assertions(brief);
-    const a = exactEvidence(brief, factor.baseline_evidence.quote, sentences);
+    const a = exactEvidence(brief, quote, sentences);
     if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
     if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
     // The sentence holding the goal target cannot also attest a current level, even for a differently named factor
@@ -845,12 +834,10 @@ function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: str
     if (typeof model.goal.value === 'number' && [...findLinkEffectAmounts(a.text).map(n => n.magnitude),
       ...words(a.text).flatMap(w => { const n = figure(w); return n === null ? [] : [n]; })].includes(model.goal.value)) return false;
     if (model.constraints.some(c => c.value === value && metricNamesLabel(c.metric, factor.label))) return false;
-    const matches = factorLevelSpans(model, factor, a.text);
-    if (matches.length !== 1) return false;
-    const span = matches[0]!;
+    const span = bind(a.text);
+    if (span === null) return false;
     if (insideQuotation(brief, a, span)) return false;
-    if (!(ownsFactorLevel(a.text.slice(0, span.start), factor) || ownCurrentClause(a.text, span, factor))
-      || !currentLevelRole(a.text, { span, unit: factor.unit })) return false;
+    if (!currentLevelRole(a.text, { span, unit: factor.unit })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
       if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
       // An elliptical bound, correction, retraction or attributed sentence remains ambiguous.
