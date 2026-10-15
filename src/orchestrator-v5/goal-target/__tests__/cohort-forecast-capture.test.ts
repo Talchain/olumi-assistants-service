@@ -207,6 +207,17 @@ describe("the user's cohort forecast: their words → one card → their press �
       .toMatchObject({ ok: true, statement: { quotes: ['Yes.'] } });
   });
 
+  it('RED (served cohort witness, CEE 87d5f90e): the same-people card binds when the AI names the goal in another letter case', async () => {
+    const w = world();
+    const label = goalOf(plain(F.graph)).label as string;
+    const other = label === label.toLowerCase() ? label.toUpperCase() : label.toLowerCase();
+    expect(other).not.toBe(label);
+    const card = await w.caps.proposeStatement!(ctx(SAME, SAME) as never,
+      sameArgs({ subject: { kind: 'goal', label: other, field: 'relation' } }) as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    expect(card.statement.subject).toBe(label);
+  });
+
   it('CONTRAST: words the user never typed, a figure-bearing same-people answer, or an option the model does not hold → refused', async () => {
     const w = world();
     expect(await w.caps.proposeStatement!(ctx() as never, args({ quote: 'It would reach about 500 people.', answering: ASK }) as never))
