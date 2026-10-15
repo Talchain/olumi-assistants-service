@@ -709,7 +709,8 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
     expect(calls).toBe(2);
     expect(issues(inputs[1]!)).toEqual([GAP_ISSUE, SERVED_LOOP_ISSUE]);
     expect(inputs[1]).toContain(`Candidate to repair: ${JSON.stringify(first)}`);
-    expect(instructions[1]).toContain('Preserve every option and risk hypothesis');
+    // The within-size repair suffix is the AIE's GR1 text (v2 arm C), bound by identity to its packet.
+    expect(instructions[1]).toContain((JSON.parse(readFileSync('tests/fixtures/sys2/aie-gen-v2-arm-c-packet.json', 'utf8')) as { generation: { changes: { id: string; replacement: string }[] } }).generation.changes.find((c) => c.id === 'GR1')!.replacement);
     // Adopted by identity: the risk now routes on to what it threatens, and nothing is withheld for a loop.
     expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(true);
     expect(has(graph, DELAY, AVAILABILITY)).toBe(false);

@@ -1,0 +1,49 @@
+{
+  "created_at_utc": "2026-10-15T00:59:27Z",
+  "status": "UNMEASURED v2 design; C0 adoption proceeds separately; no new execution authorised by this file",
+  "baseline": {
+    "source": "Dispatched benchmark CEE59a6298f5f43fb4415ecf537ea8ba1444596f648",
+    "v1_sha256": "1b94e85bc3bf60d438d83a716bde2f4daf5ea4749c67600241ca3b869df46411"
+  },
+  "generation": {
+    "retain": "G0-G2 v1 remain held; G3 is a bounded additional delta for existing direct-setting and repair contracts, not admission repair or proof",
+    "changes": [
+      {
+        "id": "G3",
+        "old": "For each option fill `interventions` with its factor settings. value_kind:\"absolute\" means the resulting total or level; value_kind:\"additional\" means a signed change from the same factor baseline.",
+        "replacement": "For each option fill `interventions` with the settings that the action directly changes under the supported causal reading. Separate an action or experiment setting from the response it may cause: do not directly set a downstream outcome merely to give an option a number or clear a construction issue. Preserve the causal parents, stated response ranges, uncertainty, evidence qualifications, speaker, source, native unit and period through the first draft and every repair. A research or pilot option sets the activity, exposure or coverage that is actually proposed; its success remains an uncertain outcome, not a chosen result. A separately grounded Olumi approximation must retain the original statement and range and disclose its basis and limitations; an AI label alone does not justify choosing an endpoint or treating a prediction as an intervention. If the existing contract cannot carry the response faithfully, retain the useful option, hypothesis and unresolved reasoning and leave its dependent numbers unsupported. value_kind:\"absolute\" means the resulting total or level of the directly changed factor; value_kind:\"additional\" means a signed change from that same factor baseline.",
+        "apply": "Same BUILD instruction in initial and repair construction; actual assembled anchor once each applicable dispatch"
+      },
+      {
+        "id": "GR1",
+        "old": "Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.",
+        "replacement": "Repair only the listed construction issues while retaining every option, risk hypothesis, complete source statement, range, qualification, attributed disagreement, question, causal direction and path to the goal. Correct the action setting that is missing; do not replace its uncertain downstream response with a fixed intervention, invent a probability, or move a learning window into a deadline to clear validation. Preserve the existing supported readings and expose an unsupported numeric representation honestly.",
+        "apply": "Existing construction repair suffix only"
+      }
+    ]
+  },
+  "coaching": {
+    "retain": "Deployed C0 v1 decision remains; C1/C2 are unmeasured shadow refinements",
+    "changes": [
+      {
+        "id": "C1",
+        "append_to": "Start with the useful model-relative finding paragraph",
+        "text": "A permitted provisional comparative lead remains useful when target chances are withheld: if the canonical licence supplies it, state which included option leads and the exact basis and limits, without turning that comparison into target achievement or a recommendation."
+      },
+      {
+        "id": "C2",
+        "append_to": "For a compatible supplied before/after comparison paragraph",
+        "text": "When the supplied precomputed comparison reports unchanged results despite a changed setting, state both facts and the continuing limitation. Unchanged output does not prove the change has no causal effect; do not invent an explanation for why the output stayed unchanged."
+      }
+    ]
+  },
+  "rationale": {
+    "generation": "Actual C D3r1 call1 preserves weak 10–20% response in statements; call2 adds fixed 10% churn intervention while retaining source statement. Raw semantic failure precedes further admission loss.",
+    "coaching": "Blind C preferred in R1 and R2 separately (labels reversed per case); limited to two Run contexts of one capacity scenario. Candidate omitted permitted lead and both arms omitted unchanged precomputed comparison."
+  },
+  "execution": {
+    "next": "Existing owner first repairs current source/context/admission carriers. Existing operator then supplies one actual matched current-head request pair and complete physical budget before any new comparison; baseline and candidate use identical corrected context.",
+    "stop": "No further GEN extension until hard failures repaired; first hard candidate failure ends component extension, first429 ends run. Retain old FAILs, no gold/source changes.",
+    "scope": "No new provider/key/engine/DB/product execution, harness/scorer/team or whole-flow conclusion."
+  }
+}

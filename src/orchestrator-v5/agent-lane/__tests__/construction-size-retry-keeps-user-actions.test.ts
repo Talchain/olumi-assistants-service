@@ -27,6 +27,7 @@
  * the authority on what the registered model still asks.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate, retainsRiskHypotheses, retrySchemaPinningGoal } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
@@ -115,6 +116,8 @@ const firstVerdict = (d: Draft) => assessConstructionSize(admitCandidateModel(pr
  * what you ADDED … risks and outcomes" that was the same two orders at the risk position. A risk the brief states is kept;
  * one Olumi added may go; every risk that is kept keeps its direction and its path to the goal.
  */
+const GR1_REPAIR = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-gen-v2-arm-c-packet.json', 'utf8')) as { generation: { changes: { id: string; replacement: string }[] } })
+  .generation.changes.find((c) => c.id === 'GR1')!.replacement;
 const COMPACTION_REPAIR_RULE = 'Repair only the listed construction issues. Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief: an option you added is the only kind that may go. '
   + 'Every option you keep still acts on each factor it acted on that you keep. Keep every risk the brief states; a risk you added may go. '
   + 'Every risk you keep keeps its causal direction and its path to the goal; do not delete an option or a risk the brief states to clear validation.';
@@ -312,7 +315,8 @@ describe('(1) a size retry may shed what the model added, never what a kept opti
 
 describe('(2) an OVERSIZED draft with a repair issue gets the repair instructions AND the copy-exactly rule', () => {
   const COPY_RULE = /Return your previous model with only the items you ADDED beyond the brief removed\. Copy every item you keep EXACTLY as it is in your previous model: the same label, wording, provenance and relationships\. Do not rename, merge, reword or re-add anything\./;
-  const REPAIR_RULE = /Repair only the listed construction issues\. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation\./;
+  // The within-size repair suffix is the AIE's GR1 text (v2 arm C, DL 06:37Z), bound by identity to its packet.
+  const REPAIR_RULE = GR1_REPAIR;
   const BUDGET = `The limit is ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links.`;
   const ONLY_REPAIRS = 'The only other change allowed is the repair each listed construction issue asks for, made in place on the item it names.';
   const COPY_RULE_TEXT = 'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
@@ -352,7 +356,7 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     // ⛔ B1 (5842265540): beside "Remove what you ADDED … speculative options" the retry was also told "Preserve every
     // option" — and adoption refused the very shed the size instruction asked for. The compaction's repair rule says
     // which options may go (only ones Olumi added), and never "Preserve every option".
-    expect(retry.instructions).not.toMatch(REPAIR_RULE);
+    expect(retry.instructions).not.toContain(REPAIR_RULE);
     expect(retry.instructions).not.toContain('Preserve every option');
     // ⛔ …and the same at the risk position (verifier at 5d985e75): the retry may shed a risk Olumi added, never one the brief states.
     expect(retry.instructions).not.toContain('Preserve every risk hypothesis');
@@ -368,20 +372,20 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
   it('CONTROL: a repair-only retry (within size) is NOT told to remove what it added, and carries no budget', async () => {
     const { reqs } = await construct(c22(), covered());
     expect(reqs).toHaveLength(2);
-    expect(reqs[1]!.instructions).toMatch(REPAIR_RULE);
+    expect(reqs[1]!.instructions).toContain(REPAIR_RULE);
     expect(reqs[1]!.instructions).not.toMatch(COPY_RULE);
     expect(reqs[1]!.instructions).not.toContain(BUDGET);
     expect(reqs[1]!.instructions).not.toContain(ONLY_REPAIRS);
     expect(reqs[1]!.input).toContain(`Candidate to repair: ${JSON.stringify(c22())}`);
     // Byte for byte what it was before this delta: a within-size repair is not a compaction.
-    expect(reqs[1]!.instructions).toBe(`${BUILD_INSTRUCTIONS}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`);
+    expect(reqs[1]!.instructions).toBe(`${BUILD_INSTRUCTIONS}  ${GR1_REPAIR}`);
   });
 
   it('CONTROL: a size-only retry carries the copy-exactly rule and NO repair rule', async () => {
     const { reqs } = await construct(oversized(covered()), covered());
     expect(reqs).toHaveLength(2);
     expect(reqs[1]!.instructions).toMatch(COPY_RULE);
-    expect(reqs[1]!.instructions).not.toMatch(REPAIR_RULE);
+    expect(reqs[1]!.instructions).not.toContain(REPAIR_RULE);
     expect(reqs[1]!.instructions).not.toContain(COMPACTION_REPAIR_RULE);
     expect(reqs[1]!.input).toContain('Your previous model, to shrink: ');
     // Byte for byte what it was before B1's fix: the size-only prompt is not touched.
