@@ -667,16 +667,32 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     expect(composeRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
   });
 
-  // ⛔ DL ruling 5940472067: no phrase list is the control — the CODE LINE leads every sent text, so no model sentence can
-  // replace the record. HARNESS's 7 outside lines (5940373987) + Codex's (pre-review e1c7c788) + the 2 honest ones.
+  // BUDDY-B #3253 round 2: finding-first still forbids an unchanged-input claim beside a named change.
+  // Retain every earlier adversarial phrasing and challenge the general model/input class outside that corpus.
   it.each([
     'Nothing changed.', 'It used the same inputs.', 'The inputs were unchanged.', 'No inputs were changed.', 'This didn’t change anything.',
     'Nothing in your model has changed.', 'Nothing in your model was changed.', 'None of your inputs changed.', 'Your model is unchanged.',
     'Your model hasn’t changed.', 'The inputs stayed the same.', 'The other inputs were unchanged.', 'Everything else used the same inputs.',
-  ])('whatever the model says ("%s"), the sent text opens on the code line', (line) => {
+    'The input settings have not changed at all.',
+  ])('drops the contrary claim "%s" and retains the complete record once', (line) => {
     const r = composeRerunExplanation(`${WHY} ${line}`, p);
-    expect(r.text.startsWith(`${LINE}\n\n${WHY}`)).toBe(true);
+    expect(r.failed).toContain('RX-NO-CONTRARY-SAME');
+    expect(r.dropped).toContain(line);
+    expect(r.text).not.toContain(line);
+    expect(r.text.split(LINE)).toHaveLength(2);
+    expect(r.text).toBe(`${WHY}\n\n${LINE}`);
+    expect(rerunViewFailures({ reasoning: line }, p)).toContain('RX-NO-CONTRARY-SAME');
   });
+
+  it.each(['Nothing else changed.', 'Olumi cannot confirm that your model is unchanged.'])(
+    'keeps the qualified full-coverage control "%s" and record once', (line) => {
+      const r = composeRerunExplanation(`${WHY} ${line}`, p);
+      expect(r.failed).toEqual([]);
+      expect(r.dropped).toEqual([]);
+      expect(r.text).toContain(line);
+      expect(r.text.split(LINE)).toHaveLength(2);
+      expect(rerunViewFailures({ reasoning: line }, p)).toEqual([]);
+    });
 
   it.each(['You ran it with the same input values.', 'Nothing in your model changed.'])('RED (RX-NO-CONTRARY-SAME, on staging today): "%s" is dropped', (line) => {
     const r = composeRerunExplanation(`${WHY} ${line}`, p);
