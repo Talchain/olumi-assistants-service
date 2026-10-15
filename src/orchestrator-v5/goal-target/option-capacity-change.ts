@@ -25,6 +25,9 @@ type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
+/** The option-capacity member's operation (the press's own write; the statement door delegates to it, `asMemberOp`). */
+export const SET_OPTION_CAPACITY_CHANGE_OP = 'set_option_capacity_change' as const;
+
 /** What the card offers and the press applies, byte for byte. */
 export interface ApprovedOptionCapacityChange {
   readonly goal_id: string;

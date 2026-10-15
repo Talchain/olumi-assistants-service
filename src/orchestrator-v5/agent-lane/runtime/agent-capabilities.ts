@@ -49,7 +49,7 @@ import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareFor
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { optionCapacityChangeCard, optionCapacityChangeHeld, optionCapacityChangeStillApplies, optionCapacityTarget, planOptionCapacityChange,
-  otherSharesOf, shareFiguresFor, withOptionCapacityChange, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
+  otherSharesOf, shareFiguresFor, withOptionCapacityChange, SET_OPTION_CAPACITY_CHANGE_OP, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
 import { effectLeadFromStatements } from '../../goal-target/effect-lead.js';
 import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
@@ -224,7 +224,7 @@ const NOT_A_FACTOR_NOTE =
 
 /** E5: the hiring-times op (its union member and `record.ts` entry are EBD's one-writer edits to `proposal.ts`; DL, 12 Oct). */
 const SET_HIRING_TIMES: StructuredProposal['operations'][number]['op'] = 'set_hiring_times';
-const SET_OPTION_CAPACITY_CHANGE: StructuredProposal['operations'][number]['op'] = 'set_option_capacity_change';
+const SET_OPTION_CAPACITY_CHANGE: StructuredProposal['operations'][number]['op'] = SET_OPTION_CAPACITY_CHANGE_OP;
 /**
  * E5: the applied hiring-times card's follow-up. ⛔ `follow_up` IS WHAT THE USER READS (reply-face P1, as #3153): the user's
  * sentence only. The direction for the Agent is `HIRING_TIMES_NOTE`. A committed change runs the analysis itself: never ask for a Run.
@@ -4265,10 +4265,14 @@ export function createAgentCapabilities(
     const card = doorCardOf(parent.operations[0]!);
     const memberOp = asMemberOp(parent.operations[0]!);
     const row = card === undefined ? undefined : doorRowOf(card);
-    if (card === undefined || memberOp === undefined || row === undefined || memberOp.op !== SET_RISK_OCCURRENCE_OP) {
+    if (card === undefined || memberOp === undefined || row === undefined
+      || (memberOp.op !== SET_RISK_OCCURRENCE_OP && memberOp.op !== SET_OPTION_CAPACITY_CHANGE)) {
       return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' };
     }
-    const res = await applyRiskOccurrence(ctx, { ...parent, operations: [memberOp] }, before);
+    // M5: an option's new share of time is the option-capacity member's own registered revision (its read-back, its retry replay).
+    const res = memberOp.op === SET_OPTION_CAPACITY_CHANGE
+      ? await applyOptionCapacityChange(ctx, { ...parent, operations: [memberOp] }, before)
+      : await applyRiskOccurrence(ctx, { ...parent, operations: [memberOp] }, before);
     if (res.ok !== true) return res;
     const after = await readGraph(ctx.scenario_id);
     return { ...res, follow_up: row.recordedWords(card.statements, card.subject, card.label, after?.raw ?? before.raw) };

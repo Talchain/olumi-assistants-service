@@ -8,7 +8,7 @@ import type { DoorReading } from './read.js';
 export const RECORD_STATEMENT_OP = 'record_statement' as const;
 /** The level door's members (`dispatch.ts` OptionLevelsCommitInput) a field may write through. */
 export type DoorWriteMember = 'levels' | 'values' | 'link_effects' | 'risk_occurrence' | 'team_time' | 'cohort_forecast' | 'goal_reading'
-  | 'identity_confirm' | 'hiring_times';
+  | 'identity_confirm' | 'hiring_times' | 'option_capacity';
 
 /** What ONE press writes: the member and its payload, as JSON (the proposal is stored, and read back at the press). */
 export interface DoorWrite {
