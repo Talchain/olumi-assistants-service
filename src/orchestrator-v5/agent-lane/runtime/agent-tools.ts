@@ -632,22 +632,28 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['option_label', 'status', 'rationale']),
   },
   {
+    // ⭐ S5 (DL 15 Oct; Paul's ≤¼ PoC ruling): ONE generic change tool for the edits no other tool makes. Each op prepares the ONE
+    // card that quotes the user's words; only its press changes the model, through the existing writer. Existing tools stay.
     type: 'function',
-    name: 'propose_removal',
+    name: 'propose_change',
     description:
-      'Remove ONE factor or risk from the model, or ONE link between two parts, ONLY when the user asks for that in THIS message '
-      + '("remove staff training", "drop that risk", "set this link to zero": a link set to zero is removed, so the analysis reads no '
-      + 'effect along it). This does NOT change anything: it prepares ONE card that quotes their words and says exactly what goes with '
-      + 'it (a factor\u2019s or risk\u2019s links, and any option\u2019s setting of a factor); only their press removes it. Never for an '
-      + 'option (use propose_option_status) or the goal, and never a part the user did not ask to remove.',
+      'Propose ONE change the user asks for in THIS message that no other tool makes. This does NOT change anything: it prepares ONE '
+      + 'card that quotes their words and says exactly what the change does; only their press makes it. '
+      + 'op remove: remove ONE factor or risk, or ONE link between two parts ("remove staff training", "drop that risk"); a factor\u2019s '
+      + 'or risk\u2019s links, and any option\u2019s setting of a factor, go with it. '
+      + 'op set_zero: the user says a link has no effect ("set this link to zero"): the link is removed, so the analysis reads no effect '
+      + 'along it (kind link). Never for an option (use propose_option_status) or the goal, and never a part the user did not ask to change.',
     parameters: obj({
-      kind: { type: 'string', enum: ['factor', 'risk', 'link'] },
-      label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
-      to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
-      id: { type: 'string', description: 'The part\u2019s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.' },
-      to_id: { type: 'string', description: 'Only for a link: the id of the part it points to.' },
-      quote: { type: 'string', description: 'The user\u2019s complete statement asking for the removal, copied exactly from THIS message.' },
-    }, ['kind', 'label', 'quote']),
+      ops: { type: 'array', minItems: 1, maxItems: 1, items: obj({
+        op: { type: 'string', enum: ['remove', 'set_zero'] },
+        kind: { type: 'string', enum: ['factor', 'risk', 'link'] },
+        label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
+        to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
+        id: { type: 'string', description: 'The part\u2019s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.' },
+        to_id: { type: 'string', description: 'Only for a link: the id of the part it points to.' },
+        quote: { type: 'string', description: 'The user\u2019s complete statement asking for the change, copied exactly from THIS message.' },
+      }, ['op', 'kind', 'label', 'quote']) },
+    }, ['ops']),
   },
   {
     type: 'function',
@@ -954,7 +960,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_removal', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_change', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -1049,7 +1055,7 @@ export interface AgentCapabilities {
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
   }): Promise<ToolResult>;
-  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). S5 (DL 15 Oct): ONE removal card. */
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). S5 (DL 15 Oct): propose_change's remove/set_zero ops. */
   proposeRemoval?(ctx: AgentToolContext, args: {
     kind: 'factor' | 'risk' | 'link'; label: string; to_label?: string; id?: string; to_id?: string; quote: string;
   }): Promise<ToolResult>;
@@ -1231,10 +1237,16 @@ async function dispatchToolUnbounded(
       return caps.proposeOptionStatus !== undefined
         ? caps.proposeOptionStatus(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'An option cannot be taken out or put back here. Nothing was changed.' };
-    case 'propose_removal':
-      return caps.proposeRemoval !== undefined
-        ? caps.proposeRemoval(ctx, args as never)
-        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A part of the model cannot be removed here. Nothing was changed.' };
+    case 'propose_change': {
+      // ⭐ S5: ONE change per card; each op goes to the existing writer's proposer. An op this tool does not hold is refused.
+      const ops = Array.isArray(args?.ops) ? args.ops as unknown[] : [];
+      const op = ops.length === 1 && ops[0] !== null && typeof ops[0] === 'object' ? ops[0] as Record<string, unknown> : undefined;
+      if ((op?.op === 'remove' || (op?.op === 'set_zero' && op.kind === 'link')) && caps.proposeRemoval !== undefined) {
+        return caps.proposeRemoval(ctx, { kind: op.kind, label: op.label, to_label: op.to_label, id: op.id, to_id: op.to_id, quote: op.quote } as never);
+      }
+      return { ok: false, mutated: false, refusal: 'unsupported_change',
+        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link). Nothing was prepared.' };
+    }
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
         ? caps.proposeNewRisk(ctx, args as never)

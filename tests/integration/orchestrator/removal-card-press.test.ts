@@ -1,6 +1,7 @@
 /**
  * ⭐ S5 (DL 15 Oct, unseen brief R4 item 3): "set this link to zero" was refused and the user was sent to a canvas with no zero
- * control; removing a factor or risk had no chat route. Olumi proposes; the user authors: `propose_removal` prepares ONE card that
+ * control; removing a factor or risk had no chat route. Olumi proposes; the user authors: `propose_change` (op remove, or set_zero
+ * for a link; S5's ONE generic change tool) prepares ONE card that
  * quotes the user's own request in THIS message and says exactly what goes with it, and only its press removes it, through the REAL
  * in-process door (`commitStructuralDeleteInProcess` → the ONE removal writer, `structural_delete`).
  *
@@ -65,14 +66,16 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
     createAgentCapabilities: typeof import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js').createAgentCapabilities;
     ProposalStore: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').ProposalStore;
     dispatchTool: typeof import('../../../src/orchestrator-v5/agent-lane/runtime/agent-tools.js').dispatchTool;
+    approvalChipsFor: typeof import('../../../src/orchestrator-v5/agent-lane/approval-chips.js').approvalChipsFor;
   };
   beforeAll(async () => {
     const d = await import('../../../src/orchestrator-v5/system-events/dispatch.js');
     const c = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js');
     const p = await import('../../../src/orchestrator-v5/agent-lane/proposal.js');
     const t = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-tools.js');
+    const a = await import('../../../src/orchestrator-v5/agent-lane/approval-chips.js');
     mods = { commitStructuralDeleteInProcess: d.commitStructuralDeleteInProcess, createAgentCapabilities: c.createAgentCapabilities,
-      ProposalStore: p.ProposalStore, dispatchTool: t.dispatchTool };
+      ProposalStore: p.ProposalStore, dispatchTool: t.dispatchTool, approvalChipsFor: a.approvalChipsFor };
   });
   beforeEach(() => { persisted = structuredClone(HIRING); rows.clear(); });
 
@@ -88,11 +91,11 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
       commitStructuralDelete: (input) => mods.commitStructuralDeleteInProcess(input, 'req-remove'),
     });
     const ctx = (said: string): Rec => ({ scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: said, user_turn_text: said });
-    const propose = async (said: string, args: Rec): Promise<Rec> =>
-      await mods.dispatchTool('propose_removal', JSON.stringify(args), ctx(said) as never, caps) as Rec;
+    const propose = async (said: string, args: Rec, op = 'remove'): Promise<Rec> =>
+      await mods.dispatchTool('propose_change', JSON.stringify({ ops: [{ op, ...args }] }), ctx(said) as never, caps) as Rec;
     const press = async (proposalId: string, typed = true): Promise<Rec> => await caps.authoriseChange({ ...ctx('Yes, remove it.'),
       ...(typed ? { typed_approval_of: proposalId } : {}) } as never, { proposal_id: proposalId }) as Rec;
-    return { store, propose, press, afterNextRead: (f: () => void) => { pending = f; } };
+    return { store, propose, press, afterNextRead: (f: () => void) => { pending = f; }, caps };
   }
 
   it('RED (hiring): "Remove hiring spend" → ONE card saying what goes with it; the press removes it in ONE commit', async () => {
@@ -127,6 +130,28 @@ describe('a removal the user asks for is ONE card; only its press removes it, th
     expect(rows.size).toBe(1);
     expect(nodeIds()).toEqual(nodesBefore);
     expect(edgePairs()).toEqual(edgesBefore);
+  });
+
+  it('RED (capacity): op set_zero on the link → the same ONE card; its button says what the press does ("Remove it")', async () => {
+    persisted = structuredClone(CAPACITY);
+    const w = world();
+    const card = await w.propose(LINK_ASK, { kind: 'link', label: 'Tickets resolved per specialist', to_label: 'Additional specialist capacity', quote: LINK_ASK }, 'set_zero');
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, public_label: LINK_CARD });
+    const stored = w.store.get(card.proposal_id)!;
+    const chips = mods.approvalChipsFor([{ name: 'propose_change', ok: true, mutated: false, proposal_id: card.proposal_id }],
+      () => ({ proposal: stored, result: card as never }));
+    expect(chips[0]).toMatchObject({ label: 'Remove it', message: 'Yes, remove it.', detail: LINK_CARD });
+    expect(String(chips[0]!.id)).toBe(`agent-approve-proposal:${card.proposal_id}`);
+  });
+
+  it('CONTRAST: set_zero names a link only; an op the tool does not hold, or two ops → nothing prepared', async () => {
+    const w = world();
+    expect(await w.propose(FACTOR_ASK, { kind: 'factor', label: 'Hiring spend', quote: FACTOR_ASK }, 'set_zero')).toMatchObject({ ok: false, refusal: 'unsupported_change' });
+    expect(await w.propose(FACTOR_ASK, { kind: 'factor', label: 'Hiring spend', quote: FACTOR_ASK }, 'delete')).toMatchObject({ ok: false, refusal: 'unsupported_change' });
+    const one = { op: 'remove', kind: 'factor', label: 'Hiring spend', quote: FACTOR_ASK };
+    expect(await mods.dispatchTool('propose_change', JSON.stringify({ ops: [one, one] }), { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a',
+      request_id: 'r', user_text: FACTOR_ASK, user_turn_text: FACTOR_ASK } as never, w.caps)).toMatchObject({ ok: false, refusal: 'unsupported_change' });
+    expect(w.store.outstanding(SCENARIO_ID, 'user-a')).toEqual([]);
   });
 
   it('CONTRAST: card-only — a typed yes without the card\'s press removes nothing', async () => {
