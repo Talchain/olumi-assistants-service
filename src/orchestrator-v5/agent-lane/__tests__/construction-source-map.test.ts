@@ -86,13 +86,7 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
     const without = await build(SERVED.draft);
     const withStatements = await build({ ...SERVED.draft, statements: [legacyLevel(), legacyLevel({ value: 15 })] });
     const bare = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map(({ user_statements: _u, ...n }) => n) });
-    // S4 SHORTCUT (Paul 15 Oct 09:15Z): the drafter's verified level statement is now trusted as filed, so its factor's 25 is
-    // the user's; every other node is unchanged.
-    const LEVEL = legacyLevel().subject.label;
-    const others = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).filter((n) => n.label !== LEVEL) });
-    expect(others(bare(withStatements.graph))).toEqual(others(without.graph));
-    expect((withStatements.graph.nodes as Rec[]).find((n) => n.label === LEVEL)).toMatchObject({ provenance: 'from_brief',
-      observed_state: { raw_value: 25, source: 'brief_extraction', extractionType: 'explicit' } });
+    expect(bare(withStatements.graph)).toEqual(without.graph);
     const held = (withStatements.graph.nodes as Rec[]).filter((n) => Array.isArray(n.user_statements));
     expect(held.map((n) => [n.label, n.user_statements.map((r: Rec) => r.field)])).toEqual([[legacyLevel().subject.label, ['level']]]);
     expect((without.graph.nodes as Rec[]).some((n) => n.user_statements !== undefined)).toBe(false);
