@@ -64,7 +64,7 @@ describe('S10 fix 1: the Agent reads whose it is from the ONE authority, never t
       observed_state: { value: 80, raw_value: 80, unit: 'tickets/week', source: 'brief_extraction', user_material_unverified: true } };
     const seen = projectEntity(node as never);
     expect(seen.value_provenance).toMatchObject({ origin: 'user', role: 'unverified' });
-    expect(seen.value_provenance.whose).not.toBe('unknown');
+    expect((seen.value_provenance as Rec).whose).not.toBe('unknown');
     expect(seen.added_by).toBe('unverified_brief');
   });
 
