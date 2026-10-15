@@ -104,7 +104,7 @@ describe('cut1 turn refusal budget', () => {
     expect(seen[1].tools.some(t => (t as { name: string }).name === tool)).toBe(true);
     expect(seen[2].tools.some(t => (t as { name: string }).name === tool)).toBe(false);
     expect(seen[2].reasoning_role).toBeUndefined();
-    expect(JSON.stringify(seen[2].input)).toContain('was refused twice for the same reason');
+    expect(JSON.stringify(seen[2].input)).toContain('Do not repeat the same call while its arguments and relevant cause remain unchanged');
     expect(JSON.stringify(seen[2].input)).toContain('No interventions were given.');
     expect(result.stopped_reason).toBe('answered');
   });
@@ -114,7 +114,7 @@ describe('cut1 turn refusal budget', () => {
     expect(result.tool_calls.filter(c => c.refusal === 'empty_proposal')).toHaveLength(4);
     expect(result.tool_results.slice(2)).toHaveLength(2);
     for (const later of result.tool_results.slice(2)) {
-      expect(later).toMatchObject({ ...result.tool_results[1], detail: expect.stringContaining('was refused twice'), repeat_withheld: true });
+      expect(later).toMatchObject({ ...result.tool_results[1], detail: expect.stringContaining('Do not repeat the same call while its arguments and relevant cause remain unchanged'), repeat_withheld: true });
     }
   });
   it('R6: a different successful tool after the stop keeps normal effort and the limitation on every hop', async () => {
@@ -133,7 +133,7 @@ describe('cut1 turn refusal budget', () => {
     for (const req of seen.slice(2)) {
       expect(req.reasoning_role).toBeUndefined();
       expect(req.tools.some(t => (t as { name: string }).name === tool)).toBe(false);
-      expect(JSON.stringify(req.input)).toContain('was refused twice for the same reason');
+      expect(JSON.stringify(req.input)).toContain('Do not repeat the same call while its arguments and relevant cause remain unchanged');
       expect(JSON.stringify(req.input)).toContain('No interventions were given.');
     }
     expect(seen).toHaveLength(4);

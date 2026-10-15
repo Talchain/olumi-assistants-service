@@ -18,7 +18,7 @@
  *     sessions unchanged if they recover.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { composeRecoveredProposalReply } from '../proposal-reply.js';
@@ -182,8 +182,62 @@ export const PREWARM_DEADLINE_MS = 15_000;
 /** The prefix of the call id a host-made first call carries in the conversation (never a model's id; unique per turn). */
 export const HOST_FIRST_CALL_ID = 'host_first_call';
 
-/** One harness instruction; actual tool/reason/detail are supplied by the refusal result. */
-export const REPEATED_REFUSAL_NARRATION = '{tool} was refused twice for the same reason ({refusal}: {detail}); do not call it again this turn; tell the user in plain words what is missing.';
+/** One harness instruction, the AIE's exact AIE-05 text (prompt/AIE-REVIEW-20261015.md); tool/reason/detail come from the refusal. */
+export const REPEATED_REFUSAL_NARRATION = '{tool} returned {refusal}: {detail}. Preserve its actual write/readback outcome. Reuse the supplied words, corrections and known source. Do not repeat the same call while its arguments and relevant cause remain unchanged. A changed relevant fact, saved revision or recovered service permits a new attempt; a new turn alone does not repair the cause. Explain once whether the obstacle is genuinely missing meaning or a drafting/application limitation, then give one supported next step.';
+
+/**
+ * ⭐ Lane A A2 / AIE-05 (founder 34a4a4cb: nine propose_change refusals, one per turn, none remembered). A refusal is remembered
+ * with what its cause depended on that can change between turns (`retry_basis`): the saved model revision and the words the
+ * user has TYPED (a digest of the verified messages; a trimmed history changes it too, so it can only allow a retry, never block one). Kept in the refusal's own output in the existing turn history (no new store or field): the same call
+ * (tool + arguments, key order ignored) on an unchanged basis is not run again; a new revision, a new typed message or a
+ * recovered service allows it. A transient refusal is never remembered, and with no known revision nothing is blocked.
+ */
+export interface RetryBasis { readonly model_revision: string | null; readonly user_words: string }
+const TRANSIENT_REFUSAL = /unavailable|timeout|timed_out|not_prepared|could_not|unreadable|conflict|busy|rate_limit|threw/;
+const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical)
+  : v !== null && typeof v === 'object' ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])])) : v;
+/** The call's identity: its tool and its arguments, canonical. */
+export function callIdentity(name: string, args: unknown): string {
+  let parsed: unknown = args;
+  if (typeof args === 'string') { try { parsed = JSON.parse(args); } catch { parsed = args; } }
+  return `${name}\u0000${JSON.stringify(canonical(parsed ?? {}))}`;
+}
+const rememberedBasis = (r: ToolResult): RetryBasis | undefined => {
+  const b = (r as { retry_basis?: unknown }).retry_basis as RetryBasis | undefined;
+  return b !== undefined && b !== null && typeof b === 'object' && (typeof b.model_revision === 'string' || b.model_revision === null)
+    && typeof b.user_words === 'string' ? b : undefined;
+};
+/** A refusal's model-facing output carries its cause basis: never a transient refusal's, and never without a known revision. */
+function withRetryBasis<T>(facing: T, result: ToolResult, basis: RetryBasis): T {
+  if (result.ok !== false || typeof result.refusal !== 'string' || TRANSIENT_REFUSAL.test(result.refusal) || basis.model_revision === null
+    || facing === null || typeof facing !== 'object') return facing;
+  return { ...(facing as object), retry_basis: basis } as T;
+}
+/** The narration for a refusal not to be repeated: the tool, the code and the refusal's own detail. */
+function repeatNarration(name: string, result: ToolResult): string {
+  const own = typeof result.refused_detail === 'string' ? result.refused_detail : result.detail;
+  const detail = typeof own === 'string' && own.trim() !== '' ? own.replace(/\s+/g, ' ').slice(0, 600) : String(result.refusal);
+  return REPEATED_REFUSAL_NARRATION.replace('{tool}', () => name)
+    .replace('{refusal}', () => String(result.refusal)).replace('{detail}', () => detail);
+}
+/** The earlier turns' refused calls, from the history's own call and output items; a later output for the same call replaces it. */
+export function refusedEarlier(history: readonly unknown[]): Map<string, ToolResult> {
+  const calls = new Map<string, string>();
+  const refused = new Map<string, ToolResult>();
+  for (const item of history) {
+    const i = item as { type?: unknown; call_id?: unknown; name?: unknown; arguments?: unknown; output?: unknown };
+    if (typeof i?.call_id !== 'string') continue;
+    if (i.type === 'function_call' && typeof i.name === 'string') calls.set(i.call_id, callIdentity(i.name, i.arguments));
+    else if (i.type === 'function_call_output' && calls.has(i.call_id)) {
+      const identity = calls.get(i.call_id)!;
+      let out: ToolResult | undefined;
+      try { out = JSON.parse(String(i.output)) as ToolResult; } catch { out = undefined; }
+      if (out?.ok === false && typeof out.refusal === 'string' && rememberedBasis(out) !== undefined) refused.set(identity, out);
+      else refused.delete(identity);
+    }
+  }
+  return refused;
+}
 
 /**
  * Where a turn's wall time actually went.
@@ -436,6 +490,18 @@ export async function runAgentTurn(
   const refusalCounts = new Map<string, number>();
   const repeatLimitations = new Map<string, string>();
   const repeatedRefusals = new Map<string, ToolResult>();
+  // ⭐ Lane A A2 / AIE-05: this turn's cause basis, and the earlier turns' refusals with theirs (`refusedEarlier`).
+  const retryBasis: RetryBasis = { model_revision: input.canonicalContext?.expectation.graph_revision ?? null,
+    user_words: createHash('sha256').update(JSON.stringify(input.ctx.verified_user_messages ?? [])).digest('hex').slice(0, 16) };
+  const earlierRefused = refusedEarlier(input.history);
+  const unchangedSince = (identity: string): ToolResult | undefined => {
+    const r = earlierRefused.get(identity);
+    const b = r === undefined ? undefined : rememberedBasis(r);
+    return r !== undefined && b !== undefined && retryBasis.model_revision !== null && b.model_revision === retryBasis.model_revision
+      && b.user_words === retryBasis.user_words && !TRANSIENT_REFUSAL.test(String(r.refusal)) ? r : undefined;
+  };
+  /** Writes so far this turn: a call repeated after one of them is a new attempt. */
+  let writesThisTurn = 0;
   /**
    * ⭐ THE STATE THE SERVER ALREADY HOLDS IS GIVEN, NOT FETCHED (slice C1; P3A replay of Paul's transcript, 27 Sep).
    * Every ordinary turn spent a whole model call (~3 s) asking for `get_canonical_state`, and every answer then sat
@@ -670,8 +736,13 @@ export async function runAgentTurn(
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
+      const identity = callIdentity(String(call.name), call.arguments);
+      const unchanged = unchangedSince(identity);
       const result: ToolResult = repeatLimitations.has(String(call.name))
         ? { ...repeatedRefusals.get(String(call.name))!, detail: repeatLimitations.get(String(call.name)), repeat_withheld: true }
+        // ⭐ Lane A A2: the same call an earlier turn had refused, on an unchanged cause, is not run again. A changed call still runs.
+        : unchanged !== undefined ? { ...unchanged, ok: false, mutated: false, detail: repeatNarration(String(call.name), unchanged),
+            refused_detail: typeof unchanged.refused_detail === 'string' ? unchanged.refused_detail : unchanged.detail, repeat_unchanged: true }
         : withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
@@ -700,17 +771,15 @@ export async function runAgentTurn(
               }
             : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       if (result.ok === false && typeof result.refusal === 'string' && !withheld.has(String(call.name))) {
-        const key = `${String(call.name)}:${result.refusal}`;
+        // ⭐ AIE-05: identical means the same call (tool + arguments) refused for the same code since the last write, never only
+        // the same refusal code: a changed-argument retry is a new attempt.
+        const key = `${identity}\u0000${result.refusal}#${writesThisTurn}`;
         const count = (refusalCounts.get(key) ?? 0) + 1;
         refusalCounts.set(key, count);
         // One corrected retry remains possible. Only the second identical refusal withholds the tool.
         if (count === 2) {
           withheld.add(String(call.name));
-          const detail = typeof result.detail === 'string' && result.detail.trim() !== ''
-            ? result.detail.replace(/\s+/g, ' ').slice(0, 600) : result.refusal;
-          const text = REPEATED_REFUSAL_NARRATION.replace('{tool}', () => String(call.name))
-            .replace('{refusal}', () => result.refusal as string).replace('{detail}', () => detail);
-          repeatLimitations.set(String(call.name), text);
+          repeatLimitations.set(String(call.name), repeatNarration(String(call.name), result));
           repeatedRefusals.set(String(call.name), structuredClone(result));
         }
       }
@@ -744,7 +813,7 @@ export async function runAgentTurn(
       if (typeof claimedCalls === 'number' && Number.isFinite(claimedCalls) && claimedCalls > 0) {
         providerCalls += Math.floor(claimedCalls);
       }
-      if (result.mutated) mutated = true;
+      if (result.mutated) { mutated = true; writesThisTurn += 1; }
       if (result.ok === false && MUTATION_TOOLS.includes(String(call.name))) {
         log.info({
           event: 'v5.agent.tool_refused',
@@ -775,7 +844,7 @@ export async function runAgentTurn(
         call_id: call.call_id,
         // ⭐ The model reads the LICENSED run (`licensed-run-view.ts`): on a turn it may not name a leader, no leader
         // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
-        output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
+        output: JSON.stringify(withRetryBasis(modelFacingToolResult(String(call.name), result), result, retryBasis)),
       });
     }
     const hopResults = toolResults.slice(hopResultsFrom);
