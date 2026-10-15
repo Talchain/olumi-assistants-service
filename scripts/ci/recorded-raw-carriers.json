@@ -45,6 +45,7 @@
   "src/orchestrator-v5/agent-lane/__tests__/fixtures/s7-a2-r2.json": 41,
   "src/orchestrator-v5/agent-lane/__tests__/fixtures/s7-one-admission-recorded.json": 10,
   "src/orchestrator-v5/agent-lane/__tests__/fixtures/s7-user-stated-r2.json": 35,
+  "src/orchestrator-v5/agent-lane/__tests__/fixtures/v2-unknowns-deadline-20261015.json": 37,
   "src/orchestrator-v5/agent-lane/__tests__/goal-and-inference-fidelity.test.ts": 1,
   "src/orchestrator-v5/agent-lane/__tests__/goal-level-verified.test.ts": 1,
   "src/orchestrator-v5/agent-lane/__tests__/money-invariant-reach.test.ts": 1,

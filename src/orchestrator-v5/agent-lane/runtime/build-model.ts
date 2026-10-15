@@ -2419,7 +2419,12 @@ export async function buildModelFromBrief(
         } as AdmittedModel['loss'][number]])],
       };
     }
-    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief);
+    // ⛔ What the drafter filed as an unknown (or a concern's copy of one) is never the goal's deadline (AIE 6183705670).
+    const filedUnknowns = (candidate as { unknowns?: unknown }).unknowns;
+    const filedConcerns = (candidate as { unknown_concerns?: unknown }).unknown_concerns;
+    const filedAsUnknown: unknown[] = [...(Array.isArray(filedUnknowns) ? filedUnknowns : []),
+      ...(Array.isArray(filedConcerns) ? filedConcerns.map((c: unknown) => (c !== null && typeof c === 'object' ? (c as { unknown?: unknown }).unknown : undefined)) : [])];
+    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, filedAsUnknown);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
