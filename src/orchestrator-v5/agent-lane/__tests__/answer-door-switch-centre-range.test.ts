@@ -105,7 +105,7 @@ describe('fixture provenance: the served refusal this fixes', () => {
 });
 
 describe('MUST-FIX (8 banked T1b drafts): the user\'s "about 150, between 80 and 250" lands as theirs, with its range', () => {
-  it.each(F4)('%s: card offered, approval writes 150 per switch WITH the range, held like the brief sentence', async (c, from, to, olumis) => {
+  it.each(F4)('%s: card offered, approval writes 150 per switch WITH the range, read like the brief sentence', async (c, from, to, olumis) => {
     const graph = graphOf(c);
     const { caps, store, commits } = world(graph);
     const f = idOf(graph, from); const t = idOf(graph, to);
@@ -127,8 +127,10 @@ describe('MUST-FIX (8 banked T1b drafts): the user\'s "about 150, between 80 and
     expect(stored.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', source_quote: ANSWER,
       natural_effect: { amount: 150, per_source_change: 1, per_source_change_unit: 'switch',
         stated_range: { low: 80, high: 250, text: 'between 80 and 250', end: 'centre' } } });
-    // Held at existence 1.0 with the range's own spread: what the same sentence in the brief gives this link.
-    expect(heldLinkOf(stored, endsOfGraph(graph)(stored)), 'the user\'s range excludes zero: the link is held').not.toBeNull();
+    // ⛔ SCIENCE C1 (AIE 6180618773): a bare range is not a calibrated 90% interval, so neither this answer nor the same sentence in
+    // the brief holds the link by its range now (rule R may still hold its existence). Before C1 both held it: the history era.
+    expect(heldLinkOf(stored, endsOfGraph(graph)(stored))?.reason, 'C1: never held by the range').not.toBe('user_range');
+    expect(heldLinkOf(stored, endsOfGraph(graph, 'pre_c1')(stored), 'pre_c1')?.reason, 'the pre-C1 hold, as history computes it').toBe('user_range');
   });
 });
 
