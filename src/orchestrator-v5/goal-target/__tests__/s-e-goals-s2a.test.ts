@@ -168,7 +168,8 @@ describe('recognition and persisted carrier survival', () => {
     if (sd === undefined) delete os.std; else os.std = sd;
     expect(shareByDateGoalOf(g)?.team_part_id).toBe('team_share');
   });
-  it('P1-b: extra share attests the final held wire spread by two_devs -> launch_share', () => {
+  // ⛔ C1 (AIE 6180618773): a stated range no longer sets the wire spread, so the final wire spread is the stored one.
+  it('P1-b (C1): extra share attests the final wire spread by two_devs -> launch_share: a stated range leaves it stored', () => {
     const g = graph(), edge = g.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share');
     edge.provenance.magnitude = 'user_stated';
     edge.provenance.natural_effect.stated_range = { low: 1, high: 100 };
@@ -176,9 +177,9 @@ describe('recognition and persisted carrier survival', () => {
     expect(wire.edges.find((e: Rec) => e.from === 'team_share' && e.to === 'launch_share'))
       .toMatchObject({ exists_probability: 1, strength: { mean: 1, std: 0.01 } });
     expect(edge.strength.std).toBeCloseTo(0.0577, 4);
-    expect(wire.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share').strength.std).toBeCloseTo(0.3009, 4);
+    expect(wire.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share').strength.std).toBeCloseTo(0.0577, 4);
     expect(g).toEqual(before);
-    expect(shareByDateGoalOf(g)).toBeNull();
+    expect(shareByDateGoalOf(g)?.team_part_id).toBe('team_share');
   });
   it('P1-b control: matching held extra spread and team +1 at 0.01 stay recognised', () => {
     const g = graph(), edge = g.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share');

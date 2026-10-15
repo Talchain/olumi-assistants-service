@@ -71,7 +71,7 @@ import { deriveAuthoritativeStage } from './context/derive-stage.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import type { FreshnessDerivation } from './context/freshness.js';
 import { applyGraphAbsenceWarrant } from './context/graph-absence-warrant.js';
-import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
+import { computeAnalysisAffectingGraphHash, type AnalysisHashProjection } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 import {
@@ -1508,7 +1508,7 @@ function distinctSorted(values: readonly string[]): string[] {
  * when no graph is persisted or the parse fails — provenance is diagnostic and
  * never affects correctness.
  */
-export function deriveDecisionContextGraphHash(graph: unknown | null): string | null {
+export function deriveDecisionContextGraphHash(graph: unknown | null, projection: AnalysisHashProjection = 'current'): string | null {
   if (graph == null) return null;
   try {
     let toHash: unknown = graph;
@@ -1521,7 +1521,7 @@ export function deriveDecisionContextGraphHash(graph: unknown | null): string | 
     // the same value-preserving canonicalisation.
     toHash = canonicaliseForAnalysis(graph);
     const parsed = GraphStateIngressSchema.safeParse(toHash);
-    return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
+    return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data, projection) : null;
   } catch {
     return null;
   }

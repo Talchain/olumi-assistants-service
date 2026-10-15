@@ -122,7 +122,15 @@ export function routeOnceCoveredSources(links: readonly { from: string; to: stri
   return queue.length === incoming.size ? covered : new Set<string>();
 }
 
-export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
+/**
+ * ⛔ SCIENCE C1 (AIE-signed table 6180618773): which range reading a hold applies. 'current' holds no user range: none carries
+ * a supported central-90% reading. 'pre_c1' is the hold of every model version and Run recorded before C1: a bare
+ * range read as a 90% Normal interval. HISTORY ONLY (`graph-hash.ts` 'pre_c1' and the earlier history projections); never
+ * freshness, never a Run input.
+ */
+export type RangeEra = 'current' | 'pre_c1';
+
+export function endsOfGraph(graph: unknown, era: RangeEra = 'current'): (e: unknown) => LinkEnds {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   // Per target node, the sources ISL FIXES rather than draws: identity operands, and an event risk's mitigations (read
@@ -152,7 +160,7 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   });
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const covered = routeOnceCoveredSources(edges.filter(structural).map((e) => ({
-    from: e.from, to: e.to, isDefault: defaultExistence(e, baseEnds(e)),
+    from: e.from, to: e.to, isDefault: defaultExistence(e, baseEnds(e), era),
   })));
   return (e) => isRec(e) ? { ...baseEnds(e), routeOnce: structural(e) && covered.has(e.from) } : UNVALIDATED_ENDS;
 }
@@ -232,21 +240,21 @@ type BaseHold = { readonly reason: 'definition' | 'user_range'; readonly std: nu
 export type LinkHold = BaseHold | { readonly reason: 'route_once'; readonly std: number | undefined };
 
 /** The validated definition, then user range hold, before rule R (history only). */
-export function heldLinkBeforeRouteOnce(e: unknown, ends: LinkEnds): BaseHold | null {
+export function heldLinkBeforeRouteOnce(e: unknown, ends: LinkEnds, era: RangeEra = 'current'): BaseHold | null {
   if (validatedDefinition(e, ends) !== undefined) return { reason: 'definition', std: DEFINITIONAL_STD };
-  const range = isUserStatedLink(e) ? rangeHold(e as Rec) : null;
+  const range = isUserStatedLink(e) ? rangeHold(e as Rec, era) : null;
   return range === null ? null : { reason: 'user_range', std: range.std };
 }
 
-function defaultExistence(e: Rec, ends: LinkEnds): boolean {
+function defaultExistence(e: Rec, ends: LinkEnds, era: RangeEra = 'current'): boolean {
   return finite(e.exists_probability) && e.exists_probability > 0 && e.exists_probability < 1
-    && ends.fixedByIsl !== true && heldLinkBeforeRouteOnce(e, ends) === null;
+    && ends.fixedByIsl !== true && heldLinkBeforeRouteOnce(e, ends, era) === null;
 }
 
-export function heldLinkOf(e: unknown, ends: LinkEnds): LinkHold | null {
-  const base = heldLinkBeforeRouteOnce(e, ends);
+export function heldLinkOf(e: unknown, ends: LinkEnds, era: RangeEra = 'current'): LinkHold | null {
+  const base = heldLinkBeforeRouteOnce(e, ends, era);
   if (base !== null) return base;
-  if (!isRec(e) || !ends.routeOnce || !defaultExistence(e, ends)) return null;
+  if (!isRec(e) || !ends.routeOnce || !defaultExistence(e, ends, era)) return null;
   return { reason: 'route_once', std: isRec(e.strength) && finite(e.strength.std) ? e.strength.std : undefined };
 }
 
@@ -265,7 +273,7 @@ export function effectiveLinkExistenceProbability(e: unknown, ends?: LinkEnds): 
 export function heldLinkBeforeValidatedDefinition(e: unknown): { readonly std: number } | null {
   if (!isUserStatedLink(e)) return null;
   if (currentDefinitionalCarrier(e) !== undefined) return { std: DEFINITIONAL_STD };
-  return rangeHold(e as Rec);
+  return rangeHold(e as Rec, 'pre_c1');
 }
 
 /**
@@ -273,7 +281,14 @@ export function heldLinkBeforeValidatedDefinition(e: unknown): { readonly std: n
  * carries: β(x) = x · strength_mean / amount. `natural_effect` is the user's size while it is current: every write of the
  * strength or the size drops or replaces it (refit-frames, CODEX 5925312387), and reframing rescales it with the edge.
  */
-function rangeHold(e: Rec): { readonly std: number } | null {
+function rangeHold(e: Rec, era: RangeEra): { readonly std: number } | null {
+  // ⛔ SCIENCE C1 (AIE-signed table, 6180618773; SCIENCE-MAPPING-TABLE C1 AMEND): a bare range, "between" or "surprised outside"
+  // is not a calibrated central 90% Normal interval, and a range excluding zero does not prove the effect exists with p = 1.
+  // width/3.29 would need a supported central-90% reading AND a separately disclosed, adopted Normal approximation on the
+  // actual frame; no statement carries that reading today, so no range holds. The range stays recorded on the link (its
+  // source is kept; nothing is re-elicited), the stated size stays the mean, and existence and spread stay as stored.
+  // What follows is the pre-C1 hold, kept only so a model version or Run recorded under it still validates as history.
+  if (era === 'current') return null;
   const ne = e.provenance?.natural_effect;
   if (!isRec(ne) || !isRec(ne.stated_range)) return null;
   const { low, high } = ne.stated_range;

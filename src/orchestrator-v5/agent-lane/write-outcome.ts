@@ -31,6 +31,7 @@ import { eventByDateRefusalDetail } from '../goal-target/event-by-date-model.js'
 import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 import type { PressBlocker } from './press-next-step.js';
+import { deriveDecisionContextGraphHash } from '../build-turn-context.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -654,20 +655,40 @@ export function withWriteOutcome(body: string, status: string | null): string {
  * Run control reads admits a run; otherwise the readiness sentence says why it cannot. Nothing about what a re-run
  * will check (a limit may still be unchecked), and no figure.
  */
-export function staleResultLine(analysisState: unknown, analysisReady: unknown): string | null {
+export function staleResultLine(analysisState: unknown, analysisReady: unknown, rangeReadingOnly = false): string | null {
   const s = analysisState as { run_state?: { kind?: unknown; cause?: unknown }; requires_rerun?: unknown } | undefined;
   if (s?.run_state?.kind !== 'complete_stale' || s.run_state.cause !== 'graph_changed' || s.requires_rerun !== true) return null;
   const mayRun = (analysisReady as { may_run?: unknown } | undefined)?.may_run === true;
+  if (rangeReadingOnly) {
+    return mayRun
+      ? `${RANGE_READING_STALE}, so run it again to see the result without that assumption.`
+      : `${RANGE_READING_STALE}.`;
+  }
   return mayRun
     ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
     : 'The analysis on screen was computed before this change.';
 }
 
+const RANGE_READING_STALE = 'The analysis on screen treated a range you gave as a calibrated 90% interval and the link as certain to exist. '
+  + 'Olumi no longer assumes either from a range alone';
+
+/**
+ * ⛔ SCIENCE C1 (AIE 6180618773): a Run is stale ONLY because a user's bare range no longer holds as a 90% interval when
+ * the hash it recorded is THIS graph's 'pre_c1' projection and not its current one: nothing the user did changed the
+ * model, so "computed before this change" would be false. Names the cause of a stale verdict already given; never
+ * decides freshness (the 'pre_c1' projection stays history only).
+ */
+export function staleOnlyByRangeReading(graph: unknown, analysisResult: unknown): boolean {
+  const atRun = (analysisResult as { computed_against_hash?: unknown } | null | undefined)?.computed_against_hash;
+  if (typeof atRun !== 'string' || atRun.length === 0) return false;
+  return deriveDecisionContextGraphHash(graph, 'pre_c1') === atRun && deriveDecisionContextGraphHash(graph) !== atRun;
+}
+
 /** ⭐ COACH (DL coaching-on-press): a stale result's ONE next step is this same line while it says "run it again" (the Run
  * control's own verdict). Where the Run may not run, the line has no step to take: another blocker holds the Run and owns
  * the step (Codex buddy r1), so nothing is typed here. Only from `run_state`, never from a result that could not be bound. */
-export function staleBlockerOf(analysisState: unknown, analysisReady: unknown): PressBlocker | null {
+export function staleBlockerOf(analysisState: unknown, analysisReady: unknown, rangeReadingOnly = false): PressBlocker | null {
   if ((analysisReady as { may_run?: unknown } | undefined)?.may_run !== true) return null;
-  const say = staleResultLine(analysisState, analysisReady);
+  const say = staleResultLine(analysisState, analysisReady, rangeReadingOnly);
   return say === null ? null : { kind: 'stale', say };
 }

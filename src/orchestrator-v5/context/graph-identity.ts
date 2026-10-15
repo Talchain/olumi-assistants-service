@@ -82,7 +82,9 @@ export function matchesHistoricalAnalysisIdentity(graph: GraphStateIngress, stor
     // d5 #87 6011224941: a version recorded under the user-only hold (before a validated definition held) is still that version.
     || computeAnalysisAffectingGraphHashSha256(graph, 'pre_definition') === storedHash
     // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6: history only.
-    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_route_once') === storedHash;
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_route_once') === storedHash
+    // SCIENCE C1 (AIE 6180618773): a version recorded while a user's bare range held as a 90% interval is still that version.
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_c1') === storedHash;
 }
 
 /** Compare's recorded Run and admission identity use the existing sanctioned seam.
@@ -103,7 +105,10 @@ export function matchesHistoricalRunAnalysisIdentity(
   // d5 #87 6011224941: and a Run computed under the user-only hold, before a validated definition held (history only).
   const preDefinitionHash = computeAnalysisAffectingGraphHash(graph, 'pre_definition');
   const preRouteOnceHash = computeAnalysisAffectingGraphHash(graph, 'pre_route_once');
+  // SCIENCE C1: and a Run computed while a user's bare range held as a 90% interval (history only, never freshness).
+  const preC1Hash = computeAnalysisAffectingGraphHash(graph, 'pre_c1');
   if (currentHash !== storedHash && preHoldHash !== storedHash && preDefinitionHash !== storedHash && preRouteOnceHash !== storedHash
+    && preC1Hash !== storedHash
     && (projection !== undefined || carriesGaps
       || computeAnalysisAffectingGraphHash(graph, 'legacy') !== storedHash)) return false;
   const snapshot = RunInputSnapshotSchema.safeParse(inputSnapshot);

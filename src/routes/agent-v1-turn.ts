@@ -107,7 +107,7 @@ import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTER
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
-import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, isDecisionInputAsk, risksSaidLeftOutOfTheChance, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
@@ -5141,7 +5141,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const wroteThisTurn = fastPath !== 'run'
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
-    const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
+    const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady, staleOnlyByRangeReading(readbackGraph, analysisResult)) : null;
     // EBD: when the first analysis's blocked line already said the analysis could not run, an all-said readiness line is dropped.
     const firstAnalysisRefusalSaid = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
       && firstAnalysisSaid !== null && owed.includes(firstAnalysisSaid);

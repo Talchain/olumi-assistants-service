@@ -280,14 +280,15 @@ describe('Paul\'s exact limit: keeping monthly churn UNDER 4%', () => {
     expect(r.perLimit).toEqual(WITHHELD_FOR_THE_PIN);
   });
 
-  it('EFFECTIVE EXISTENCE CONTROL: stored zero on a user-range-held price→churn link remains a path on the engine wire', async () => {
+  // ⛔ SCIENCE C1 (AIE 6180618773): a range excluding zero does not prove the link exists, so it no longer lifts a stored zero.
+  it('⛔ C1 EFFECTIVE EXISTENCE: stored zero on a user-RANGED price→churn link stays zero on the engine wire → no path, the strict-threshold limit stays unscored', async () => {
     const r = await plotLimit([underFour], undefined, 0.04, undefined, {
       priceChurnExistence: 0, priceChurnRange: true, unchangedParent: true,
     });
-    expect(r.wireEdges.find((edge) => edge.from === 'fac_price' && edge.to === 'fac_churn'), 'the analysis hold takes effective existence to one').toMatchObject({ exists_probability: 1 });
+    expect(r.wireEdges.find((edge) => edge.from === 'fac_price' && edge.to === 'fac_churn'), 'a range no longer holds existence at one').toMatchObject({ exists_probability: 0 });
     expect(r.todayWithinLimit).toBe('at_threshold');
-    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
-    expect(r.perLimit).toEqual(SCORED);
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'unevaluated', mayName: false });
+    expect(r.perLimit).toEqual([{ constraint_id: LIMIT_ID, state: 'unscored', reason: 'level_set_at_strict_threshold' }]);
   });
 
   it.each([strictRow, atMostRow])('PERIOD RED: relabelled annual limit %s has no monthly reply fact and restores the annual wire unit', async (base) => {
