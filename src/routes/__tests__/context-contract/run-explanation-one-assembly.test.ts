@@ -208,7 +208,9 @@ describe('Explain scoped assembly safety', () => {
       // S10 fix 1 + the AIE's EXACT links sentence (#94 6181933060, links' vocabulary per 6182232796): the host contract's links
       // clause only: 40,783 → 40,922 bytes (+139). Captured from the SENT body: staging's reproduces d6ce2c69… and 40,783 bytes, and with
       // exactly that clause swapped equals this head's byte for byte.
-      .toBe('4b97d9ec1de2c4a78a3725c769f578643babb622c4951183edc8f0061c910bc7');
+      // B1 buddy repair: standing safeguards prefix restored; consolidated RUN_FACTS_USE kept once.
+      // 44,147 UTF-8 bytes, hashed from the actual Run-explanation/run2/1.sentBody.json instructions.
+      .toBe('fce3c2b060d55b2362cd95918bf0f0d846fe3f52c2f86b2c46ed6801a3ecf1f9');
   },60000);
 });
 
