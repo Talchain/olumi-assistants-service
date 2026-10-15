@@ -350,13 +350,15 @@ export interface HeldGoalAttributes {
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
-  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
+  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown; readonly source_quote?: unknown } | null | undefined,
   brief: string,
+  filedAsUnknown: readonly unknown[] = [],
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
   const goals = nodes.filter((n) => n.kind === 'goal');
   // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
-  const attestation = attestHorizon(brief, goal);
+  // A brief statement the drafter filed whole as an unknown is never a deadline (`attestHorizon`, AIE 6183705670).
+  const attestation = attestHorizon(brief, goal, filedAsUnknown);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
   if ((node as { threshold_source?: unknown }).threshold_source === 'definitional') {

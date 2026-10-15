@@ -87,20 +87,49 @@ function forwardDurations(brief: string): Span[] {
   return spans.sort((a, b) => a.index - b.index);
 }
 
+/** One spelling for a statement and the drafter's text it is looked for in: typographic quotes plain, space runs single. */
+const plain = (text: string): string => text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
+
+/**
+ * ⛔ TEXT FROM UNKNOWNS IS NEVER A DEADLINE (AIE #94 6183705670; v2 D5r1 raws, both arms): the drafter left the goal's
+ * `horizon_months` null and filed "We have two months to learn, and are not choosing a final strategy today." WHOLE in
+ * `unknowns`, yet this helper read "two months to learn" from the brief as an allotted deadline and admission saved it as the goal's
+ * deadline as stated. A brief statement the drafter filed whole as an unknown (or a concern) is that reading, so no
+ * span inside it is a deadline. Bound by identity: the brief's own whole statement (ending at . ! ? ; or a line, as
+ * `wholeStatementIn`), verbatim inside an unknowns entry. EXCEPT the goal's own statement: a statement inside
+ * `goal.source_quote` keeps its deadline whatever else quotes it. Nothing filed → every span is read exactly as before.
+ */
+function filedStatementAt(brief: string, filedAsUnknown: readonly unknown[], goalQuote: unknown): (index: number) => boolean {
+  const filed = filedAsUnknown.filter((u): u is string => typeof u === 'string' && u.trim() !== '').map(plain);
+  if (filed.length === 0) return () => false;
+  const goal = typeof goalQuote === 'string' ? plain(goalQuote) : '';
+  const statements: { start: number; end: number; text: string }[] = [];
+  for (const m of brief.matchAll(/[^.!?;\n]+[.!?;]?/g)) {
+    const text = plain(m[0]);
+    if (text !== '' && /[\p{L}\p{N}]/u.test(text)) statements.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, text });
+  }
+  return (index) => {
+    const at = statements.find((st) => index >= st.start && index < st.end);
+    return at !== undefined && !(goal !== '' && goal.includes(at.text)) && filed.some((u) => u.includes(at.text));
+  };
+}
+
 /**
  * Whether the brief attests the candidate goal's deadline. `candidate` is the drafter's goal (`horizon_months`);
  * an older or goal-free candidate is simply one with no deadline to attest.
  */
 export function attestHorizon(
   brief: string | null | undefined,
-  candidate: { readonly horizon_months?: unknown } | null | undefined,
+  candidate: { readonly horizon_months?: unknown; readonly source_quote?: unknown } | null | undefined,
+  filedAsUnknown: readonly unknown[] = [],
 ): HorizonAttestation {
   const absent: HorizonAttestation = { months: null, wording: '', status: 'absent' };
   if (typeof brief !== 'string' || brief.trim() === '') return absent;
   const claimed = candidate?.horizon_months;
-  const durations = forwardDurations(brief);
+  const filed = filedStatementAt(brief, filedAsUnknown, candidate?.source_quote);
+  const durations = forwardDurations(brief).filter((d) => !filed(d.index));
   const countWords: Readonly<Record<string, number>> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, eighteen: 18 };
-  const proposals = [...brief.matchAll(/\bmonth\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\s+months?\b/gi)];
+  const proposals = [...brief.matchAll(/\bmonth\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\s+months?\b/gi)].filter((p) => !filed(p.index));
   // ⛔ S3 T5 D2 (L1): the CANDIDATE's count picks the brief's span that says it. "…the first three months after launch. We
   // plan to launch six months from today." with a 6 typed was saved as "three months": the first span won, whatever the
   // claim. A forward span equal to the claim is taken; otherwise the first, exactly as before.
@@ -134,7 +163,7 @@ export function attestHorizon(
     const match = durations.find((d) => d.months === claimed);
     if (match !== undefined) return { months: claimed, wording: match.wording, status: 'attested' };
   }
-  const calendar = [...brief.matchAll(CALENDAR_POINT)].map((m) => ({ wording: m[0].trim(), index: m.index ?? 0 }));
+  const calendar = [...brief.matchAll(CALENDAR_POINT)].map((m) => ({ wording: m[0].trim(), index: m.index ?? 0 })).filter((c) => !filed(c.index));
   const first = [...calendar, ...durations.filter((d) => d.led)].sort((a, b) => a.index - b.index)[0];
   return first === undefined ? absent : { months: null, wording: first.wording, status: 'unresolved' };
 }
