@@ -18,7 +18,6 @@ type Rec = Record<string, any>;
 const fixture = (name: string): Rec => JSON.parse(readFileSync(new URL(`../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/${name}`,
   import.meta.url), 'utf8')) as Rec;
 const HIRING = fixture('hiring-42d10ecf-read-before-effects.json').graph as Rec;
-const CAPACITY = fixture('capacity-post3017-turn01-read.json').j.graph as Rec;
 const SCENARIO_ID = 'e9e63843-b4c9-4354-a976-1fb43a8a7303';
 
 let persisted: unknown = structuredClone(HIRING);
@@ -52,8 +51,6 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 
 const hash = (): string => computeAnalysisAffectingGraphHash(persisted as never)!;
 const g = (): Rec => persisted as Rec;
-const nodeIds = (): string[] => g().nodes.map((n: Rec) => String(n.id));
-const edgePairs = (): string[] => g().edges.map((e: Rec) => `${String(e.from)}::${String(e.to)}`);
 
 const OPT_ASK = 'Rename Hire two developers to Hire three developers.';
 const OPT_CARD = `From your message: “${OPT_ASK}”. Olumi proposes renaming ‘Hire two developers’ to ‘Hire three developers’. Rename it?`;
