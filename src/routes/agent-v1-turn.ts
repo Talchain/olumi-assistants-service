@@ -99,8 +99,7 @@ import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessSentenceOnce, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
-import { constructionOperationId, strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
-import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
+import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
@@ -4345,8 +4344,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const autoRunIdentity = autoRun?.ran === true ? (autoRun as { run_identity?: unknown }).run_identity : undefined;
     // ⭐ THE SAME FOR A RUN PRESS AFTER A CHANGE (DL 14 Oct, joined-flow witness): the canvas's own automatic Run after an
     // edit or Undo (DGAI #2767) reaches CEE as a Run press, which answered only "Your results are ready", so its coaching
-    // never came. A pressed Run after a committed change gets this same one call over THAT Run (`pressedAfterChange`); a
-    // Run with no committed change since the model was built or last run keeps the ready line and spends no call.
+    // never came. Each eligible completed selected Run gets this same one call, including the first Run.
+    // A preceding Run is required only for comparison. This interprets the existing Run; it never starts another one.
     const pressedRunIdentity = fastPath === 'run' && runPressResult?.ran === true
       ? (runPressResult as { run_identity?: unknown }).run_identity : undefined;
     const interpretRunIdentity = autoRunIdentity ?? pressedRunIdentity;
@@ -4362,24 +4361,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const selectedRead = selected ? await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}) : undefined;
       const currentRead = selectedRead?.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
-      // ⭐ KEYED TO A COMMITTED CHANGE, not to a preceding Run (PL #94, 14 Oct 19:41): only the COMPARISON needs a prior Run.
-      // With a prior Run, its delta says whether anything changed (`C0_identical`: nothing). With none, a change is a
-      // committed write in the turn ledger (`model_version_mutation_id`: never typing, a proposal or a failed write) other
-      // than the construction's own. A ledger that cannot be read, or is not a census, is no evidence: no call.
-      const delta = typeof currentRead?.run_delta === 'object' && currentRead.run_delta !== null ? currentRead.run_delta : undefined;
-      const committedSinceConstruction = async (): Promise<boolean> => {
-        const brief = selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined;
-        if (typeof brief !== 'string' || brief.trim() === '' || typeof store.readCommittedTurnLedger !== 'function') return false;
-        try {
-          const ledger = await store.readCommittedTurnLedger(scenarioId);
-          if (ledger.complete !== true) return false;
-          const construction = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
-          return ledger.write_turn_ids.some((id) => id !== construction);
-        } catch { return false; }
-      };
-      const pressedAfterChange = autoRunIdentity === undefined && selected
-        && (delta !== undefined ? (delta as { attribution_case?: unknown }).attribution_case !== 'C0_identical' : await committedSinceConstruction());
-      const interpretedRun = !selected || (autoRunIdentity === undefined && !pressedAfterChange) ? undefined
+      const pressedForInterpretation = autoRunIdentity === undefined && selected;
+      const interpretedRun = !selected ? undefined
         : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true,
           selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined);
       if (interpretedRun?.admitted === true) {
@@ -4390,7 +4373,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // (pending/unavailable): DGAI takes the latest Run's key only from those, and drops the WHOLE message of a "ready"
         // narration whose key is not the latest (narrationTurn.ts `namesALatestRun`/`isForeignExplanation`), so "ready"
         // here hid this Run's reply.
-        if (pressedAfterChange) {
+        if (pressedForInterpretation) {
           runInterpreted = true; text = said;
           if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
         }

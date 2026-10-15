@@ -375,8 +375,9 @@ describe('selected Sol coach on the actual Agent route', () => {
     const response = await sendTurn('Run analysis.', [say('The Run is provisional.')],
       { id: 'agent-run-analysis', action_type: 'run_analysis' });
     expect(response._diagnostic_trace?.fast_path).toBe('run');
-    expect(sent).toHaveLength(1);
-    for (const body of sent) {
+    expect(sent).toHaveLength(2); // AIE-03: the explicit first Run is followed by its one tool-less interpretation.
+    expect(sent.filter(body => body.tool_choice === 'none')).toHaveLength(1);
+    for (const body of sent.filter(body => body.tool_choice !== 'none')) {
       expect(body.model).toBe('gpt-6.1-sol');
       expectCoachInstructions(body);
     }
