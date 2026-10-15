@@ -10,6 +10,10 @@ import { STATEMENTS_INSTRUCTION, buildModelFromBrief } from '../runtime/build-mo
 import { sourceMapOf, subjectKey } from '../construction-source-map.js';
 
 type Rec = Record<string, any>;
+/** The AIE's exact paragraph (#94 6180604131), copied from the comment: the text is bound by identity, never retyped. */
+const AIE_TEXT = readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8');
+/** The served capacity brief (`_source`): "between 10 and 30" is a stated range only a clause check can attest. */
+const CAPACITY = JSON.parse(readFileSync('tests/fixtures/drafter-text-3/served-capacity-brief.json', 'utf8')) as { brief: string };
 const SERVED = JSON.parse(readFileSync('tests/fixtures/drafter-capacity-chain/served-c1494f4d.json', 'utf8')) as { brief: string; draft: Rec };
 const sid = '5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e';
 const LEGACY = 'We have an urgent launch date in the next six months, but our development team is spending, on average, 25% of their time on fixing legacy code.';
@@ -32,6 +36,8 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
   it('RED: the SENT drafter request asks for statements once, with the closed field set, required at the provider boundary', async () => {
     const { sent } = await build(SERVED.draft);
     expect((sent.instructions as string).split(STATEMENTS_INSTRUCTION)).toHaveLength(2);
+    expect(STATEMENTS_INSTRUCTION).toBe(AIE_TEXT);
+    expect((sent.instructions as string).split(AIE_TEXT)).toHaveLength(2);
     const schemas = JSON.stringify(sent).match(/"statements":\{"type":"array"/g) ?? [];
     expect(schemas).toHaveLength(1);
     const text = JSON.stringify(sent);
@@ -60,6 +66,9 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
       { quote: LEGACY, field: 'level', form: 'point', value: 25 }, // no subject
       legacyLevel(),
     ], SERVED.brief);
+    // Each is retained WHOLE as the drafter gave it (AIE 6180604131), never shortened.
+    expect(map.refused[0]!.given).toEqual({ ...legacyLevel({ value: 15 }), subject: { kind: 'factor', label: 'Time on legacy fixes', to_label: null, factor_label: null } });
+    expect(map.refused[3]!.given).toEqual({ quote: LEGACY, field: 'level', form: 'point', value: 25 });
     expect(map.refused.map((r) => [r.index, r.refusal, r.quote, r.key])).toEqual([
       [0, 'figure_not_in_quote', LEGACY, KEY],
       [1, 'statement_not_found', '25% of their time on fixing legacy code.', KEY],
@@ -75,6 +84,21 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
     const without = await build(SERVED.draft);
     const withStatements = await build({ ...SERVED.draft, statements: [legacyLevel(), legacyLevel({ value: 15 })] });
     expect(withStatements.graph).toEqual(without.graph);
+  });
+
+  it('two figures written side by side are not a range by themselves: "between 10 and 30" stays unknown, retained, until the clause check (step 2)', () => {
+    const quote = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
+    const map = sourceMapOf([{ quote, subject: { kind: 'factor', label: 'Specialist capacity', to_label: null, factor_label: null }, field: 'level', form: 'range',
+      value: null, low: 10, high: 30, unit: 'tickets per week', qualifier: 'about', conditions: null }], CAPACITY.brief);
+    expect(map.verified.size).toBe(0);
+    expect(map.refused).toEqual([expect.objectContaining({ index: 0, refusal: 'figure_not_in_quote', quote, given: expect.objectContaining({ low: 10, high: 30 }) })]);
+  });
+
+  it('nothing past the per-draft limit is dropped: it is retained whole, unchecked, its authorship unknown', () => {
+    const many = Array.from({ length: 61 }, () => legacyLevel());
+    const map = sourceMapOf(many, SERVED.brief);
+    expect(map.verified.get(KEY)).toHaveLength(60);
+    expect(map.refused).toEqual([expect.objectContaining({ index: 60, refusal: 'not_checked', quote: LEGACY, given: expect.objectContaining({ value: 25 }) })]);
   });
 
   it('statements is OPTIONAL: a malformed list never fails a draft (DL condition, 23:06Z)', async () => {
