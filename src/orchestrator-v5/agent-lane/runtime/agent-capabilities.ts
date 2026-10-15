@@ -3918,7 +3918,11 @@ export function createAgentCapabilities(
     // call holds no deliverable, so an event alone never answers it either.
     const drafted = draftedTeamPartOf(candidate);
     const event = drafted !== null && deliverableWrittenIn(drafted.deliverable, deliverable) ? drafted : null;
-    if (held.length === 0 && event === null) {
+    // ⛔ The target gate guards a real loss: a goal the user STATED with a target, or (a correction) targets the saved model
+    // holds, that the revision drops. ⭐ DEMO (served 34a4a4cb, Paul's founder brief): a goal with NO numeric target ("Larger fund
+    // secured") is no loss to a correction: the revision keeps it qualitative, and no target is ever invented for it.
+    const qualitativeKept = correction && held.length === 0 && targetsHeldBy(g.raw).length === 0;
+    if (held.length === 0 && event === null && !qualitativeKept) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : 'The revised draft holds no target for the goal the user stated, so it was not offered and the model is unchanged. Tell the user plainly.');
     }
@@ -3950,7 +3954,11 @@ export function createAgentCapabilities(
     // The AIE's card clause (packet B card_without_date, 14 Oct), with construction's own deliverable, never the tool's short
     // trigger. A construction never holds a deadline date (only an approved deadline write does: `goal-horizon-write.ts`,
     // `hiring-times.ts`), so the date is always still to be confirmed, and this card never implies it saves one.
-    const card = (held.length > 0
+    const goalNow = nodesOf(candidate).find((n) => n?.kind === 'goal');
+    const card = (qualitativeKept
+      ? `Replace the early draft with a revised one built from your brief and the correction you just gave. Its goal, `
+        + `\u2018${typeof goalNow?.label === 'string' ? goalNow.label : goal.label}\u2019, has no numeric target, as before. `
+      : held.length > 0
       ? `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave: `
         + `${held.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
       : `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave (the draft modelled \u2018${goal.label}\u2019): `

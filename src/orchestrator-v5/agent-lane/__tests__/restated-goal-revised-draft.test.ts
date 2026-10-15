@@ -1349,3 +1349,54 @@ describe('a correction to the model as a whole becomes an approved, saved revise
     expect(UNKNOWN_ORIGIN_DETAIL).toContain('nothing was recorded as the user’s own figure');
   });
 });
+
+/**
+ * ⭐ DEMO fix (served 34a4a4cb, Paul's founder brief: six revise_model calls refused `revised_draft_has_no_target`): the goal is
+ * QUALITATIVE ("Larger fund secured": no threshold, no target row). A correction to such a model is no target loss, so it is
+ * offered and saved, and no target is invented. A correction that DROPS a target the saved model holds still refuses.
+ */
+describe('a correction to a model whose goal has NO numeric target (the founder brief\'s shape)', () => {
+  const CORRECTION = 'We have no funding to lose, so take the funding-loss risk out and model 60 founder hours a week, not 40.';
+  const turn = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-q', turn_id: 'corr-q-0001',
+    user_turn_text: CORRECTION, user_text: `${FX.l1.message}\n${CORRECTION}` };
+  const qualitative = (): Rec => {
+    const c = candidate();
+    c.goal = { ...c.goal, metric: 'Larger fund secured', operator: null, target_stated: false, value: null, unit: null,
+      baseline_known: false, baseline_value: null, basis: null };
+    c.constraints = c.constraints.filter((k: Rec) => k.role === 'limit');
+    c.links = c.links.map((l: Rec) => (l.to === 'New customers' ? { ...l, to: 'Larger fund secured' } : l));
+    return c;
+  };
+  const change = async (caps: ReturnType<typeof lane>['caps']) => {
+    const { dispatchTool } = await import('../runtime/agent-tools.js');
+    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote: CORRECTION }] }),
+      turn as never, caps) as Promise<Rec>;
+  };
+
+  it('RED: correction → ONE card saying the goal has no numeric target → press → saved → reopen holds it; no target invented', async () => {
+    const s = server();
+    const { caps } = lane(s, new ProposalStore(), qualitative);
+    const offer = await change(caps);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true, mutated: false });
+    expect(String(offer.public_label)).toMatch(/^Replace the early draft with a revised one built from your brief and the correction you just gave\. Its goal, ‘Larger fund secured’, has no numeric target, as before\. /);
+    s.said(turn.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(goal.label).toBe('Larger fund secured');
+    expect(goal.goal_threshold ?? null).toBeNull();
+    expect(((reopened.graph.goal_constraints ?? []) as Rec[]).filter((r) => r.role === 'goal_target')).toEqual([]);
+    expect((reopened.graph.nodes as Rec[]).map((n) => n.label)).not.toContain('Ad production costs erode budget');
+  });
+
+  it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
+    const base = structuredClone(FX.graph);
+    base.goal_constraints = [...(base.goal_constraints ?? []), { constraint_id: 'agent-lane:product_feature_launch:>=', node_id: 'product_feature_launch',
+      operator: '>=', value: 100, unit: '% complete', label: 'product feature launch', provenance: 'explicit', value_frame: 'level', role: 'goal_target' }];
+    const s = server({ graph: base });
+    const { caps } = lane(s, new ProposalStore(), qualitative);
+    expect(await change(caps)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.commits).toHaveLength(0);
+  });
+});
