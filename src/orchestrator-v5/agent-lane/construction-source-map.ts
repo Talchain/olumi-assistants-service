@@ -117,12 +117,14 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
 
 /**
  * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z, unseen brief R4): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15:
- * the same figure with the opposite direction word. The drafter's −15 was refused as no figure of the quote, so the user's own
+ * the same figure with the opposite direction word, where the words state a NET flow. The drafter's −15 was refused as no figure of the quote, so the user's own
  * net loss was admitted as Olumi's unverified, unscaled guess and blocked every Run. A figure written straight after a loss
  * direction is also stated as its negative; with no such words a negative stays refused, as before. Which reading a subject
  * takes (a net change at −15, or a count of losses at 15) is the binder's, never this list's.
  */
-const LOSS_BEFORE = /\b(?:losing|lose|loses|lost|(?:net )?loss of|deficit of|outflow of|down(?: by)?)(?: a net| net)?(?: (?:about|around|roughly|nearly|almost|some|over))?\s*$/iu;
+// AIE 6187351293 (2a scope): the loss words are literal source support for a NET reading only. "We lose 15 members a month"
+// can be a gross count of 15 lost (positive, with a negative effect downstream), so only a net flow states −15.
+const LOSS_BEFORE = /\b(?:(?:losing|lose|loses|lost) (?:a )?net|(?:a )?net (?:loss|outflow|decline|drop) of|(?:a )?deficit of)(?: (?:about|around|roughly|nearly|almost|some|over))?\s*$/iu;
 export function statesLossBefore(quote: string, index: number): boolean {
   return LOSS_BEFORE.test(quote.slice(0, index));
 }
