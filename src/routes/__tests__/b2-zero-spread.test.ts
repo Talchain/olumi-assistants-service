@@ -224,7 +224,12 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     const output = produced(envelope);
     expect(JSON.stringify(withoutAmendment7InRecord(output.enrichment))).toBe(JSON.stringify(STAGING_CONTROL.enrichment));
     expect(JSON.stringify(withoutAmendment7InRecord(output.public_enrichment))).toBe(JSON.stringify(STAGING_CONTROL.public_enrichment));
-    expect(JSON.stringify(output.agent_facts)).toBe(JSON.stringify(STAGING_CONTROL.agent_facts));
+    // ⭐ S7 B2 (SESSION4 05:29Z): Starter's chance is shown as a range only, so the licence's notes now reach the AI beside it
+    // (here the unverified-source provisional note). Exactly that key is added; every other byte stays staging's.
+    const { goal_chance_notes: rangeNotes, ...agentFactsRest } = output.agent_facts;
+    expect(rangeNotes).toEqual(licence.notes);
+    expect(rangeNotes).toEqual(['Provisional: Olumi could not confirm where some figures behind this result came from.']);
+    expect(JSON.stringify(agentFactsRest)).toBe(JSON.stringify(STAGING_CONTROL.agent_facts));
     // Batch C: condition 6 / r1 item 6 (DL, 12 Oct). Starter's range rests on the same Olumi inputs as its point, so it says
     // so in the point's own words. Exactly that clause (and its count field) is added; every other byte stays staging's.
     const lines = structuredClone(STAGING_CONTROL.screen_lines) as Rec[];
@@ -233,7 +238,11 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(licenceRecord(output.enrichment)!.withheld_reason_by_option).toEqual({ [KEEP]: keepReason });
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
     view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
-    expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
+    // ⭐ S7 B2 (SESSION4 05:29Z): the range-only card says the same provisional note (the one leaf added).
+    expect(view).not.toHaveProperty('goal_chance');
+    const { goal_chance: cardChance, ...cardRest } = output.canonical_view;
+    expect(cardChance).toEqual({ notes: rangeNotes });
+    expect(JSON.stringify(otherwise(cardRest))).toBe(JSON.stringify(otherwise(view)));
     expect(output.canonical_view.leader).toEqual(output.leader_expected);
     expect(STAGING_CONTROL.canonical_view).not.toHaveProperty('leader');
     expectKeepZeroSpread(output.canonical_view);
