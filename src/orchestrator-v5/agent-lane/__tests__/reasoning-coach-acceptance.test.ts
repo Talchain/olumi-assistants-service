@@ -46,7 +46,9 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     // RC-OUTSIDE-VIEW (DL 14 Oct, old #1711 rebuilt): ONE appended row (P5, typed `has_range`, no keyword trigger), the slot_1
     // and tie_break lists naming it, and the outside_view catalogue / DSK-TR-002 entries saying it is built. No case changes.
     expect(createHash('sha256').update(policy).digest('hex')).toBe('54bed6181acce51492eab8d0d74d46fb03a4b6bfe5bd0abfbd8e1d26d65ec0fb');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
+    // System 4 row 11 (SCIENCE, 15 Oct): ONLY the four not_measured S1 cases lose " The comparison turns on it." in their
+    // expected rendered question (a sensitivity claim THIS Run never measured); the policy template bytes are unchanged.
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('39686a0d7fd7a3e06241eab00a2b97fcfaecd106a8ec5efb0697bd38ad5fec38');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });

@@ -17,10 +17,11 @@ export function composeEligibleIntervention(composed: ReplyComposition, interven
   // R3-1: the UI escapes HTML, so "<details>…" reached the user as tags (run 2: hiring 10–14, marketing 2–6). The same
   // label and Science's words, byte for byte, ship as a plain final paragraph the chat renders.
   const disclosure = whySaid ? '' : `${INTERVENTION_WHY_LABEL} ${intervention.why}`;
-  // AI-first N1: the AI's answer ships whole; the selected action and Science's disclosure follow it as plain paragraphs.
+  // AI-first N1: the AI's answer ships whole, and Science's disclosure follows it as a plain paragraph. Reply-face P1 (served UI
+  // witness 23:07Z: "…\n\nSuggest drivers\n\nWhy? …"): the action label is a BUTTON'S words (`guidance.slot1.primary_action`), not
+  // text the user reads, so it is never joined into the AI's answer.
   if (composed.reason === 'ai_answer') {
-    const action = actionLabel === undefined || composed.text.includes(actionLabel) ? '' : actionLabel;
-    return { ...composed, text: [composed.text, action, disclosure].filter(Boolean).join('\n\n') };
+    return { ...composed, text: [composed.text, disclosure].filter(Boolean).join('\n\n') };
   }
   // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
   if (faceContract) {

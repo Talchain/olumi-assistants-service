@@ -771,6 +771,13 @@ export const NodeV3 = z.object({
    */
   occurrence_statement: z.record(z.string(), z.unknown()).optional().catch(undefined),
   /**
+   * ⭐ SYSTEM 1 the user's recorded statements about this node (DL ruling 14 Oct 23:09Z; AIE 6180193788): each entry is the
+   * subject and field a door card recorded, the user's complete verified words (quote, source, speaker) and when. Written ONLY by
+   * the statement door's writer in the same commit as the member its reading sets; read through `userStatementFor`. CEE-owned; not
+   * in the analysis hash. Malformed on read degrades to absence.
+   */
+  user_statements: z.array(z.record(z.string(), z.unknown())).optional().catch(undefined),
+  /**
    * ⭐ AIE LAWS RULING, SAME COHORT (option nodes only; science PR-4, `goal-target/cohort-forecast.ts`). This option's forecast
    * of the goal window's ONE cohort: the people it reaches over the window (a point, its own uncertainty excluded and said so)
    * and their conversion's likely range, read as the MIDDLE HALF (25th–75th percentile; never a min–max, never a 90% interval).

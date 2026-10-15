@@ -5,6 +5,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { ROLE_TABLE, rowKey } from '../../src/orchestrator-v5/statement-door/role-table.js';
 
 const TOOLS = readFileSync('src/orchestrator-v5/agent-lane/runtime/agent-tools.ts', 'utf8');
 const proposeTools = [...new Set([...TOOLS.matchAll(/name: '(propose_[a-z_]+)'/g)].map((m) => m[1]!))].sort();
@@ -45,5 +46,10 @@ describe('SYSTEM 1: user-statement tools only shrink onto the ONE statement door
     expect(args).toEqual(USER_STATEMENT_ARGS.filter((a) => args.includes(a)));
     expect(USER_STATEMENT_ARGS.filter((a) => !args.includes(a))).toEqual([]);
     expect(USER_STATEMENT_ARGS.length).toBeLessThanOrEqual(2);
+  });
+
+  it('the door table has ONE row per (field, carrier), each signed by an AIE ruling (never a test row)', () => {
+    expect(new Set(ROLE_TABLE.map(rowKey)).size).toBe(ROLE_TABLE.length);
+    for (const r of ROLE_TABLE) expect(r.signed_by, rowKey(r)).toMatch(/^\d{10}$/);
   });
 });
