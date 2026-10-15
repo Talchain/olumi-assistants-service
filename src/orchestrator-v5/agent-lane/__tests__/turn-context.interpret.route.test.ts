@@ -145,6 +145,21 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     expect(JSON.parse(last).request).toBe(RUN_EXPLANATION_MESSAGE);
     expect(last.includes(BRIEF_LABEL)).toBe(false);
   }, 60_000);
+
+  it('B1 buddy regression: the actual interpreting request keeps standing unit, authorship and calculation safeguards', async () => {
+    const request = await explainRequest(BRIEFS.capacity!);
+    const instructions = String(request.instructions);
+    for (const safeguard of [
+      'A target is not a baseline',
+      'Do not call an Olumi estimate',
+      'CALCULATION BOUNDARY',
+      'VOCABULARY',
+      'Never express the chance as a percentage of model runs',
+      'Never expose internal ids or field names',
+    ]) expect(instructions, safeguard).toContain(safeguard);
+    expect(request.tools).toEqual([]);
+    expect(request.tool_choice).toBe('none');
+  }, 60_000);
 });
 
 describe('S2 turnContext: the user’s older words survive the coaching call’s 3-turn trim', () => {
