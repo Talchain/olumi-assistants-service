@@ -520,7 +520,7 @@ export const BUILD_INSTRUCTIONS = [
   // no factor linked on to the goal, so the analysis refused. The shape below is
   // the stated envelope; the node and link ceilings are the size gate's own.
   'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE \u2014 BUT NOT THIN. The shape to aim for is this envelope: one goal; '
-  + 'EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total \u2014 when the user states fewer than 3, add carrying on as now if they did not state it, then the strongest alternative the question itself points to (such as a partial, phased or smaller version of a stated option), each marked "ai_proposed"; '
+  + 'EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total \u2014 when further alternatives would help, propose materially different feasible alternatives, labelled as Olumi\'s. Include carrying on as an actionable option only where consistent with the user\'s current constraints and explicit corrections; if it is infeasible or rejected, retain it only as a clearly separated reference when useful, not as a revived feasible choice. Mark each alternative Olumi adds "ai_proposed"; '
   + 'roughly 4 to 8 factors that actually move the goal \u2014 besides any factor an option sets directly, name the MECHANISMS through which those changes reach the goal, never an option merely restated as a quantity; '
   // ⛔ A FIGURE RULE NEVER REMOVES STRUCTURE (DL #75 5916217417): drafted models with NO risk rose from ≤8% (20–27 Sep)
   // to 81% (30 Sep). Measured on staging 68c9789c (MG, 0 retries): both MRR briefs drafted 0 risks, hiring 2, funding

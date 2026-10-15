@@ -99,3 +99,15 @@ describe('what the drafter is sent', () => {
     expect(instructions.indexOf(TEXT.goal_level_in_other_words)).toBe(rule + 'It is where things stand today, never the target. '.length);
   });
 });
+describe('AIE-10 (prompt/AIE-REVIEW-20261015.md): the first-draft default no longer revives carrying on as now', () => {
+  it('the drafter is told to propose feasible alternatives as Olumi\'s, and to keep a rejected or infeasible status quo only as a separated reference', async () => {
+    const sent = await firstRequest(HIRING_BRIEF);
+    const instructions = sent.instructions as string;
+    expect(instructions).toContain('when further alternatives would help, propose materially different feasible alternatives, labelled as Olumi\'s. '
+      + 'Include carrying on as an actionable option only where consistent with the user\'s current constraints and explicit corrections; if it is '
+      + 'infeasible or rejected, retain it only as a clearly separated reference when useful, not as a revived feasible choice.');
+    // Founder turn 04 ("I cannot carry on as I am now") still drafted it: the unconditional default is gone.
+    expect(instructions).not.toContain('add carrying on as now if they did not state it');
+  });
+});
+
