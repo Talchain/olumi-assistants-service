@@ -92,6 +92,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   set_goal_deadline: 'slice_3', // the goal's date (`goal_horizon.deadline`, new on staging 7 Oct): with goal target and limits (S3, S-E)
   confirm_identity: 'none',
   set_option_status: 'none',
+  rename_option: 'none', // S5: the option's name, proposed on its card and renamed only by the press: a structural act, not an estimate
   adopt_olumi_option: 'slice_3',
   replace_draft: 'none', // a whole revised draft, approved as one act; nothing in it is a figure this card edits
 };
