@@ -103,7 +103,8 @@ const effectWords = (graph: unknown, e: Rec): string => `‘${labelOf(graph, e.f
 export const referenceWords = (basis: GoalTargetBasis): string => (basis.reference === 'launch' ? 'after launch' : 'from today');
 const endWords = (graph: unknown, goalId: string, basis: GoalTargetBasis): string => {
   const deadline = goalDeadlineFromRecord(graph, goalId);
-  return `${periodEndWords(basis)} ${referenceWords(basis)}${deadline !== undefined && basis.reference === 'today' ? ` (${sayDate(deadline)})` : ''}`;
+  // `periodEndWords` already says "after launch" for a launch reference (served: "by month three after launch after launch").
+  return `${periodEndWords(basis)}${basis.reference === 'launch' ? '' : ` ${referenceWords(basis)}`}${deadline !== undefined && basis.reference === 'today' ? ` (${sayDate(deadline)})` : ''}`;
 };
 
 /** The ONE timing ask (`ask.ts`): every current option effect and the target's own end point. An answer to it binds all three. */

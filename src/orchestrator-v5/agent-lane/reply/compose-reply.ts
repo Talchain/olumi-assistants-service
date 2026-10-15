@@ -41,7 +41,7 @@ import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { launchWindowOf } from '../../goal-target/goal-target-basis.js';
-import { goalHorizonReplyLead, goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
+import { goalHorizonNextStep, goalHorizonReplyLead, goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
 export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
@@ -704,8 +704,12 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const horizonWhyLeads = horizonLead !== null && chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested'
     && new Set(horizonWithholdDetails).size === 1
     && (input.chanceCells ?? []).some(cell => cell.kind === 'withheld' && cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+  // ⭐ S7 B2 (hiring e2e c1e944a4 turn 18; DL 06:1xZ): the lead, then the ONE next step straight after it (the goal's timing
+  // question), before the estimates and relies-on lines. The reason is still said once.
+  const horizonStep = horizonWhyLeads ? goalHorizonNextStep(input.graph) : null;
   const chanceMarker = chanceDisclosure === null || input.notRunOrExplain === true ? undefined
-    : horizonWhyLeads && horizonLead !== null ? horizonLead : markerForDisclosure(chanceDisclosure);
+    : horizonWhyLeads && horizonLead !== null ? (horizonStep === null ? horizonLead : `${horizonLead} ${horizonStep}`)
+      : markerForDisclosure(chanceDisclosure);
   // The why's opening restates the lead's reason ("Your goal is for month 12, and this model only has today's numbers."): dropped.
   const horizonDetailBeyondLead = !horizonWhyLeads ? horizonWithholdDetails
     : horizonWithholdDetails.slice(0, 1).map(why => sentencesOf(why).slice(1).join(' ').trim()).filter(rest => rest !== '');

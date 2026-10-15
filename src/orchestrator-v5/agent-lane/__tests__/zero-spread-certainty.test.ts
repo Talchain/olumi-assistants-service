@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { goalCertaintyDecisions } from '../goal-certainty.js';
-import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceOf, ZERO_SPREAD_FIXED_BASELINE_LINE } from '../../goal-target/goal-chance-licence.js';
 
 type Rec = Record<string, any>;
 // B1 828d87ac's stored graph: goal MRR ≥ £20,000/month within 12 months; Keep £49 is the baseline.
@@ -72,8 +72,10 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
-    expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
-    expect(lineOf(noHorizon, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
+    // ⭐ S7 B2 (capacity e2e c1e944a4 item 3): with no carrier, Keep £49 is the status quo holding every factor at today's value,
+    // so its line says that, typed `fixed_baseline`. The carrier arm above (a level projected forward) keeps the generic line.
+    expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' });
+    expect(lineOf(noHorizon, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' });
     expect(lineOf(graph, short).line).toBe('Not shown yet: needs month-by-month changes');
     // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
     const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));
