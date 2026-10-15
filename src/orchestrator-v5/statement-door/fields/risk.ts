@@ -125,7 +125,11 @@ function readHoldsNow(quote: string, subject: DoorSubject, graph: unknown, _word
   }
   const windowAsk = windowHoldsAskOf(graph, subject.id);
   if (windowAsk !== undefined && typeof answering === 'string' && answering.trim() === windowAsk) {
-    if (ANSWER_YES.test(quote) && !ANSWER_NO.test(quote) && !HEDGED.test(quote) && !CONDITIONAL.test(quote)) return { form: 'holds_in_window' };
+    // The WHOLE answer, by the shared negation and condition readers (PL 04:05): a later denial ("Yes, but it will not hold during
+    // that period") or condition anywhere in it keeps the words and is never read as a forecast that it holds.
+    if (ANSWER_YES.test(quote) && !ANSWER_NO.test(quote) && !HEDGED.test(quote) && !NEGATED.test(quote) && !CONDITIONAL.test(quote)) {
+      return { form: 'holds_in_window' };
+    }
     // AIE 6183711560: a hedge, condition or no keeps its meaning; never ask about its effect instead (a different quantity), nor
     // press for an unconditional answer.
     return { refused: `“${quote}” is the user’s own answer: keep it as theirs, with its qualifications. It does not say plainly that `
