@@ -75,7 +75,11 @@ async function harness(g = g0()) {
     await app.close(); vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-    app = Fastify(); apps.push(app); await registerRoute(app); await readRoute(app); await app.register(agentV1TurnRoute); await app.ready();
+    // ONE module graph, as the served process has: the register and read routes come from the same fresh import as the Agent
+    // route, so its in-process dispatch mark (`agent-subturn-context.ts`) is the one the register route reads (S10).
+    const { default: freshRegisterRoute } = await import('../../../routes/assist.v1.scenario-graph-register.js');
+    const { default: freshReadRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    app = Fastify(); apps.push(app); await freshRegisterRoute(app); await freshReadRoute(app); await app.register(agentV1TurnRoute); await app.ready();
   };
   const agentTurn = async (message: string, extra: Rec = {}) => {
     const r = await injectAsCeeWriter(app, { method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, turn_id: randomUUID(), message, ...extra } });

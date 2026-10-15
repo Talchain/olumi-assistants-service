@@ -6,7 +6,6 @@
  * `agent-v1-turn.ts` dispatches it (`runAsAgentSubturn`). Every other inject behaves exactly as `app.inject` would.
  */
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
-import { runAsAgentSubturn } from '../../src/orchestrator-v5/session/agent-subturn-context.js';
 
 const REGISTER_URL = /\/scenarios\/([^/?#]+)\/graph\/register(?:[?#]|$)/;
 
@@ -17,5 +16,7 @@ export async function injectAsCeeWriter(app: Pick<FastifyInstance, 'inject'>, op
   // ⚠ AWAITED INSIDE THE MARK: without a callback `inject` returns Light-my-Request's LAZY chain, which only dispatches
   // when `.then` is called, so a chain returned out of the mark would dispatch in the caller's context, unmarked. The
   // served dispatch (`agent-v1-turn.ts` `dispatchFor`) awaits it inside, exactly so.
+  // Resolved at the CALL, so a spec that re-imports its routes after `vi.resetModules()` marks the instance they read.
+  const { runAsAgentSubturn } = await import('../../src/orchestrator-v5/session/agent-subturn-context.js');
   return runAsAgentSubturn(decodeURIComponent(match[1]), async () => await app.inject(opts));
 }
