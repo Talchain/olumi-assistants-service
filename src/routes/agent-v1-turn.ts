@@ -5262,8 +5262,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // BYPASS1: on the AI's reply only the value changes and the identity ask it holds as typed facts are not restated. Every
     // other owed line (receipts, what was left out, the first analysis, open questions, the methods note, the Run lines) is
     // server truth and stays, and so does every line when the current state is unknown (the no-present-claim rule).
+    // An interpreting call cannot issue the figure-confirm tool. Its existing card survives, and the exact
+    // confirmation question remains owed if the AI omitted it; the asked-once pass above still owns repeats.
+    const identityAskStillOwed = aiRunTurn ? identityAskLineOwed(result.tool_results, narrationText) : null;
     const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed
-      : owed.filter((line) => !owedHeldByAi.has(line));
+      : owed.filter((line) => !owedHeldByAi.has(line) || line === identityAskStillOwed);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       // #3167 fix-forward: the risks the Run on screen recorded leaving out, never today's predicate.
