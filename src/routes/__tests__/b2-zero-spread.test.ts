@@ -248,7 +248,9 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     // (here the unverified-source provisional note). Exactly that key is added; every other byte stays staging's.
     const { goal_chance_notes: rangeNotes, ...agentFactsRest } = output.agent_facts;
     expect(rangeNotes).toEqual(licence.notes);
-    expect(rangeNotes).toEqual(['Provisional: Olumi could not confirm where some figures behind this result came from.']);
+    // C2 (AIE 6184726873): beside it, the adopted range's line, once (`AMENDMENT_7.notes`): both disclosures reach the AI.
+    expect(rangeNotes).toEqual(AMENDMENT_7.notes);
+    expect(rangeNotes[0]).toBe('Provisional: Olumi could not confirm where some figures behind this result came from.');
     expect(JSON.stringify(agentFactsRest)).toBe(JSON.stringify(STAGING_CONTROL.agent_facts));
     // Batch C: condition 6 / r1 item 6 (DL, 12 Oct). Starter's range rests on the same Olumi inputs as its point, so it says
     // so in the point's own words. Exactly that clause (and its count field) is added; every other byte stays staging's.
