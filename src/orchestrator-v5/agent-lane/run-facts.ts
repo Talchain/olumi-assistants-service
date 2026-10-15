@@ -61,6 +61,18 @@ export function runLeaderOf(analysisResult: unknown, analysisState: unknown, ana
     near_tie: robust?.near_tie_is_tie ?? false, robustness: robust?.level ?? null };
 }
 
+/**
+ * THE COMPARISON WITH THE PRECEDING RUN (AIE 6181933060 via DL 01:18Z: both arms of the AIE's comparison omitted it), as the
+ * state already gates it: the prior Run's id, the licensed model-facing delta (`analysis.run_delta`) and Olumi's leader-free
+ * record of what changed (`rerun_record`). Carried, never recomputed; none for a first Run or a Run that is not current.
+ */
+export interface RunComparison {
+  readonly prior_run_id: string;
+  readonly run_delta?: unknown;
+  /** Olumi's record's facts (`code_line`, `prior_withheld`, `attribution_case`); its `use` instruction stays in `rerun_record`. */
+  readonly rerun_record?: unknown;
+}
+
 export interface RunFacts {
   /** Whether these facts are the selected CURRENT Run's (a stale Run's facts are never read as current). */
   readonly current: boolean;
@@ -74,9 +86,18 @@ export interface RunFacts {
   readonly olumi_inputs?: { readonly links: number; readonly values: number; readonly settings_by_option: Readonly<Record<string, number>> };
   /** The user's own recorded statements, verbatim, per node. */
   readonly user_statements: readonly { readonly node_id: string; readonly field: string; readonly said: readonly string[] }[];
+  /** This Run against the preceding one (see {@link RunComparison}); absent for a first Run. */
+  readonly comparison?: RunComparison;
   /** The AIE's exact disclosures that apply to THIS Run: each said once, word for word, where it applies. */
   readonly must_say: readonly string[];
 }
+
+/** Olumi's record of what changed, as facts only: its instruction (`use`) already rides beside it in the state, said once. */
+const recordFacts = (record: unknown): Rec | undefined => {
+  if (!isRec(record)) return undefined;
+  const { use: _use, ...facts } = record;
+  return facts;
+};
 
 const warningsOf = (result: unknown): Rec[] => {
   const r = isRec(result) ? result : undefined;
@@ -86,7 +107,8 @@ const warningsOf = (result: unknown): Rec[] => {
 
 /** The packet for the selected Run (`analysisResult`, the graph it reads, and whether it is current). */
 export function runFactsOf(analysisResult: unknown, graph: unknown, current: boolean,
-  state: { readonly analysisState?: unknown; readonly analysisReady?: unknown } = {}): RunFacts {
+  state: { readonly analysisState?: unknown; readonly analysisReady?: unknown;
+    readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
   const chances = goalChanceFactsForAgent(analysisResult, graph, current);
   const licence = current ? goalChanceLicenceForAgent(analysisResult) : undefined;
   const withheld: RunWithheld[] = current ? warningsOf(analysisResult).filter((w) => typeof w.code === 'string' && w.code.startsWith('GOAL_FIGURES_'))
@@ -112,6 +134,11 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     sensitivity: s.status === 'measured' ? { measured: true, most_sensitive: s.most_sensitive.label } : { measured: false },
     ...(census !== undefined ? { olumi_inputs: census } : {}),
     user_statements: said,
+    ...(current && typeof state.comparison?.prior_run_id === 'string' && state.comparison.prior_run_id !== ''
+      && (state.comparison.run_delta !== undefined || state.comparison.rerun_record !== undefined)
+      ? { comparison: { prior_run_id: state.comparison.prior_run_id,
+        ...(state.comparison.run_delta !== undefined ? { run_delta: state.comparison.run_delta } : {}),
+        ...(recordFacts(state.comparison.rerun_record) !== undefined ? { rerun_record: recordFacts(state.comparison.rerun_record) } : {}) } } : {}),
     must_say: [...(chances.goal_chance_notes ?? [])],
   };
 }

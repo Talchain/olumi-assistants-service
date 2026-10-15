@@ -709,8 +709,13 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect(state.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
     expect(cold.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
     const { run_delta: _delta, ...analysis } = cold.analysis;
-    expect({ ...cold, analysis }).toEqual(baseline);
-    expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
+    // S7 step 1 (AIE 6181933060): the Run-facts packet carries THIS comparison, by identity: the prior Run's id and the same
+    // licensed delta the model is shown. Everything else stays equal to the baseline.
+    const { comparison, ...runFacts } = cold.run_facts;
+    expect(comparison).toEqual({ prior_run_id: delta.endpoints!.prior.run_id, run_delta: projectModelFacingRunDelta(delta) });
+    expect(baseline.run_facts).not.toHaveProperty('comparison');
+    expect({ ...cold, analysis, run_facts: runFacts }).toEqual(baseline);
+    expect(JSON.stringify({ ...cold, analysis, run_facts: runFacts })).toBe(JSON.stringify(baseline));
     expect(state.entities).toEqual(baseline.entities);
     expect(state.links).toEqual(baseline.links);
     expect(state.limits).toEqual(baseline.limits);
@@ -753,7 +758,12 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     leaderFreePins(rerunRecord);
     expect(rerunRecord.code_line).toBe('Nothing you entered changed.');
     expect(JSON.stringify(rerunRecord)).not.toMatch(/\bgoal\b(?!_path)/i);
-    expect(JSON.stringify({ ...withoutRecord, analysis })).toBe(JSON.stringify(baseline));
+    // S7 step 1 (AIE 6181933060): the Run-facts packet carries the SAME record's facts and the prior Run's id (its `use`
+    // instruction is said once, in `rerun_record`); no unlicensed delta rides there either.
+    const { comparison, ...runFacts } = withoutRecord.run_facts;
+    const { use: _use, ...recordFacts } = rerunRecord;
+    expect(comparison).toEqual({ prior_run_id: read.current_read.run_delta.endpoints.prior.run_id, rerun_record: recordFacts });
+    expect(JSON.stringify({ ...withoutRecord, analysis, run_facts: runFacts })).toBe(JSON.stringify(baseline));
   });
 
   it('D3-a: Explain on a current Run with an UNEARNED P(goal)=0 carries that option’s goal_certainty sentence', async () => {
