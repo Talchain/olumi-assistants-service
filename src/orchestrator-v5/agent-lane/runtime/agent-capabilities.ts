@@ -1,3 +1,4 @@
+import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
@@ -1475,7 +1476,13 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(n.scale_frame === undefined || n.kind === 'goal' ? {} : { scale_frame: n.scale_frame }),
             ...(Object.keys(valueProvenance).length === 0
               ? {}
-              : { value_provenance: valueProvenance }),
+              : { value_provenance: valueProvenance }),            // ⭐ SYSTEM 2 (AIE 6181498097): how the goal's level today was reached, in the one reader's words
+            // (`goalLevelReadingWords`), so the Agent says "derived from your figures" and never calls it a measured total.
+            ...((): Record<string, unknown> => {
+              const words = n.kind === 'goal' ? goalLevelReadingWords({ nodes: [n] }, n.id) : null;
+              return words === null ? {} : { level_today_reading: words };
+            })(),
+
             // ⭐ Recovery Batch B, Row5 (DL 12 Oct): the range stated for this level, as stored (`observed_state.range`), with
             // its author, so the Agent can say "you gave 10–30" or "a supplier's 10–30 (unverified)". The user's own range
             // sits beside their figure; a third party's is quoted, role unverified. `point` says which figure sits beside it:
