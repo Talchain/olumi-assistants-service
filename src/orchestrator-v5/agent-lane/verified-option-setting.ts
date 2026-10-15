@@ -816,6 +816,13 @@ export function recordedRawLevelQuote(model: CandidateModel, factor: Factor): st
   const q = (factor as { baseline_evidence?: { quote?: unknown } | null } | undefined)?.baseline_evidence?.quote;
   return typeof q === 'string' ? q : undefined;
 }
+/**
+ * Whether a factor's level is the brief's own, for readers outside admission (the event capacity basis, DL ruling C): SYSTEM 2's
+ * verified level statement, or, for a recording made before SYSTEM 2, its retired carrier through the one recorded-raw reader.
+ */
+export function levelQuotedByBrief(model: CandidateModel, brief: string | undefined): (factor: Factor) => boolean {
+  return (factor) => (carriesStatements(model) ? statementCitesLevel(model, factor, brief) : recordedRawLevelQuote(model, factor) !== undefined);
+}
 /** SYSTEM 2: the draft states a level for this factor (verified or refused): its claimed receipt, never rewritten into another. */
 function claimsLevelStatement(model: CandidateModel, factor: Factor, brief: string): boolean {
   if (!carriesStatements(model)) return false;

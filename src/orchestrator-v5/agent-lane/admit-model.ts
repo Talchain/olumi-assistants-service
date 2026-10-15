@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { carriesStatements, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -3504,7 +3504,7 @@ export function admitCandidateModel(
   };
   if (prompted) {
     try {
-      const refusal = eventByDateAdmissionRefusal(candidateModel, brief);
+      const refusal = eventByDateAdmissionRefusal(candidateModel, levelQuotedByBrief(candidateModel, brief));
       if (refusal !== null) return failedEvent(refusal);
     } catch {
       return failedEvent(EVENT_BY_DATE_REFUSALS[1]);
