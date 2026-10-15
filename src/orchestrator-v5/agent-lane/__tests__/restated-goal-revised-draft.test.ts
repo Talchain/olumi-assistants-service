@@ -1222,7 +1222,7 @@ describe('a revised draft over the link limit only is admitted as drafted (L20 s
     // ⛔ PL #94 19:41: only the size compaction is skipped. The first pass's own coverage gaps still take their checked
     // repair retry; it answers with the served demoting retry, which the existing checks reject, so the first pass stands.
     expect(sent, 'the first pass and one repair retry').toHaveLength(2);
-    expect(String(sent[1]!.instructions), 'a repair retry').toContain('Repair only the listed construction issues.');
+    expect(String(sent[1]!.instructions), 'a repair retry').toContain((JSON.parse(readFileSync('tests/fixtures/sys2/aie-gen-v2-arm-c-packet.json', 'utf8')) as { generation: { changes: { id: string; replacement: string }[] } }).generation.changes.find((c) => c.id === 'GR1')!.replacement);
     expect(String(sent[1]!.input), 'never the size compaction').not.toContain('Your previous model, to shrink');
     expect(String(offer.public_label).split(REVISED_DRAFT_MORE_LINKS), 'said once').toHaveLength(2);
     s.said(FX.l20.turn_id);

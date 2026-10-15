@@ -43,6 +43,12 @@ export interface ApprovedGoalHorizon {
   readonly expected_deadline: string | null;
   readonly reference_date?: string;
   readonly stated_months?: number;
+  /**
+   * ⭐ DL 15 Oct (hiring 62e94f27, URGENT): the goal reading's open question, EXACTLY as the card showed it, where the reading was
+   * stored awaiting its period. The press is the user's answer to that shown question (answered_ask): the write removes it,
+   * only when the stored question is still these exact words. The date stays Olumi's reading, approved.
+   */
+  readonly answers_question?: string;
 }
 
 export type GoalHorizonRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'date_invalid' | 'deadline_changed' | 'reference_missing' | 'horizon_not_modelled';
@@ -104,6 +110,13 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
     else delete goal.goal_horizon_stated_months;
     if (part === null) Object.assign(graph, admitStructuralGoalAccumulation(graph.nodes as Array<Rec & { id: string }>, graph.edges as Array<Rec & { from: string; to: string }>));
   }
+  // The shown question, answered by the press, by identity: a reading awaiting its period whose stored question is the card's words.
+  const basis = isRec(goal.goal_target_basis) ? goal.goal_target_basis : undefined;
+  if (approved.answers_question !== undefined && basis !== undefined && basis.period_months === undefined
+    && basis.open_question === approved.answers_question) {
+    const { open_question: _answered, ...rest } = basis;
+    goal.goal_target_basis = rest;
+  }
 
   const label = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'the goal';
   // Commit assigns refs to new entities: bind the door to those same projected bytes before hashing/read-back.
@@ -133,7 +146,8 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
 }
 
 /** Validate the entire freshly computed atomic write; landed retries use the field-scoped recovery check below. */
-export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, goalId: string, expectedReference?: string | null, statedMonths?: number): boolean {
+export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, goalId: string, expectedReference?: string | null, statedMonths?: number,
+  answersQuestion?: string): boolean {
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
   const deadline = readGoalRecord(after, goalId)?.horizon?.deadline;
   const goal = (after.nodes as Rec[]).find(n => n.id === goalId);
@@ -143,7 +157,7 @@ export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, go
   if (reference !== undefined && typeof reference !== 'string') return false;
   const written = applyGoalHorizonEdit(before, { goal_id: goalId, deadline,
     expected_deadline: readGoalRecord(before, goalId)?.horizon?.deadline ?? null, reference_date: reference,
-    ...(statedMonths !== undefined ? { stated_months: statedMonths } : {}) });
+    ...(statedMonths !== undefined ? { stated_months: statedMonths } : {}), ...(answersQuestion !== undefined ? { answers_question: answersQuestion } : {}) });
   return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
 }
 
