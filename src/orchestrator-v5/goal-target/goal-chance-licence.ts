@@ -397,27 +397,34 @@ export const ZERO_SPREAD_LINE = 'Chance not shown: this result reports a very na
   + 'That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option.';
 
 /**
- * ⭐ S7 B2 (capacity e2e c1e944a4 judge item 3; DL 05:46Z): the zero-spread line for the status quo that holds every factor at
- * today's value. The generic line ("a very narrow central range…") read as a measurement problem on an option that is fixed by
- * construction. Two facts, both recorded (the option's own definition, and the measured spread in the AIE's 6172311003 words, so
- * no zero variance the std arm does not prove: AIE 281e8b3d), the AIE's non-certainty sentence and #3077's next step: never a
- * cause beyond them, a figure, a forecast or a future event.
+ * ⭐ S7 B2 (capacity e2e c1e944a4 judge item 3; AIE 6186002237 + 6186411970, exact): the zero-spread line for the status quo
+ * THIS Run evaluated at today's values. The generic line ("a very narrow central range…") read as a measurement problem on an
+ * option fixed by construction. Only where the Run's own sent request shows it (`fixedBaselineOf`); otherwise, on the weaker
+ * output-summary evidence alone, the 6172311003 words stay.
  */
-export const ZERO_SPREAD_FIXED_BASELINE_LINE = 'Chance not shown: this option keeps every factor at today’s value, and this result reports a very narrow central range or a very small spread. '
-  + 'That alone does not establish certainty. Worth checking: whether any of today’s figures are uncertain; giving them a range can let the Run show a chance for it.';
+export const zeroSpreadFixedBaselineLine = (option: string, goal: string): string =>
+  `Chance not shown: this Run evaluates ‘${option}’ using today’s values as a fixed baseline. This result does not support a chance of meeting ‘${goal}’.`;
+/** That line's shape, for the stored-licence reader (the labels are the Run's own; no other line carries the basis). */
+const FIXED_BASELINE_LINE = /^Chance not shown: this Run evaluates ‘[^‘’\r\n]+’ using today’s values as a fixed baseline\. This result does not support a chance of meeting ‘[^‘’\r\n]+’\.$/u;
 
 /**
- * The status quo that holds every factor at today's value: the baseline option, with no intervention of its own, on a model with
- * no accumulation (a carrier projects a level forward from today, so "today's value" would not be the result's).
+ * The option THIS Run evaluated as a fixed baseline: in the Run's own sent request (`sentRun.options`, the evaluator's input),
+ * the one option marked `is_baseline` whose every sent intervention is 0 (the wire's "held at today's value"; none sent is the
+ * same), on a model with no accumulation (a carrier projects a level forward from today, so "today's values" would not be the
+ * result's). Not the graph's stamp alone.
  */
-function fixedBaselineIdOf(graph: unknown): string | undefined {
+function fixedBaselineOf(sentRun: unknown, graph: unknown): { readonly id: string; readonly label: string } | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   if (nodes.some((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation')) return undefined;
-  const baselines = nodes.filter((n) => n.kind === 'option' && n.is_baseline === true && typeof n.id === 'string');
+  const sent = isRec(sentRun) && Array.isArray(sentRun.options) ? sentRun.options.filter(isRec) : [];
+  const baselines = sent.filter((o) => o.is_baseline === true);
   if (baselines.length !== 1) return undefined;
   const b = baselines[0]!;
-  const intervenes = [b.interventions, isRec(b.data) ? b.data.interventions : undefined].some((iv) => isRec(iv) && Object.keys(iv).length > 0);
-  return intervenes ? undefined : b.id as string;
+  const id = typeof b.option_id === 'string' ? b.option_id : typeof b.id === 'string' ? b.id : undefined;
+  if (id === undefined || !isRec(b.interventions) || !Object.values(b.interventions).every((v) => v === 0)) return undefined;
+  const node = nodes.find((n) => n.id === id && n.kind === 'option');
+  const label = typeof node?.label === 'string' && node.label.trim() !== '' && !/[\r\n‘’]/.test(node.label) ? node.label.trim() : undefined;
+  return label === undefined ? undefined : { id, label };
 }
 
 /** The goal's target as the face says it: the shared formatter's rate separator (" / month") is the panel's, the face's is "a month". */
@@ -434,16 +441,16 @@ function retiredPlainZeroSpreadLine(side: 'meets' | 'falls_short', value: number
 }
 
 function zeroSpreadReasons(
-  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, envelope: unknown,
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, envelope: unknown, sentRun?: unknown, goalLabel?: string,
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
   const out: Record<string, GoalChanceZeroSpread> = {};
   // Paul's principle review (B.md, #3017 residual): the carrier arm's "Meets / Falls short … if today's rates hold" was the
   // future-event form #3017 retired for the plain arm; a new Run says the same plain line. A stored Run keeps its own line.
-  const fixed = fixedBaselineIdOf(graph);
+  const fixed = goalLabel === undefined || /[‘’]/.test(goalLabel) ? undefined : fixedBaselineOf(sentRun, graph);
   for (const [id, side] of Object.entries(sides)) {
-    if (verdict !== 'withhold' && id === fixed) {
-      out[id] = { reason: 'zero_spread', side, line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' };
+    if (verdict !== 'withhold' && fixed !== undefined && id === fixed.id) {
+      out[id] = { reason: 'zero_spread', side, line: zeroSpreadFixedBaselineLine(fixed.label, goalLabel!), basis: 'fixed_baseline' };
       continue;
     }
     const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine() : ZERO_SPREAD_LINE;
@@ -746,7 +753,7 @@ export function goalChanceLicenceOf(
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
-    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope) : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope, constraints.sentRun, goalLabel) : {}),
     ...Object.fromEntries(Object.entries(unearnedSide).flatMap(([id, side]) => {
       const line = shareUnearnedCertaintyLine(graph, id, side);
       return line === undefined ? [] : [[id, { reason: 'unearned_certainty' as const, side, line }]];
@@ -1624,7 +1631,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
         && reason.line === retiredPlainZeroSpreadLine(reason.side, storedTarget.value as number, storedTarget.unit as string);
       const line = retired ? ZERO_SPREAD_LINE : reason.line;
       // S7 B2: the stored fixed-baseline basis is kept only beside its own line (a basis never re-labels another line).
-      const basis = reason.basis === 'fixed_baseline' && line === ZERO_SPREAD_FIXED_BASELINE_LINE ? { basis: 'fixed_baseline' as const } : {};
+      const basis = reason.basis === 'fixed_baseline' && FIXED_BASELINE_LINE.test(line) ? { basis: 'fixed_baseline' as const } : {};
       zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line, ...basis };
     } else if (reason.reason === 'unearned_certainty' && (reason.side === 'meets' || reason.side === 'falls_short')) {
       // DL (14 Oct): the stored Run's own words for a deadline-forecast certainty it did not earn.

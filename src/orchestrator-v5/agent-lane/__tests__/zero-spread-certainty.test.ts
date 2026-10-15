@@ -7,7 +7,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { goalCertaintyDecisions } from '../goal-certainty.js';
-import { goalChanceLicenceOf, ZERO_SPREAD_FIXED_BASELINE_LINE } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceOf, zeroSpreadFixedBaselineLine } from '../../goal-target/goal-chance-licence.js';
+import type { SentRunInputs } from '../../goal-target/goal-own-constraint-chance.js';
 
 type Rec = Record<string, any>;
 // B1 828d87ac's stored graph: goal MRR ≥ £20,000/month within 12 months; Keep £49 is the baseline.
@@ -72,10 +73,22 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
-    // ⭐ S7 B2 (capacity e2e c1e944a4 item 3): with no carrier, Keep £49 is the status quo holding every factor at today's value,
-    // so its line says that, typed `fixed_baseline`. The carrier arm above (a level projected forward) keeps the generic line.
-    expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' });
-    expect(lineOf(noHorizon, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' });
+    // S7 B2 (AIE 6186002237): with no record of what THIS Run sent, only the output summary is evidence: the 6172311003 words.
+    expect(lineOf(noHorizon, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
+    expect(lineOf(noHorizon, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: LINE });
+    // ⭐ …and where the Run's own sent request evaluated Keep £49 at today's values (baseline, no intervention): the AIE's exact face.
+    const keep = (graph.nodes as Rec[]).find((n) => n.id === 'keep_pro_price_at_49')!.label as string;
+    const goal = (noHorizon.nodes as Rec[]).find((n) => n.id === 'mrr')!.label as string;
+    const sentRun = { options: [{ option_id: 'keep_pro_price_at_49', is_baseline: true, interventions: {} },
+      { option_id: 'raise_pro_price_to_59', is_baseline: false, interventions: { pro_plan_price: 59 } }] };
+    const sentLine = (g: Rec, records: Rec[], run: SentRunInputs) => goalChanceLicenceOf({ option_comparison: records }, g, 'mrr', earnedBy(records), undefined, g, { sentRun: run })!
+      .withheld_reason_by_option!.keep_pro_price_at_49;
+    expect(sentLine(noHorizon, fixedRates, sentRun)).toEqual({ reason: 'zero_spread', side: 'meets',
+      line: zeroSpreadFixedBaselineLine(keep, goal), basis: 'fixed_baseline' });
+    // CONTRAST: the same option sent WITH an intervention is not a fixed baseline; nor is any option on the carrier arm.
+    const intervened = { options: [{ ...sentRun.options[0], interventions: { pro_plan_price: 49 } }, sentRun.options[1]] };
+    expect(sentLine(noHorizon, fixedRates, intervened)).toEqual({ reason: 'zero_spread', side: 'meets', line: LINE });
+    expect(sentLine(bound, fixedRates, sentRun)).not.toHaveProperty('basis');
     expect(lineOf(graph, short).line).toBe('Not shown yet: needs month-by-month changes');
     // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
     const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));

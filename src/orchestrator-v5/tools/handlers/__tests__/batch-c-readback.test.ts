@@ -29,7 +29,7 @@ import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
-import { goalChanceLicenceForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, ZERO_SPREAD_FIXED_BASELINE_LINE } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
@@ -562,9 +562,10 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     // event (capacity post3010 row 3), never a blank or a new withhold.
     expect(licence.status_quo).toBeUndefined();
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
-    // ⭐ S7 B2 (capacity e2e c1e944a4 item 3): carrying on holds every factor at today's 75%, so its true line says so (typed).
+    // ⭐ S7 B2 (capacity e2e c1e944a4 item 3; AIE 6186002237 exact): the real Run SENT carrying on with no intervention, so its line
+    // says this Run evaluated it at today's values (typed `fixed_baseline`).
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'zero_spread', side: 'falls_short',
-      line: ZERO_SPREAD_FIXED_BASELINE_LINE, basis: 'fixed_baseline' });
+      line: zeroSpreadFixedBaselineLine('Carry on with the current team', 'Development capacity'), basis: 'fixed_baseline' });
     expect(JSON.stringify(licence)).not.toMatch(/by assumption|doesn’t match/);
     // Its row is the Run's own, intervals kept: none is removed for an assumption that is not claimed.
     expect((result.enrichment.option_comparison as Rec[]).find((r) => r.option_id === 'carry_on_with_the_current_team')!.outcome)

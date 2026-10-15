@@ -194,9 +194,14 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
       labelMatches(sentence, inputs.current_option_labels ?? []) && banned(sentence, /\b(leads|ahead|best|wins|now first)\b/iu, labels)));
     check('RX-NOISE', inputs.noise_verdict !== 'not_noise_qualified'
       || !banned(reply, /\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu, labels));
-    // The earlier run had no figures to move from (prior_withheld), or no option has figures in both runs.
-    check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
-      || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
+    // The earlier run had no figures to move from (prior_withheld), or no option has figures in both runs. ⭐ S9: prior_withheld
+    // is the earlier Run's SHARES; where goal chances were recorded in both Runs, only a sentence about a chance (and no share)
+    // may say it moved.
+    const moved = /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu;
+    check('RX-NO-MOVEMENT-WITHOUT-PRIOR', inputs.prior_withheld === true && inputs.goal_chances_in_both === true
+      ? !sentences.some(sentence => banned(sentence, moved, labels)
+        && (!banned(sentence, /\bchances?\b/iu, labels) || banned(sentence, /\b(shares?|on top|of (the )?runs|wins?|won)\b/iu, labels)))
+      : !(inputs.prior_withheld === true || inputs.no_matched_figures === true) || !banned(reply, moved, labels));
     // A named OR unsaid change is never "no change". Incomplete coverage also cannot license "nothing else changed".
     const changesUnsaid = inputs.changes_unsaid === true;
     check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 && !changesUnsaid

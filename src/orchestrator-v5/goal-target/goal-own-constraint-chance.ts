@@ -43,6 +43,8 @@ export interface SentRunInputs {
   readonly graph?: unknown;
   readonly goal_direction?: unknown;
   readonly goal_threshold_strict?: unknown;
+  /** The options as sent (`is_baseline`, `interventions`): read by the zero-spread fixed-baseline face. */
+  readonly options?: unknown;
 }
 
 export interface GoalOwnConstraintRead {
