@@ -774,7 +774,21 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
   const unit = JSON.stringify(readUnitParts(factor.unit));
   if (unit === 'null') return false;
-  return (map.verified.get(key) ?? []).some((statement) => {
+  // R1 (DL 05:46Z, capacity e2e): a point the drafter stated INSIDE a range ("about 20 tickets per week, between 10 and 30";
+  // form range, value 20, low 10, high 30) is refused by the map, which never pairs figures. Its point is checked here as a
+  // point of the same sentence, and its pair only by the existing clause-governed range reader (`briefStatedLevelRange`, the
+  // reader that already credits that range): both ends must be exactly the ones it reads, and they are then set aside so the
+  // one figure left is the point.
+  const anchored = map.refused.filter((r) => r.key === key && r.refusal === 'figure_not_in_quote' && r.given.form === 'range'
+    && r.given.value === value && typeof r.given.low === 'number' && typeof r.given.high === 'number' && r.given.low < value && value < r.given.high)
+    .flatMap((r) => {
+      const range = briefStatedLevelRange(factor, brief);
+      if (range === undefined || range.quote !== r.quote || range.low !== r.given.low || range.high !== r.given.high) return [];
+      const point = sourceMapOf([{ ...r.given, form: 'point', low: null, high: null }], brief).verified.get(key) ?? [];
+      return point.map((s) => ({ statement: s, ends: [range.low, range.high] }));
+    });
+  const candidates = [...(map.verified.get(key) ?? []).map((statement) => ({ statement, ends: [] as number[] })), ...anchored];
+  return candidates.some(({ statement, ends }) => {
     if (statement.form !== 'point' || statement.low !== value || statement.negated === true) return false;
     const quote = statement.quote;
     // L1 (as `factorLevelSpans`): a count unit that names nothing of its own ("headcount") takes its noun from the factor's
@@ -782,8 +796,10 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
     const name = words(currentQuantityLabel(factor.label)).map(singular);
     const labelBeside = (amount: StatedAmount): boolean => countsItself(factor.unit) && name.length > 0
       && words(quote.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular).join(' ') === name.join(' ');
-    const inFrame = findLinkEffectAmounts(quote).filter((amount) =>
-      sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount)));
+    // The denominator may stay implicit in the sentence's subject ("Each additional specialist resolves about 20 tickets per
+    // week" for tickets per week per specialist), as `quoteBindsFactorFigure` already reads it; a different written one refuses.
+    const inFrame = findLinkEffectAmounts(quote).filter((amount) => !ends.includes(amount.magnitude) &&
+      sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount), true));
     if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
     const stated = inFrame[0]!;
     const label = (l: string): Set<string> => new Set(words(l).map(singular));
