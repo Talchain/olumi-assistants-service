@@ -122,7 +122,7 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
     }[key]);
   });
 
-  it.each([['D3_r1', 'three months'], ['D3_r2', 'three months'], ['D5_r1', 'two months']])(
+  it.each([['D3_r1', 'three months'], ['D3_r2', 'three months']])(
     'CONTRAST %s: a brief whose stated horizon really is %s keeps it', async (key, words) => {
       expect(ep(key).t5_saved_goal.goal_deadline_as_stated, 'PRECONDITION: T5 saved it').toBe(words);
       const { goal } = await build(ep(key));
@@ -130,6 +130,14 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
       expect(Object.hasOwn(goal, 'goal_horizon_months')).toBe(false);
     },
   );
+
+  // ⭐ AIE #94 6184383302: this row USED to pin T5's original failure as a contrast. D5's "We have two months to learn" is the team's
+  // learning window, not a deadline for achieving customer trust; with no claim and no goal target statement it is never written.
+  it('⭐ REPAIRED D5_r1: T5 saved "two months" as the goal\'s deadline; the learning window is now held as no deadline', async () => {
+    expect(ep('D5_r1').t5_saved_goal.goal_deadline_as_stated, 'PRECONDITION: T5 saved it (the original failure)').toBe('two months');
+    const { goal } = await build(ep('D5_r1'));
+    expect(Object.hasOwn(goal, 'goal_deadline_as_stated'), JSON.stringify(goal.goal_deadline_as_stated)).toBe(false);
+  });
 
   it('CONTRAST (served bike-share brief, tests/fixtures/deadline-card-d2.json): no count claimed → the FIRST span stays, "ten months", never the later "month 3"', () => {
     const goal = (servedBikeShare.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
