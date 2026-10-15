@@ -88,7 +88,7 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectRepresentative, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-reading.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
@@ -585,6 +585,8 @@ export interface ApprovedLinkEffect {
   readonly unit_readings?: readonly LinkEffectUnitReading[];
   readonly reversal?: LinkEffectReversal;
   readonly link_selected?: true;
+  /** S5 effect range: `effect.amount` is Olumi's midpoint of the user's range (AIE 6187341689), bound into the reading token. */
+  readonly representative?: LinkEffectRepresentative;
 }
 
 /**
@@ -1174,6 +1176,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
       reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings,
       reversal: linkEffect.reversal, link_selected: linkEffect.link_selected,
+      ...(linkEffect.representative !== undefined ? { representative: linkEffect.representative } : {}),
       lastRunIdentityUse: input.lastRunIdentityUse ?? null, frameRefit: true });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
     const graph = projectGraphForPersistence(written.mutatedGraph);
@@ -1188,7 +1191,10 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     levelBase = graph;
     levelBaseHash = appliedHash;
     valueFacts = written.handlerFacts;
-    valueConfirmations = [`"${labelOfBefore(linkEffect.from)}" → "${labelOfBefore(linkEffect.to)}" now carries the size you stated${
+    valueConfirmations = [linkEffect.representative !== undefined
+      // S5: the receipt never calls Olumi's midpoint the size the user stated.
+      ? `"${labelOfBefore(linkEffect.from)}" → "${labelOfBefore(linkEffect.to)}" now carries Olumi’s calculated midpoint of your range, as a representative effect.`
+      : `"${labelOfBefore(linkEffect.from)}" → "${labelOfBefore(linkEffect.to)}" now carries the size you stated${
       written.statement !== undefined ? `: ${written.statement}` : ''}.`];
   }
   /**
