@@ -749,6 +749,23 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b.assistant_text).not.toContain('between about');
   });
 
+  it('⭐ S7 B1 (served B5 T1b, leader withheld): the AI’s OWN licensed chance lines survive the gate, with NO composer copy', async () => {
+    useT1b();
+    expect(READ.analysis_state.leader_claim.permitted).toBe(false);
+    const screen = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    expect(screen).toHaveLength(3);
+    // The AI's own words for each option's licensed figure, built from the screen's own figure (never typed by hand).
+    const own = screen.map((l) => `In this model, ${l.label} has ${l.figure} chance of meeting your goal.`);
+    const b = await turn(run(`The analysis ran. ${own.join(' ')}`), 'Run it');
+    for (const [i, line] of own.entries()) {
+      expect(count(b.assistant_text, line), `${line}\n---\n${b.assistant_text}`).toBe(1);
+      expect(count(b.assistant_text, screen[i]!.chance), 'no composer copy of the same figure').toBe(0);
+    }
+    // CONTRAST (the fallback stays truthful): the same Run with the AI saying no figure still gets the screen's lines.
+    const none = await turn(run('The analysis ran.'), 'Run it');
+    for (const l of screen) expect(count(none.assistant_text, l.chance), none.assistant_text).toBe(1);
+  });
+
   it('POINTS, RED at base (B5 T1b readback): a Run reply whose figures are gone ends up with the screen’s three lines, once each', async () => {
     useT1b();
     expect(READ.analysis_state.leader_claim.permitted).toBe(false);

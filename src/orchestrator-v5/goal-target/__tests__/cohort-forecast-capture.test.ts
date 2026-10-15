@@ -27,6 +27,7 @@ import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../sy
 import { targetForecastWireOf } from '../cohort-forecast.js';
 import { applyCohortForecastEdit, cohortForecastAskWords, cohortQuartileQuestion, percentRangesIn, peopleFiguresIn, sameCohortStatementOf, storedTargetRowsOf } from '../cohort-forecast-write.js';
 import { goalTargetBasisOf, periodWords } from '../goal-target-basis.js';
+import { timingAskOf } from '../../statement-door/fields/goal-timing.js';
 import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../../admission/target-testability.js';
 
 type Rec = Record<string, any>;
@@ -188,6 +189,21 @@ describe("the user's cohort forecast: their words → one card → their press �
     // Their answer typed in THIS turn, to this option's question, binds.
     const ok = await w.caps.proposeStatement!(ctx() as never, args() as never) as Rec;
     expect(ok).toMatchObject({ ok: true });
+  });
+
+  it('CONTRAST (session 4, #3185 note a): answers bind by the goal NODE, so a bare "Yes." to a TIMING question is never the same-people answer, nor an option\'s estimates', async () => {
+    const w = world();
+    // Measured: the saved marketing goal holds NO live timing ask (no effect is read at its period end), so the node-key hazard
+    // is pinned with the timing ask's own form. Only the question actually answered gives a bare "Yes." its meaning.
+    expect(timingAskOf(plain(F.graph), goalOf(plain(F.graph)).id)).toBeUndefined();
+    const timing = 'Would all of these effects be fully in place by the end of the first three months after launch: ‘Hire marketing manager’ on ‘Conversion rate’?';
+    expect(await w.caps.proposeStatement!(ctx('Yes.', `${timing}\nYes.`) as never, sameArgs({ statements: [{ quote: 'Yes.', answering: timing }] }) as never))
+      .toMatchObject({ ok: false, refusal: 'not_this_subject' });
+    expect(await w.caps.proposeStatement!(ctx() as never, args(undefined, { quote: RANGE, answering: timing }) as never)).toMatchObject({ ok: false });
+    expect(w.proposals.outstanding(SID, null)).toEqual([]);
+    // CONTROL: the same "Yes." answering the same-people question itself is their answer to it.
+    expect(await w.caps.proposeStatement!(ctx('Yes.', `${SAME_Q}\nYes.`) as never, sameArgs({ statements: [{ quote: 'Yes.', answering: SAME_Q }] }) as never))
+      .toMatchObject({ ok: true, statement: { quotes: ['Yes.'] } });
   });
 
   it('CONTRAST: words the user never typed, a figure-bearing same-people answer, or an option the model does not hold → refused', async () => {

@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { eventByDateAdmissionRefusal, unresolvedEventOptionIds, withEventShareDate, withRatioCarrierSizes } from '../../goal-target/event-by-date-model.js';
+import { levelQuotedByBrief } from '../verified-option-setting.js';
 import { applyTeamShareEdit } from '../../goal-target/team-share-write.js';
 import { CAPACITY_RATIO_COMPARISON_WITHHELD, withoutCapacityRatioComparison, withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE, capacityRatioOutOfReach, shareChanceInputFailure, shareOptionEstimateWords, sharePartsForOption } from '../../goal-target/share-by-date-run.js';
@@ -408,7 +409,7 @@ describe('DL (14 Oct): a stated deadline keeps its forecast whatever options the
   // all 6 of Paul's state the team (6 developers / 25% of their time, quoted); none of T5 D2's 7 marketing-launch drafts
   // (first, served retry, reps 6–10) does, so they keep their ordinary model and its outcome goals.
   it('⭐ ruling C measure: Paul\'s 6 drafts are admitted; T5 D2\'s 7 marketing drafts (deadline stated, no capacity basis) are refused', () => {
-    for (const d of PROBE.drafts) expect(eventByDateAdmissionRefusal(JSON.parse(d.raw_text) as never), d.id).toBeNull();
+    for (const d of PROBE.drafts) { const c = JSON.parse(d.raw_text); expect(eventByDateAdmissionRefusal(c as never, levelQuotedByBrief(c as never, undefined)), d.id).toBeNull(); }
     const first = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-r1.json', 'utf8')) as Rec;
     const reps = JSON.parse(readFileSync('tests/fixtures/size-retry/t5-d2-v3-retries.json', 'utf8')) as Rec;
     const d2: [string, unknown][] = [['draft_call1', first.draft_call1], ['draft_call2', first.draft_call2],
@@ -417,7 +418,7 @@ describe('DL (14 Oct): a stated deadline keeps its forecast whatever options the
     for (const [k, raw] of d2) {
       const c = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Rec;
       expect(c.goal.kind === 'event_by_date' && c.goal.horizon_months > 0, `PRECONDITION ${k}: typed event, deadline stated`).toBe(true);
-      expect(eventByDateAdmissionRefusal(c as never), k).not.toBeNull();
+      expect(eventByDateAdmissionRefusal(c as never, levelQuotedByBrief(c as never, undefined)), k).not.toBeNull();
     }
   });
 });
