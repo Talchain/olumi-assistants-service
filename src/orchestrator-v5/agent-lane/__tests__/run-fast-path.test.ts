@@ -172,12 +172,16 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
   it('the ONE call carries Interpreter v0.2 verbatim (appended) and the canonical claim permissions', async () => {
     const { INTERPRETER_V02_BANKED } = await import('../../../routes/agent-v1-turn.js');
     const { createHash } = await import('node:crypto');
-    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('272fbbd1fcbe6b2c');
+    // ⛔ CHANGED EXPECTATION (C0, AIE packet AIE-GENERATION-COACHING-CANDIDATE-20261015-v1, ADOPTED by the DL 15 Oct 00:34Z after
+    // the operator comparison): the whole banked block is the packet's replacement, verbatim. The old text hashed 272fbbd1fcbe6b2c.
+    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (C0 replacement)').toBe('fd7cc4e0de0c65a5');
     // S2i (DL P6, 7 Oct): one clause differs from blob 344896ef ("say investigation priority is not established" → the DL's
     // words below); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
     // ⛔ CHANGED EXPECTATION (prompt P17, AIE one-pass packet 94ad9c8f…): the screen-driver deferral is replaced by the packet's
     // driver sentence; the investigation-priority prohibition stays. Restoring that one clause reproduces d13dd401219ddcb7.
-    expect(INTERPRETER_V02_BANKED).toContain('are absent, make no claim about investigation priority. Use the supplied current driver and sensitivity data to explain what the result rests on, with its source and uncertainty. If a sensitivity was not measured, say so rather than infer a decisive driver or an untested numerical effect.');
+    // C0 keeps the investigation-priority prohibition in its own words, and the no-recommendation rule.
+    expect(INTERPRETER_V02_BANKED).toContain('Do not call an unmeasured link the main driver, diagnose bias or rank investigations merely because the link is close to the goal or first tested.');
+    expect(INTERPRETER_V02_BANKED).toContain('Never choose for the user or use best, winner, go with, recommend or recommendation.');
     expect(INTERPRETER_V02_BANKED).not.toContain("beyond the screen's own driver lines");
     expect(INTERPRETER_V02_BANKED).not.toContain('say investigation priority is not established.');
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
