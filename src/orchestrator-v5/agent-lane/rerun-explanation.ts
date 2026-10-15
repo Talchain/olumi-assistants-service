@@ -20,8 +20,7 @@
  */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
 import { POLICY } from './guidance/policy.js';
-import { recordedSentenceIn } from './recorded-sentence.js';
-import { sentencesOf } from './reply/compose-reply.js';
+import { recordedSentenceIn, recordedSentencesOf as sentencesOf } from './recorded-sentence.js';
 import { CANVAS_BAND_WORD, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 import { log } from '../../utils/telemetry.js';

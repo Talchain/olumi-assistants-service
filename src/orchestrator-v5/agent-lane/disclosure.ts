@@ -19,8 +19,7 @@
  */
 
 import { resizedLinksSentence, type ResizedLinksGroup } from '../../cee/magnitude/frame-defaulted-links.js';
-import { recordedSentenceIn } from './recorded-sentence.js';
-import { sentencesOf } from './reply/compose-reply.js';
+import { recordedSentenceIn, recordedSentencesOf as sentencesOf } from './recorded-sentence.js';
 import { indexGoalWeightsMessages } from '../goal-target/index-goal-weights-note.js';
 
 export interface DisclosableOutcome {
